@@ -1,0 +1,20 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <IsPackable>false</IsPackable>
+    <IsTestProject>true</IsTestProject>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\CalibreLibraryCleaner.Application\CalibreLibraryCleaner.Application.csproj" />
+    <ProjectReference Include="..\..\src\CalibreLibraryCleaner.Domain\CalibreLibraryCleaner.Domain.csproj" />
+    <ProjectReference Include="..\..\src\CalibreLibraryCleaner.Infrastructure\CalibreLibraryCleaner.Infrastructure.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="FakeItEasy" />
+    <PackageReference Include="FluentAssertions" />
+    <PackageReference Include="Microsoft.NET.Test.Sdk" />
+    <PackageReference Include="xunit" />
+    <PackageReference Include="xunit.runner.visualstudio" PrivateAssets="all" />
+  </ItemGroup>
+</Project>

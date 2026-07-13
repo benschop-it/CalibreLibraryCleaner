@@ -1,0 +1,5 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <ItemGroup>
+    <ProjectReference Include="..\CalibreLibraryCleaner.Domain\CalibreLibraryCleaner.Domain.csproj" />
+  </ItemGroup>
+</Project>

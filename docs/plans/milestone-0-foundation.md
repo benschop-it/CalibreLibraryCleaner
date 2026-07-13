@@ -189,11 +189,11 @@ Do not claim these succeeded until they are actually run during implementation.
 - `dotnet format --verify-no-changes` can fail if generated WPF files or IDE settings are unintentionally included; configuration should target source files and standard analyzer rules.
 - Removing the root console project is a structural change, but it aligns the repo with the documented architecture.
 
-## Unresolved questions
+## Resolved questions
 
-- Whether to keep the old root project files in the repository but excluded from the solution, or delete them as scaffold remnants. The proposed implementation deletes them because they conflict with the documented project topology.
-- Whether the WPF project should contain a visible empty main window in Milestone 0 or only compile-time app wiring. The proposed implementation uses a minimal shell so the project builds as a desktop app without product behavior.
-- Which exact architecture test library to use. The proposed implementation should prefer a lightweight, actively maintained library if available through NuGet; otherwise, reflection-based assembly reference tests are sufficient for Milestone 0.
+- The old root project files in the repository can be deleted.
+- The WPF project can use a minimal shell so the project builds as a desktop app without product behavior.
+- Regarding the exact architecture test library to use: prefer a lightweight, actively maintained library if available through NuGet; otherwise, reflection-based assembly reference tests are sufficient for Milestone 0.
 
 ## Progress
 
@@ -206,10 +206,29 @@ Do not claim these succeeded until they are actually run during implementation.
 - [x] Read relevant nested `AGENTS.md` files.
 - [x] Inspect existing solution, project, and default program files.
 - [x] Create Milestone 0 execution plan.
-- [ ] Implement Milestone 0 foundation.
-- [ ] Run restore, build, tests, and format verification.
-- [ ] Review complete diff.
+- [x] Implement Milestone 0 foundation.
+- [x] Run restore, build, tests, and format verification.
+- [x] Review complete diff.
+
+Implementation notes:
+
+- The first `dotnet build --no-restore` failed because the test sources did not explicitly import xUnit and the WPF `Application` base type conflicted with the solution's Application namespace. The scaffold was corrected with explicit imports and fully qualified WPF base types.
+- The next build reached all projects and failed on analyzer rule `CA1859` in the architecture test helper. Its private return type was narrowed from `IReadOnlyCollection<string>` to `string[]`; no analyzer rule was suppressed.
+- The first `dotnet format --verify-no-changes` reported LF line endings in the newly added C# files while `.editorconfig` requires CRLF. `dotnet format` normalized the files before the final verification sequence.
+- Diff review found that the architecture-test XML helper treated dotted package IDs as filenames. It was corrected to remove extensions only from project-reference paths before final verification.
+- The first build after that review correction failed nullable analysis because LINQ did not infer non-null values after the explicit whitespace guard. A null-forgiving annotation now documents the guarded invariant.
 
 ## Final outcome
 
-Pending implementation.
+Completed on 2026-07-13.
+
+- Adapted the existing solution to contain the four production projects and four test projects under the documented `src/` and `tests/` folders.
+- Added .NET 10 SDK selection, central package management, nullable reference types, deterministic builds, analyzers-as-errors, and formatting configuration.
+- Added the documented project references, DI and structured-logging abstractions in Infrastructure, WPF hosting and MVVM packages, and xUnit/FakeItEasy/FluentAssertions in all test projects.
+- Added three assembly smoke tests and seven architecture tests covering project-reference direction and prohibited core dependencies.
+- Added only assembly markers and a minimal compile-only WPF shell. No Calibre access, duplicate detection, ebook analysis, cleanup, or mutation behavior was introduced.
+- Final `dotnet restore` succeeded.
+- Final `dotnet build --no-restore` succeeded with zero warnings and zero errors.
+- Final `dotnet test --no-build` succeeded: 10 passed, 0 failed, 0 skipped.
+- Final `dotnet format --verify-no-changes` succeeded.
+- Complete diff review found no conflict with the architecture or accepted ADRs.
