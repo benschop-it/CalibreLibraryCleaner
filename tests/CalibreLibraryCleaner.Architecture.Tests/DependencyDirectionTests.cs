@@ -82,6 +82,45 @@ public sealed class DependencyDirectionTests
                 prefix => assemblyName.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)));
     }
 
+    [Fact]
+    public void ApplicationAssemblyDoesNotReferenceSqliteOrUiAssemblies()
+    {
+        string[] forbiddenAssemblyPrefixes =
+        [
+            "Microsoft.Data.Sqlite",
+            "PresentationCore",
+            "PresentationFramework",
+            "System.Xaml",
+            "WindowsBase",
+        ];
+        Assembly applicationAssembly = typeof(Application.AssemblyMarker).Assembly;
+        string[] referencedAssemblies = applicationAssembly
+            .GetReferencedAssemblies()
+            .Select(reference => reference.Name ?? string.Empty)
+            .ToArray();
+
+        referencedAssemblies.Should().NotContain(
+            assemblyName => forbiddenAssemblyPrefixes.Any(
+                prefix => assemblyName.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)));
+    }
+
+    [Fact]
+    public void WpfViewModelsDoNotReferenceInfrastructureSqliteOrFileSystemApis()
+    {
+        string viewModelsPath = Path.Combine(
+            RepositoryRoot,
+            "src",
+            WpfProject,
+            "ViewModels");
+        string source = string.Join(
+            Environment.NewLine,
+            Directory.EnumerateFiles(viewModelsPath, "*.cs").Select(File.ReadAllText));
+
+        source.Should().NotContain("CalibreLibraryCleaner.Infrastructure");
+        source.Should().NotContain("Microsoft.Data.Sqlite");
+        source.Should().NotContain("System.IO");
+    }
+
     private static string[] ReadItemNames(string projectName, string itemName)
     {
         string projectPath = Path.Combine(

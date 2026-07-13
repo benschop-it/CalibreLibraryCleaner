@@ -1,0 +1,219 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project version="4">
+  <component name="AutoImportSettings">
+    <option name="autoReloadType" value="SELECTIVE" />
+  </component>
+  <component name="CMakeProjectFlavorService">
+    <option name="flavorId" value="CMakePlainProjectFlavor" />
+  </component>
+  <component name="CMakeSettings">
+    <configurations />
+  </component>
+  <component name="ChangeListManager">
+    <list default="true" id="85ef94cc-8dec-4e90-ba06-74f40311736d" name="Changes" comment="">
+      <change afterPath="$PROJECT_DIR$/docs/plans/milestone-1-read-only-library-snapshot.md" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/src/CalibreLibraryCleaner.Application/Abstractions/ICalibreMetadataReader.cs" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/src/CalibreLibraryCleaner.Application/Abstractions/IClock.cs" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/src/CalibreLibraryCleaner.Application/Abstractions/ILibraryPathResolver.cs" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/src/CalibreLibraryCleaner.Application/Libraries/CalibreCatalogReadOutcome.cs" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/src/CalibreLibraryCleaner.Application/Libraries/CalibreCatalogRecord.cs" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/src/CalibreLibraryCleaner.Application/Libraries/LibraryError.cs" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/src/CalibreLibraryCleaner.Application/Libraries/LibraryErrorCode.cs" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/src/CalibreLibraryCleaner.Application/Libraries/LibraryScanOutcome.cs" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/src/CalibreLibraryCleaner.Application/Libraries/LibraryScanPhase.cs" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/src/CalibreLibraryCleaner.Application/Libraries/LibraryScanProgress.cs" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/src/CalibreLibraryCleaner.Application/Libraries/LibraryValidationOutcome.cs" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/src/CalibreLibraryCleaner.Application/Libraries/ResolvedFormatPath.cs" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/src/CalibreLibraryCleaner.Application/Libraries/ScanLibraryUseCase.cs" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/src/CalibreLibraryCleaner.Application/Libraries/ValidateLibraryUseCase.cs" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/src/CalibreLibraryCleaner.Application/Libraries/ValidatedLibraryLocation.cs" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/src/CalibreLibraryCleaner.Domain/Findings/FindingSeverity.cs" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/src/CalibreLibraryCleaner.Domain/Findings/LibraryFinding.cs" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/src/CalibreLibraryCleaner.Domain/Libraries/BookAuthor.cs" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/src/CalibreLibraryCleaner.Domain/Libraries/BookFormat.cs" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/src/CalibreLibraryCleaner.Domain/Libraries/BookIdentifier.cs" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/src/CalibreLibraryCleaner.Domain/Libraries/CalibreAuthorId.cs" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/src/CalibreLibraryCleaner.Domain/Libraries/CalibreBook.cs" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/src/CalibreLibraryCleaner.Domain/Libraries/CalibreBookId.cs" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/src/CalibreLibraryCleaner.Domain/Libraries/FormatFileStatus.cs" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/src/CalibreLibraryCleaner.Domain/Libraries/LibraryIdentity.cs" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/src/CalibreLibraryCleaner.Domain/Libraries/LibrarySnapshot.cs" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/src/CalibreLibraryCleaner.Infrastructure/DependencyInjection/ServiceCollectionExtensions.cs" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/src/CalibreLibraryCleaner.Infrastructure/Paths/LibraryPathResolver.cs" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/src/CalibreLibraryCleaner.Infrastructure/Sqlite/CalibreSchemaContract.cs" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/src/CalibreLibraryCleaner.Infrastructure/Sqlite/CalibreSchemaInspector.cs" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/src/CalibreLibraryCleaner.Infrastructure/Sqlite/ReadOnlySqliteConnectionFactory.cs" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/src/CalibreLibraryCleaner.Infrastructure/Sqlite/SqliteCalibreMetadataReader.cs" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/src/CalibreLibraryCleaner.Infrastructure/Time/SystemClock.cs" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/src/CalibreLibraryCleaner.Wpf/Services/ILibraryFolderPicker.cs" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/src/CalibreLibraryCleaner.Wpf/Services/OpenFolderDialogLibraryFolderPicker.cs" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/src/CalibreLibraryCleaner.Wpf/ViewModels/BookRowViewModel.cs" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/src/CalibreLibraryCleaner.Wpf/ViewModels/FormatRowViewModel.cs" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/src/CalibreLibraryCleaner.Wpf/ViewModels/MainWindowViewModel.cs" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/tests/CalibreLibraryCleaner.Application.Tests/Libraries/ScanLibraryUseCaseTests.cs" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/tests/CalibreLibraryCleaner.Application.Tests/Libraries/ValidateLibraryUseCaseTests.cs" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/tests/CalibreLibraryCleaner.Domain.Tests/Libraries/LibrarySnapshotTests.cs" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/tests/CalibreLibraryCleaner.Domain.Tests/Libraries/LibraryValueTests.cs" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/tests/CalibreLibraryCleaner.Infrastructure.Tests/Fixtures/LibraryStateCapture.cs" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/tests/CalibreLibraryCleaner.Infrastructure.Tests/Fixtures/SyntheticCalibreLibrary.cs" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/tests/CalibreLibraryCleaner.Infrastructure.Tests/Fixtures/TemporaryDirectory.cs" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/tests/CalibreLibraryCleaner.Infrastructure.Tests/Fixtures/TestServices.cs" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/tests/CalibreLibraryCleaner.Infrastructure.Tests/Paths/LibraryPathResolverTests.cs" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/tests/CalibreLibraryCleaner.Infrastructure.Tests/Safety/ReadOnlyLibraryScanSafetyTests.cs" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/tests/CalibreLibraryCleaner.Infrastructure.Tests/Sqlite/SqliteCalibreMetadataReaderTests.cs" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/tests/CalibreLibraryCleaner.Wpf.Tests/CalibreLibraryCleaner.Wpf.Tests.csproj" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/tests/CalibreLibraryCleaner.Wpf.Tests/ViewModels/MainWindowViewModelTests.cs" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/CalibreLibraryCleaner.sln" beforeDir="false" afterPath="$PROJECT_DIR$/CalibreLibraryCleaner.sln" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/Directory.Packages.props" beforeDir="false" afterPath="$PROJECT_DIR$/Directory.Packages.props" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/docs/architecture.md" beforeDir="false" afterPath="$PROJECT_DIR$/docs/architecture.md" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/CalibreLibraryCleaner.Infrastructure/CalibreLibraryCleaner.Infrastructure.csproj" beforeDir="false" afterPath="$PROJECT_DIR$/src/CalibreLibraryCleaner.Infrastructure/CalibreLibraryCleaner.Infrastructure.csproj" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/CalibreLibraryCleaner.Wpf/App.xaml" beforeDir="false" afterPath="$PROJECT_DIR$/src/CalibreLibraryCleaner.Wpf/App.xaml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/CalibreLibraryCleaner.Wpf/App.xaml.cs" beforeDir="false" afterPath="$PROJECT_DIR$/src/CalibreLibraryCleaner.Wpf/App.xaml.cs" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/CalibreLibraryCleaner.Wpf/MainWindow.xaml" beforeDir="false" afterPath="$PROJECT_DIR$/src/CalibreLibraryCleaner.Wpf/MainWindow.xaml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/CalibreLibraryCleaner.Wpf/MainWindow.xaml.cs" beforeDir="false" afterPath="$PROJECT_DIR$/src/CalibreLibraryCleaner.Wpf/MainWindow.xaml.cs" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/tests/CalibreLibraryCleaner.Architecture.Tests/DependencyDirectionTests.cs" beforeDir="false" afterPath="$PROJECT_DIR$/tests/CalibreLibraryCleaner.Architecture.Tests/DependencyDirectionTests.cs" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/tests/CalibreLibraryCleaner.Infrastructure.Tests/CalibreLibraryCleaner.Infrastructure.Tests.csproj" beforeDir="false" afterPath="$PROJECT_DIR$/tests/CalibreLibraryCleaner.Infrastructure.Tests/CalibreLibraryCleaner.Infrastructure.Tests.csproj" afterDir="false" />
+    </list>
+    <option name="SHOW_DIALOG" value="false" />
+    <option name="HIGHLIGHT_CONFLICTS" value="true" />
+    <option name="HIGHLIGHT_NON_ACTIVE_CHANGELIST" value="false" />
+    <option name="LAST_RESOLUTION" value="IGNORE" />
+  </component>
+  <component name="EmbeddingIndexingInfo">
+    <option name="cachedIndexableFilesCount" value="736" />
+  </component>
+  <component name="Git.Settings">
+    <option name="RECENT_GIT_ROOT_PATH" value="$PROJECT_DIR$" />
+  </component>
+  <component name="McpProjectServerCommands">
+    <commands />
+    <urls />
+  </component>
+  <component name="NextEditCompletionFeaturesState">
+    <decayedCancelled>
+      <entry key="MS100" value="1.000498649495345" />
+      <entry key="MS500" value="1.31097991240554" />
+      <entry key="S2" value="2.2493530996226547" />
+      <entry key="S5" value="2.997386173143293" />
+      <entry key="S10" value="4.364676526939999" />
+      <entry key="S30" value="8.315623074861026" />
+      <entry key="S60" value="10.599894245170072" />
+      <entry key="M2" value="12.128552872358492" />
+      <entry key="M5" value="13.205306219420995" />
+      <entry key="M10" value="13.59450791376992" />
+      <entry key="M15" value="13.727826146088876" />
+      <entry key="M30" value="13.86298106328749" />
+      <entry key="H1" value="13.931255804255766" />
+      <entry key="H2" value="13.965569003202894" />
+      <entry key="H4" value="13.982769749643701" />
+      <entry key="D1" value="13.997126240409097" />
+      <entry key="W1" value="13.999589412651941" />
+    </decayedCancelled>
+    <decayedSelected>
+      <entry key="MS100" value="0.0" />
+      <entry key="MS500" value="0.0" />
+      <entry key="S2" value="0.0" />
+      <entry key="S5" value="0.0" />
+      <entry key="S10" value="0.0" />
+      <entry key="S30" value="0.0" />
+      <entry key="S60" value="0.0" />
+      <entry key="M2" value="0.0" />
+      <entry key="M5" value="0.0" />
+      <entry key="M10" value="0.0" />
+      <entry key="M15" value="0.0" />
+      <entry key="M30" value="0.0" />
+      <entry key="H1" value="0.0" />
+      <entry key="H2" value="0.0" />
+      <entry key="H4" value="0.0" />
+      <entry key="D1" value="0.0" />
+      <entry key="W1" value="0.0" />
+    </decayedSelected>
+    <decayedShown>
+      <entry key="MS100" value="0.8589850404855323" />
+      <entry key="MS500" value="1.2712250647504908" />
+      <entry key="S2" value="2.2323439996877568" />
+      <entry key="S5" value="2.9883239236330734" />
+      <entry key="S10" value="4.356929942008858" />
+      <entry key="S30" value="8.308158159374145" />
+      <entry key="S60" value="10.594460826690513" />
+      <entry key="M2" value="12.125232106520677" />
+      <entry key="M5" value="13.20380239373593" />
+      <entry key="M10" value="13.59372380047048" />
+      <entry key="M15" value="13.727296013840366" />
+      <entry key="M30" value="13.862712241902235" />
+      <entry key="H1" value="13.931120443296331" />
+      <entry key="H2" value="13.965501083711116" />
+      <entry key="H4" value="13.982735729963249" />
+      <entry key="D1" value="13.997120562122655" />
+      <entry key="W1" value="13.999588601263723" />
+    </decayedShown>
+  </component>
+  <component name="ProjectColorInfo"><![CDATA[{
+  "associatedIndex": 4,
+  "fromUser": false
+}]]></component>
+  <component name="ProjectId" id="3GSiJJVsiTvXcsTNkENcg64iwH9" />
+  <component name="ProjectViewState">
+    <option name="hideEmptyMiddlePackages" value="true" />
+    <option name="showLibraryContents" value="true" />
+  </component>
+  <component name="PropertiesComponent"><![CDATA[{
+  "keyToString": {
+    "ModuleVcsDetector.initialDetectionPerformed": "true",
+    "RunOnceActivity.MCP Project settings loaded": "true",
+    "RunOnceActivity.ShowReadmeOnStart": "true",
+    "RunOnceActivity.cidr.known.project.marker": "true",
+    "RunOnceActivity.git.unshallow": "true",
+    "RunOnceActivity.readMode.enableVisualFormatting": "true",
+    "RunOnceActivity.typescript.service.memoryLimit.init": "true",
+    "cidr.known.project.marker": "true",
+    "codeWithMe.voiceChat.enabledByDefault": "false",
+    "com.intellij.ml.llm.matterhorn.ej.ui.settings.DefaultModelSelectionForGA.v1": "true",
+    "git-widget-placeholder": "master",
+    "junie.onboarding.icon.badge.shown": "true",
+    "node.js.detected.package.eslint": "true",
+    "node.js.detected.package.tslint": "true",
+    "node.js.selected.package.eslint": "(autodetect)",
+    "node.js.selected.package.tslint": "(autodetect)",
+    "nodejs_package_manager_path": "npm",
+    "to.speed.mode.migration.done": "true",
+    "vue.rearranger.settings.migration": "true"
+  }
+}]]></component>
+  <component name="TaskManager">
+    <task active="true" id="Default" summary="Default task">
+      <changelist id="85ef94cc-8dec-4e90-ba06-74f40311736d" name="Changes" comment="" />
+      <created>1783971299705</created>
+      <option name="number" value="Default" />
+      <option name="presentableId" value="Default" />
+      <updated>1783971299705</updated>
+      <workItem from="1783971300925" duration="1903000" />
+    </task>
+    <servers />
+  </component>
+  <component name="TypeScriptGeneratedFilesManager">
+    <option name="version" value="3" />
+  </component>
+  <component name="UnityProjectConfiguration" hasMinimizedUI="false" />
+  <component name="VcsManagerConfiguration">
+    <option name="CLEAR_INITIAL_COMMIT_MESSAGE" value="true" />
+  </component>
+  <component name="XDebuggerManager">
+    <breakpoint-manager>
+      <breakpoints>
+        <breakpoint enabled="true" type="DotNet_Exception_Breakpoints">
+          <properties exception="System.OperationCanceledException" breakIfHandledByOtherCode="false" displayValue="System.OperationCanceledException" />
+          <option name="timeStamp" value="1" />
+        </breakpoint>
+        <breakpoint enabled="true" type="DotNet_Exception_Breakpoints">
+          <properties exception="System.Threading.Tasks.TaskCanceledException" breakIfHandledByOtherCode="false" displayValue="System.Threading.Tasks.TaskCanceledException" />
+          <option name="timeStamp" value="2" />
+        </breakpoint>
+        <breakpoint enabled="true" type="DotNet_Exception_Breakpoints">
+          <properties exception="System.Threading.ThreadAbortException" breakIfHandledByOtherCode="false" displayValue="System.Threading.ThreadAbortException" />
+          <option name="timeStamp" value="3" />
+        </breakpoint>
+      </breakpoints>
+    </breakpoint-manager>
+  </component>
+</project>

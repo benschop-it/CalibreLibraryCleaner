@@ -14,6 +14,7 @@ tests/
   CalibreLibraryCleaner.Application.Tests/
   CalibreLibraryCleaner.Infrastructure.Tests/
   CalibreLibraryCleaner.Architecture.Tests/
+  CalibreLibraryCleaner.Wpf.Tests/
 ```
 
 ## Dependency direction
@@ -31,6 +32,7 @@ Domain <- Application <- Infrastructure
 - Application: use cases and integration interfaces.
 - Infrastructure: read-only SQLite, paths, hashing, ebook inspection, Calibre CLI, backups, JSON storage, analysis cache.
 - WPF: selection, progress, comparison, review, approval, history, and settings.
+- WPF tests: focused ViewModel and presentation-state behavior on the Windows target.
 
 ## Long-running operations
 
