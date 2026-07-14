@@ -12,11 +12,14 @@ internal static class TestServices
         ServiceCollection services = new();
         services.AddLogging();
         services.AddCalibreLibraryInfrastructure();
+        services.AddSingleton(new LibraryAnalysisOptions());
         return services.BuildServiceProvider();
     }
 
     public static ScanLibraryUseCase CreateScanUseCase(ServiceProvider provider) => new(
         provider.GetRequiredService<ILibraryPathResolver>(),
         provider.GetRequiredService<ICalibreMetadataReader>(),
-        provider.GetRequiredService<IClock>());
+        provider.GetRequiredService<IFormatFileHasher>(),
+        provider.GetRequiredService<IClock>(),
+        provider.GetRequiredService<LibraryAnalysisOptions>());
 }

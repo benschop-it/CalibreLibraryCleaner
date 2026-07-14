@@ -1,4 +1,5 @@
 using CalibreLibraryCleaner.Application.Abstractions;
+using CalibreLibraryCleaner.Domain.Duplicates;
 using CalibreLibraryCleaner.Domain.Findings;
 using CalibreLibraryCleaner.Domain.Libraries;
 
@@ -7,7 +8,9 @@ namespace CalibreLibraryCleaner.Application.Libraries;
 public sealed class ScanLibraryUseCase(
     ILibraryPathResolver pathResolver,
     ICalibreMetadataReader metadataReader,
-    IClock clock)
+    IFormatFileHasher formatFileHasher,
+    IClock clock,
+    LibraryAnalysisOptions options)
 {
     public async Task<LibraryScanOutcome> ExecuteAsync(
         string? candidatePath,
@@ -16,7 +19,6 @@ public sealed class ScanLibraryUseCase(
     {
         cancellationToken.ThrowIfCancellationRequested();
         progress?.Report(new(LibraryScanPhase.Validating, 0, 1, "Validating library"));
-
         LibraryValidationOutcome validation = await pathResolver
             .ValidateAsync(candidatePath, cancellationToken)
             .ConfigureAwait(false);
@@ -40,21 +42,17 @@ public sealed class ScanLibraryUseCase(
             .ThenBy(issue => issue.Code, StringComparer.Ordinal)
             .Select(MapIssue)
             .ToList();
-        List<CalibreBook> books = [];
+        List<PreparedBook> preparedBooks = [];
+        List<FormatHashRequest> requests = [];
         long totalFormats = catalog.Books.Sum(book => (long)book.Formats.Count);
         long completedFormats = 0;
-        progress?.Report(new(
-            LibraryScanPhase.ResolvingFiles,
-            completedFormats,
-            totalFormats,
-            "Resolving format files"));
+        progress?.Report(new(LibraryScanPhase.ResolvingFiles, 0, totalFormats, "Resolving format files"));
 
         foreach (CalibreBookRecord bookRecord in catalog.Books.OrderBy(book => book.Id))
         {
             cancellationToken.ThrowIfCancellationRequested();
             CalibreBookId bookId = new(bookRecord.Id);
-            List<BookFormat> formats = [];
-
+            List<PreparedFormat> formats = [];
             foreach (CalibreFormatRecord formatRecord in bookRecord.Formats
                          .OrderBy(format => format.Format, StringComparer.Ordinal)
                          .ThenBy(format => format.StoredName, StringComparer.Ordinal))
@@ -66,14 +64,9 @@ public sealed class ScanLibraryUseCase(
                     bookRecord.RelativeDirectory,
                     formatRecord.StoredName,
                     canonicalFormat);
-
                 if (!resolved.IsSuccess)
                 {
-                    formats.Add(new(
-                        canonicalFormat,
-                        formatRecord.StoredName,
-                        string.Empty,
-                        FormatFileStatus.InvalidPath));
+                    formats.Add(new(canonicalFormat, formatRecord.StoredName, string.Empty, null));
                     findings.Add(CreateInvalidPathFinding(
                         bookId,
                         canonicalFormat,
@@ -82,62 +75,161 @@ public sealed class ScanLibraryUseCase(
                 }
                 else
                 {
-                    bool exists = await pathResolver
-                        .FileExistsAsync(resolved.Path!, cancellationToken)
-                        .ConfigureAwait(false);
+                    int sequence = requests.Count;
+                    requests.Add(new(sequence, bookId, canonicalFormat, resolved.Path!));
                     formats.Add(new(
                         canonicalFormat,
                         formatRecord.StoredName,
                         resolved.Path!.RelativePath,
-                        exists ? FormatFileStatus.Present : FormatFileStatus.Missing));
-
-                    if (!exists)
-                    {
-                        findings.Add(CreateMissingFileFinding(
-                            bookId,
-                            canonicalFormat,
-                            resolved.Path.RelativePath));
-                    }
+                        sequence));
                 }
 
                 completedFormats++;
-                ReportProgress(
-                    progress,
-                    LibraryScanPhase.ResolvingFiles,
-                    completedFormats,
-                    totalFormats,
-                    "Resolving format files");
+                ReportProgress(progress, LibraryScanPhase.ResolvingFiles, completedFormats, totalFormats, "Resolving format files");
             }
 
-            books.Add(new(
-                bookId,
-                bookRecord.Title,
-                bookRecord.AuthorSort,
-                bookRecord.Authors.Select(author => new BookAuthor(
-                    new CalibreAuthorId(author.Id),
-                    author.Name,
-                    author.SortName)),
-                bookRecord.Identifiers
-                    .OrderBy(identifier => identifier.Type, StringComparer.Ordinal)
-                    .ThenBy(identifier => identifier.Value, StringComparer.Ordinal)
-                    .Select(identifier => new BookIdentifier(identifier.Type, identifier.Value)),
-                formats,
-                bookRecord.RelativeDirectory));
+            preparedBooks.Add(new(bookRecord, formats));
         }
 
-        findings = findings
+        IReadOnlyList<FormatHashResult> hashResults;
+        try
+        {
+            IProgress<FormatHashProgress>? hashProgress = progress is null
+                ? null
+                : new ProgressAdapter(progress);
+            hashResults = await formatFileHasher.HashAsync(
+                    requests,
+                    options.MaxHashConcurrency,
+                    hashProgress,
+                    cancellationToken)
+                .ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch
+        {
+            return LibraryScanOutcome.Failure(new(
+                LibraryErrorCode.HashingFailed,
+                "The ebook files could not be hashed reliably.",
+                "Close tools changing the library and retry the scan."));
+        }
+
+        if (!AreHashResultsValid(requests, hashResults))
+        {
+            return LibraryScanOutcome.Failure(new(
+                LibraryErrorCode.HashingFailed,
+                "The ebook hashing results were incomplete.",
+                "Retry the scan. If the problem continues, inspect the application log."));
+        }
+
+        Dictionary<int, FormatHashResult> resultsBySequence = hashResults.ToDictionary(result => result.Sequence);
+        List<CalibreBook> books = preparedBooks
+            .Select(book => MapBook(book, resultsBySequence, findings, cancellationToken))
+            .ToList();
+        cancellationToken.ThrowIfCancellationRequested();
+        progress?.Report(new(LibraryScanPhase.GroupingExactDuplicates, 0, 1, "Grouping exact file duplicates"));
+        IReadOnlyList<ExactBinaryDuplicateGroup> groups = ExactBinaryDuplicateDetector.Detect(books, cancellationToken);
+        cancellationToken.ThrowIfCancellationRequested();
+        progress?.Report(new(LibraryScanPhase.GroupingExactDuplicates, 1, 1, "Exact file duplicates grouped"));
+
+        Dictionary<FindingKey, LibraryFinding> uniqueFindings = [];
+        foreach (LibraryFinding finding in findings)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            uniqueFindings.TryAdd(new(finding.BookId, finding.Format, finding.RelativePath, finding.Code), finding);
+        }
+
+        findings = uniqueFindings.Values
             .OrderBy(finding => finding.BookId?.Value ?? 0)
             .ThenBy(finding => finding.Format, StringComparer.Ordinal)
+            .ThenBy(finding => finding.RelativePath, StringComparer.Ordinal)
             .ThenBy(finding => finding.Code, StringComparer.Ordinal)
             .ToList();
-
+        cancellationToken.ThrowIfCancellationRequested();
         LibrarySnapshot snapshot = new(
             new LibraryIdentity(catalog.LibraryUuid, catalog.SchemaVersion, validation.Location!.LibraryRoot),
             clock.GetUtcNow(),
             books,
-            findings);
+            findings,
+            groups);
+        cancellationToken.ThrowIfCancellationRequested();
         progress?.Report(new(LibraryScanPhase.Completed, 1, 1, "Scan complete"));
         return LibraryScanOutcome.Success(snapshot);
+    }
+
+    private static CalibreBook MapBook(
+        PreparedBook prepared,
+        Dictionary<int, FormatHashResult> results,
+        List<LibraryFinding> findings,
+        CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        CalibreBookId bookId = new(prepared.Record.Id);
+        List<BookFormat> formats = [];
+        foreach (PreparedFormat format in prepared.Formats)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (format.Sequence is null)
+            {
+                formats.Add(new(format.Format, format.StoredName, format.RelativePath, FormatFileStatus.InvalidPath));
+                continue;
+            }
+
+            FormatHashResult result = results[format.Sequence.Value];
+            (FormatFileStatus status, string? findingCode, string? message, string? action) = result.Status switch
+            {
+                FormatHashResultStatus.Success => (FormatFileStatus.Present, null, null, null),
+                FormatHashResultStatus.Missing => (
+                    FormatFileStatus.Missing,
+                    "FORMAT_FILE_MISSING",
+                    $"The expected {format.Format} file is missing.",
+                    "Use Calibre's Library maintenance tools or restore the file; this scan made no changes."),
+                FormatHashResultStatus.Inaccessible => (
+                    FormatFileStatus.Inaccessible,
+                    "FORMAT_FILE_INACCESSIBLE",
+                    $"The expected {format.Format} file could not be read safely.",
+                    "Check file permissions, close tools locking the file, and retry."),
+                FormatHashResultStatus.ChangedDuringHashing => (
+                    FormatFileStatus.ChangedDuringHashing,
+                    "FORMAT_FILE_CHANGED_DURING_HASHING",
+                    $"The expected {format.Format} file changed while it was being hashed.",
+                    "Wait for Calibre or file synchronization to finish, then retry."),
+                _ => throw new InvalidOperationException("Unknown format hash result status."),
+            };
+            formats.Add(new(format.Format, format.StoredName, format.RelativePath, status, result.Fingerprint));
+            if (findingCode is not null)
+            {
+                findings.Add(new(
+                    findingCode,
+                    FindingSeverity.Warning,
+                    message!,
+                    action!,
+                    bookId,
+                    format.Format,
+                    format.RelativePath,
+                    new Dictionary<string, string>(StringComparer.Ordinal)
+                    {
+                        ["ReasonCode"] = result.ReasonCode ?? "Unknown",
+                    }));
+            }
+        }
+
+        return new(
+            bookId,
+            prepared.Record.Title,
+            prepared.Record.AuthorSort,
+            prepared.Record.Authors.Select(author => new BookAuthor(
+                new CalibreAuthorId(author.Id),
+                author.Name,
+                author.SortName)),
+            prepared.Record.Identifiers
+                .OrderBy(identifier => identifier.Type, StringComparer.Ordinal)
+                .ThenBy(identifier => identifier.Value, StringComparer.Ordinal)
+                .Select(identifier => new BookIdentifier(identifier.Type, identifier.Value)),
+            formats,
+            prepared.Record.RelativeDirectory);
     }
 
     private static LibraryFinding MapIssue(CalibreCatalogIssueRecord issue) => new(
@@ -162,18 +254,6 @@ public sealed class ScanLibraryUseCase(
         format,
         relativeDirectory);
 
-    private static LibraryFinding CreateMissingFileFinding(
-        CalibreBookId bookId,
-        string format,
-        string relativePath) => new(
-        "FORMAT_FILE_MISSING",
-        FindingSeverity.Warning,
-        $"The expected {format} file is missing.",
-        "Use Calibre's Library maintenance tools or restore the file; this scan made no changes.",
-        bookId,
-        format,
-        relativePath);
-
     private static void ReportProgress(
         IProgress<LibraryScanProgress>? progress,
         LibraryScanPhase phase,
@@ -184,6 +264,53 @@ public sealed class ScanLibraryUseCase(
         if (completed == total || completed % 100 == 0)
         {
             progress?.Report(new(phase, completed, total, message));
+        }
+    }
+
+    private static bool AreHashResultsValid(
+        List<FormatHashRequest> requests,
+        IReadOnlyList<FormatHashResult>? results)
+    {
+        if (results is null || results.Count != requests.Count)
+        {
+            return false;
+        }
+
+        int[] sequences = results.Select(result => result.Sequence).Order().ToArray();
+        if (!sequences.SequenceEqual(Enumerable.Range(0, requests.Count)))
+        {
+            return false;
+        }
+
+        return results.All(result => result.Status switch
+        {
+            FormatHashResultStatus.Success => result.Fingerprint is not null && result.ReasonCode is null,
+            FormatHashResultStatus.Missing or FormatHashResultStatus.Inaccessible or FormatHashResultStatus.ChangedDuringHashing =>
+                result.Fingerprint is null && !string.IsNullOrWhiteSpace(result.ReasonCode),
+            _ => false,
+        });
+    }
+
+    private sealed record PreparedBook(CalibreBookRecord Record, IReadOnlyList<PreparedFormat> Formats);
+
+    private sealed record PreparedFormat(string Format, string StoredName, string RelativePath, int? Sequence);
+
+    private sealed record FindingKey(
+        CalibreBookId? BookId,
+        string? Format,
+        string? RelativePath,
+        string Code);
+
+    private sealed class ProgressAdapter(IProgress<LibraryScanProgress> progress) : IProgress<FormatHashProgress>
+    {
+        public void Report(FormatHashProgress value)
+        {
+            bool useBytes = value.TotalBytes > 0;
+            progress.Report(new(
+                LibraryScanPhase.HashingFormats,
+                useBytes ? Math.Min(value.CompletedBytes, value.TotalBytes) : value.CompletedFiles,
+                useBytes ? value.TotalBytes : value.TotalFiles,
+                value.Message));
         }
     }
 }

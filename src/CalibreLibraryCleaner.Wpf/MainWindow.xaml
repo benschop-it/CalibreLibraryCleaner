@@ -31,7 +31,7 @@
                Margin="4,0,8,0"
                Padding="4"
                IsReadOnly="True"
-               Text="{Binding SelectedLibraryPath}"
+               Text="{Binding SelectedLibraryPath, Mode=OneWay}"
                AutomationProperties.Name="Selected Calibre library folder" />
       <Button Grid.Column="2"
               MinWidth="80"
@@ -57,7 +57,7 @@
       <ProgressBar Height="16"
                    Minimum="0"
                    Maximum="100"
-                   Value="{Binding ProgressPercentage}"
+                   Value="{Binding ProgressPercentage, Mode=OneWay}"
                    IsIndeterminate="{Binding IsProgressIndeterminate}"
                    AutomationProperties.Name="Library scan progress" />
       <TextBlock Margin="0,4,0,0"
@@ -90,35 +90,91 @@
       </StackPanel>
     </Border>
 
-    <GroupBox Grid.Row="3" Margin="0,12,0,0" Header="Books">
-      <DataGrid ItemsSource="{Binding Books}"
-                SelectedItem="{Binding SelectedBook}"
-                AutoGenerateColumns="False"
-                IsReadOnly="True"
-                SelectionMode="Single"
-                AutomationProperties.Name="Loaded books">
-        <DataGrid.Columns>
-          <DataGridTextColumn Width="70" Header="ID" Binding="{Binding Id}" />
-          <DataGridTextColumn Width="2*" Header="Title" Binding="{Binding Title}" />
-          <DataGridTextColumn Width="2*" Header="Authors" Binding="{Binding Authors}" />
-          <DataGridTextColumn Width="2*" Header="Author sort" Binding="{Binding AuthorSort}" />
-          <DataGridTextColumn Width="3*" Header="Managed directory" Binding="{Binding RelativeDirectory}" />
-        </DataGrid.Columns>
-      </DataGrid>
-    </GroupBox>
-
-    <GroupBox Grid.Row="4" Margin="0,12,0,0" Header="Formats for selected book">
-      <DataGrid ItemsSource="{Binding SelectedFormats}"
-                AutoGenerateColumns="False"
-                IsReadOnly="True"
-                AutomationProperties.Name="Formats for selected book">
-        <DataGrid.Columns>
-          <DataGridTextColumn Width="100" Header="Format" Binding="{Binding Format}" />
-          <DataGridTextColumn Width="2*" Header="Stored name" Binding="{Binding StoredFileName}" />
-          <DataGridTextColumn Width="4*" Header="Expected relative path" Binding="{Binding ExpectedRelativePath}" />
-          <DataGridTextColumn Width="120" Header="File status" Binding="{Binding Status}" />
-        </DataGrid.Columns>
-      </DataGrid>
-    </GroupBox>
+    <TabControl Grid.Row="3" Grid.RowSpan="2" Margin="0,12,0,0">
+      <TabItem Header="_Library">
+        <Grid Margin="8">
+          <Grid.RowDefinitions>
+            <RowDefinition Height="*" />
+            <RowDefinition Height="2*" />
+          </Grid.RowDefinitions>
+          <GroupBox Grid.Row="0" Header="Books">
+            <DataGrid ItemsSource="{Binding Books}"
+                      SelectedItem="{Binding SelectedBook}"
+                      AutoGenerateColumns="False"
+                      IsReadOnly="True"
+                      SelectionMode="Single"
+                      AutomationProperties.Name="Loaded books">
+              <DataGrid.Columns>
+                <DataGridTextColumn Width="70" Header="ID" Binding="{Binding Id}" />
+                <DataGridTextColumn Width="2*" Header="Title" Binding="{Binding Title}" />
+                <DataGridTextColumn Width="2*" Header="Authors" Binding="{Binding Authors}" />
+                <DataGridTextColumn Width="2*" Header="Author sort" Binding="{Binding AuthorSort}" />
+                <DataGridTextColumn Width="3*" Header="Managed directory" Binding="{Binding RelativeDirectory}" />
+              </DataGrid.Columns>
+            </DataGrid>
+          </GroupBox>
+          <GroupBox Grid.Row="1" Margin="0,8,0,0" Header="Formats for selected book">
+            <DataGrid ItemsSource="{Binding SelectedFormats}"
+                      AutoGenerateColumns="False"
+                      IsReadOnly="True"
+                      AutomationProperties.Name="Formats for selected book">
+              <DataGrid.Columns>
+                <DataGridTextColumn Width="80" Header="Format" Binding="{Binding Format}" />
+                <DataGridTextColumn Width="*" Header="Stored name" Binding="{Binding StoredFileName}" />
+                <DataGridTextColumn Width="2*" Header="Expected relative path" Binding="{Binding ExpectedRelativePath}" />
+                <DataGridTextColumn Width="150" Header="File status" Binding="{Binding Status}" />
+                <DataGridTextColumn Width="110" Header="Size" Binding="{Binding FileSize}" />
+                <DataGridTextColumn Width="3*" Header="SHA-256" Binding="{Binding Sha256}" />
+              </DataGrid.Columns>
+            </DataGrid>
+          </GroupBox>
+        </Grid>
+      </TabItem>
+      <TabItem Header="_Exact file duplicates">
+        <Grid Margin="8">
+          <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+            <RowDefinition Height="*" />
+          </Grid.RowDefinitions>
+          <StackPanel Grid.Row="0" Margin="0,0,0,8">
+            <TextBlock Text="These groups contain byte-identical files. They do not by themselves identify duplicate book records."
+                       TextWrapping="Wrap" />
+            <TextBlock Margin="0,4,0,0"
+                       Text="{Binding ExactDuplicateSummary}"
+                       TextWrapping="Wrap" />
+          </StackPanel>
+          <GroupBox Grid.Row="1" Header="Exact binary file groups">
+            <DataGrid ItemsSource="{Binding ExactDuplicateGroups}"
+                      SelectedItem="{Binding SelectedExactDuplicateGroup}"
+                      AutoGenerateColumns="False"
+                      IsReadOnly="True"
+                      SelectionMode="Single"
+                      AutomationProperties.Name="Exact binary duplicate file groups">
+              <DataGrid.Columns>
+                <DataGridTextColumn Width="110" Header="Size" Binding="{Binding FileSize}" />
+                <DataGridTextColumn Width="90" Header="Files" Binding="{Binding FileCount}" />
+                <DataGridTextColumn Width="90" Header="Records" Binding="{Binding RecordCount}" />
+                <DataGridTextColumn Width="3*" Header="SHA-256" Binding="{Binding Sha256}" />
+              </DataGrid.Columns>
+            </DataGrid>
+          </GroupBox>
+          <GroupBox Grid.Row="2" Margin="0,8,0,0" Header="Records and formats in selected file group">
+            <DataGrid ItemsSource="{Binding SelectedExactDuplicateMembers}"
+                      AutoGenerateColumns="False"
+                      IsReadOnly="True"
+                      AutomationProperties.Name="Records and formats in selected exact file group">
+              <DataGrid.Columns>
+                <DataGridTextColumn Width="80" Header="Record ID" Binding="{Binding BookId}" />
+                <DataGridTextColumn Width="2*" Header="Title" Binding="{Binding Title}" />
+                <DataGridTextColumn Width="2*" Header="Authors" Binding="{Binding Authors}" />
+                <DataGridTextColumn Width="90" Header="Format" Binding="{Binding Format}" />
+                <DataGridTextColumn Width="3*" Header="Relative path" Binding="{Binding ExpectedRelativePath}" />
+              </DataGrid.Columns>
+            </DataGrid>
+          </GroupBox>
+        </Grid>
+      </TabItem>
+    </TabControl>
   </Grid>
 </Window>

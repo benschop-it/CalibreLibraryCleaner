@@ -91,7 +91,7 @@ Initial assumptions to confirm and encode in compatibility tests:
 
 | Purpose | Required schema | Mapping assumption |
 | --- | --- | --- |
-| Schema identity | `PRAGMA user_version` | Record the version and accept only explicitly tested version(s); never run Calibre schema upgrades. Calibre 9.11.0, the stable release verified on 2026-07-13, uses schema version 26. Milestone 1 accepts version 26 only and fails closed for other versions. |
+| Schema identity | `PRAGMA user_version` | Record the version and accept only explicitly tested version(s); never run Calibre schema upgrades. Calibre 9.11.0 uses schema version 27. Its final `upgrade_version_26()` method upgrades version 26 and then sets `user_version` to 27. Milestone 1 accepts version 27 only and fails closed for other versions. |
 | Library identity | `library_id(uuid)` | Exactly one non-blank UUID identifies the library. Zero/multiple/malformed rows are controlled unsupported/corrupt-library errors. |
 | Books | `books(id, title, author_sort, path)` | `id` is an integer primary key; `title` and `path` are non-null; `author_sort` may be null/blank in damaged or older data and is preserved as an empty value plus a data finding rather than synthesized. |
 | Authors | `authors(id, name, sort)` | `sort` is the author-specific sort value. Do not reproduce Calibre's locale/tweak-dependent author-sort algorithm. |
@@ -102,7 +102,7 @@ Initial assumptions to confirm and encode in compatibility tests:
 
 `CalibreSchemaInspector` will query `sqlite_master` and `PRAGMA table_info(...)` using fixed table names. It will verify all required tables and columns before data queries and return one `UnsupportedSchema` error listing missing elements and the observed `user_version`. It will not inspect, create, migrate, repair, or write schema objects. Queries must use only built-in SQLite behavior and must not rely on Calibre-specific collations, functions, triggers, or views.
 
-The compatibility decision is fail-closed: an untested schema version, non-SQLite file, malformed database, required shape mismatch, or library identity failure stops the scan with an actionable error. Adding another supported schema version later requires an official-source review and a matching synthetic compatibility fixture/test. The implementation target is Calibre 9.11.0/schema 26, verified against the tagged `v9.11.0` versions of `metadata_sqlite.sql`, `schema_upgrades.py`, `tables.py`, and `backend.py`; no planned schema or path assumption was contradicted.
+The compatibility decision is fail-closed: an untested schema version, non-SQLite file, malformed database, required shape mismatch, or library identity failure stops the scan with an actionable error. Adding another supported schema version later requires an official-source review and a matching synthetic compatibility fixture/test. The implementation target is Calibre 9.11.0/schema 27, verified against the tagged `v9.11.0` versions of `metadata_sqlite.sql`, `schema_upgrades.py`, `tables.py`, and `backend.py`. The original plan incorrectly equated the highest upgrade method suffix (26) with the resulting schema version; Calibre increments `user_version` to 27 after that method runs.
 
 ### Proposed Domain types
 
@@ -211,7 +211,7 @@ Errors and findings have different semantics:
 Examples of actionable messages:
 
 - `Metadata database not found` / `Choose the top-level Calibre library folder that directly contains metadata.db.`
-- `The library schema is not supported (schema 27; expected 26)` / `Open and update the library with a supported Calibre version, or update Calibre Library Cleaner.`
+- `The library schema is not supported (schema 26; expected 27)` / `Open and update the library with a supported Calibre version, or update Calibre Library Cleaner.`
 - `The database is busy or changing` / `Wait for Calibre library maintenance to finish, close other tools using the library, and retry.`
 - `Expected EPUB file is missing` / `Use Calibre's Library maintenance tools or restore the file; this scan made no changes.`
 
@@ -483,7 +483,7 @@ Reply to unresolved questions: the proposed answers are accepted.
 - [x] Inspect the current solution, central build/package files, all production source/XAML, all tests, git status, and recent history.
 - [x] Review current official Calibre schema/path sources to identify assumptions that implementation must pin and verify.
 - [x] Create the Milestone 1 execution plan.
-- [x] Resolve and record supported Calibre schema version(s) and accepted reparse/WAL policies (Calibre 9.11.0/schema 26; fail closed for unsafe linked paths or WAL states that cannot be opened without creation).
+- [x] Resolve and record supported Calibre schema version(s) and accepted reparse/WAL policies (Calibre 9.11.0/schema 27; fail closed for unsafe linked paths or WAL states that cannot be opened without creation).
 - [x] Implement Domain and Application portions.
 - [x] Implement Infrastructure read-only SQLite and path portions.
 - [x] Implement the minimal WPF flow.
@@ -499,21 +499,24 @@ Implementation notes:
 - The first `dotnet format --verify-no-changes` failed only on LF line endings in newly added C# files while `.editorconfig` requires CRLF. `dotnet format` normalized the sources; the final format verification succeeded. No formatting rule was relaxed.
 - The plan named a separate `CalibreSchemaInspectorTests.cs`, but schema-version/shape behavior is covered through the public `ICalibreMetadataReader` boundary in `SqliteCalibreMetadataReaderTests.cs` to avoid tests of an internal helper. The plan's proposed `AddInfrastructure()` extension is named `AddCalibreLibraryInfrastructure()` to avoid an overly generic composition API.
 - The WPF executable was started hidden after the final build, remained alive for two seconds, and was intentionally stopped. Interactive visual/high-DPI/accessibility inspection and selecting a synthetic folder through the native dialog could not be performed in the non-interactive session; ViewModel behavior is covered by focused automated tests.
+- On 2026-07-14, a real startup run exposed WPF's default `TwoWay` behavior for `TextBox.Text` and `ProgressBar.Value`, which cannot target the ViewModel's read-only-to-the-view properties. Both bindings now specify `Mode=OneWay`. A new STA window test constructs, shows, and closes `MainWindow`, covering XAML binding activation that the original ViewModel-only tests did not exercise. A process startup/graceful-close smoke test then completed with empty standard error.
+- On 2026-07-14, scanning a real Calibre 9.11.0 library exposed an off-by-one error in the schema contract. The highest tagged method is `upgrade_version_26()`, but Calibre invokes it for a version-26 database and then sets `PRAGMA user_version` to 27. The production contract, synthetic fixture default, unit/integration/UI records, unsupported-version test, error example, progress record, and final outcome were corrected from 26 to 27. SQLite error code 26 (`SQLITE_NOTADB`) remains unchanged because it is unrelated to Calibre's schema version.
 
 ## Final outcome
 
-Completed on 2026-07-13.
+Completed on 2026-07-14.
 
-- Delivered the Milestone 1 WPF vertical slice: choose and validate a Calibre folder, revalidate before scanning, load a version-26 Calibre catalog read-only, resolve exact expected format paths, retain missing/invalid formats as findings, display book/format master-detail lists, show actionable errors/progress, and cancel without committing partial results.
-- Verified Calibre 9.11.0's tagged official schema and path implementation. The reader accepts `PRAGMA user_version = 26` only; requires `library_id`, `books`, `authors`, `books_authors_link`, `identifiers`, and `data` columns documented above; preserves author order by `books_authors_link.id`; and derives `${books.path}/${data.name}.${lower(data.format)}` without Calibre's fallback rename behavior. No schema assumption was contradicted.
+- Delivered the Milestone 1 WPF vertical slice: choose and validate a Calibre folder, revalidate before scanning, load a version-27 Calibre catalog read-only, resolve exact expected format paths, retain missing/invalid formats as findings, display book/format master-detail lists, show actionable errors/progress, and cancel without committing partial results.
+- Verified Calibre 9.11.0's tagged official schema and path implementation. The reader accepts `PRAGMA user_version = 27` only; requires `library_id`, `books`, `authors`, `books_authors_link`, `identifiers`, and `data` columns documented above; preserves author order by `books_authors_link.id`; and derives `${books.path}/${data.name}.${lower(data.format)}` without Calibre's fallback rename behavior. The original version-26 assumption was corrected after reviewing Calibre's increment-after-upgrade loop.
 - SQLite is confined to Infrastructure and opened with `SqliteOpenMode.ReadOnly`, private cache, disabled pooling, and confirmed `PRAGMA query_only = ON`. The production SQL surface contains only fixed `SELECT` statements and read-only/connection-local `PRAGMA` statements.
 - Filesystem behavior in production is confined to Infrastructure path validation, canonicalization, attribute inspection, and exact `File.Exists` checks. It contains no create, write, copy, rename, move, overwrite, or delete calls.
 - Added generated synthetic SQLite/filesystem fixtures only. Safety tests compare recursive names, kinds, attributes, lengths, creation/last-write timestamps, and SHA-256 test hashes before/after present-file, missing-file, and canceled scans; assert no SQLite sidecars are created; and prove an alternate EPUB is neither adopted nor renamed.
 - Final `dotnet restore` succeeded.
 - Final `dotnet build --no-restore` succeeded with zero warnings and zero errors.
-- Final `dotnet test --no-build` succeeded: 38 passed, 0 failed, 0 skipped across Domain (5), Application (5), Infrastructure (16), Architecture (9), and WPF (3).
+- Final `dotnet test --no-build` succeeded: 39 passed, 0 failed, 0 skipped across Domain (5), Application (5), Infrastructure (16), Architecture (9), and WPF (4).
 - Final `dotnet format --verify-no-changes` succeeded.
 - `dotnet list package --vulnerable --include-transitive` reported no vulnerable packages in any project.
 - WPF process-startup smoke test succeeded. Interactive visual/accessibility testing remains manual follow-up.
 - Complete diff review and production mutation scan found no hashing, duplicate detection, EPUB/PDF inspection, scoring, recommendations, cleanup plans, Calibre CLI integration, SQL mutation statements, or mutable library filesystem operations.
-- Remaining risks: only Calibre schema 26 is supported; active/atypical WAL states can fail closed; linked/junction library paths are rejected; SQLite native calls are not instantly cancellable; filesystem/database state can change between independent read checks; and visual/high-DPI/accessibility behavior still needs an interactive synthetic-library smoke test.
+- The schema-27 correction reran the full verification suite on 2026-07-14: all standard commands passed, the dependency audit found no known vulnerable packages, the WPF startup/graceful-close smoke test produced empty standard error, and the production mutation scan remained empty.
+- Remaining risks: only Calibre schema 27 is supported; active/atypical WAL states can fail closed; linked/junction library paths are rejected; SQLite native calls are not instantly cancellable; filesystem/database state can change between independent read checks; and visual/high-DPI/accessibility behavior still needs an interactive synthetic-library smoke test.

@@ -2,7 +2,7 @@ namespace CalibreLibraryCleaner.Infrastructure.Sqlite;
 
 internal static class CalibreSchemaContract
 {
-    public const int SupportedVersion = 26;
+    public const int SupportedVersion = 27;
 
     public static IReadOnlyDictionary<string, string[]> RequiredColumns { get; } =
         new Dictionary<string, string[]>(StringComparer.OrdinalIgnoreCase)

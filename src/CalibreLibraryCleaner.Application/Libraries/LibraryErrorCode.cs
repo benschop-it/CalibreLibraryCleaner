@@ -12,5 +12,6 @@ public enum LibraryErrorCode
     UnsupportedSchema,
     CorruptDatabase,
     DatabaseBusy,
+    HashingFailed,
     UnexpectedReadFailure,
 }

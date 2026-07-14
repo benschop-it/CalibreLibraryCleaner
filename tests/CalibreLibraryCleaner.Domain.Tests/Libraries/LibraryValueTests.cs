@@ -23,4 +23,20 @@ public sealed class LibraryValueTests
 
         format.FileStatus.Should().Be(FormatFileStatus.Missing);
     }
+
+    [Fact]
+    public void Sha256DigestNormalizesHexadecimalText()
+    {
+        Sha256Digest digest = new(new string('A', 64));
+
+        digest.Value.Should().Be(new string('a', 64));
+    }
+
+    [Fact]
+    public void PresentFormatRequiresFingerprint()
+    {
+        Action act = () => _ = new BookFormat("EPUB", "Book", "Book.epub", FormatFileStatus.Present);
+
+        act.Should().Throw<ArgumentException>();
+    }
 }

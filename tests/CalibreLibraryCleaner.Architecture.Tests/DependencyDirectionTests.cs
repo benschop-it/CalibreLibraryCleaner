@@ -121,6 +121,49 @@ public sealed class DependencyDirectionTests
         source.Should().NotContain("System.IO");
     }
 
+    [Fact]
+    public void CoreAndWpfSourceDoNotImplementFileHashing()
+    {
+        string[] projectNames = [DomainProject, ApplicationProject, WpfProject];
+        string source = string.Join(
+            Environment.NewLine,
+            projectNames.SelectMany(project => Directory.EnumerateFiles(
+                Path.Combine(RepositoryRoot, "src", project),
+                "*.cs",
+                SearchOption.AllDirectories))
+                .Where(path => !path.Contains($"{Path.DirectorySeparatorChar}obj{Path.DirectorySeparatorChar}", StringComparison.Ordinal))
+                .Select(File.ReadAllText));
+
+        source.Should().NotContain("FileStream");
+        source.Should().NotContain("IncrementalHash");
+        source.Should().NotContain("SHA256.HashData");
+        source.Should().NotContain("File.ReadAllBytes");
+    }
+
+    [Fact]
+    public void ProductionHashingStreamsAndDoesNotMutateFiles()
+    {
+        string hashingPath = Path.Combine(
+            RepositoryRoot,
+            "src",
+            InfrastructureProject,
+            "Hashing");
+        string source = string.Join(
+            Environment.NewLine,
+            Directory.EnumerateFiles(hashingPath, "*.cs", SearchOption.AllDirectories)
+                .Select(File.ReadAllText));
+
+        source.Should().NotContain("File.ReadAllBytes");
+        source.Should().NotContain("ReadToEnd");
+        source.Should().NotContain("MemoryMappedFile");
+        source.Should().NotContain("FileMode.Create");
+        source.Should().NotContain("FileMode.Append");
+        source.Should().NotContain("FileMode.Truncate");
+        source.Should().NotContain("File.Delete");
+        source.Should().NotContain("File.Move");
+        source.Should().NotContain("File.Replace");
+    }
+
     private static string[] ReadItemNames(string projectName, string itemName)
     {
         string projectPath = Path.Combine(

@@ -13,7 +13,7 @@ public sealed class LibrarySnapshotTests
         List<CalibreBook> books = [CreateBook()];
         List<LibraryFinding> findings = [];
         LibrarySnapshot snapshot = new(
-            new LibraryIdentity(Guid.NewGuid().ToString(), 26, "library"),
+            new LibraryIdentity(Guid.NewGuid().ToString(), 27, "library"),
             DateTimeOffset.UnixEpoch,
             books,
             findings);
@@ -31,6 +31,11 @@ public sealed class LibrarySnapshotTests
         "Author",
         [new BookAuthor(new CalibreAuthorId(1), "Author", "Author")],
         [new BookIdentifier("isbn", "123")],
-        [new BookFormat("EPUB", "Book", "Author/Book/Book.epub", FormatFileStatus.Present)],
+        [new BookFormat(
+            "EPUB",
+            "Book",
+            "Author/Book/Book.epub",
+            FormatFileStatus.Present,
+            new FormatFileFingerprint(4, new Sha256Digest(new string('a', 64))))],
         "Author/Book");
 }

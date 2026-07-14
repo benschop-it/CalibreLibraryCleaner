@@ -29,3 +29,9 @@ Traverse spine order, extract visible text, decode entities, normalize Unicode a
 ## Automation policy
 
 Only provably redundant byte-identical content is eligible for automatic action in early releases. All other matches require review.
+
+## Exact binary file groups
+
+Milestone 2 hashes every safely readable declared format with streaming SHA-256. File size is a comparison pre-filter, not a reason to skip hashing. A group requires both equal byte length and equal SHA-256 and at least two distinct managed file references.
+
+Group identity is derived from the length and digest. Groups are ordered by size descending and digest; members are ordered by record ID, format, and managed relative path. These are file-level groups: even when identical files span records, the result does not assert that the book records are metadata duplicates, equivalent editions, or safe to merge or delete.

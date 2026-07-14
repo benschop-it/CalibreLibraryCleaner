@@ -24,7 +24,7 @@ public sealed class SqliteCalibreMetadataReaderTests
 
         outcome.IsSuccess.Should().BeTrue();
         outcome.Catalog!.LibraryUuid.Should().Be(library.LibraryUuid);
-        outcome.Catalog.SchemaVersion.Should().Be(26);
+        outcome.Catalog.SchemaVersion.Should().Be(27);
         outcome.Catalog.Books.Should().ContainSingle();
         CalibreBookRecord book = outcome.Catalog.Books[0];
         book.Title.Should().Be("Book");
@@ -38,7 +38,7 @@ public sealed class SqliteCalibreMetadataReaderTests
     [Fact]
     public async Task ReadRejectsUnsupportedSchemaVersion()
     {
-        using SyntheticCalibreLibrary library = new(schemaVersion: 25);
+        using SyntheticCalibreLibrary library = new(schemaVersion: 26);
         using ServiceProvider provider = TestServices.CreateProvider();
         ICalibreMetadataReader reader = provider.GetRequiredService<ICalibreMetadataReader>();
 
@@ -48,6 +48,8 @@ public sealed class SqliteCalibreMetadataReaderTests
             CancellationToken.None);
 
         outcome.Error!.Code.Should().Be(LibraryErrorCode.UnsupportedSchema);
+        outcome.Error.Message.Should().Be(
+            "The Calibre library schema is not supported (schema 26; expected 27).");
     }
 
     [Fact]

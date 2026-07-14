@@ -1,6 +1,6 @@
 namespace CalibreLibraryCleaner.Application.Libraries;
 
-public sealed record ResolvedFormatPath(string FullPath, string RelativePath);
+public sealed record ResolvedFormatPath(string LibraryRoot, string FullPath, string RelativePath);
 
 public sealed record ResolvedFormatPathOutcome
 {

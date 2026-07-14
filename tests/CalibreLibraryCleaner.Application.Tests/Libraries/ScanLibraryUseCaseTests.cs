@@ -9,93 +9,217 @@ namespace CalibreLibraryCleaner.Application.Tests.Libraries;
 
 public sealed class ScanLibraryUseCaseTests
 {
-    [Fact]
-    public async Task MissingFormatProducesFindingAndSuccessfulSnapshot()
+    [Theory]
+    [InlineData(FormatHashResultStatus.Missing, "FORMAT_FILE_MISSING", FormatFileStatus.Missing)]
+    [InlineData(FormatHashResultStatus.Inaccessible, "FORMAT_FILE_INACCESSIBLE", FormatFileStatus.Inaccessible)]
+    [InlineData(FormatHashResultStatus.ChangedDuringHashing, "FORMAT_FILE_CHANGED_DURING_HASHING", FormatFileStatus.ChangedDuringHashing)]
+    public async Task HashFailureProducesFindingAndSuccessfulSnapshot(
+        FormatHashResultStatus resultStatus,
+        string findingCode,
+        FormatFileStatus fileStatus)
     {
-        ILibraryPathResolver resolver = A.Fake<ILibraryPathResolver>();
-        ICalibreMetadataReader reader = A.Fake<ICalibreMetadataReader>();
-        IClock clock = A.Fake<IClock>();
-        ValidatedLibraryLocation location = new("C:\\Library", "C:\\Library\\metadata.db");
-        A.CallTo(() => resolver.ValidateAsync("C:\\Library", A<CancellationToken>._))
-            .Returns(LibraryValidationOutcome.Success(location));
-        A.CallTo(() => reader.ReadAsync(location, A<IProgress<LibraryScanProgress>?>._, A<CancellationToken>._))
-            .Returns(CalibreCatalogReadOutcome.Success(CreateCatalog()));
-        ResolvedFormatPath resolvedPath = new(
-            "C:\\Library\\Author\\Book (1)\\Book.epub",
-            "Author\\Book (1)\\Book.epub");
-        A.CallTo(() => resolver.ResolveFormat(location, "Author/Book (1)", "Book", "EPUB"))
-            .Returns(ResolvedFormatPathOutcome.Success(resolvedPath));
-        A.CallTo(() => resolver.FileExistsAsync(resolvedPath, A<CancellationToken>._))
-            .ReturnsLazily(_ => ValueTask.FromResult(false));
-        DateTimeOffset scannedAt = new(2026, 7, 13, 12, 0, 0, TimeSpan.Zero);
-        A.CallTo(() => clock.GetUtcNow()).Returns(scannedAt);
-        ScanLibraryUseCase useCase = new(resolver, reader, clock);
+        TestContext context = CreateContext();
+        A.CallTo(() => context.Hasher.HashAsync(
+                A<IReadOnlyList<FormatHashRequest>>._,
+                4,
+                A<IProgress<FormatHashProgress>?>._,
+                A<CancellationToken>._))
+            .ReturnsLazily(call => Task.FromResult<IReadOnlyList<FormatHashResult>>(
+                [FormatHashResult.Failure(0, resultStatus, "TestReason")]));
 
-        LibraryScanOutcome outcome = await useCase.ExecuteAsync(
-            "C:\\Library",
-            null,
-            CancellationToken.None);
+        LibraryScanOutcome outcome = await context.UseCase.ExecuteAsync("C:/Library", null, CancellationToken.None);
 
         outcome.IsSuccess.Should().BeTrue();
-        outcome.Snapshot!.ScannedAt.Should().Be(scannedAt);
-        outcome.Snapshot.Books.Should().ContainSingle();
-        outcome.Snapshot.Books[0].Formats[0].FileStatus.Should().Be(FormatFileStatus.Missing);
-        outcome.Snapshot.Findings.Should().ContainSingle(finding => finding.Code == "FORMAT_FILE_MISSING");
+        outcome.Snapshot!.Books[0].Formats[0].FileStatus.Should().Be(fileStatus);
+        outcome.Snapshot.Findings.Should().ContainSingle(finding => finding.Code == findingCode);
+        outcome.Snapshot.ExactBinaryDuplicateGroups.Should().BeEmpty();
     }
 
     [Fact]
-    public async Task InvalidPathIsNotCheckedForExistence()
+    public async Task SuccessfulHashesProduceExactFileGroup()
     {
-        ILibraryPathResolver resolver = A.Fake<ILibraryPathResolver>();
-        ICalibreMetadataReader reader = A.Fake<ICalibreMetadataReader>();
-        IClock clock = A.Fake<IClock>();
-        ValidatedLibraryLocation location = new("root", "database");
-        A.CallTo(() => resolver.ValidateAsync("root", A<CancellationToken>._))
-            .Returns(LibraryValidationOutcome.Success(location));
-        A.CallTo(() => reader.ReadAsync(location, A<IProgress<LibraryScanProgress>?>._, A<CancellationToken>._))
-            .Returns(CalibreCatalogReadOutcome.Success(CreateCatalog()));
-        A.CallTo(() => resolver.ResolveFormat(location, A<string>._, A<string>._, A<string>._))
-            .Returns(ResolvedFormatPathOutcome.Failure("Path traversal."));
-        ScanLibraryUseCase useCase = new(resolver, reader, clock);
+        TestContext context = CreateContext(bookCount: 2);
+        FormatFileFingerprint fingerprint = new(4, new Sha256Digest(new string('a', 64)));
+        A.CallTo(() => context.Hasher.HashAsync(
+                A<IReadOnlyList<FormatHashRequest>>._,
+                4,
+                A<IProgress<FormatHashProgress>?>._,
+                A<CancellationToken>._))
+            .ReturnsLazily(call =>
+            {
+                IReadOnlyList<FormatHashRequest> requests = call.GetArgument<IReadOnlyList<FormatHashRequest>>(0)!;
+                return Task.FromResult<IReadOnlyList<FormatHashResult>>(
+                    requests.Select(request => FormatHashResult.Success(request.Sequence, fingerprint)).ToArray());
+            });
 
-        LibraryScanOutcome outcome = await useCase.ExecuteAsync("root", null, CancellationToken.None);
+        LibraryScanOutcome outcome = await context.UseCase.ExecuteAsync("C:/Library", null, CancellationToken.None);
+
+        outcome.Snapshot!.ExactBinaryDuplicateGroups.Should().ContainSingle();
+        outcome.Snapshot.ExactBinaryDuplicateGroups[0].DistinctBookCount.Should().Be(2);
+    }
+
+    [Fact]
+    public async Task InvalidPathIsNotSentToHasher()
+    {
+        TestContext context = CreateContext();
+        A.CallTo(() => context.Resolver.ResolveFormat(
+                A<ValidatedLibraryLocation>._,
+                A<string>._,
+                A<string>._,
+                A<string>._))
+            .Returns(ResolvedFormatPathOutcome.Failure("Path traversal."));
+        A.CallTo(() => context.Hasher.HashAsync(
+                A<IReadOnlyList<FormatHashRequest>>._,
+                A<int>._,
+                A<IProgress<FormatHashProgress>?>._,
+                A<CancellationToken>._))
+            .Returns(Task.FromResult<IReadOnlyList<FormatHashResult>>([]));
+
+        LibraryScanOutcome outcome = await context.UseCase.ExecuteAsync("C:/Library", null, CancellationToken.None);
 
         outcome.Snapshot!.Findings.Should().ContainSingle(finding => finding.Code == "MANAGED_PATH_INVALID");
-        A.CallTo(() => resolver.FileExistsAsync(A<ResolvedFormatPath>._, A<CancellationToken>._))
+        A.CallTo(() => context.Hasher.HashAsync(
+                A<IReadOnlyList<FormatHashRequest>>.That.Matches(requests => requests.Count != 0),
+                A<int>._,
+                A<IProgress<FormatHashProgress>?>._,
+                A<CancellationToken>._))
             .MustNotHaveHappened();
     }
 
     [Fact]
     public async Task CancellationDuringValidationPropagates()
     {
-        ILibraryPathResolver resolver = A.Fake<ILibraryPathResolver>();
-        ICalibreMetadataReader reader = A.Fake<ICalibreMetadataReader>();
-        IClock clock = A.Fake<IClock>();
+        TestContext context = CreateContext();
         using CancellationTokenSource cancellation = new();
         cancellation.Cancel();
-        ScanLibraryUseCase useCase = new(resolver, reader, clock);
 
-        Func<Task> act = async () => await useCase.ExecuteAsync("root", null, cancellation.Token);
+        Func<Task> act = async () => await context.UseCase.ExecuteAsync("C:/Library", null, cancellation.Token);
 
         await act.Should().ThrowAsync<OperationCanceledException>();
-        A.CallTo(() => reader.ReadAsync(
-                A<ValidatedLibraryLocation>._,
-                A<IProgress<LibraryScanProgress>?>._,
+        A.CallTo(() => context.Hasher.HashAsync(
+                A<IReadOnlyList<FormatHashRequest>>._,
+                A<int>._,
+                A<IProgress<FormatHashProgress>?>._,
                 A<CancellationToken>._))
             .MustNotHaveHappened();
     }
 
-    private static CalibreCatalogRecord CreateCatalog() => new(
+    [Fact]
+    public async Task CancellationAtGroupingPhasePropagatesWithoutCompletedProgress()
+    {
+        TestContext context = CreateContext(bookCount: 2);
+        FormatFileFingerprint fingerprint = new(4, new Sha256Digest(new string('a', 64)));
+        A.CallTo(() => context.Hasher.HashAsync(
+                A<IReadOnlyList<FormatHashRequest>>._,
+                A<int>._,
+                A<IProgress<FormatHashProgress>?>._,
+                A<CancellationToken>._))
+            .ReturnsLazily(call => Task.FromResult<IReadOnlyList<FormatHashResult>>(
+                call.GetArgument<IReadOnlyList<FormatHashRequest>>(0)!
+                    .Select(request => FormatHashResult.Success(request.Sequence, fingerprint))
+                    .ToArray()));
+        using CancellationTokenSource cancellation = new();
+        List<LibraryScanProgress> updates = [];
+        InlineProgress progress = new(update =>
+        {
+            updates.Add(update);
+            if (update.Phase == LibraryScanPhase.GroupingExactDuplicates)
+            {
+                cancellation.Cancel();
+            }
+        });
+
+        Func<Task> act = async () => await context.UseCase.ExecuteAsync("C:/Library", progress, cancellation.Token);
+
+        await act.Should().ThrowAsync<OperationCanceledException>();
+        updates.Should().NotContain(update => update.Phase == LibraryScanPhase.Completed);
+    }
+
+    [Theory]
+    [InlineData(1)]
+    [InlineData(-1)]
+    public async Task InvalidHashResultSequenceBecomesStructuredFailure(int sequence)
+    {
+        TestContext context = CreateContext();
+        FormatFileFingerprint fingerprint = new(4, new Sha256Digest(new string('a', 64)));
+        A.CallTo(() => context.Hasher.HashAsync(
+                A<IReadOnlyList<FormatHashRequest>>._,
+                A<int>._,
+                A<IProgress<FormatHashProgress>?>._,
+                A<CancellationToken>._))
+            .Returns(Task.FromResult<IReadOnlyList<FormatHashResult>>(
+                [FormatHashResult.Success(sequence, fingerprint)]));
+
+        LibraryScanOutcome outcome = await context.UseCase.ExecuteAsync("C:/Library", null, CancellationToken.None);
+
+        outcome.IsSuccess.Should().BeFalse();
+        outcome.Error!.Code.Should().Be(LibraryErrorCode.HashingFailed);
+    }
+
+    [Fact]
+    public async Task InvalidHashResultFingerprintCombinationBecomesStructuredFailure()
+    {
+        TestContext context = CreateContext();
+        A.CallTo(() => context.Hasher.HashAsync(
+                A<IReadOnlyList<FormatHashRequest>>._,
+                A<int>._,
+                A<IProgress<FormatHashProgress>?>._,
+                A<CancellationToken>._))
+            .Returns(Task.FromResult<IReadOnlyList<FormatHashResult>>(
+                [new FormatHashResult(0, FormatHashResultStatus.Success, null, null)]));
+
+        LibraryScanOutcome outcome = await context.UseCase.ExecuteAsync("C:/Library", null, CancellationToken.None);
+
+        outcome.IsSuccess.Should().BeFalse();
+        outcome.Error!.Code.Should().Be(LibraryErrorCode.HashingFailed);
+    }
+
+    private static TestContext CreateContext(int bookCount = 1)
+    {
+        ILibraryPathResolver resolver = A.Fake<ILibraryPathResolver>();
+        ICalibreMetadataReader reader = A.Fake<ICalibreMetadataReader>();
+        IFormatFileHasher hasher = A.Fake<IFormatFileHasher>();
+        IClock clock = A.Fake<IClock>();
+        ValidatedLibraryLocation location = new("C:/Library", "C:/Library/metadata.db");
+        A.CallTo(() => resolver.ValidateAsync("C:/Library", A<CancellationToken>._))
+            .Returns(LibraryValidationOutcome.Success(location));
+        A.CallTo(() => reader.ReadAsync(location, A<IProgress<LibraryScanProgress>?>._, A<CancellationToken>._))
+            .Returns(CalibreCatalogReadOutcome.Success(CreateCatalog(bookCount)));
+        A.CallTo(() => resolver.ResolveFormat(location, A<string>._, A<string>._, "EPUB"))
+            .ReturnsLazily(call =>
+            {
+                string directory = call.GetArgument<string>(1)!;
+                return ResolvedFormatPathOutcome.Success(new(
+                    "C:/Library",
+                    $"C:/Library/{directory}/Book.epub",
+                    $"{directory}/Book.epub"));
+            });
+        A.CallTo(() => clock.GetUtcNow()).Returns(DateTimeOffset.UnixEpoch);
+        return new(
+            resolver,
+            hasher,
+            new ScanLibraryUseCase(resolver, reader, hasher, clock, new()));
+    }
+
+    private static CalibreCatalogRecord CreateCatalog(int bookCount) => new(
         "87f7ed1f-59a8-45a6-975a-7e06fd84780d",
-        26,
-        [
-            new CalibreBookRecord(
-                1,
-                "Book",
-                "Author",
-                "Author/Book (1)",
-                [new CalibreAuthorRecord(1, "Author", "Author")],
-                [new CalibreIdentifierRecord("isbn", "123")],
-                [new CalibreFormatRecord("epub", "Book")]),
-        ]);
+        27,
+        Enumerable.Range(1, bookCount).Select(id => new CalibreBookRecord(
+            id,
+            $"Book {id}",
+            "Author",
+            $"Author/Book ({id})",
+            [new CalibreAuthorRecord(id, "Author", "Author")],
+            [],
+            [new CalibreFormatRecord("EPUB", "Book")])));
+
+    private sealed record TestContext(
+        ILibraryPathResolver Resolver,
+        IFormatFileHasher Hasher,
+        ScanLibraryUseCase UseCase);
+
+    private sealed class InlineProgress(Action<LibraryScanProgress> report) : IProgress<LibraryScanProgress>
+    {
+        public void Report(LibraryScanProgress value) => report(value);
+    }
 }

@@ -174,16 +174,7 @@ internal sealed class LibraryPathResolver : ILibraryPathResolver
             }
         }
 
-        return ResolvedFormatPathOutcome.Success(new(fullPath, relativePath));
-    }
-
-    public ValueTask<bool> FileExistsAsync(
-        ResolvedFormatPath path,
-        CancellationToken cancellationToken)
-    {
-        ArgumentNullException.ThrowIfNull(path);
-        cancellationToken.ThrowIfCancellationRequested();
-        return ValueTask.FromResult(File.Exists(path.FullPath));
+        return ResolvedFormatPathOutcome.Success(new(library.LibraryRoot, fullPath, relativePath));
     }
 
     private static bool TrySplitRelativePath(

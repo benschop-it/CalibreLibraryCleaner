@@ -10,5 +10,7 @@ public enum LibraryScanPhase
     ReadingIdentifiers,
     ReadingFormats,
     ResolvingFiles,
+    HashingFormats,
+    GroupingExactDuplicates,
     Completed,
 }

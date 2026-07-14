@@ -1,4 +1,5 @@
 using System.Collections.ObjectModel;
+using CalibreLibraryCleaner.Domain.Duplicates;
 using CalibreLibraryCleaner.Domain.Findings;
 
 namespace CalibreLibraryCleaner.Domain.Libraries;
@@ -9,7 +10,8 @@ public sealed record LibrarySnapshot
         LibraryIdentity identity,
         DateTimeOffset scannedAt,
         IEnumerable<CalibreBook> books,
-        IEnumerable<LibraryFinding> findings)
+        IEnumerable<LibraryFinding> findings,
+        IEnumerable<ExactBinaryDuplicateGroup>? exactBinaryDuplicateGroups = null)
     {
         ArgumentNullException.ThrowIfNull(identity);
         ArgumentNullException.ThrowIfNull(books);
@@ -19,6 +21,8 @@ public sealed record LibrarySnapshot
         ScannedAt = scannedAt;
         Books = new ReadOnlyCollection<CalibreBook>(books.ToArray());
         Findings = new ReadOnlyCollection<LibraryFinding>(findings.ToArray());
+        ExactBinaryDuplicateGroups = new ReadOnlyCollection<ExactBinaryDuplicateGroup>(
+            (exactBinaryDuplicateGroups ?? []).ToArray());
     }
 
     public LibraryIdentity Identity { get; }
@@ -28,4 +32,6 @@ public sealed record LibrarySnapshot
     public IReadOnlyList<CalibreBook> Books { get; }
 
     public IReadOnlyList<LibraryFinding> Findings { get; }
+
+    public IReadOnlyList<ExactBinaryDuplicateGroup> ExactBinaryDuplicateGroups { get; }
 }

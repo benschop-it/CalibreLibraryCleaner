@@ -6,7 +6,7 @@ internal sealed class SyntheticCalibreLibrary : IDisposable
 {
     private readonly TemporaryDirectory _temporaryDirectory = new();
 
-    public SyntheticCalibreLibrary(int schemaVersion = 26)
+    public SyntheticCalibreLibrary(int schemaVersion = 27)
     {
         RootPath = _temporaryDirectory.Path;
         DatabasePath = Path.Combine(RootPath, "metadata.db");
@@ -85,6 +85,39 @@ internal sealed class SyntheticCalibreLibrary : IDisposable
         }
 
         return formatPath;
+    }
+
+    public string AddSimpleBook(int id, byte[]? content, string format = "EPUB")
+    {
+        string relativeDirectory = $"Author {id}/Book ({id})";
+        string storedName = $"Book {id}";
+        using SqliteConnection connection = OpenWritable();
+        using SqliteCommand command = connection.CreateCommand();
+        command.CommandText = """
+            INSERT INTO books(id, title, author_sort, path) VALUES ($id, $title, $authorSort, $path);
+            INSERT INTO authors(id, name, sort) VALUES ($authorId, $author, $authorSort);
+            INSERT INTO books_authors_link(id, book, author) VALUES ($id, $id, $authorId);
+            INSERT INTO data(id, book, format, name) VALUES ($id, $id, $format, $storedName);
+            """;
+        command.Parameters.AddWithValue("$id", id);
+        command.Parameters.AddWithValue("$title", $"Book {id}");
+        command.Parameters.AddWithValue("$authorId", 1000 + id);
+        command.Parameters.AddWithValue("$author", $"Author {id}");
+        command.Parameters.AddWithValue("$authorSort", $"Author {id}");
+        command.Parameters.AddWithValue("$path", relativeDirectory);
+        command.Parameters.AddWithValue("$format", format);
+        command.Parameters.AddWithValue("$storedName", storedName);
+        command.ExecuteNonQuery();
+
+        string directory = Path.Combine(RootPath, $"Author {id}", $"Book ({id})");
+        string path = Path.Combine(directory, $"{storedName}.{format.ToLowerInvariant()}");
+        if (content is not null)
+        {
+            Directory.CreateDirectory(directory);
+            File.WriteAllBytes(path, content);
+        }
+
+        return path;
     }
 
     public void DropRequiredTable(string table)

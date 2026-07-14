@@ -14,7 +14,4 @@ public interface ILibraryPathResolver
         string storedName,
         string format);
 
-    ValueTask<bool> FileExistsAsync(
-        ResolvedFormatPath path,
-        CancellationToken cancellationToken);
 }

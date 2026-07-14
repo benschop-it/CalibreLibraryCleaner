@@ -17,6 +17,7 @@ public partial class App : System.Windows.Application
         builder.Services.AddCalibreLibraryInfrastructure();
         builder.Services.AddSingleton<ValidateLibraryUseCase>();
         builder.Services.AddSingleton<ScanLibraryUseCase>();
+        builder.Services.AddSingleton(new LibraryAnalysisOptions());
         builder.Services.AddSingleton<ILibraryFolderPicker, OpenFolderDialogLibraryFolderPicker>();
         builder.Services.AddSingleton<MainWindowViewModel>();
         builder.Services.AddSingleton<MainWindow>();

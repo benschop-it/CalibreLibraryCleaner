@@ -1,3 +1,4 @@
+using CalibreLibraryCleaner.Application.Abstractions;
 using CalibreLibraryCleaner.Application.Libraries;
 using CalibreLibraryCleaner.Infrastructure.Tests.Fixtures;
 using FluentAssertions;
@@ -8,6 +9,47 @@ namespace CalibreLibraryCleaner.Infrastructure.Tests.Safety;
 
 public sealed class ReadOnlyLibraryScanSafetyTests
 {
+    [Fact]
+    public async Task ExactDuplicateAnalysisDoesNotChangeSyntheticLibrary()
+    {
+        using SyntheticCalibreLibrary library = new();
+        byte[] content = [1, 2, 3, 4, 5];
+        library.AddSimpleBook(1, content);
+        library.AddSimpleBook(2, content);
+        IReadOnlyList<LibraryEntryState> before = LibraryStateCapture.Capture(library.RootPath);
+        using ServiceProvider provider = TestServices.CreateProvider();
+        ScanLibraryUseCase useCase = TestServices.CreateScanUseCase(provider);
+
+        LibraryScanOutcome outcome = await useCase.ExecuteAsync(library.RootPath, null, CancellationToken.None);
+
+        outcome.IsSuccess.Should().BeTrue();
+        outcome.Snapshot!.ExactBinaryDuplicateGroups.Should().ContainSingle();
+        LibraryStateCapture.Capture(library.RootPath)
+            .Should().BeEquivalentTo(before, options => options.WithStrictOrdering());
+        Directory.EnumerateFiles(library.RootPath, "metadata.db-*", SearchOption.TopDirectoryOnly)
+            .Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task InaccessibleFormatFindingDoesNotChangeSyntheticLibrary()
+    {
+        using SyntheticCalibreLibrary library = new();
+        string formatPath = library.AddSimpleBook(1, [1, 2, 3]);
+        IReadOnlyList<LibraryEntryState> before = LibraryStateCapture.Capture(library.RootPath);
+        using ServiceProvider provider = TestServices.CreateProvider();
+        ScanLibraryUseCase useCase = TestServices.CreateScanUseCase(provider);
+        LibraryScanOutcome outcome;
+        await using (FileStream locked = new(formatPath, FileMode.Open, FileAccess.Read, FileShare.None))
+        {
+            outcome = await useCase.ExecuteAsync(library.RootPath, null, CancellationToken.None);
+        }
+
+        outcome.IsSuccess.Should().BeTrue();
+        outcome.Snapshot!.Findings.Should().ContainSingle(finding => finding.Code == "FORMAT_FILE_INACCESSIBLE");
+        LibraryStateCapture.Capture(library.RootPath)
+            .Should().BeEquivalentTo(before, options => options.WithStrictOrdering());
+    }
+
     [Theory]
     [InlineData(true)]
     [InlineData(false)]
@@ -84,8 +126,88 @@ public sealed class ReadOnlyLibraryScanSafetyTests
             .Should().BeEquivalentTo(before, options => options.WithStrictOrdering());
     }
 
+    [Fact]
+    public async Task CancellationDuringHashingDoesNotChangeAnythingInsideSyntheticLibrary()
+    {
+        using SyntheticCalibreLibrary library = new();
+        string formatPath = library.AddSimpleBook(1, [0]);
+        await using (FileStream stream = new(formatPath, FileMode.Open, FileAccess.Write, FileShare.None))
+        {
+            stream.SetLength(64L * 1024 * 1024);
+        }
+
+        IReadOnlyList<LibraryEntryState> before = LibraryStateCapture.Capture(library.RootPath);
+        using ServiceProvider provider = TestServices.CreateProvider();
+        ScanLibraryUseCase useCase = TestServices.CreateScanUseCase(provider);
+        using CancellationTokenSource cancellation = new();
+        InlineProgress progress = new(update =>
+        {
+            if (update.Phase == LibraryScanPhase.HashingFormats && update.CompletedUnits > 0)
+            {
+                cancellation.Cancel();
+            }
+        });
+
+        Func<Task> act = async () => await useCase.ExecuteAsync(library.RootPath, progress, cancellation.Token);
+
+        await act.Should().ThrowAsync<OperationCanceledException>();
+        LibraryStateCapture.Capture(library.RootPath)
+            .Should().BeEquivalentTo(before, options => options.WithStrictOrdering());
+        Directory.EnumerateFiles(library.RootPath, "metadata.db-*", SearchOption.TopDirectoryOnly)
+            .Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task SameSizeNonmatchAnalysisDoesNotChangeSyntheticLibrary()
+    {
+        using SyntheticCalibreLibrary library = new();
+        library.AddSimpleBook(1, [1, 2, 3]);
+        library.AddSimpleBook(2, [3, 2, 1]);
+        IReadOnlyList<LibraryEntryState> before = LibraryStateCapture.Capture(library.RootPath);
+        using ServiceProvider provider = TestServices.CreateProvider();
+        ScanLibraryUseCase useCase = TestServices.CreateScanUseCase(provider);
+
+        LibraryScanOutcome outcome = await useCase.ExecuteAsync(library.RootPath, null, CancellationToken.None);
+
+        outcome.IsSuccess.Should().BeTrue();
+        outcome.Snapshot!.ExactBinaryDuplicateGroups.Should().BeEmpty();
+        LibraryStateCapture.Capture(library.RootPath)
+            .Should().BeEquivalentTo(before, options => options.WithStrictOrdering());
+    }
+
+    [Fact]
+    public async Task FatalHashFailureDoesNotChangeSyntheticLibrary()
+    {
+        using SyntheticCalibreLibrary library = new();
+        library.AddSimpleBook(1, [1, 2, 3]);
+        IReadOnlyList<LibraryEntryState> before = LibraryStateCapture.Capture(library.RootPath);
+        using ServiceProvider provider = TestServices.CreateProvider();
+        ScanLibraryUseCase useCase = new(
+            provider.GetRequiredService<ILibraryPathResolver>(),
+            provider.GetRequiredService<ICalibreMetadataReader>(),
+            new ThrowingHasher(),
+            provider.GetRequiredService<IClock>(),
+            provider.GetRequiredService<LibraryAnalysisOptions>());
+
+        LibraryScanOutcome outcome = await useCase.ExecuteAsync(library.RootPath, null, CancellationToken.None);
+
+        outcome.IsSuccess.Should().BeFalse();
+        outcome.Error!.Code.Should().Be(LibraryErrorCode.HashingFailed);
+        LibraryStateCapture.Capture(library.RootPath)
+            .Should().BeEquivalentTo(before, options => options.WithStrictOrdering());
+    }
+
     private sealed class InlineProgress(Action<LibraryScanProgress> report) : IProgress<LibraryScanProgress>
     {
         public void Report(LibraryScanProgress value) => report(value);
+    }
+
+    private sealed class ThrowingHasher : IFormatFileHasher
+    {
+        public Task<IReadOnlyList<FormatHashResult>> HashAsync(
+            IReadOnlyList<FormatHashRequest> requests,
+            int maxDegreeOfParallelism,
+            IProgress<FormatHashProgress>? progress,
+            CancellationToken cancellationToken) => throw new IOException("Synthetic fatal hash failure.");
     }
 }

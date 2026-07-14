@@ -14,7 +14,16 @@ internal static class LibraryStateCapture
     {
         FileAttributes attributes = File.GetAttributes(path);
         bool isDirectory = (attributes & FileAttributes.Directory) != 0;
-        byte[]? hash = isDirectory ? null : SHA256.HashData(File.ReadAllBytes(path));
+        byte[]? hash;
+        if (isDirectory)
+        {
+            hash = null;
+        }
+        else
+        {
+            using FileStream stream = new(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+            hash = SHA256.HashData(stream);
+        }
         long length = isDirectory ? 0 : new FileInfo(path).Length;
         return new(
             Path.GetRelativePath(root, path),

@@ -1,4 +1,5 @@
 using CalibreLibraryCleaner.Application.Abstractions;
+using CalibreLibraryCleaner.Infrastructure.Hashing;
 using CalibreLibraryCleaner.Infrastructure.Paths;
 using CalibreLibraryCleaner.Infrastructure.Sqlite;
 using CalibreLibraryCleaner.Infrastructure.Time;
@@ -14,6 +15,7 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<IClock, SystemClock>();
         services.AddSingleton<ILibraryPathResolver, LibraryPathResolver>();
         services.AddSingleton<ICalibreMetadataReader, SqliteCalibreMetadataReader>();
+        services.AddSingleton<IFormatFileHasher, StreamingSha256FormatFileHasher>();
         return services;
     }
 }

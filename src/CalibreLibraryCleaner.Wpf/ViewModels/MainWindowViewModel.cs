@@ -1,4 +1,6 @@
 using System.Collections.ObjectModel;
+using System.Collections.Specialized;
+using System.ComponentModel;
 using CalibreLibraryCleaner.Application.Libraries;
 using CalibreLibraryCleaner.Domain.Libraries;
 using CalibreLibraryCleaner.Wpf.Services;
@@ -12,16 +14,19 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
     private readonly ValidateLibraryUseCase _validateLibrary;
     private readonly ScanLibraryUseCase _scanLibrary;
     private readonly ILibraryFolderPicker _folderPicker;
-    private readonly ObservableCollection<BookRowViewModel> _books = [];
+    private readonly BulkObservableCollection<BookRowViewModel> _books = [];
+    private readonly BulkObservableCollection<ExactDuplicateGroupRowViewModel> _exactDuplicateGroups = [];
     private CancellationTokenSource? _scanCancellation;
     private string _selectedLibraryPath = string.Empty;
     private string _statusMessage = "Choose a Calibre library folder.";
     private string _errorMessage = string.Empty;
     private string _errorAction = string.Empty;
+    private string _exactDuplicateSummary = "No exact file duplicate groups have been found.";
     private bool _isBusy;
     private double _progressPercentage;
     private bool _isProgressIndeterminate;
     private BookRowViewModel? _selectedBook;
+    private ExactDuplicateGroupRowViewModel? _selectedExactDuplicateGroup;
 
     public MainWindowViewModel(
         ValidateLibraryUseCase validateLibrary,
@@ -32,6 +37,7 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
         _scanLibrary = scanLibrary;
         _folderPicker = folderPicker;
         Books = new ReadOnlyObservableCollection<BookRowViewModel>(_books);
+        ExactDuplicateGroups = new ReadOnlyObservableCollection<ExactDuplicateGroupRowViewModel>(_exactDuplicateGroups);
         SelectLibraryCommand = new AsyncRelayCommand(SelectLibraryAsync, () => !IsBusy);
         ScanCommand = new AsyncRelayCommand(ScanAsync, () => !IsBusy && !string.IsNullOrWhiteSpace(SelectedLibraryPath));
         CancelCommand = new RelayCommand(
@@ -97,6 +103,14 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
 
     public ReadOnlyObservableCollection<BookRowViewModel> Books { get; }
 
+    public ReadOnlyObservableCollection<ExactDuplicateGroupRowViewModel> ExactDuplicateGroups { get; }
+
+    public string ExactDuplicateSummary
+    {
+        get => _exactDuplicateSummary;
+        private set => SetProperty(ref _exactDuplicateSummary, value);
+    }
+
     public BookRowViewModel? SelectedBook
     {
         get => _selectedBook;
@@ -110,6 +124,21 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
     }
 
     public IReadOnlyList<FormatRowViewModel> SelectedFormats => SelectedBook?.Formats ?? [];
+
+    public ExactDuplicateGroupRowViewModel? SelectedExactDuplicateGroup
+    {
+        get => _selectedExactDuplicateGroup;
+        set
+        {
+            if (SetProperty(ref _selectedExactDuplicateGroup, value))
+            {
+                OnPropertyChanged(nameof(SelectedExactDuplicateMembers));
+            }
+        }
+    }
+
+    public IReadOnlyList<ExactDuplicateMemberRowViewModel> SelectedExactDuplicateMembers =>
+        SelectedExactDuplicateGroup?.Members ?? [];
 
     public IAsyncRelayCommand SelectLibraryCommand { get; }
 
@@ -155,16 +184,21 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
         ClearError();
         ProgressPercentage = 0;
         IsProgressIndeterminate = true;
-        IProgress<LibraryScanProgress> progress = new Progress<LibraryScanProgress>(UpdateProgress);
+        CoalescingProgress progress = new(UpdateProgress);
 
         try
         {
             LibraryScanOutcome outcome = await _scanLibrary
                 .ExecuteAsync(SelectedLibraryPath, progress, _scanCancellation.Token)
                 .ConfigureAwait(true);
+            progress.Complete();
             if (outcome.IsSuccess)
             {
-                ApplySnapshot(outcome.Snapshot!);
+                SnapshotPresentation presentation = await Task.Run(
+                        () => CreatePresentation(outcome.Snapshot!, _scanCancellation.Token),
+                        _scanCancellation.Token)
+                    .ConfigureAwait(true);
+                ApplySnapshot(outcome.Snapshot!, presentation);
             }
             else
             {
@@ -174,10 +208,12 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
         }
         catch (OperationCanceledException)
         {
+            progress.Complete();
             StatusMessage = "Scan canceled. Previous results, if any, were not replaced.";
         }
         finally
         {
+            progress.Complete();
             IsBusy = false;
             _scanCancellation.Dispose();
             _scanCancellation = null;
@@ -201,19 +237,55 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
             : progress.Phase == LibraryScanPhase.Completed ? 100 : 0;
     }
 
-    private void ApplySnapshot(LibrarySnapshot snapshot)
+    private static SnapshotPresentation CreatePresentation(
+        LibrarySnapshot snapshot,
+        CancellationToken cancellationToken)
     {
-        _books.Clear();
-        foreach (CalibreBook book in snapshot.Books)
+        BookRowViewModel[] books = new BookRowViewModel[snapshot.Books.Count];
+        Dictionary<CalibreBookId, CalibreBook> booksById = new(snapshot.Books.Count);
+        for (int index = 0; index < snapshot.Books.Count; index++)
         {
-            _books.Add(new(book));
+            cancellationToken.ThrowIfCancellationRequested();
+            CalibreBook book = snapshot.Books[index];
+            books[index] = new(book);
+            booksById.Add(book.Id, book);
         }
 
+        ExactDuplicateGroupRowViewModel[] groups = new ExactDuplicateGroupRowViewModel[
+            snapshot.ExactBinaryDuplicateGroups.Count];
+        for (int index = 0; index < snapshot.ExactBinaryDuplicateGroups.Count; index++)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            groups[index] = new(snapshot.ExactBinaryDuplicateGroups[index], booksById);
+        }
+
+        int missingCount = 0;
+        foreach (Domain.Findings.LibraryFinding finding in snapshot.Findings)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (finding.Code == "FORMAT_FILE_MISSING")
+            {
+                missingCount++;
+            }
+        }
+
+        return new(books, groups, missingCount);
+    }
+
+    private void ApplySnapshot(LibrarySnapshot snapshot, SnapshotPresentation presentation)
+    {
+        _books.ReplaceAll(presentation.Books);
         SelectedBook = _books.FirstOrDefault();
-        int missingCount = snapshot.Findings.Count(finding => finding.Code == "FORMAT_FILE_MISSING");
+        _exactDuplicateGroups.ReplaceAll(presentation.Groups);
+        SelectedExactDuplicateGroup = _exactDuplicateGroups.FirstOrDefault();
+        ExactDuplicateSummary = presentation.Groups.Count == 0
+            ? "No exact file duplicate groups were found in this scan."
+            : presentation.Groups.Count == 1
+                ? "1 exact file duplicate group was found."
+                : $"{presentation.Groups.Count} exact file duplicate groups were found.";
         StatusMessage = snapshot.Books.Count == 0
             ? "Scan complete. The library contains no books."
-            : $"Scan complete: {snapshot.Books.Count} books, {missingCount} missing format files.";
+            : $"Scan complete: {snapshot.Books.Count} books, {snapshot.ExactBinaryDuplicateGroups.Count} exact file duplicate groups, {presentation.MissingCount} missing format files.";
         IsProgressIndeterminate = false;
         ProgressPercentage = 100;
     }
@@ -228,5 +300,114 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
     {
         ErrorMessage = error.Message;
         ErrorAction = error.SuggestedAction;
+    }
+
+    private sealed record SnapshotPresentation(
+        IReadOnlyList<BookRowViewModel> Books,
+        IReadOnlyList<ExactDuplicateGroupRowViewModel> Groups,
+        int MissingCount);
+
+    private sealed class BulkObservableCollection<T> : ObservableCollection<T>
+    {
+        public void ReplaceAll(IEnumerable<T> values)
+        {
+            ArgumentNullException.ThrowIfNull(values);
+            CheckReentrancy();
+            Items.Clear();
+            foreach (T value in values)
+            {
+                Items.Add(value);
+            }
+
+            OnPropertyChanged(new PropertyChangedEventArgs(nameof(Count)));
+            OnPropertyChanged(new PropertyChangedEventArgs("Item[]"));
+            OnCollectionChanged(new NotifyCollectionChangedEventArgs(NotifyCollectionChangedAction.Reset));
+        }
+    }
+
+    private sealed class CoalescingProgress : IProgress<LibraryScanProgress>
+    {
+        private readonly object _gate = new();
+        private readonly Action<LibraryScanProgress> _handler;
+        private readonly SynchronizationContext? _synchronizationContext = SynchronizationContext.Current;
+        private LibraryScanProgress? _latest;
+        private bool _isActive = true;
+        private bool _isScheduled;
+
+        public CoalescingProgress(Action<LibraryScanProgress> handler)
+        {
+            ArgumentNullException.ThrowIfNull(handler);
+            _handler = handler;
+        }
+
+        public void Report(LibraryScanProgress value)
+        {
+            lock (_gate)
+            {
+                if (!_isActive)
+                {
+                    return;
+                }
+
+                _latest = value;
+                if (_isScheduled)
+                {
+                    return;
+                }
+
+                _isScheduled = true;
+            }
+
+            PostDrain();
+        }
+
+        public void Complete()
+        {
+            lock (_gate)
+            {
+                _isActive = false;
+                _latest = null;
+            }
+        }
+
+        private void PostDrain()
+        {
+            if (_synchronizationContext is null)
+            {
+                ThreadPool.QueueUserWorkItem(static state => ((CoalescingProgress)state!).Drain(), this);
+            }
+            else
+            {
+                _synchronizationContext.Post(static state => ((CoalescingProgress)state!).Drain(), this);
+            }
+        }
+
+        private void Drain()
+        {
+            LibraryScanProgress? value;
+            lock (_gate)
+            {
+                value = _isActive ? _latest : null;
+                _latest = null;
+                _isScheduled = false;
+            }
+
+            if (value is not null)
+            {
+                _handler(value);
+            }
+
+            lock (_gate)
+            {
+                if (!_isActive || _latest is null || _isScheduled)
+                {
+                    return;
+                }
+
+                _isScheduled = true;
+            }
+
+            PostDrain();
+        }
     }
 }
