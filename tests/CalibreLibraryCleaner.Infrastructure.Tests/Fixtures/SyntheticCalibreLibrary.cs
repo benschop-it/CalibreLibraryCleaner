@@ -89,25 +89,72 @@ internal sealed class SyntheticCalibreLibrary : IDisposable
 
     public string AddSimpleBook(int id, byte[]? content, string format = "EPUB")
     {
+        return AddMetadataBook(
+            id,
+            $"Book {id}",
+            [$"Author {id}"],
+            [$"Author {id}"],
+            content,
+            format);
+    }
+
+    public string AddMetadataBook(
+        int id,
+        string title,
+        IReadOnlyList<string> authorNames,
+        IReadOnlyList<string> authorSortNames,
+        byte[]? content,
+        string format = "EPUB",
+        string? identifier = null)
+    {
+        ArgumentNullException.ThrowIfNull(authorNames);
+        ArgumentNullException.ThrowIfNull(authorSortNames);
+        if (authorNames.Count != authorSortNames.Count)
+        {
+            throw new ArgumentException("Author names and sort names must have the same count.", nameof(authorSortNames));
+        }
+
         string relativeDirectory = $"Author {id}/Book ({id})";
         string storedName = $"Book {id}";
         using SqliteConnection connection = OpenWritable();
         using SqliteCommand command = connection.CreateCommand();
         command.CommandText = """
             INSERT INTO books(id, title, author_sort, path) VALUES ($id, $title, $authorSort, $path);
-            INSERT INTO authors(id, name, sort) VALUES ($authorId, $author, $authorSort);
-            INSERT INTO books_authors_link(id, book, author) VALUES ($id, $id, $authorId);
             INSERT INTO data(id, book, format, name) VALUES ($id, $id, $format, $storedName);
             """;
         command.Parameters.AddWithValue("$id", id);
-        command.Parameters.AddWithValue("$title", $"Book {id}");
-        command.Parameters.AddWithValue("$authorId", 1000 + id);
-        command.Parameters.AddWithValue("$author", $"Author {id}");
-        command.Parameters.AddWithValue("$authorSort", $"Author {id}");
+        command.Parameters.AddWithValue("$title", title);
+        command.Parameters.AddWithValue("$authorSort", string.Join(" & ", authorSortNames));
         command.Parameters.AddWithValue("$path", relativeDirectory);
         command.Parameters.AddWithValue("$format", format);
         command.Parameters.AddWithValue("$storedName", storedName);
         command.ExecuteNonQuery();
+
+        for (int index = 0; index < authorNames.Count; index++)
+        {
+            using SqliteCommand authorCommand = connection.CreateCommand();
+            authorCommand.CommandText = """
+                INSERT INTO authors(id, name, sort) VALUES ($authorId, $name, $sort);
+                INSERT INTO books_authors_link(id, book, author) VALUES ($linkId, $bookId, $authorId);
+                """;
+            authorCommand.Parameters.AddWithValue("$authorId", (id * 1000) + index + 1);
+            authorCommand.Parameters.AddWithValue("$linkId", (id * 1000) + index + 1);
+            authorCommand.Parameters.AddWithValue("$bookId", id);
+            authorCommand.Parameters.AddWithValue("$name", authorNames[index]);
+            authorCommand.Parameters.AddWithValue("$sort", authorSortNames[index]);
+            authorCommand.ExecuteNonQuery();
+        }
+
+        if (identifier is not null)
+        {
+            using SqliteCommand identifierCommand = connection.CreateCommand();
+            identifierCommand.CommandText =
+                "INSERT INTO identifiers(id, book, type, val) VALUES ($id, $book, 'isbn', $value);";
+            identifierCommand.Parameters.AddWithValue("$id", id);
+            identifierCommand.Parameters.AddWithValue("$book", id);
+            identifierCommand.Parameters.AddWithValue("$value", identifier);
+            identifierCommand.ExecuteNonQuery();
+        }
 
         string directory = Path.Combine(RootPath, $"Author {id}", $"Book ({id})");
         string path = Path.Combine(directory, $"{storedName}.{format.ToLowerInvariant()}");
@@ -118,6 +165,18 @@ internal sealed class SyntheticCalibreLibrary : IDisposable
         }
 
         return path;
+    }
+
+    public void AddBrokenAuthorLink(int bookId, int linkId, int missingAuthorId)
+    {
+        using SqliteConnection connection = OpenWritable();
+        using SqliteCommand command = connection.CreateCommand();
+        command.CommandText =
+            "INSERT INTO books_authors_link(id, book, author) VALUES ($linkId, $bookId, $authorId);";
+        command.Parameters.AddWithValue("$linkId", linkId);
+        command.Parameters.AddWithValue("$bookId", bookId);
+        command.Parameters.AddWithValue("$authorId", missingAuthorId);
+        command.ExecuteNonQuery();
     }
 
     public void DropRequiredTable(string table)

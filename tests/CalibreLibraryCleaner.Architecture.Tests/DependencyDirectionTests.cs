@@ -164,6 +164,32 @@ public sealed class DependencyDirectionTests
         source.Should().NotContain("File.Replace");
     }
 
+    [Fact]
+    public void DomainMetadataMatchingAvoidsIntegrationAndFutureScopeAlgorithms()
+    {
+        string duplicatesPath = Path.Combine(
+            RepositoryRoot,
+            "src",
+            DomainProject,
+            "Duplicates");
+        string source = string.Join(
+            Environment.NewLine,
+            Directory.EnumerateFiles(duplicatesPath, "*.cs", SearchOption.TopDirectoryOnly)
+                .Where(path => Path.GetFileName(path).Contains("Metadata", StringComparison.Ordinal) ||
+                               Path.GetFileName(path).StartsWith("Normalized", StringComparison.Ordinal))
+                .Select(File.ReadAllText));
+
+        source.Should().NotContain("System.IO");
+        source.Should().NotContain("Microsoft.Data.Sqlite");
+        source.Should().NotContain("AuthorSort");
+        source.Should().NotContain("SortName");
+        string upperSource = source.ToUpperInvariant();
+        upperSource.Should().NotContain("ISBN");
+        upperSource.Should().NotContain("LEVENSHTEIN");
+        upperSource.Should().NotContain("JARO");
+        upperSource.Should().NotContain("SIMILARITY");
+    }
+
     private static string[] ReadItemNames(string projectName, string itemName)
     {
         string projectPath = Path.Combine(

@@ -11,7 +11,8 @@ public sealed record LibrarySnapshot
         DateTimeOffset scannedAt,
         IEnumerable<CalibreBook> books,
         IEnumerable<LibraryFinding> findings,
-        IEnumerable<ExactBinaryDuplicateGroup>? exactBinaryDuplicateGroups = null)
+        IEnumerable<ExactBinaryDuplicateGroup>? exactBinaryDuplicateGroups = null,
+        IEnumerable<ExactMetadataDuplicateGroup>? exactMetadataDuplicateGroups = null)
     {
         ArgumentNullException.ThrowIfNull(identity);
         ArgumentNullException.ThrowIfNull(books);
@@ -23,6 +24,8 @@ public sealed record LibrarySnapshot
         Findings = new ReadOnlyCollection<LibraryFinding>(findings.ToArray());
         ExactBinaryDuplicateGroups = new ReadOnlyCollection<ExactBinaryDuplicateGroup>(
             (exactBinaryDuplicateGroups ?? []).ToArray());
+        ExactMetadataDuplicateGroups = new ReadOnlyCollection<ExactMetadataDuplicateGroup>(
+            (exactMetadataDuplicateGroups ?? []).ToArray());
     }
 
     public LibraryIdentity Identity { get; }
@@ -34,4 +37,6 @@ public sealed record LibrarySnapshot
     public IReadOnlyList<LibraryFinding> Findings { get; }
 
     public IReadOnlyList<ExactBinaryDuplicateGroup> ExactBinaryDuplicateGroups { get; }
+
+    public IReadOnlyList<ExactMetadataDuplicateGroup> ExactMetadataDuplicateGroups { get; }
 }

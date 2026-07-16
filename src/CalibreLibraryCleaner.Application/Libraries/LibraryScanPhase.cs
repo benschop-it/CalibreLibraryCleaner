@@ -12,5 +12,6 @@ public enum LibraryScanPhase
     ResolvingFiles,
     HashingFormats,
     GroupingExactDuplicates,
+    GroupingExactMetadataDuplicates,
     Completed,
 }

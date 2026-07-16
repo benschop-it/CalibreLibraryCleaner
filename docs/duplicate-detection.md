@@ -14,13 +14,28 @@ Group records when normalized title and normalized author set are equal. Record 
 
 ## Safe normalization
 
-- Unicode normalization and invariant case folding.
-- Trim and collapse whitespace.
-- Normalize punctuation spacing.
-- Remove zero-width characters.
-- Stable ordering of multiple authors for comparison.
+- Normalize to Unicode NFC, apply whole-string `ToUpperInvariant()`, then normalize to NFC again.
+- Remove Unicode `Format` scalars, including zero-width and directional formatting controls.
+- Convert Unicode whitespace runs to one ASCII space and trim leading/trailing space.
+- Remove that canonical space immediately before or after Unicode punctuation while preserving every punctuation scalar and all subtitle/edition text.
+- Normalize titles from the stored title and authors from stored author names only. Never use author-sort values for identity.
+- Deduplicate normalized author names and sort them with ordinal comparison to create an order-independent author set.
+- Require a usable title and a non-empty author set. If any stored author normalizes to empty, exclude the record rather than silently weakening its identity.
+- Exclude records carrying an `AUTHOR_REFERENCE_MISSING` catalog finding because their complete stored author set is unknown.
 
 Do not initially remove subtitles, infer pen names, reverse comma-separated names, discard initials, translate titles, or infer editions.
+
+Author sets must be exactly equal. A record listing only a main author does not match a record listing that author plus additional authors. Literal non-empty values such as `Unknown` are treated as stored text; the detector does not infer localized placeholder semantics.
+
+## Exact normalized metadata groups
+
+A group key is exactly `(NormalizedTitle, NormalizedAuthorSet)`. Identifiers, author IDs/order, author-sort values, formats, hashes, paths, series, and edition inference do not affect it. A group requires at least two distinct Calibre record IDs.
+
+Member IDs are ordered ascending. Groups are ordered by normalized title ordinal, then lexicographically by the ordinally sorted normalized author-name sequence, then by canonical group ID. Group IDs use the versioned, UTF-8-byte-length-prefixed normalized identity and never depend on record order or runtime dictionary hashes.
+
+Every group records reason code `EXACT_NORMALIZED_TITLE_AUTHOR_SET`, category `Exact normalized metadata candidate`, and the explanation that normalized title and order-independent normalized author set are exactly equal. These are candidate duplicate records, not proof of identical files, content, or editions.
+
+Exact metadata groups remain separate from exact binary file groups. A pair can appear in either collection, both collections, or neither; the application does not combine the signals or calculate a recommendation.
 
 ## EPUB fingerprints
 

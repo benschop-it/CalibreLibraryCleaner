@@ -140,6 +140,91 @@ public sealed class MainWindowViewModelTests
     }
 
     [Fact]
+    public async Task MetadataGroupsSupportFilteringNavigationAndSessionDeferWithoutIntegrationCalls()
+    {
+        ILibraryFolderPicker picker = A.Fake<ILibraryFolderPicker>();
+        A.CallTo(() => picker.PickFolder(A<string?>._)).Returns("library");
+        MainWindowViewModel viewModel = CreateViewModel(
+            picker,
+            out ILibraryPathResolver resolver,
+            out ICalibreMetadataReader reader,
+            out IFormatFileHasher hasher);
+        ValidatedLibraryLocation location = new("library", "database");
+        A.CallTo(() => resolver.ValidateAsync("library", A<CancellationToken>._))
+            .Returns(LibraryValidationOutcome.Success(location));
+        A.CallTo(() => reader.ReadAsync(location, A<IProgress<LibraryScanProgress>?>._, A<CancellationToken>._))
+            .Returns(CalibreCatalogReadOutcome.Success(CreateMetadataDuplicateCatalog()));
+        A.CallTo(() => resolver.ResolveFormat(
+                location,
+                A<string>.That.IsNotNull(),
+                A<string>.That.IsNotNull(),
+                A<string>.That.IsNotNull()))
+            .ReturnsLazily(call =>
+            {
+                string directory = call.GetArgument<string>(1)!;
+                return ResolvedFormatPathOutcome.Success(new("library", directory, $"{directory}/Book.epub"));
+            });
+        A.CallTo(() => hasher.HashAsync(
+                A<IReadOnlyList<FormatHashRequest>>._,
+                A<int>._,
+                A<IProgress<FormatHashProgress>?>._,
+                A<CancellationToken>._))
+            .ReturnsLazily(call => Task.FromResult<IReadOnlyList<FormatHashResult>>(
+                call.GetArgument<IReadOnlyList<FormatHashRequest>>(0)!
+                    .Select(request => FormatHashResult.Success(
+                        request.Sequence,
+                        new FormatFileFingerprint(
+                            request.Sequence + 1,
+                            new Sha256Digest(new string((char)('a' + request.Sequence), 64)))))
+                    .ToArray()));
+
+        await viewModel.SelectLibraryCommand.ExecuteAsync(null);
+        await viewModel.ScanCommand.ExecuteAsync(null);
+
+        viewModel.MetadataDuplicateGroups.Should().HaveCount(2);
+        viewModel.StatusMessage.Should().Contain("2 exact metadata candidate groups");
+        viewModel.MetadataDuplicateSummary.Should().Contain("2 of 2 metadata candidate groups visible");
+        viewModel.SelectedMetadataDuplicateGroup!.NormalizedTitle.Should().Be("ALPHA:BOOK");
+        viewModel.NextMetadataDuplicateGroupCommand.Execute(null);
+        viewModel.SelectedMetadataDuplicateGroup.NormalizedTitle.Should().Be("BETA BOOK");
+        viewModel.PreviousMetadataDuplicateGroupCommand.Execute(null);
+        viewModel.SelectedMetadataDuplicateGroup.NormalizedTitle.Should().Be("ALPHA:BOOK");
+
+        Fake.ClearRecordedCalls(resolver);
+        Fake.ClearRecordedCalls(reader);
+        Fake.ClearRecordedCalls(hasher);
+        viewModel.MetadataDuplicateFilterText = "beta";
+        viewModel.MetadataDuplicateGroups.Should().ContainSingle();
+        viewModel.SelectedMetadataDuplicateGroup!.NormalizedTitle.Should().Be("BETA BOOK");
+        viewModel.ToggleMetadataDuplicateDeferredCommand.Execute(null);
+        viewModel.SelectedMetadataDuplicateGroup!.IsDeferred.Should().BeTrue();
+        viewModel.MetadataDuplicateFilterMode = MetadataDuplicateFilterMode.Active;
+        viewModel.MetadataDuplicateGroups.Should().BeEmpty();
+        viewModel.MetadataDuplicateFilterMode = MetadataDuplicateFilterMode.Deferred;
+        viewModel.MetadataDuplicateGroups.Should().ContainSingle(group => group.IsDeferred);
+        Fake.GetCalls(resolver).Should().BeEmpty();
+        Fake.GetCalls(reader).Should().BeEmpty();
+        Fake.GetCalls(hasher).Should().BeEmpty();
+
+        viewModel.MetadataDuplicateFilterText = string.Empty;
+        viewModel.MetadataDuplicateFilterMode = MetadataDuplicateFilterMode.All;
+        await viewModel.ScanCommand.ExecuteAsync(null);
+
+        viewModel.MetadataDuplicateGroups.Should().ContainSingle(
+            group => group.NormalizedTitle == "BETA BOOK" && group.IsDeferred);
+        viewModel.MetadataDuplicateGroups.Should().ContainSingle(
+            group => group.NormalizedTitle == "ALPHA:BOOK" && !group.IsDeferred);
+        viewModel.SelectedMetadataDuplicateMembers.Should().HaveCount(2);
+        viewModel.MetadataDuplicateGroups[0].Reason.Should().Contain("exactly equal");
+
+        A.CallTo(() => reader.ReadAsync(location, A<IProgress<LibraryScanProgress>?>._, A<CancellationToken>._))
+            .Returns(CalibreCatalogReadOutcome.Success(CreateMetadataDuplicateCatalog("different-library-uuid")));
+        await viewModel.ScanCommand.ExecuteAsync(null);
+
+        viewModel.MetadataDuplicateGroups.Should().OnlyContain(group => !group.IsDeferred);
+    }
+
+    [Fact]
     public async Task SyntheticLibraryFlowsThroughRealInfrastructureToDuplicateView()
     {
         using SyntheticDuplicateLibrary library = new();
@@ -202,7 +287,26 @@ public sealed class MainWindowViewModelTests
                 $"Book {id}",
                 [new CalibreAuthorRecord(id, "Author", "Author")],
                 [],
-                [new CalibreFormatRecord("EPUB", "Book")])));
+            [new CalibreFormatRecord("EPUB", "Book")])));
+
+    private static CalibreCatalogRecord CreateMetadataDuplicateCatalog(
+        string libraryUuid = "87f7ed1f-59a8-45a6-975a-7e06fd84780d") => new(
+        libraryUuid,
+        27,
+        new[]
+        {
+            (Id: 1, Title: "Alpha : Book", Author: "Alice"),
+            (Id: 2, Title: "alpha:book", Author: "Alice"),
+            (Id: 3, Title: "Beta Book", Author: "Bob"),
+            (Id: 4, Title: "BETA  BOOK", Author: "Bob"),
+        }.Select(item => new CalibreBookRecord(
+            item.Id,
+            item.Title,
+            $"{item.Author}, Sort",
+            $"Book {item.Id}",
+            [new CalibreAuthorRecord(item.Id, item.Author, $"{item.Author}, Sort")],
+            [new CalibreIdentifierRecord("isbn", $"context-{item.Id}")],
+            [new CalibreFormatRecord("EPUB", "Book")])));
 
     private static async Task<CalibreCatalogReadOutcome> WaitForCancellation(
         CancellationToken cancellationToken)

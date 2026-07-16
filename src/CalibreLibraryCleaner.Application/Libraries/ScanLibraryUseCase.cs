@@ -130,9 +130,30 @@ public sealed class ScanLibraryUseCase(
             .ToList();
         cancellationToken.ThrowIfCancellationRequested();
         progress?.Report(new(LibraryScanPhase.GroupingExactDuplicates, 0, 1, "Grouping exact file duplicates"));
-        IReadOnlyList<ExactBinaryDuplicateGroup> groups = ExactBinaryDuplicateDetector.Detect(books, cancellationToken);
+        IReadOnlyList<ExactBinaryDuplicateGroup> exactBinaryGroups =
+            ExactBinaryDuplicateDetector.Detect(books, cancellationToken);
         cancellationToken.ThrowIfCancellationRequested();
         progress?.Report(new(LibraryScanPhase.GroupingExactDuplicates, 1, 1, "Exact file duplicates grouped"));
+        cancellationToken.ThrowIfCancellationRequested();
+        progress?.Report(new(
+            LibraryScanPhase.GroupingExactMetadataDuplicates,
+            0,
+            1,
+            "Grouping exact metadata duplicates"));
+        HashSet<CalibreBookId> booksWithIncompleteAuthorReferences = catalog.Issues
+            .Where(issue => issue.Code == "AUTHOR_REFERENCE_MISSING")
+            .Select(issue => new CalibreBookId(issue.BookId))
+            .ToHashSet();
+        IReadOnlyList<ExactMetadataDuplicateGroup> exactMetadataGroups =
+            ExactMetadataDuplicateDetector.Detect(
+                books.Where(book => !booksWithIncompleteAuthorReferences.Contains(book.Id)),
+                cancellationToken);
+        cancellationToken.ThrowIfCancellationRequested();
+        progress?.Report(new(
+            LibraryScanPhase.GroupingExactMetadataDuplicates,
+            1,
+            1,
+            "Exact metadata duplicates grouped"));
 
         Dictionary<FindingKey, LibraryFinding> uniqueFindings = [];
         foreach (LibraryFinding finding in findings)
@@ -153,7 +174,8 @@ public sealed class ScanLibraryUseCase(
             clock.GetUtcNow(),
             books,
             findings,
-            groups);
+            exactBinaryGroups,
+            exactMetadataGroups);
         cancellationToken.ThrowIfCancellationRequested();
         progress?.Report(new(LibraryScanPhase.Completed, 1, 1, "Scan complete"));
         return LibraryScanOutcome.Success(snapshot);

@@ -2,6 +2,7 @@ using System.Collections.ObjectModel;
 using System.Collections.Specialized;
 using System.ComponentModel;
 using CalibreLibraryCleaner.Application.Libraries;
+using CalibreLibraryCleaner.Domain.Duplicates;
 using CalibreLibraryCleaner.Domain.Libraries;
 using CalibreLibraryCleaner.Wpf.Services;
 using CommunityToolkit.Mvvm.ComponentModel;
@@ -16,17 +17,25 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
     private readonly ILibraryFolderPicker _folderPicker;
     private readonly BulkObservableCollection<BookRowViewModel> _books = [];
     private readonly BulkObservableCollection<ExactDuplicateGroupRowViewModel> _exactDuplicateGroups = [];
+    private readonly BulkObservableCollection<MetadataDuplicateGroupRowViewModel> _metadataDuplicateGroups = [];
+    private readonly HashSet<DeferredMetadataGroupKey> _deferredMetadataGroups = [];
+    private IReadOnlyList<MetadataDuplicateGroupRowViewModel> _allMetadataDuplicateGroups = [];
     private CancellationTokenSource? _scanCancellation;
     private string _selectedLibraryPath = string.Empty;
     private string _statusMessage = "Choose a Calibre library folder.";
     private string _errorMessage = string.Empty;
     private string _errorAction = string.Empty;
     private string _exactDuplicateSummary = "No exact file duplicate groups have been found.";
+    private string _metadataDuplicateSummary = "No exact metadata candidate groups have been found.";
+    private string _metadataDuplicateFilterText = string.Empty;
+    private MetadataDuplicateFilterMode _metadataDuplicateFilterMode;
     private bool _isBusy;
     private double _progressPercentage;
     private bool _isProgressIndeterminate;
     private BookRowViewModel? _selectedBook;
     private ExactDuplicateGroupRowViewModel? _selectedExactDuplicateGroup;
+    private MetadataDuplicateGroupRowViewModel? _selectedMetadataDuplicateGroup;
+    private string? _currentLibraryUuid;
 
     public MainWindowViewModel(
         ValidateLibraryUseCase validateLibrary,
@@ -38,11 +47,22 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
         _folderPicker = folderPicker;
         Books = new ReadOnlyObservableCollection<BookRowViewModel>(_books);
         ExactDuplicateGroups = new ReadOnlyObservableCollection<ExactDuplicateGroupRowViewModel>(_exactDuplicateGroups);
+        MetadataDuplicateGroups = new ReadOnlyObservableCollection<MetadataDuplicateGroupRowViewModel>(
+            _metadataDuplicateGroups);
         SelectLibraryCommand = new AsyncRelayCommand(SelectLibraryAsync, () => !IsBusy);
         ScanCommand = new AsyncRelayCommand(ScanAsync, () => !IsBusy && !string.IsNullOrWhiteSpace(SelectedLibraryPath));
         CancelCommand = new RelayCommand(
             CancelScan,
             () => IsBusy && _scanCancellation is { IsCancellationRequested: false });
+        NextMetadataDuplicateGroupCommand = new RelayCommand(
+            () => MoveMetadataSelection(1),
+            () => !IsBusy && _metadataDuplicateGroups.Count > 0);
+        PreviousMetadataDuplicateGroupCommand = new RelayCommand(
+            () => MoveMetadataSelection(-1),
+            () => !IsBusy && _metadataDuplicateGroups.Count > 0);
+        ToggleMetadataDuplicateDeferredCommand = new RelayCommand(
+            ToggleMetadataDuplicateDeferred,
+            () => !IsBusy && SelectedMetadataDuplicateGroup is not null && _currentLibraryUuid is not null);
     }
 
     public string SelectedLibraryPath
@@ -85,6 +105,9 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
                 SelectLibraryCommand.NotifyCanExecuteChanged();
                 ScanCommand.NotifyCanExecuteChanged();
                 CancelCommand.NotifyCanExecuteChanged();
+                NextMetadataDuplicateGroupCommand.NotifyCanExecuteChanged();
+                PreviousMetadataDuplicateGroupCommand.NotifyCanExecuteChanged();
+                ToggleMetadataDuplicateDeferredCommand.NotifyCanExecuteChanged();
             }
         }
     }
@@ -105,10 +128,45 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
 
     public ReadOnlyObservableCollection<ExactDuplicateGroupRowViewModel> ExactDuplicateGroups { get; }
 
+    public ReadOnlyObservableCollection<MetadataDuplicateGroupRowViewModel> MetadataDuplicateGroups { get; }
+
+    public IReadOnlyList<MetadataDuplicateFilterMode> MetadataDuplicateFilterModes { get; } =
+        Enum.GetValues<MetadataDuplicateFilterMode>();
+
     public string ExactDuplicateSummary
     {
         get => _exactDuplicateSummary;
         private set => SetProperty(ref _exactDuplicateSummary, value);
+    }
+
+    public string MetadataDuplicateSummary
+    {
+        get => _metadataDuplicateSummary;
+        private set => SetProperty(ref _metadataDuplicateSummary, value);
+    }
+
+    public string MetadataDuplicateFilterText
+    {
+        get => _metadataDuplicateFilterText;
+        set
+        {
+            if (SetProperty(ref _metadataDuplicateFilterText, value ?? string.Empty))
+            {
+                ApplyMetadataDuplicateFilter();
+            }
+        }
+    }
+
+    public MetadataDuplicateFilterMode MetadataDuplicateFilterMode
+    {
+        get => _metadataDuplicateFilterMode;
+        set
+        {
+            if (SetProperty(ref _metadataDuplicateFilterMode, value))
+            {
+                ApplyMetadataDuplicateFilter();
+            }
+        }
     }
 
     public BookRowViewModel? SelectedBook
@@ -140,11 +198,38 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
     public IReadOnlyList<ExactDuplicateMemberRowViewModel> SelectedExactDuplicateMembers =>
         SelectedExactDuplicateGroup?.Members ?? [];
 
+    public MetadataDuplicateGroupRowViewModel? SelectedMetadataDuplicateGroup
+    {
+        get => _selectedMetadataDuplicateGroup;
+        set
+        {
+            if (SetProperty(ref _selectedMetadataDuplicateGroup, value))
+            {
+                OnPropertyChanged(nameof(SelectedMetadataDuplicateMembers));
+                OnPropertyChanged(nameof(MetadataDeferAction));
+                ToggleMetadataDuplicateDeferredCommand.NotifyCanExecuteChanged();
+            }
+        }
+    }
+
+    public IReadOnlyList<MetadataDuplicateMemberRowViewModel> SelectedMetadataDuplicateMembers =>
+        SelectedMetadataDuplicateGroup?.Members ?? [];
+
+    public string MetadataDeferAction => SelectedMetadataDuplicateGroup?.IsDeferred == true
+        ? "_Restore"
+        : "_Defer";
+
     public IAsyncRelayCommand SelectLibraryCommand { get; }
 
     public IAsyncRelayCommand ScanCommand { get; }
 
     public IRelayCommand CancelCommand { get; }
+
+    public IRelayCommand NextMetadataDuplicateGroupCommand { get; }
+
+    public IRelayCommand PreviousMetadataDuplicateGroupCommand { get; }
+
+    public IRelayCommand ToggleMetadataDuplicateDeferredCommand { get; }
 
     public void Dispose()
     {
@@ -259,6 +344,14 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
             groups[index] = new(snapshot.ExactBinaryDuplicateGroups[index], booksById);
         }
 
+        MetadataDuplicateGroupRowViewModel[] metadataGroups = new MetadataDuplicateGroupRowViewModel[
+            snapshot.ExactMetadataDuplicateGroups.Count];
+        for (int index = 0; index < snapshot.ExactMetadataDuplicateGroups.Count; index++)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            metadataGroups[index] = new(snapshot.ExactMetadataDuplicateGroups[index], booksById);
+        }
+
         int missingCount = 0;
         foreach (Domain.Findings.LibraryFinding finding in snapshot.Findings)
         {
@@ -269,7 +362,7 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
             }
         }
 
-        return new(books, groups, missingCount);
+        return new(books, groups, metadataGroups, missingCount);
     }
 
     private void ApplySnapshot(LibrarySnapshot snapshot, SnapshotPresentation presentation)
@@ -283,9 +376,17 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
             : presentation.Groups.Count == 1
                 ? "1 exact file duplicate group was found."
                 : $"{presentation.Groups.Count} exact file duplicate groups were found.";
+        _currentLibraryUuid = snapshot.Identity.CalibreLibraryUuid;
+        foreach (MetadataDuplicateGroupRowViewModel group in presentation.MetadataGroups)
+        {
+            group.SetDeferred(_deferredMetadataGroups.Contains(new(_currentLibraryUuid, group.GroupId)));
+        }
+
+        _allMetadataDuplicateGroups = presentation.MetadataGroups;
+        ApplyMetadataDuplicateFilter();
         StatusMessage = snapshot.Books.Count == 0
             ? "Scan complete. The library contains no books."
-            : $"Scan complete: {snapshot.Books.Count} books, {snapshot.ExactBinaryDuplicateGroups.Count} exact file duplicate groups, {presentation.MissingCount} missing format files.";
+            : $"Scan complete: {snapshot.Books.Count} books, {snapshot.ExactBinaryDuplicateGroups.Count} exact file duplicate groups, {snapshot.ExactMetadataDuplicateGroups.Count} exact metadata candidate groups, {presentation.MissingCount} missing format files.";
         IsProgressIndeterminate = false;
         ProgressPercentage = 100;
     }
@@ -302,10 +403,83 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
         ErrorAction = error.SuggestedAction;
     }
 
+    private void ApplyMetadataDuplicateFilter()
+    {
+        ExactMetadataDuplicateGroupId? selectedId = SelectedMetadataDuplicateGroup?.GroupId;
+        MetadataDuplicateGroupRowViewModel[] visible = _allMetadataDuplicateGroups
+            .Where(group => MetadataDuplicateFilterMode switch
+            {
+                MetadataDuplicateFilterMode.All => true,
+                MetadataDuplicateFilterMode.Active => !group.IsDeferred,
+                MetadataDuplicateFilterMode.Deferred => group.IsDeferred,
+                _ => false,
+            })
+            .Where(group => string.IsNullOrWhiteSpace(MetadataDuplicateFilterText) ||
+                            group.SearchText.Contains(MetadataDuplicateFilterText.Trim(), StringComparison.OrdinalIgnoreCase))
+            .ToArray();
+        _metadataDuplicateGroups.ReplaceAll(visible);
+        SelectedMetadataDuplicateGroup = selectedId is null
+            ? _metadataDuplicateGroups.FirstOrDefault()
+            : _metadataDuplicateGroups.FirstOrDefault(group => group.GroupId == selectedId.Value) ??
+              _metadataDuplicateGroups.FirstOrDefault();
+
+        int deferredCount = _allMetadataDuplicateGroups.Count(group => group.IsDeferred);
+        MetadataDuplicateSummary = _allMetadataDuplicateGroups.Count == 0
+            ? "No exact metadata candidate groups were found in this scan."
+            : visible.Length == 0
+                ? $"No metadata candidate groups match the current filter (0 of {_allMetadataDuplicateGroups.Count} visible; {deferredCount} deferred)."
+                : $"{visible.Length} of {_allMetadataDuplicateGroups.Count} metadata candidate groups visible; {deferredCount} deferred.";
+        NextMetadataDuplicateGroupCommand.NotifyCanExecuteChanged();
+        PreviousMetadataDuplicateGroupCommand.NotifyCanExecuteChanged();
+        ToggleMetadataDuplicateDeferredCommand.NotifyCanExecuteChanged();
+    }
+
+    private void MoveMetadataSelection(int offset)
+    {
+        if (_metadataDuplicateGroups.Count == 0)
+        {
+            return;
+        }
+
+        int currentIndex = SelectedMetadataDuplicateGroup is null
+            ? 0
+            : _metadataDuplicateGroups.IndexOf(SelectedMetadataDuplicateGroup);
+        int nextIndex = (currentIndex + offset + _metadataDuplicateGroups.Count) % _metadataDuplicateGroups.Count;
+        SelectedMetadataDuplicateGroup = _metadataDuplicateGroups[nextIndex];
+    }
+
+    private void ToggleMetadataDuplicateDeferred()
+    {
+        if (SelectedMetadataDuplicateGroup is null || _currentLibraryUuid is null)
+        {
+            return;
+        }
+
+        DeferredMetadataGroupKey key = new(_currentLibraryUuid, SelectedMetadataDuplicateGroup.GroupId);
+        bool isDeferred = !SelectedMetadataDuplicateGroup.IsDeferred;
+        if (isDeferred)
+        {
+            _deferredMetadataGroups.Add(key);
+        }
+        else
+        {
+            _deferredMetadataGroups.Remove(key);
+        }
+
+        SelectedMetadataDuplicateGroup.SetDeferred(isDeferred);
+        OnPropertyChanged(nameof(MetadataDeferAction));
+        ApplyMetadataDuplicateFilter();
+    }
+
     private sealed record SnapshotPresentation(
         IReadOnlyList<BookRowViewModel> Books,
         IReadOnlyList<ExactDuplicateGroupRowViewModel> Groups,
+        IReadOnlyList<MetadataDuplicateGroupRowViewModel> MetadataGroups,
         int MissingCount);
+
+    private sealed record DeferredMetadataGroupKey(
+        string LibraryUuid,
+        ExactMetadataDuplicateGroupId GroupId);
 
     private sealed class BulkObservableCollection<T> : ObservableCollection<T>
     {

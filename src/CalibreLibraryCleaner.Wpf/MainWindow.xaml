@@ -6,6 +6,11 @@
         Height="700"
         MinWidth="760"
         MinHeight="480">
+  <Window.InputBindings>
+    <KeyBinding Key="N" Modifiers="Control" Command="{Binding NextMetadataDuplicateGroupCommand}" />
+    <KeyBinding Key="P" Modifiers="Control" Command="{Binding PreviousMetadataDuplicateGroupCommand}" />
+    <KeyBinding Key="D" Modifiers="Control" Command="{Binding ToggleMetadataDuplicateDeferredCommand}" />
+  </Window.InputBindings>
   <Grid Margin="16">
     <Grid.RowDefinitions>
       <RowDefinition Height="Auto" />
@@ -170,6 +175,101 @@
                 <DataGridTextColumn Width="2*" Header="Authors" Binding="{Binding Authors}" />
                 <DataGridTextColumn Width="90" Header="Format" Binding="{Binding Format}" />
                 <DataGridTextColumn Width="3*" Header="Relative path" Binding="{Binding ExpectedRelativePath}" />
+              </DataGrid.Columns>
+            </DataGrid>
+          </GroupBox>
+        </Grid>
+      </TabItem>
+      <TabItem Header="_Metadata candidates">
+        <Grid Margin="8">
+          <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+            <RowDefinition Height="*" />
+          </Grid.RowDefinitions>
+          <StackPanel Grid.Row="0" Margin="0,0,0,8">
+            <TextBlock Text="These records have exactly equal normalized titles and author sets. This is metadata evidence only; content and editions may differ."
+                       TextWrapping="Wrap" />
+            <TextBlock Margin="0,4,0,0"
+                       Text="Identifiers shown below are context only and do not affect grouping. Deferred state is kept only for this application session."
+                       TextWrapping="Wrap" />
+            <TextBlock Margin="0,4,0,0"
+                       Text="{Binding MetadataDuplicateSummary}"
+                       TextWrapping="Wrap" />
+          </StackPanel>
+          <Grid Grid.Row="1" Margin="0,0,0,8">
+            <Grid.ColumnDefinitions>
+              <ColumnDefinition Width="Auto" />
+              <ColumnDefinition Width="2*" />
+              <ColumnDefinition Width="Auto" />
+              <ColumnDefinition Width="*" />
+              <ColumnDefinition Width="Auto" />
+              <ColumnDefinition Width="Auto" />
+              <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
+            <Label Grid.Column="0" Target="{Binding ElementName=MetadataFilterBox}" Content="_Filter:" />
+            <TextBox x:Name="MetadataFilterBox"
+                     Grid.Column="1"
+                     Margin="4,0,8,0"
+                     Padding="4"
+                     Text="{Binding MetadataDuplicateFilterText, UpdateSourceTrigger=PropertyChanged, Delay=200}"
+                     AutomationProperties.Name="Filter metadata candidate groups" />
+            <Label Grid.Column="2" Target="{Binding ElementName=MetadataFilterModeBox}" Content="_View:" />
+            <ComboBox x:Name="MetadataFilterModeBox"
+                      Grid.Column="3"
+                      MinWidth="100"
+                      Margin="4,0,8,0"
+                      ItemsSource="{Binding MetadataDuplicateFilterModes}"
+                      SelectedItem="{Binding MetadataDuplicateFilterMode}" />
+            <Button Grid.Column="4"
+                    Margin="0,0,8,0"
+                    Padding="8,4"
+                    Content="_Previous"
+                    ToolTip="Previous visible metadata group (Ctrl+P)"
+                    Command="{Binding PreviousMetadataDuplicateGroupCommand}" />
+            <Button Grid.Column="5"
+                    Margin="0,0,8,0"
+                    Padding="8,4"
+                    Content="_Next"
+                    ToolTip="Next visible metadata group (Ctrl+N)"
+                    Command="{Binding NextMetadataDuplicateGroupCommand}" />
+            <Button Grid.Column="6"
+                    MinWidth="80"
+                    Padding="8,4"
+                    Content="{Binding MetadataDeferAction}"
+                    ToolTip="Defer or restore the selected metadata group for this session (Ctrl+D)"
+                    Command="{Binding ToggleMetadataDuplicateDeferredCommand}" />
+          </Grid>
+          <GroupBox Grid.Row="2" Header="Exact normalized metadata candidate groups">
+            <DataGrid ItemsSource="{Binding MetadataDuplicateGroups}"
+                      SelectedItem="{Binding SelectedMetadataDuplicateGroup}"
+                      AutoGenerateColumns="False"
+                      IsReadOnly="True"
+                      SelectionMode="Single"
+                      AutomationProperties.Name="Exact normalized metadata candidate groups">
+              <DataGrid.Columns>
+                <DataGridTextColumn Width="2*" Header="Normalized title" Binding="{Binding NormalizedTitle}" />
+                <DataGridTextColumn Width="2*" Header="Normalized author set" Binding="{Binding NormalizedAuthors}" />
+                <DataGridTextColumn Width="80" Header="Records" Binding="{Binding RecordCount}" />
+                <DataGridTextColumn Width="130" Header="Review state" Binding="{Binding ReviewStatus}" />
+                <DataGridTextColumn Width="2*" Header="Category" Binding="{Binding Category}" />
+                <DataGridTextColumn Width="3*" Header="Match reason" Binding="{Binding Reason}" />
+              </DataGrid.Columns>
+            </DataGrid>
+          </GroupBox>
+          <GroupBox Grid.Row="3" Margin="0,8,0,0" Header="Records in selected metadata group">
+            <DataGrid ItemsSource="{Binding SelectedMetadataDuplicateMembers}"
+                      AutoGenerateColumns="False"
+                      IsReadOnly="True"
+                      AutomationProperties.Name="Records in selected exact metadata candidate group">
+              <DataGrid.Columns>
+                <DataGridTextColumn Width="80" Header="Record ID" Binding="{Binding BookId}" />
+                <DataGridTextColumn Width="2*" Header="Original title" Binding="{Binding Title}" />
+                <DataGridTextColumn Width="2*" Header="Original authors" Binding="{Binding Authors}" />
+                <DataGridTextColumn Width="2*" Header="Author sort (context)" Binding="{Binding AuthorSort}" />
+                <DataGridTextColumn Width="*" Header="Formats" Binding="{Binding Formats}" />
+                <DataGridTextColumn Width="2*" Header="Identifiers (context only)" Binding="{Binding Identifiers}" />
               </DataGrid.Columns>
             </DataGrid>
           </GroupBox>

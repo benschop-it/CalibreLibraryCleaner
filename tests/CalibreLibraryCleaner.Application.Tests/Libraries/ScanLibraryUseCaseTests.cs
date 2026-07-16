@@ -56,6 +56,87 @@ public sealed class ScanLibraryUseCaseTests
 
         outcome.Snapshot!.ExactBinaryDuplicateGroups.Should().ContainSingle();
         outcome.Snapshot.ExactBinaryDuplicateGroups[0].DistinctBookCount.Should().Be(2);
+        outcome.Snapshot.ExactMetadataDuplicateGroups.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task SameMetadataWithDifferentHashesProducesOnlyMetadataGroup()
+    {
+        TestContext context = CreateContext(CreateCatalog(bookCount: 2, sameMetadata: true));
+        A.CallTo(() => context.Hasher.HashAsync(
+                A<IReadOnlyList<FormatHashRequest>>._,
+                4,
+                A<IProgress<FormatHashProgress>?>._,
+                A<CancellationToken>._))
+            .ReturnsLazily(call => Task.FromResult<IReadOnlyList<FormatHashResult>>(
+                call.GetArgument<IReadOnlyList<FormatHashRequest>>(0)!
+                    .Select(request => FormatHashResult.Success(
+                        request.Sequence,
+                        new FormatFileFingerprint(
+                            request.Sequence + 1,
+                            new Sha256Digest(new string((char)('a' + request.Sequence), 64)))))
+                    .ToArray()));
+
+        LibraryScanOutcome outcome = await context.UseCase.ExecuteAsync("C:/Library", null, CancellationToken.None);
+
+        outcome.Snapshot!.ExactBinaryDuplicateGroups.Should().BeEmpty();
+        outcome.Snapshot.ExactMetadataDuplicateGroups.Should().ContainSingle();
+        outcome.Snapshot.ExactMetadataDuplicateGroups[0].Members.Select(member => member.Value).Should().Equal(1, 2);
+    }
+
+    [Fact]
+    public async Task IncompleteAuthorReferenceExcludesRecordFromMetadataGrouping()
+    {
+        CalibreCatalogRecord catalog = CreateCatalog(bookCount: 2, sameMetadata: true);
+        catalog = new(
+            catalog.LibraryUuid,
+            catalog.SchemaVersion,
+            catalog.Books,
+            [new CalibreCatalogIssueRecord(
+                "AUTHOR_REFERENCE_MISSING",
+                "An author link references a missing or invalid author.",
+                "Inspect the book in Calibre.",
+                1)]);
+        TestContext context = CreateContext(catalog);
+        A.CallTo(() => context.Hasher.HashAsync(
+                A<IReadOnlyList<FormatHashRequest>>._,
+                4,
+                A<IProgress<FormatHashProgress>?>._,
+                A<CancellationToken>._))
+            .ReturnsLazily(call => Task.FromResult<IReadOnlyList<FormatHashResult>>(
+                call.GetArgument<IReadOnlyList<FormatHashRequest>>(0)!
+                    .Select(request => FormatHashResult.Success(
+                        request.Sequence,
+                        new FormatFileFingerprint(
+                            request.Sequence + 1,
+                            new Sha256Digest(new string((char)('a' + request.Sequence), 64)))))
+                    .ToArray()));
+
+        LibraryScanOutcome outcome = await context.UseCase.ExecuteAsync("C:/Library", null, CancellationToken.None);
+
+        outcome.Snapshot!.ExactMetadataDuplicateGroups.Should().BeEmpty();
+        outcome.Snapshot.Findings.Should().ContainSingle(finding => finding.Code == "AUTHOR_REFERENCE_MISSING");
+    }
+
+    [Fact]
+    public async Task SameMetadataAndHashesRemainSeparateGroupsInBothCollections()
+    {
+        TestContext context = CreateContext(CreateCatalog(bookCount: 2, sameMetadata: true));
+        FormatFileFingerprint fingerprint = new(4, new Sha256Digest(new string('a', 64)));
+        A.CallTo(() => context.Hasher.HashAsync(
+                A<IReadOnlyList<FormatHashRequest>>._,
+                4,
+                A<IProgress<FormatHashProgress>?>._,
+                A<CancellationToken>._))
+            .ReturnsLazily(call => Task.FromResult<IReadOnlyList<FormatHashResult>>(
+                call.GetArgument<IReadOnlyList<FormatHashRequest>>(0)!
+                    .Select(request => FormatHashResult.Success(request.Sequence, fingerprint))
+                    .ToArray()));
+
+        LibraryScanOutcome outcome = await context.UseCase.ExecuteAsync("C:/Library", null, CancellationToken.None);
+
+        outcome.Snapshot!.ExactBinaryDuplicateGroups.Should().ContainSingle();
+        outcome.Snapshot.ExactMetadataDuplicateGroups.Should().ContainSingle();
     }
 
     [Fact]
@@ -135,6 +216,37 @@ public sealed class ScanLibraryUseCaseTests
         updates.Should().NotContain(update => update.Phase == LibraryScanPhase.Completed);
     }
 
+    [Fact]
+    public async Task CancellationAtMetadataGroupingPropagatesWithoutCompletedProgress()
+    {
+        TestContext context = CreateContext(CreateCatalog(bookCount: 2, sameMetadata: true));
+        FormatFileFingerprint fingerprint = new(4, new Sha256Digest(new string('a', 64)));
+        A.CallTo(() => context.Hasher.HashAsync(
+                A<IReadOnlyList<FormatHashRequest>>._,
+                A<int>._,
+                A<IProgress<FormatHashProgress>?>._,
+                A<CancellationToken>._))
+            .ReturnsLazily(call => Task.FromResult<IReadOnlyList<FormatHashResult>>(
+                call.GetArgument<IReadOnlyList<FormatHashRequest>>(0)!
+                    .Select(request => FormatHashResult.Success(request.Sequence, fingerprint))
+                    .ToArray()));
+        using CancellationTokenSource cancellation = new();
+        List<LibraryScanProgress> updates = [];
+        InlineProgress progress = new(update =>
+        {
+            updates.Add(update);
+            if (update.Phase == LibraryScanPhase.GroupingExactMetadataDuplicates)
+            {
+                cancellation.Cancel();
+            }
+        });
+
+        Func<Task> act = async () => await context.UseCase.ExecuteAsync("C:/Library", progress, cancellation.Token);
+
+        await act.Should().ThrowAsync<OperationCanceledException>();
+        updates.Should().NotContain(update => update.Phase == LibraryScanPhase.Completed);
+    }
+
     [Theory]
     [InlineData(1)]
     [InlineData(-1)]
@@ -174,7 +286,9 @@ public sealed class ScanLibraryUseCaseTests
         outcome.Error!.Code.Should().Be(LibraryErrorCode.HashingFailed);
     }
 
-    private static TestContext CreateContext(int bookCount = 1)
+    private static TestContext CreateContext(int bookCount = 1) => CreateContext(CreateCatalog(bookCount));
+
+    private static TestContext CreateContext(CalibreCatalogRecord catalog)
     {
         ILibraryPathResolver resolver = A.Fake<ILibraryPathResolver>();
         ICalibreMetadataReader reader = A.Fake<ICalibreMetadataReader>();
@@ -184,7 +298,7 @@ public sealed class ScanLibraryUseCaseTests
         A.CallTo(() => resolver.ValidateAsync("C:/Library", A<CancellationToken>._))
             .Returns(LibraryValidationOutcome.Success(location));
         A.CallTo(() => reader.ReadAsync(location, A<IProgress<LibraryScanProgress>?>._, A<CancellationToken>._))
-            .Returns(CalibreCatalogReadOutcome.Success(CreateCatalog(bookCount)));
+            .Returns(CalibreCatalogReadOutcome.Success(catalog));
         A.CallTo(() => resolver.ResolveFormat(location, A<string>._, A<string>._, "EPUB"))
             .ReturnsLazily(call =>
             {
@@ -201,12 +315,12 @@ public sealed class ScanLibraryUseCaseTests
             new ScanLibraryUseCase(resolver, reader, hasher, clock, new()));
     }
 
-    private static CalibreCatalogRecord CreateCatalog(int bookCount) => new(
+    private static CalibreCatalogRecord CreateCatalog(int bookCount, bool sameMetadata = false) => new(
         "87f7ed1f-59a8-45a6-975a-7e06fd84780d",
         27,
         Enumerable.Range(1, bookCount).Select(id => new CalibreBookRecord(
             id,
-            $"Book {id}",
+            sameMetadata ? id == 1 ? "Book : One" : "book:one" : $"Book {id}",
             "Author",
             $"Author/Book ({id})",
             [new CalibreAuthorRecord(id, "Author", "Author")],

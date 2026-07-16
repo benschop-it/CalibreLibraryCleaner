@@ -1,3 +1,4 @@
+using CalibreLibraryCleaner.Domain.Duplicates;
 using CalibreLibraryCleaner.Domain.Findings;
 using CalibreLibraryCleaner.Domain.Libraries;
 using FluentAssertions;
@@ -23,6 +24,32 @@ public sealed class LibrarySnapshotTests
 
         snapshot.Books.Should().ContainSingle();
         snapshot.Findings.Should().BeEmpty();
+    }
+
+    [Fact]
+    public void SnapshotDefensivelyCopiesMetadataDuplicateGroups()
+    {
+        CalibreBook first = CreateBook();
+        CalibreBook second = new(
+            new CalibreBookId(2),
+            first.Title,
+            first.AuthorSort,
+            first.Authors,
+            first.Identifiers,
+            first.Formats,
+            "Author/Book 2");
+        List<ExactMetadataDuplicateGroup> groups = ExactMetadataDuplicateDetector.Detect([first, second]).ToList();
+        LibrarySnapshot snapshot = new(
+            new LibraryIdentity(Guid.NewGuid().ToString(), 27, "library"),
+            DateTimeOffset.UnixEpoch,
+            [first, second],
+            [],
+            [],
+            groups);
+
+        groups.Clear();
+
+        snapshot.ExactMetadataDuplicateGroups.Should().ContainSingle();
     }
 
     private static CalibreBook CreateBook() => new(

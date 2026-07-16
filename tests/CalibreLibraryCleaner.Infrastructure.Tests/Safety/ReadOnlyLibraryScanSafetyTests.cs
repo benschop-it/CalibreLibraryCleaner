@@ -31,6 +31,96 @@ public sealed class ReadOnlyLibraryScanSafetyTests
     }
 
     [Fact]
+    public async Task ExactMetadataDuplicateAnalysisDoesNotChangeSyntheticLibrary()
+    {
+        using SyntheticCalibreLibrary library = new();
+        library.AddMetadataBook(1, "Book : One", ["Author"], ["Author"], [1, 2, 3]);
+        library.AddMetadataBook(2, "book:one", ["Author"], ["Different sort"], [3, 2, 1]);
+        IReadOnlyList<LibraryEntryState> before = LibraryStateCapture.Capture(library.RootPath);
+        using ServiceProvider provider = TestServices.CreateProvider();
+        ScanLibraryUseCase useCase = TestServices.CreateScanUseCase(provider);
+
+        LibraryScanOutcome outcome = await useCase.ExecuteAsync(library.RootPath, null, CancellationToken.None);
+
+        outcome.IsSuccess.Should().BeTrue();
+        outcome.Snapshot!.ExactMetadataDuplicateGroups.Should().ContainSingle();
+        outcome.Snapshot.ExactBinaryDuplicateGroups.Should().BeEmpty();
+        LibraryStateCapture.Capture(library.RootPath)
+            .Should().BeEquivalentTo(before, options => options.WithStrictOrdering());
+        Directory.EnumerateFiles(library.RootPath, "metadata.db-*", SearchOption.TopDirectoryOnly)
+            .Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task CombinedBinaryAndMetadataDuplicateAnalysisDoesNotChangeSyntheticLibrary()
+    {
+        using SyntheticCalibreLibrary library = new();
+        byte[] content = [1, 2, 3];
+        library.AddMetadataBook(1, "Book", ["Author"], ["Author"], content);
+        library.AddMetadataBook(2, "BOOK", ["Author"], ["Different sort"], content);
+        IReadOnlyList<LibraryEntryState> before = LibraryStateCapture.Capture(library.RootPath);
+        using ServiceProvider provider = TestServices.CreateProvider();
+        ScanLibraryUseCase useCase = TestServices.CreateScanUseCase(provider);
+
+        LibraryScanOutcome outcome = await useCase.ExecuteAsync(library.RootPath, null, CancellationToken.None);
+
+        outcome.IsSuccess.Should().BeTrue();
+        outcome.Snapshot!.ExactBinaryDuplicateGroups.Should().ContainSingle();
+        outcome.Snapshot.ExactMetadataDuplicateGroups.Should().ContainSingle();
+        LibraryStateCapture.Capture(library.RootPath)
+            .Should().BeEquivalentTo(before, options => options.WithStrictOrdering());
+        Directory.EnumerateFiles(library.RootPath, "metadata.db-*", SearchOption.TopDirectoryOnly)
+            .Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task NoAuthorExclusionDoesNotChangeSyntheticLibrary()
+    {
+        using SyntheticCalibreLibrary library = new();
+        library.AddMetadataBook(1, "Book", [], [], [1]);
+        library.AddMetadataBook(2, "Book", [], [], [2]);
+        IReadOnlyList<LibraryEntryState> before = LibraryStateCapture.Capture(library.RootPath);
+        using ServiceProvider provider = TestServices.CreateProvider();
+        ScanLibraryUseCase useCase = TestServices.CreateScanUseCase(provider);
+
+        LibraryScanOutcome outcome = await useCase.ExecuteAsync(library.RootPath, null, CancellationToken.None);
+
+        outcome.IsSuccess.Should().BeTrue();
+        outcome.Snapshot!.ExactMetadataDuplicateGroups.Should().BeEmpty();
+        LibraryStateCapture.Capture(library.RootPath)
+            .Should().BeEquivalentTo(before, options => options.WithStrictOrdering());
+        Directory.EnumerateFiles(library.RootPath, "metadata.db-*", SearchOption.TopDirectoryOnly)
+            .Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task CancellationDuringMetadataGroupingDoesNotChangeSyntheticLibrary()
+    {
+        using SyntheticCalibreLibrary library = new();
+        library.AddMetadataBook(1, "Book", ["Author"], ["Author"], [1]);
+        library.AddMetadataBook(2, "Book", ["Author"], ["Author"], [2]);
+        IReadOnlyList<LibraryEntryState> before = LibraryStateCapture.Capture(library.RootPath);
+        using ServiceProvider provider = TestServices.CreateProvider();
+        ScanLibraryUseCase useCase = TestServices.CreateScanUseCase(provider);
+        using CancellationTokenSource cancellation = new();
+        InlineProgress progress = new(update =>
+        {
+            if (update.Phase == LibraryScanPhase.GroupingExactMetadataDuplicates)
+            {
+                cancellation.Cancel();
+            }
+        });
+
+        Func<Task> act = async () => await useCase.ExecuteAsync(library.RootPath, progress, cancellation.Token);
+
+        await act.Should().ThrowAsync<OperationCanceledException>();
+        LibraryStateCapture.Capture(library.RootPath)
+            .Should().BeEquivalentTo(before, options => options.WithStrictOrdering());
+        Directory.EnumerateFiles(library.RootPath, "metadata.db-*", SearchOption.TopDirectoryOnly)
+            .Should().BeEmpty();
+    }
+
+    [Fact]
     public async Task InaccessibleFormatFindingDoesNotChangeSyntheticLibrary()
     {
         using SyntheticCalibreLibrary library = new();
