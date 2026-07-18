@@ -1,4 +1,5 @@
 using System.Collections.ObjectModel;
+using CalibreLibraryCleaner.Domain.Assessments;
 using CalibreLibraryCleaner.Domain.Duplicates;
 using CalibreLibraryCleaner.Domain.Findings;
 
@@ -12,7 +13,8 @@ public sealed record LibrarySnapshot
         IEnumerable<CalibreBook> books,
         IEnumerable<LibraryFinding> findings,
         IEnumerable<ExactBinaryDuplicateGroup>? exactBinaryDuplicateGroups = null,
-        IEnumerable<ExactMetadataDuplicateGroup>? exactMetadataDuplicateGroups = null)
+        IEnumerable<ExactMetadataDuplicateGroup>? exactMetadataDuplicateGroups = null,
+        IEnumerable<FormatAssessment>? epubAssessments = null)
     {
         ArgumentNullException.ThrowIfNull(identity);
         ArgumentNullException.ThrowIfNull(books);
@@ -26,6 +28,18 @@ public sealed record LibrarySnapshot
             (exactBinaryDuplicateGroups ?? []).ToArray());
         ExactMetadataDuplicateGroups = new ReadOnlyCollection<ExactMetadataDuplicateGroup>(
             (exactMetadataDuplicateGroups ?? []).ToArray());
+        FormatAssessment[] orderedAssessments = (epubAssessments ?? [])
+            .OrderBy(assessment => assessment.CalibreBookId.Value)
+            .ThenBy(assessment => assessment.Format, StringComparer.Ordinal)
+            .ThenBy(assessment => assessment.ExpectedRelativePath, StringComparer.Ordinal)
+            .ToArray();
+        if (orderedAssessments.Select(assessment => (assessment.CalibreBookId, assessment.Format, assessment.ExpectedRelativePath))
+            .Distinct().Count() != orderedAssessments.Length)
+        {
+            throw new ArgumentException("EPUB assessment associations must be unique.", nameof(epubAssessments));
+        }
+
+        EpubAssessments = new ReadOnlyCollection<FormatAssessment>(orderedAssessments);
     }
 
     public LibraryIdentity Identity { get; }
@@ -39,4 +53,6 @@ public sealed record LibrarySnapshot
     public IReadOnlyList<ExactBinaryDuplicateGroup> ExactBinaryDuplicateGroups { get; }
 
     public IReadOnlyList<ExactMetadataDuplicateGroup> ExactMetadataDuplicateGroups { get; }
+
+    public IReadOnlyList<FormatAssessment> EpubAssessments { get; }
 }

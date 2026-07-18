@@ -275,6 +275,57 @@
           </GroupBox>
         </Grid>
       </TabItem>
+      <TabItem Header="_EPUB assessments" AutomationProperties.Name="EPUB assessments">
+        <Grid Margin="8">
+          <Grid.RowDefinitions>
+            <RowDefinition Height="2*" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+          </Grid.RowDefinitions>
+          <DataGrid Grid.Row="0"
+                    ItemsSource="{Binding EpubAssessments}"
+                    SelectedItem="{Binding SelectedEpubAssessment}"
+                    AutoGenerateColumns="False"
+                    IsReadOnly="True"
+                    SelectionMode="Single"
+                    AutomationProperties.Name="EPUB assessment summary">
+            <DataGrid.Columns>
+              <DataGridTextColumn Width="70" Header="Book ID" Binding="{Binding BookId}" />
+              <DataGridTextColumn Width="*" Header="Calibre title (context)" Binding="{Binding BookTitle}" />
+              <DataGridTextColumn Width="2*" Header="Expected path" Binding="{Binding ExpectedRelativePath}" />
+              <DataGridTextColumn Width="110" Header="Status" Binding="{Binding Status}" />
+              <DataGridTextColumn Width="150" Header="Score" Binding="{Binding Score}" />
+              <DataGridTextColumn Width="70" Header="Opened" Binding="{Binding Opened}" />
+              <DataGridTextColumn Width="100" Header="Package" Binding="{Binding PackageParsed}" />
+              <DataGridTextColumn Width="80" Header="EPUB" Binding="{Binding PackageVersion}" />
+              <DataGridTextColumn Width="140" Header="Analyzer" Binding="{Binding AnalyzerVersion}" />
+              <DataGridTextColumn Width="140" Header="Scoring model" Binding="{Binding ScoringModelVersion}" />
+            </DataGrid.Columns>
+          </DataGrid>
+          <TextBlock Grid.Row="1" Margin="0,8,0,4" TextWrapping="Wrap" Text="{Binding EpubDisqualificationMessage}" FontWeight="Bold" AutomationProperties.Name="EPUB disqualification status" />
+          <TextBlock Grid.Row="2" Margin="0,4,0,8" TextWrapping="Wrap" Text="{Binding SelectedEpubFeatureSummary}" AutomationProperties.Name="Selected EPUB bounded feature summary" />
+          <Grid Grid.Row="3">
+            <Grid.RowDefinitions>
+              <RowDefinition Height="Auto" />
+              <RowDefinition Height="*" />
+            </Grid.RowDefinitions>
+            <StackPanel Orientation="Horizontal" Margin="0,0,0,4">
+              <Label Target="{Binding ElementName=EpubFindingFilter}" Content="Finding _severity:" />
+              <ComboBox x:Name="EpubFindingFilter" MinWidth="140" ItemsSource="{Binding EpubFindingFilterModes}" SelectedItem="{Binding EpubFindingFilterMode}" AutomationProperties.Name="Filter EPUB findings by severity" />
+            </StackPanel>
+            <DataGrid Grid.Row="1" ItemsSource="{Binding EpubFindings}" AutoGenerateColumns="False" IsReadOnly="True" AutomationProperties.Name="EPUB assessment findings">
+              <DataGrid.Columns>
+                <DataGridTextColumn Width="110" Header="Severity" Binding="{Binding Severity}" />
+                <DataGridTextColumn Width="220" Header="Rule" Binding="{Binding RuleId}" />
+                <DataGridTextColumn Width="90" Header="Adjustment" Binding="{Binding Adjustment}" />
+                <DataGridTextColumn Width="2*" Header="Explanation" Binding="{Binding Explanation}" />
+                <DataGridTextColumn Width="2*" Header="Evidence" Binding="{Binding Evidence}" />
+              </DataGrid.Columns>
+            </DataGrid>
+          </Grid>
+        </Grid>
+      </TabItem>
     </TabControl>
   </Grid>
 </Window>

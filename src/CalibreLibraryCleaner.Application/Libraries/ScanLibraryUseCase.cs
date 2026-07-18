@@ -1,4 +1,6 @@
 using CalibreLibraryCleaner.Application.Abstractions;
+using CalibreLibraryCleaner.Application.Assessments;
+using CalibreLibraryCleaner.Domain.Assessments;
 using CalibreLibraryCleaner.Domain.Duplicates;
 using CalibreLibraryCleaner.Domain.Findings;
 using CalibreLibraryCleaner.Domain.Libraries;
@@ -10,7 +12,8 @@ public sealed class ScanLibraryUseCase(
     ICalibreMetadataReader metadataReader,
     IFormatFileHasher formatFileHasher,
     IClock clock,
-    LibraryAnalysisOptions options)
+    LibraryAnalysisOptions options,
+    AssessEpubFormatsUseCase? assessEpubFormats = null)
 {
     public async Task<LibraryScanOutcome> ExecuteAsync(
         string? candidatePath,
@@ -128,6 +131,33 @@ public sealed class ScanLibraryUseCase(
         List<CalibreBook> books = preparedBooks
             .Select(book => MapBook(book, resultsBySequence, findings, cancellationToken))
             .ToList();
+        IReadOnlyList<FormatAssessment> epubAssessments = [];
+        if (assessEpubFormats is not null)
+        {
+            try
+            {
+                List<EpubAssessmentTarget> epubTargets = CreateEpubTargets(preparedBooks, requests, resultsBySequence);
+                IProgress<EpubAssessmentProgress>? epubProgress = progress is null ? null : new EpubProgressAdapter(progress);
+                epubAssessments = await assessEpubFormats.ExecuteAsync(
+                    epubTargets,
+                    options.MaxEpubAssessmentConcurrency,
+                    EpubInspectionLimits.V1,
+                    epubProgress,
+                    cancellationToken).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch
+            {
+                return LibraryScanOutcome.Failure(new(
+                    LibraryErrorCode.EpubAssessmentFailed,
+                    "The EPUB files could not be assessed reliably.",
+                    "Close tools changing the library and retry the scan."));
+            }
+        }
+
         cancellationToken.ThrowIfCancellationRequested();
         progress?.Report(new(LibraryScanPhase.GroupingExactDuplicates, 0, 1, "Grouping exact file duplicates"));
         IReadOnlyList<ExactBinaryDuplicateGroup> exactBinaryGroups =
@@ -175,7 +205,8 @@ public sealed class ScanLibraryUseCase(
             books,
             findings,
             exactBinaryGroups,
-            exactMetadataGroups);
+            exactMetadataGroups,
+            epubAssessments);
         cancellationToken.ThrowIfCancellationRequested();
         progress?.Report(new(LibraryScanPhase.Completed, 1, 1, "Scan complete"));
         return LibraryScanOutcome.Success(snapshot);
@@ -306,9 +337,14 @@ public sealed class ScanLibraryUseCase(
 
         return results.All(result => result.Status switch
         {
-            FormatHashResultStatus.Success => result.Fingerprint is not null && result.ReasonCode is null,
+            FormatHashResultStatus.Success => result.Fingerprint is not null
+                && result.Observation is not null
+                && result.Fingerprint.SizeInBytes == result.Observation.Length
+                && result.ReasonCode is null,
             FormatHashResultStatus.Missing or FormatHashResultStatus.Inaccessible or FormatHashResultStatus.ChangedDuringHashing =>
-                result.Fingerprint is null && !string.IsNullOrWhiteSpace(result.ReasonCode),
+                result.Fingerprint is null
+                && result.Observation is null
+                && !string.IsNullOrWhiteSpace(result.ReasonCode),
             _ => false,
         });
     }
@@ -316,6 +352,50 @@ public sealed class ScanLibraryUseCase(
     private sealed record PreparedBook(CalibreBookRecord Record, IReadOnlyList<PreparedFormat> Formats);
 
     private sealed record PreparedFormat(string Format, string StoredName, string RelativePath, int? Sequence);
+
+    private static List<EpubAssessmentTarget> CreateEpubTargets(
+        IReadOnlyList<PreparedBook> preparedBooks,
+        IReadOnlyList<FormatHashRequest> requests,
+        Dictionary<int, FormatHashResult> results)
+    {
+        Dictionary<int, FormatHashRequest> requestsBySequence = requests.ToDictionary(request => request.Sequence);
+        List<EpubAssessmentTarget> targets = [];
+        foreach (PreparedBook book in preparedBooks)
+        {
+            foreach (PreparedFormat format in book.Formats.Where(format => string.Equals(format.Format, "EPUB", StringComparison.OrdinalIgnoreCase)))
+            {
+                CalibreBookId bookId = new(book.Record.Id);
+                if (format.Sequence is null)
+                {
+                    targets.Add(new(bookId, "EPUB", string.Empty, null, null, FormatFileStatus.InvalidPath, null, null));
+                    continue;
+                }
+
+                FormatHashResult result = results[format.Sequence.Value];
+                ResolvedFormatPath path = requestsBySequence[format.Sequence.Value].Path;
+                targets.Add(new(
+                    bookId,
+                    "EPUB",
+                    format.RelativePath,
+                    path.LibraryRoot,
+                    path.FullPath,
+                    MapFileStatus(result.Status),
+                    result.Fingerprint,
+                    result.Observation));
+            }
+        }
+
+        return targets;
+    }
+
+    private static FormatFileStatus MapFileStatus(FormatHashResultStatus status) => status switch
+    {
+        FormatHashResultStatus.Success => FormatFileStatus.Present,
+        FormatHashResultStatus.Missing => FormatFileStatus.Missing,
+        FormatHashResultStatus.Inaccessible => FormatFileStatus.Inaccessible,
+        FormatHashResultStatus.ChangedDuringHashing => FormatFileStatus.ChangedDuringHashing,
+        _ => throw new ArgumentOutOfRangeException(nameof(status)),
+    };
 
     private sealed record FindingKey(
         CalibreBookId? BookId,
@@ -334,5 +414,16 @@ public sealed class ScanLibraryUseCase(
                 useBytes ? value.TotalBytes : value.TotalFiles,
                 value.Message));
         }
+    }
+
+    private sealed class EpubProgressAdapter(IProgress<LibraryScanProgress> progress) : IProgress<EpubAssessmentProgress>
+    {
+        public void Report(EpubAssessmentProgress value) => progress.Report(new(
+            LibraryScanPhase.AssessingEpubFormats,
+            value.CompletedFiles,
+            value.TotalFiles,
+            string.IsNullOrWhiteSpace(value.CurrentRelativePath)
+                ? $"Assessing EPUB files: {value.CompletedFiles} of {value.TotalFiles} complete"
+                : $"Assessing EPUB files: {value.CompletedFiles} of {value.TotalFiles} complete — {value.Stage}: {value.CurrentRelativePath}"));
     }
 }

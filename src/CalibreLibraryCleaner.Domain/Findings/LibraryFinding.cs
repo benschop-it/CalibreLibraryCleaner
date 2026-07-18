@@ -18,6 +18,10 @@ public sealed record LibraryFinding
         ArgumentException.ThrowIfNullOrWhiteSpace(code);
         ArgumentException.ThrowIfNullOrWhiteSpace(message);
         ArgumentException.ThrowIfNullOrWhiteSpace(suggestedAction);
+        if (severity is FindingSeverity.Positive or FindingSeverity.Disqualifying)
+        {
+            throw new ArgumentException("Scan-level findings cannot use assessment-only severities.", nameof(severity));
+        }
 
         Code = code;
         Severity = severity;

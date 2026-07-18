@@ -229,7 +229,8 @@ internal sealed class StreamingSha256FormatFileHasher(
             string digest = Convert.ToHexString(hash.GetHashAndReset()).ToLowerInvariant();
             return FormatHashResult.Success(
                 prepared.Request.Sequence,
-                new FormatFileFingerprint(prepared.State.Length, new Sha256Digest(digest)));
+                new FormatFileFingerprint(prepared.State.Length, new Sha256Digest(digest)),
+                ToObservation(prepared.State));
         }
         catch (OperationCanceledException)
         {
@@ -352,6 +353,12 @@ internal sealed class StreamingSha256FormatFileHasher(
 
     private static FormatHashResult Inaccessible(int sequence, string reason) =>
         FormatHashResult.Failure(sequence, FormatHashResultStatus.Inaccessible, reason);
+
+    private static FormatFileObservation ToObservation(FileState state) => new(
+        state.Length,
+        new DateTimeOffset(state.CreationTimeUtc, TimeSpan.Zero),
+        new DateTimeOffset(state.LastWriteTimeUtc, TimeSpan.Zero),
+        (int)state.Attributes);
 
     private sealed record FileState(
         long Length,

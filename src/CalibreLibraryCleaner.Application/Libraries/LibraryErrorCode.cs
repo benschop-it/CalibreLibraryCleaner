@@ -13,5 +13,6 @@ public enum LibraryErrorCode
     CorruptDatabase,
     DatabaseBusy,
     HashingFailed,
+    EpubAssessmentFailed,
     UnexpectedReadFailure,
 }

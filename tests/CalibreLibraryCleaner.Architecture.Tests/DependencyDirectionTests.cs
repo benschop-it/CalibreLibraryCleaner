@@ -47,6 +47,7 @@ public sealed class DependencyDirectionTests
             "Microsoft.Extensions.Logging",
             "System.Data.SQLite",
             "VersOne.Epub",
+            "HtmlAgilityPack",
         ];
 
         string[] packageReferences = ReadItemNames(projectName, "PackageReference");
@@ -138,6 +139,35 @@ public sealed class DependencyDirectionTests
         source.Should().NotContain("IncrementalHash");
         source.Should().NotContain("SHA256.HashData");
         source.Should().NotContain("File.ReadAllBytes");
+    }
+
+    [Fact]
+    public void EpubLibrariesAreReferencedOnlyByInfrastructure()
+    {
+        ReadItemNames(InfrastructureProject, "PackageReference").Should().Contain(["VersOne.Epub", "HtmlAgilityPack"]);
+        foreach (string project in new[] { DomainProject, ApplicationProject, WpfProject })
+        {
+            ReadItemNames(project, "PackageReference").Should().NotContain(
+                name => name == "VersOne.Epub" || name == "HtmlAgilityPack");
+        }
+    }
+
+    [Fact]
+    public void ProductionEpubInspectionHasNoMutationExtractionOrNetworkApi()
+    {
+        string epubPath = Path.Combine(RepositoryRoot, "src", InfrastructureProject, "Epub");
+        string source = string.Join(Environment.NewLine, Directory.EnumerateFiles(epubPath, "*.cs").Select(File.ReadAllText));
+
+        source.Should().NotContain("ExtractToFile");
+        source.Should().NotContain("ExtractToDirectory");
+        source.Should().NotContain("FileMode.Create");
+        source.Should().NotContain("FileAccess.Write");
+        source.Should().NotContain("File.Delete");
+        source.Should().NotContain("File.Move");
+        source.Should().NotContain("HttpClient");
+        source.Should().NotContain("WebRequest");
+        source.Should().Contain("DownloadContent = false");
+        source.Should().Contain("FailClosedContentDownloader");
     }
 
     [Fact]

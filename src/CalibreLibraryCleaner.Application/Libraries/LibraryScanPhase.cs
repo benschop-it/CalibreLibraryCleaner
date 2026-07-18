@@ -11,6 +11,7 @@ public enum LibraryScanPhase
     ReadingFormats,
     ResolvingFiles,
     HashingFormats,
+    AssessingEpubFormats,
     GroupingExactDuplicates,
     GroupingExactMetadataDuplicates,
     Completed,

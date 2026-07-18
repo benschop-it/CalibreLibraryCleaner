@@ -18,6 +18,8 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
     private readonly BulkObservableCollection<BookRowViewModel> _books = [];
     private readonly BulkObservableCollection<ExactDuplicateGroupRowViewModel> _exactDuplicateGroups = [];
     private readonly BulkObservableCollection<MetadataDuplicateGroupRowViewModel> _metadataDuplicateGroups = [];
+    private readonly BulkObservableCollection<EpubAssessmentRowViewModel> _epubAssessments = [];
+    private readonly BulkObservableCollection<EpubAssessmentFindingRowViewModel> _epubFindings = [];
     private readonly HashSet<DeferredMetadataGroupKey> _deferredMetadataGroups = [];
     private IReadOnlyList<MetadataDuplicateGroupRowViewModel> _allMetadataDuplicateGroups = [];
     private CancellationTokenSource? _scanCancellation;
@@ -35,6 +37,8 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
     private BookRowViewModel? _selectedBook;
     private ExactDuplicateGroupRowViewModel? _selectedExactDuplicateGroup;
     private MetadataDuplicateGroupRowViewModel? _selectedMetadataDuplicateGroup;
+    private EpubAssessmentRowViewModel? _selectedEpubAssessment;
+    private EpubFindingFilterMode _epubFindingFilterMode;
     private string? _currentLibraryUuid;
 
     public MainWindowViewModel(
@@ -49,6 +53,8 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
         ExactDuplicateGroups = new ReadOnlyObservableCollection<ExactDuplicateGroupRowViewModel>(_exactDuplicateGroups);
         MetadataDuplicateGroups = new ReadOnlyObservableCollection<MetadataDuplicateGroupRowViewModel>(
             _metadataDuplicateGroups);
+        EpubAssessments = new ReadOnlyObservableCollection<EpubAssessmentRowViewModel>(_epubAssessments);
+        EpubFindings = new ReadOnlyObservableCollection<EpubAssessmentFindingRowViewModel>(_epubFindings);
         SelectLibraryCommand = new AsyncRelayCommand(SelectLibraryAsync, () => !IsBusy);
         ScanCommand = new AsyncRelayCommand(ScanAsync, () => !IsBusy && !string.IsNullOrWhiteSpace(SelectedLibraryPath));
         CancelCommand = new RelayCommand(
@@ -129,6 +135,12 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
     public ReadOnlyObservableCollection<ExactDuplicateGroupRowViewModel> ExactDuplicateGroups { get; }
 
     public ReadOnlyObservableCollection<MetadataDuplicateGroupRowViewModel> MetadataDuplicateGroups { get; }
+
+    public ReadOnlyObservableCollection<EpubAssessmentRowViewModel> EpubAssessments { get; }
+
+    public ReadOnlyObservableCollection<EpubAssessmentFindingRowViewModel> EpubFindings { get; }
+
+    public IReadOnlyList<EpubFindingFilterMode> EpubFindingFilterModes { get; } = Enum.GetValues<EpubFindingFilterMode>();
 
     public IReadOnlyList<MetadataDuplicateFilterMode> MetadataDuplicateFilterModes { get; } =
         Enum.GetValues<MetadataDuplicateFilterMode>();
@@ -214,6 +226,32 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
 
     public IReadOnlyList<MetadataDuplicateMemberRowViewModel> SelectedMetadataDuplicateMembers =>
         SelectedMetadataDuplicateGroup?.Members ?? [];
+
+    public EpubAssessmentRowViewModel? SelectedEpubAssessment
+    {
+        get => _selectedEpubAssessment;
+        set
+        {
+            if (SetProperty(ref _selectedEpubAssessment, value))
+            {
+                ApplyEpubFindingFilter();
+                OnPropertyChanged(nameof(SelectedEpubFeatureSummary));
+                OnPropertyChanged(nameof(EpubDisqualificationMessage));
+            }
+        }
+    }
+
+    public EpubFindingFilterMode EpubFindingFilterMode
+    {
+        get => _epubFindingFilterMode;
+        set { if (SetProperty(ref _epubFindingFilterMode, value)) ApplyEpubFindingFilter(); }
+    }
+
+    public string SelectedEpubFeatureSummary => SelectedEpubAssessment?.FeatureSummary ?? "Select an EPUB assessment to view bounded format facts.";
+
+    public string EpubDisqualificationMessage => SelectedEpubAssessment?.Status == "Disqualified"
+        ? "Not scored — disqualified. See the disqualifying finding below."
+        : string.Empty;
 
     public string MetadataDeferAction => SelectedMetadataDuplicateGroup?.IsDeferred == true
         ? "_Restore"
@@ -352,6 +390,15 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
             metadataGroups[index] = new(snapshot.ExactMetadataDuplicateGroups[index], booksById);
         }
 
+        EpubAssessmentRowViewModel[] epubAssessments = new EpubAssessmentRowViewModel[snapshot.EpubAssessments.Count];
+        for (int index = 0; index < snapshot.EpubAssessments.Count; index++)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            Domain.Assessments.FormatAssessment assessment = snapshot.EpubAssessments[index];
+            booksById.TryGetValue(assessment.CalibreBookId, out CalibreBook? book);
+            epubAssessments[index] = new(assessment, book);
+        }
+
         int missingCount = 0;
         foreach (Domain.Findings.LibraryFinding finding in snapshot.Findings)
         {
@@ -362,7 +409,7 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
             }
         }
 
-        return new(books, groups, metadataGroups, missingCount);
+        return new(books, groups, metadataGroups, epubAssessments, missingCount);
     }
 
     private void ApplySnapshot(LibrarySnapshot snapshot, SnapshotPresentation presentation)
@@ -384,6 +431,8 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
 
         _allMetadataDuplicateGroups = presentation.MetadataGroups;
         ApplyMetadataDuplicateFilter();
+        _epubAssessments.ReplaceAll(presentation.EpubAssessments);
+        SelectedEpubAssessment = _epubAssessments.FirstOrDefault();
         StatusMessage = snapshot.Books.Count == 0
             ? "Scan complete. The library contains no books."
             : $"Scan complete: {snapshot.Books.Count} books, {snapshot.ExactBinaryDuplicateGroups.Count} exact file duplicate groups, {snapshot.ExactMetadataDuplicateGroups.Count} exact metadata candidate groups, {presentation.MissingCount} missing format files.";
@@ -471,10 +520,22 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
         ApplyMetadataDuplicateFilter();
     }
 
+    private void ApplyEpubFindingFilter()
+    {
+        IEnumerable<EpubAssessmentFindingRowViewModel> findings = SelectedEpubAssessment?.Findings ?? [];
+        if (EpubFindingFilterMode != EpubFindingFilterMode.All)
+        {
+            findings = findings.Where(finding => string.Equals(finding.Severity, EpubFindingFilterMode.ToString(), StringComparison.Ordinal));
+        }
+
+        _epubFindings.ReplaceAll(findings);
+    }
+
     private sealed record SnapshotPresentation(
         IReadOnlyList<BookRowViewModel> Books,
         IReadOnlyList<ExactDuplicateGroupRowViewModel> Groups,
         IReadOnlyList<MetadataDuplicateGroupRowViewModel> MetadataGroups,
+        IReadOnlyList<EpubAssessmentRowViewModel> EpubAssessments,
         int MissingCount);
 
     private sealed record DeferredMetadataGroupKey(

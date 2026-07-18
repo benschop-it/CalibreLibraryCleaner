@@ -1,4 +1,5 @@
 using CalibreLibraryCleaner.Application.Abstractions;
+using CalibreLibraryCleaner.Application.Assessments;
 using CalibreLibraryCleaner.Application.Libraries;
 using CalibreLibraryCleaner.Infrastructure.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection;
@@ -13,6 +14,8 @@ internal static class TestServices
         services.AddLogging();
         services.AddCalibreLibraryInfrastructure();
         services.AddSingleton(new LibraryAnalysisOptions());
+        services.AddSingleton<EpubAssessmentEngine>();
+        services.AddSingleton<AssessEpubFormatsUseCase>();
         return services.BuildServiceProvider();
     }
 
@@ -21,5 +24,6 @@ internal static class TestServices
         provider.GetRequiredService<ICalibreMetadataReader>(),
         provider.GetRequiredService<IFormatFileHasher>(),
         provider.GetRequiredService<IClock>(),
-        provider.GetRequiredService<LibraryAnalysisOptions>());
+        provider.GetRequiredService<LibraryAnalysisOptions>(),
+        provider.GetRequiredService<AssessEpubFormatsUseCase>());
 }

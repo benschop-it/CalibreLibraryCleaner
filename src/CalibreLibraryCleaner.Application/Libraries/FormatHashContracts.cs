@@ -20,15 +20,28 @@ public sealed record FormatHashResult(
     int Sequence,
     FormatHashResultStatus Status,
     FormatFileFingerprint? Fingerprint,
+    FormatFileObservation? Observation,
     string? ReasonCode)
 {
-    public static FormatHashResult Success(int sequence, FormatFileFingerprint fingerprint) =>
-        new(sequence, FormatHashResultStatus.Success, fingerprint, null);
+    public FormatHashResult(
+        int sequence,
+        FormatHashResultStatus status,
+        FormatFileFingerprint? fingerprint,
+        string? reasonCode)
+        : this(sequence, status, fingerprint, null, reasonCode)
+    {
+    }
+
+    public static FormatHashResult Success(
+        int sequence,
+        FormatFileFingerprint fingerprint,
+        FormatFileObservation observation) =>
+        new(sequence, FormatHashResultStatus.Success, fingerprint, observation, null);
 
     public static FormatHashResult Failure(
         int sequence,
         FormatHashResultStatus status,
-        string reasonCode) => new(sequence, status, null, reasonCode);
+        string reasonCode) => new(sequence, status, null, null, reasonCode);
 }
 
 public sealed record FormatHashProgress(

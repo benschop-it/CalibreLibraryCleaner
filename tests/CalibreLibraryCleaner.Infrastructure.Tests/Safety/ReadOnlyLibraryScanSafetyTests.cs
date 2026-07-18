@@ -10,6 +10,26 @@ namespace CalibreLibraryCleaner.Infrastructure.Tests.Safety;
 public sealed class ReadOnlyLibraryScanSafetyTests
 {
     [Fact]
+    public async Task ValidEpubAssessmentDoesNotChangeSyntheticLibrary()
+    {
+        using TemporaryDirectory fixtureDirectory = new();
+        string epubPath = Path.Combine(fixtureDirectory.Path, "Valid.epub");
+        SyntheticEpubBuilder.CreateValid(epubPath);
+        using SyntheticCalibreLibrary library = new();
+        library.AddSimpleBook(1, await File.ReadAllBytesAsync(epubPath));
+        IReadOnlyList<LibraryEntryState> before = LibraryStateCapture.Capture(library.RootPath);
+        using ServiceProvider provider = TestServices.CreateProvider();
+
+        LibraryScanOutcome outcome = await TestServices.CreateScanUseCase(provider)
+            .ExecuteAsync(library.RootPath, null, CancellationToken.None);
+
+        outcome.IsSuccess.Should().BeTrue();
+        outcome.Snapshot!.EpubAssessments.Should().ContainSingle(assessment => assessment.Score.HasValue);
+        LibraryStateCapture.Capture(library.RootPath)
+            .Should().BeEquivalentTo(before, options => options.WithStrictOrdering());
+    }
+
+    [Fact]
     public async Task ExactDuplicateAnalysisDoesNotChangeSyntheticLibrary()
     {
         using SyntheticCalibreLibrary library = new();

@@ -1,6 +1,7 @@
 using System.Collections.Specialized;
 using System.IO;
 using CalibreLibraryCleaner.Application.Abstractions;
+using CalibreLibraryCleaner.Application.Assessments;
 using CalibreLibraryCleaner.Application.Libraries;
 using CalibreLibraryCleaner.Domain.Libraries;
 using CalibreLibraryCleaner.Infrastructure.DependencyInjection;
@@ -67,6 +68,83 @@ public sealed class MainWindowViewModelTests
     }
 
     [Fact]
+    public async Task EpubAssessmentDisplaysVersionsScoreDisqualificationAndSeverityFilters()
+    {
+        ILibraryFolderPicker picker = A.Fake<ILibraryFolderPicker>();
+        ILibraryPathResolver resolver = A.Fake<ILibraryPathResolver>();
+        ICalibreMetadataReader reader = A.Fake<ICalibreMetadataReader>();
+        IFormatFileHasher hasher = A.Fake<IFormatFileHasher>();
+        IEpubInspector inspector = A.Fake<IEpubInspector>();
+        IClock clock = A.Fake<IClock>();
+        ValidatedLibraryLocation location = new("library", "database");
+        FormatFileFingerprint fingerprint = new(10, new Sha256Digest(new string('a', 64)));
+        FormatFileObservation observation = new(10, DateTimeOffset.UnixEpoch, DateTimeOffset.UnixEpoch, 0);
+        A.CallTo(() => picker.PickFolder(A<string?>._)).Returns("library");
+        A.CallTo(() => resolver.ValidateAsync("library", A<CancellationToken>._)).Returns(LibraryValidationOutcome.Success(location));
+        A.CallTo(() => reader.ReadAsync(location, A<IProgress<LibraryScanProgress>?>._, A<CancellationToken>._))
+            .Returns(CalibreCatalogReadOutcome.Success(CreateCatalog()));
+        A.CallTo(() => resolver.ResolveFormat(
+                location,
+                A<string>.That.IsNotNull(),
+                A<string>.That.IsNotNull(),
+                "EPUB"))
+            .Returns(ResolvedFormatPathOutcome.Success(new("library", "full", "Book/Book.epub")));
+        A.CallTo(() => hasher.HashAsync(A<IReadOnlyList<FormatHashRequest>>._, A<int>._, A<IProgress<FormatHashProgress>?>._, A<CancellationToken>._))
+            .Returns(Task.FromResult<IReadOnlyList<FormatHashResult>>([FormatHashResult.Success(0, fingerprint, observation)]));
+        A.CallTo(() => inspector.InspectAsync(A<EpubInspectionRequest>._, A<IProgress<EpubInspectionProgress>?>._, A<CancellationToken>._))
+            .ReturnsLazily(call =>
+            {
+                EpubInspectionRequest request = call.GetArgument<EpubInspectionRequest>(0)!;
+                return Task.FromResult(new EpubInspectionResult(
+                    request.BookId, request.ExpectedRelativePath, true, true, true, "3.0", "Embedded title",
+                    ["Author"], ["en"], ["2020-01-01"], ["9780306406157"], true, 600, 800, true,
+                    4, 1, 1, 4, [], [], [], [], ["https://example.invalid/remote.css"], 6_000, "None", false, []));
+            });
+        MainWindowViewModel viewModel = new(
+            new ValidateLibraryUseCase(resolver),
+            new ScanLibraryUseCase(
+                resolver,
+                reader,
+                hasher,
+                clock,
+                new(),
+                new AssessEpubFormatsUseCase(inspector, new())),
+            picker);
+
+        await viewModel.SelectLibraryCommand.ExecuteAsync(null);
+        await viewModel.ScanCommand.ExecuteAsync(null);
+
+        viewModel.EpubAssessments.Should().ContainSingle();
+        viewModel.SelectedEpubAssessment!.Score.Should().Be("100");
+        viewModel.SelectedEpubAssessment.AnalyzerVersion.Should().Be("epub-inspector/1.0.1");
+        viewModel.SelectedEpubAssessment.ScoringModelVersion.Should().Be("epub-quality/1.0.0");
+        viewModel.SelectedEpubFeatureSummary.Should().Contain("Readable characters: 6000");
+        viewModel.SelectedEpubFeatureSummary.Should().Contain("Dates: 2020-01-01");
+        viewModel.SelectedEpubFeatureSummary.Should().Contain("Strong identifiers: 9780306406157");
+        viewModel.SelectedEpubFeatureSummary.Should().Contain("Local resources: 4");
+        viewModel.EpubFindingFilterMode = EpubFindingFilterMode.Information;
+        viewModel.EpubFindings.Should().OnlyContain(finding => finding.Severity == "Information");
+
+        A.CallTo(() => inspector.InspectAsync(A<EpubInspectionRequest>._, A<IProgress<EpubInspectionProgress>?>._, A<CancellationToken>._))
+            .ReturnsLazily(call =>
+            {
+                EpubInspectionRequest request = call.GetArgument<EpubInspectionRequest>(0)!;
+                return Task.FromResult(EpubInspectionResult.Failed(
+                    request.BookId,
+                    request.ExpectedRelativePath,
+                    EpubInspectionProblemCode.Encrypted,
+                    "Unsupported encryption prevents inspection."));
+            });
+
+        await viewModel.ScanCommand.ExecuteAsync(null);
+
+        viewModel.SelectedEpubAssessment!.Score.Should().Contain("Not scored");
+        viewModel.EpubDisqualificationMessage.Should().Contain("disqualified");
+        viewModel.EpubFindingFilterMode = EpubFindingFilterMode.Disqualifying;
+        viewModel.EpubFindings.Should().ContainSingle(finding => finding.RuleId == "EPUB.ENCRYPTION");
+    }
+
+    [Fact]
     public async Task CancellationShowsNeutralStateAndAllowsRetry()
     {
         ILibraryFolderPicker picker = A.Fake<ILibraryFolderPicker>();
@@ -127,7 +205,7 @@ public sealed class MainWindowViewModelTests
                 A<CancellationToken>._))
             .ReturnsLazily(call => Task.FromResult<IReadOnlyList<FormatHashResult>>(
                 call.GetArgument<IReadOnlyList<FormatHashRequest>>(0)!
-                    .Select(request => FormatHashResult.Success(request.Sequence, fingerprint))
+                    .Select(request => Successful(request.Sequence, fingerprint))
                     .ToArray()));
 
         await viewModel.SelectLibraryCommand.ExecuteAsync(null);
@@ -171,7 +249,7 @@ public sealed class MainWindowViewModelTests
                 A<CancellationToken>._))
             .ReturnsLazily(call => Task.FromResult<IReadOnlyList<FormatHashResult>>(
                 call.GetArgument<IReadOnlyList<FormatHashRequest>>(0)!
-                    .Select(request => FormatHashResult.Success(
+                    .Select(request => Successful(
                         request.Sequence,
                         new FormatFileFingerprint(
                             request.Sequence + 1,
@@ -234,6 +312,8 @@ public sealed class MainWindowViewModelTests
         services.AddLogging();
         services.AddCalibreLibraryInfrastructure();
         services.AddSingleton(new LibraryAnalysisOptions(maxHashConcurrency: 2));
+        services.AddSingleton<EpubAssessmentEngine>();
+        services.AddSingleton<AssessEpubFormatsUseCase>();
         using ServiceProvider provider = services.BuildServiceProvider();
         MainWindowViewModel viewModel = new(
             new ValidateLibraryUseCase(provider.GetRequiredService<ILibraryPathResolver>()),
@@ -242,7 +322,8 @@ public sealed class MainWindowViewModelTests
                 provider.GetRequiredService<ICalibreMetadataReader>(),
                 provider.GetRequiredService<IFormatFileHasher>(),
                 provider.GetRequiredService<IClock>(),
-                provider.GetRequiredService<LibraryAnalysisOptions>()),
+                provider.GetRequiredService<LibraryAnalysisOptions>(),
+                provider.GetRequiredService<AssessEpubFormatsUseCase>()),
             picker);
         int bookCollectionChanges = 0;
         int groupCollectionChanges = 0;
@@ -256,6 +337,8 @@ public sealed class MainWindowViewModelTests
         viewModel.Books.Should().HaveCount(2);
         viewModel.ExactDuplicateGroups.Should().ContainSingle();
         viewModel.SelectedExactDuplicateMembers.Should().HaveCount(2);
+        viewModel.EpubAssessments.Should().HaveCount(2);
+        viewModel.EpubAssessments.Should().OnlyContain(assessment => assessment.Status == "Disqualified");
         bookCollectionChanges.Should().Be(1);
         groupCollectionChanges.Should().Be(1);
     }
@@ -275,6 +358,11 @@ public sealed class MainWindowViewModelTests
             new ScanLibraryUseCase(resolver, reader, hasher, clock, new()),
             picker);
     }
+
+    private static FormatHashResult Successful(int sequence, FormatFileFingerprint fingerprint) => FormatHashResult.Success(
+        sequence,
+        fingerprint,
+        new FormatFileObservation(fingerprint.SizeInBytes, DateTimeOffset.UnixEpoch, DateTimeOffset.UnixEpoch, 0));
 
     private static CalibreCatalogRecord CreateCatalog(int bookCount = 1) => new(
         "87f7ed1f-59a8-45a6-975a-7e06fd84780d",

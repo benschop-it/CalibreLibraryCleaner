@@ -1,3 +1,4 @@
+using CalibreLibraryCleaner.Application.Assessments;
 using CalibreLibraryCleaner.Application.Libraries;
 using CalibreLibraryCleaner.Infrastructure.DependencyInjection;
 using CalibreLibraryCleaner.Wpf.Services;
@@ -16,6 +17,8 @@ public partial class App : System.Windows.Application
         HostApplicationBuilder builder = Host.CreateApplicationBuilder();
         builder.Services.AddCalibreLibraryInfrastructure();
         builder.Services.AddSingleton<ValidateLibraryUseCase>();
+        builder.Services.AddSingleton<EpubAssessmentEngine>();
+        builder.Services.AddSingleton<AssessEpubFormatsUseCase>();
         builder.Services.AddSingleton<ScanLibraryUseCase>();
         builder.Services.AddSingleton(new LibraryAnalysisOptions());
         builder.Services.AddSingleton<ILibraryFolderPicker, OpenFolderDialogLibraryFolderPicker>();

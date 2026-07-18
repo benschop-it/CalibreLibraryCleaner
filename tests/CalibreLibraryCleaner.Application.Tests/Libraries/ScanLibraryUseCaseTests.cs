@@ -49,7 +49,7 @@ public sealed class ScanLibraryUseCaseTests
             {
                 IReadOnlyList<FormatHashRequest> requests = call.GetArgument<IReadOnlyList<FormatHashRequest>>(0)!;
                 return Task.FromResult<IReadOnlyList<FormatHashResult>>(
-                    requests.Select(request => FormatHashResult.Success(request.Sequence, fingerprint)).ToArray());
+                    requests.Select(request => Successful(request.Sequence, fingerprint)).ToArray());
             });
 
         LibraryScanOutcome outcome = await context.UseCase.ExecuteAsync("C:/Library", null, CancellationToken.None);
@@ -70,7 +70,7 @@ public sealed class ScanLibraryUseCaseTests
                 A<CancellationToken>._))
             .ReturnsLazily(call => Task.FromResult<IReadOnlyList<FormatHashResult>>(
                 call.GetArgument<IReadOnlyList<FormatHashRequest>>(0)!
-                    .Select(request => FormatHashResult.Success(
+                    .Select(request => Successful(
                         request.Sequence,
                         new FormatFileFingerprint(
                             request.Sequence + 1,
@@ -105,7 +105,7 @@ public sealed class ScanLibraryUseCaseTests
                 A<CancellationToken>._))
             .ReturnsLazily(call => Task.FromResult<IReadOnlyList<FormatHashResult>>(
                 call.GetArgument<IReadOnlyList<FormatHashRequest>>(0)!
-                    .Select(request => FormatHashResult.Success(
+                    .Select(request => Successful(
                         request.Sequence,
                         new FormatFileFingerprint(
                             request.Sequence + 1,
@@ -130,7 +130,7 @@ public sealed class ScanLibraryUseCaseTests
                 A<CancellationToken>._))
             .ReturnsLazily(call => Task.FromResult<IReadOnlyList<FormatHashResult>>(
                 call.GetArgument<IReadOnlyList<FormatHashRequest>>(0)!
-                    .Select(request => FormatHashResult.Success(request.Sequence, fingerprint))
+                    .Select(request => Successful(request.Sequence, fingerprint))
                     .ToArray()));
 
         LibraryScanOutcome outcome = await context.UseCase.ExecuteAsync("C:/Library", null, CancellationToken.None);
@@ -197,7 +197,7 @@ public sealed class ScanLibraryUseCaseTests
                 A<CancellationToken>._))
             .ReturnsLazily(call => Task.FromResult<IReadOnlyList<FormatHashResult>>(
                 call.GetArgument<IReadOnlyList<FormatHashRequest>>(0)!
-                    .Select(request => FormatHashResult.Success(request.Sequence, fingerprint))
+                    .Select(request => Successful(request.Sequence, fingerprint))
                     .ToArray()));
         using CancellationTokenSource cancellation = new();
         List<LibraryScanProgress> updates = [];
@@ -228,7 +228,7 @@ public sealed class ScanLibraryUseCaseTests
                 A<CancellationToken>._))
             .ReturnsLazily(call => Task.FromResult<IReadOnlyList<FormatHashResult>>(
                 call.GetArgument<IReadOnlyList<FormatHashRequest>>(0)!
-                    .Select(request => FormatHashResult.Success(request.Sequence, fingerprint))
+                    .Select(request => Successful(request.Sequence, fingerprint))
                     .ToArray()));
         using CancellationTokenSource cancellation = new();
         List<LibraryScanProgress> updates = [];
@@ -260,7 +260,7 @@ public sealed class ScanLibraryUseCaseTests
                 A<IProgress<FormatHashProgress>?>._,
                 A<CancellationToken>._))
             .Returns(Task.FromResult<IReadOnlyList<FormatHashResult>>(
-                [FormatHashResult.Success(sequence, fingerprint)]));
+                [Successful(sequence, fingerprint)]));
 
         LibraryScanOutcome outcome = await context.UseCase.ExecuteAsync("C:/Library", null, CancellationToken.None);
 
@@ -287,6 +287,11 @@ public sealed class ScanLibraryUseCaseTests
     }
 
     private static TestContext CreateContext(int bookCount = 1) => CreateContext(CreateCatalog(bookCount));
+
+    private static FormatHashResult Successful(int sequence, FormatFileFingerprint fingerprint) => FormatHashResult.Success(
+        sequence,
+        fingerprint,
+        new FormatFileObservation(fingerprint.SizeInBytes, DateTimeOffset.UnixEpoch, DateTimeOffset.UnixEpoch, 0));
 
     private static TestContext CreateContext(CalibreCatalogRecord catalog)
     {
