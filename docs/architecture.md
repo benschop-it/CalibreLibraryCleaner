@@ -42,6 +42,10 @@ Must be asynchronous, cancellable, progress-reporting, bounded in parallelism, a
 
 Application owns the provider-neutral `IEpubInspector` contract, inspection limits/results, deterministic scoring engine, and bounded orchestration. Infrastructure alone owns ZIP, XML, HTML, image-header, filesystem, and VersOne/Html Agility Pack types. EPUB files are preflighted and opened read-only, content is never extracted or fetched, expected untrusted-input failures become structured inspection problems, and the final snapshot is published only after all assessments complete.
 
+## Recommendation and review-export boundary
+
+Domain owns immutable recommendation selections, reasons, warnings, decision strength, qualitative confidence, review values, and invariants. Application indexes completed Milestone 2â€“4 evidence, orchestrates deterministic generation, validates overrides, evaluates staleness, and owns the external export port. Infrastructure alone owns JSON parsing/serialization and guarded file publication outside the selected library. WPF owns session review interaction and file selection; ViewModels call Application use cases and do not write files. Recommendation review artifacts contain no cleanup-plan or mutation instructions.
+
 ## Errors
 
 Distinguish validation failures, read failures, missing-file findings, malformed-format findings, operation conflicts, process failures, verification failures, and unexpected faults.

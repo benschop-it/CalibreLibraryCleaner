@@ -18,7 +18,10 @@ internal sealed class SyntheticCalibreLibrary : IDisposable
                 id INTEGER PRIMARY KEY,
                 title TEXT NOT NULL,
                 author_sort TEXT,
-                path TEXT NOT NULL);
+                path TEXT NOT NULL,
+                pubdate TIMESTAMP,
+                series_index REAL NOT NULL DEFAULT 1.0,
+                has_cover BOOL DEFAULT 0);
             CREATE TABLE authors (
                 id INTEGER PRIMARY KEY,
                 name TEXT NOT NULL,
@@ -40,6 +43,19 @@ internal sealed class SyntheticCalibreLibrary : IDisposable
                 format TEXT NOT NULL COLLATE NOCASE,
                 name TEXT NOT NULL,
                 UNIQUE(book, format));
+            CREATE TABLE publishers (id INTEGER PRIMARY KEY, name TEXT NOT NULL);
+            CREATE TABLE books_publishers_link (
+                id INTEGER PRIMARY KEY, book INTEGER NOT NULL, publisher INTEGER NOT NULL, UNIQUE(book));
+            CREATE TABLE series (id INTEGER PRIMARY KEY, name TEXT NOT NULL);
+            CREATE TABLE books_series_link (
+                id INTEGER PRIMARY KEY, book INTEGER NOT NULL, series INTEGER NOT NULL, UNIQUE(book));
+            CREATE TABLE languages (id INTEGER PRIMARY KEY, lang_code TEXT NOT NULL);
+            CREATE TABLE books_languages_link (
+                id INTEGER PRIMARY KEY,
+                book INTEGER NOT NULL,
+                lang_code INTEGER NOT NULL,
+                item_order INTEGER NOT NULL DEFAULT 0,
+                UNIQUE(book, lang_code));
             """);
         Execute(connection, $"PRAGMA user_version={schemaVersion};");
         using SqliteCommand command = connection.CreateCommand();
@@ -177,6 +193,61 @@ internal sealed class SyntheticCalibreLibrary : IDisposable
         command.Parameters.AddWithValue("$bookId", bookId);
         command.Parameters.AddWithValue("$authorId", missingAuthorId);
         command.ExecuteNonQuery();
+    }
+
+    public void SetPublicationMetadata(
+        int bookId,
+        string? publisher = null,
+        string? publicationDate = null,
+        string? series = null,
+        decimal seriesIndex = 1,
+        IReadOnlyList<string>? languages = null,
+        bool hasCover = false)
+    {
+        using SqliteConnection connection = OpenWritable();
+        using (SqliteCommand command = connection.CreateCommand())
+        {
+            command.CommandText = "UPDATE books SET pubdate = $pubdate, series_index = $seriesIndex, has_cover = $hasCover WHERE id = $bookId;";
+            command.Parameters.AddWithValue("$pubdate", (object?)publicationDate ?? DBNull.Value);
+            command.Parameters.AddWithValue("$seriesIndex", seriesIndex);
+            command.Parameters.AddWithValue("$hasCover", hasCover ? 1 : 0);
+            command.Parameters.AddWithValue("$bookId", bookId);
+            command.ExecuteNonQuery();
+        }
+
+        if (publisher is not null)
+        {
+            using SqliteCommand command = connection.CreateCommand();
+            command.CommandText = "INSERT INTO publishers(id, name) VALUES ($id, $name); INSERT INTO books_publishers_link(id, book, publisher) VALUES ($id, $book, $id);";
+            command.Parameters.AddWithValue("$id", 10_000 + bookId);
+            command.Parameters.AddWithValue("$book", bookId);
+            command.Parameters.AddWithValue("$name", publisher);
+            command.ExecuteNonQuery();
+        }
+
+        if (series is not null)
+        {
+            using SqliteCommand command = connection.CreateCommand();
+            command.CommandText = "INSERT INTO series(id, name) VALUES ($id, $name); INSERT INTO books_series_link(id, book, series) VALUES ($id, $book, $id);";
+            command.Parameters.AddWithValue("$id", 20_000 + bookId);
+            command.Parameters.AddWithValue("$book", bookId);
+            command.Parameters.AddWithValue("$name", series);
+            command.ExecuteNonQuery();
+        }
+
+        int order = 0;
+        foreach (string language in languages ?? [])
+        {
+            using SqliteCommand command = connection.CreateCommand();
+            int id = 30_000 + (bookId * 100) + order;
+            command.CommandText = "INSERT INTO languages(id, lang_code) VALUES ($id, $language); INSERT INTO books_languages_link(id, book, lang_code, item_order) VALUES ($id, $book, $id, $order);";
+            command.Parameters.AddWithValue("$id", id);
+            command.Parameters.AddWithValue("$book", bookId);
+            command.Parameters.AddWithValue("$language", language);
+            command.Parameters.AddWithValue("$order", order);
+            command.ExecuteNonQuery();
+            order++;
+        }
     }
 
     public void DropRequiredTable(string table)

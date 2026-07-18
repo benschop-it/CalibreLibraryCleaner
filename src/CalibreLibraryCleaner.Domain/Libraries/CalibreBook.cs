@@ -11,7 +11,8 @@ public sealed record CalibreBook
         IEnumerable<BookAuthor> authors,
         IEnumerable<BookIdentifier> identifiers,
         IEnumerable<BookFormat> formats,
-        string relativeDirectory)
+        string relativeDirectory,
+        BookPublicationMetadata? publicationMetadata = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(title);
         ArgumentNullException.ThrowIfNull(authorSort);
@@ -27,6 +28,7 @@ public sealed record CalibreBook
         Identifiers = new ReadOnlyCollection<BookIdentifier>(identifiers.ToArray());
         Formats = new ReadOnlyCollection<BookFormat>(formats.ToArray());
         RelativeDirectory = relativeDirectory;
+        PublicationMetadata = publicationMetadata ?? BookPublicationMetadata.Empty;
     }
 
     public CalibreBookId Id { get; }
@@ -42,4 +44,6 @@ public sealed record CalibreBook
     public IReadOnlyList<BookFormat> Formats { get; }
 
     public string RelativeDirectory { get; }
+
+    public BookPublicationMetadata PublicationMetadata { get; }
 }

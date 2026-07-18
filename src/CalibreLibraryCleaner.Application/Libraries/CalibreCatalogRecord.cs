@@ -35,7 +35,16 @@ public sealed record CalibreBookRecord(
     string RelativeDirectory,
     IReadOnlyList<CalibreAuthorRecord> Authors,
     IReadOnlyList<CalibreIdentifierRecord> Identifiers,
-    IReadOnlyList<CalibreFormatRecord> Formats);
+    IReadOnlyList<CalibreFormatRecord> Formats,
+    CalibrePublicationRecord? Publication = null);
+
+public sealed record CalibrePublicationRecord(
+    string? Publisher,
+    DateTimeOffset? PublicationDate,
+    string? Series,
+    decimal? SeriesIndex,
+    IReadOnlyList<string> Languages,
+    bool HasCover);
 
 public sealed record CalibreAuthorRecord(long Id, string Name, string SortName);
 

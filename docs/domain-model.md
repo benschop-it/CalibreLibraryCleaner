@@ -37,6 +37,8 @@ Milestone 2 adds `Sha256Digest`, `FormatFileFingerprint`, and `ExactBinaryDuplic
 
 Milestone 3 adds `NormalizedTitle`, `NormalizedAuthorName`, `NormalizedAuthorSet`, `NormalizedBookIdentity`, and `ExactMetadataDuplicateGroup`. The author set is non-empty, duplicate-free, ordinally sorted, and structurally equal by normalized author values. An exact metadata group contains at least two distinct Calibre book record IDs whose normalized title and complete normalized author set are exactly equal. Its deterministic ID is derived from the normalized identity, and it records reason code `EXACT_NORMALIZED_TITLE_AUTHOR_SET`.
 
+Milestone 5 adds stored `BookPublicationMetadata` (publisher, publication date, series/index, ordered languages, and Calibre's cover flag) and immutable `ConsolidationRecommendation` aggregates. A recommendation records independent metadata and per-format sources, all format candidates, exact-binary exclusions, unresolved conflicts, retained-separate/potentially-redundant records, linked reasons/warnings, decision strength, qualitative confidence, model version, and canonical input version. `UserRecommendationOverride` remains separate from the generated aggregate; `ReviewedConsolidationRecommendation` records current/effective/stale state and review status without modifying the generated value.
+
 ## Invariants
 
 - Record-duplicate groups contain at least two distinct records. Exact binary file groups contain at least two distinct managed files and may occur within one record or across records.
@@ -50,3 +52,6 @@ Milestone 3 adds `NormalizedTitle`, `NormalizedAuthorName`, `NormalizedAuthorSet
 - Destructive plans require backups and expected pre-operation states.
 - Approved plans are immutable.
 - AI confidence is distinct from deterministic duplicate confidence.
+- Recommendation confidence is distinct from exact-metadata match evidence, exact-binary equality, EPUB assessment status, EPUB quality score, and per-decision strength.
+- A non-identical unassessed same-format conflict has no generated source or exclusion. A proposed redundant record has at least one available format and exact-binary coverage for every available format, and contributes no selection or unresolved/unavailable/separate evidence.
+- Staleness is equality over canonical relevant input/model identity, not scan time. A stale override has no effective final selection until reset or reapplied.

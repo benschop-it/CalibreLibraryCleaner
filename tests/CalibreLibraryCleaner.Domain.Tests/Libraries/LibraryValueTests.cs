@@ -39,4 +39,17 @@ public sealed class LibraryValueTests
 
         act.Should().Throw<ArgumentException>();
     }
+
+    [Fact]
+    public void PublicationMetadataPreservesStoredTextAndLanguageOrder()
+    {
+        BookPublicationMetadata metadata = new(
+            publisher: "  Publisher  ",
+            series: "  Series  ",
+            languages: ["eng", " ENG ", "deu"]);
+
+        metadata.Publisher.Should().Be("  Publisher  ");
+        metadata.Series.Should().Be("  Series  ");
+        metadata.Languages.Should().Equal("eng", " ENG ", "deu");
+    }
 }

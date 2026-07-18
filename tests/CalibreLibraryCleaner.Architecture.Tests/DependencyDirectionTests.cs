@@ -133,6 +133,7 @@ public sealed class DependencyDirectionTests
                 "*.cs",
                 SearchOption.AllDirectories))
                 .Where(path => !path.Contains($"{Path.DirectorySeparatorChar}obj{Path.DirectorySeparatorChar}", StringComparison.Ordinal))
+                .Where(path => !path.Contains($"{Path.DirectorySeparatorChar}Recommendations{Path.DirectorySeparatorChar}", StringComparison.Ordinal))
                 .Select(File.ReadAllText));
 
         source.Should().NotContain("FileStream");
@@ -218,6 +219,44 @@ public sealed class DependencyDirectionTests
         upperSource.Should().NotContain("LEVENSHTEIN");
         upperSource.Should().NotContain("JARO");
         upperSource.Should().NotContain("SIMILARITY");
+    }
+
+    [Fact]
+    public void RecommendationIntegrationBoundariesRemainConfined()
+    {
+        string domainSource = ReadSource(DomainProject, "Recommendations");
+        string applicationSource = ReadSource(ApplicationProject, "Recommendations");
+        string viewModelSource = ReadSource(WpfProject, "ViewModels");
+        string infrastructureSource = ReadSource(InfrastructureProject, "Recommendations");
+
+        domainSource.Should().NotContain("System.Text.Json").And.NotContain("System.IO").And.NotContain("Microsoft.Data.Sqlite");
+        applicationSource.Should().NotContain("System.Text.Json").And.NotContain("File.").And.NotContain("Directory.").And.NotContain("Microsoft.Win32");
+        viewModelSource.Should().NotContain("System.Text.Json").And.NotContain("File.").And.NotContain("Directory.");
+        infrastructureSource.Should().Contain("System.Text.Json").And.Contain("FileStream");
+    }
+
+    [Fact]
+    public void MilestoneFiveProductionSourceHasNoFutureMutationFeatures()
+    {
+        string source = string.Join(
+            Environment.NewLine,
+            new[] { DomainProject, ApplicationProject, InfrastructureProject, WpfProject }
+                .SelectMany(project => Directory.EnumerateFiles(Path.Combine(RepositoryRoot, "src", project), "*.cs", SearchOption.AllDirectories))
+                .Where(path => !path.Contains($"{Path.DirectorySeparatorChar}obj{Path.DirectorySeparatorChar}", StringComparison.Ordinal))
+                .Select(File.ReadAllText));
+        string upper = source.ToUpperInvariant();
+
+        upper.Should().NotContain("CALIBREDB");
+        upper.Should().NotContain("CLEANUPPLAN");
+        upper.Should().NotContain("PDFPIG");
+        upper.Should().NotContain("LEVENSHTEIN");
+        upper.Should().NotContain("HTTPCLIENT");
+    }
+
+    private static string ReadSource(string project, string folder)
+    {
+        string path = Path.Combine(RepositoryRoot, "src", project, folder);
+        return string.Join(Environment.NewLine, Directory.EnumerateFiles(path, "*.cs", SearchOption.AllDirectories).Select(File.ReadAllText));
     }
 
     private static string[] ReadItemNames(string projectName, string itemName)

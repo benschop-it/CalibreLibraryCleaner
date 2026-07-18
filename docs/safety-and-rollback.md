@@ -6,6 +6,8 @@ Allowed: read database and files, hash, parse, and create application-owned repo
 
 Forbidden: rename, move, overwrite, delete, change metadata, add formats, or create Calibre-managed files.
 
+Milestone 5 recommendation review JSON is an application-owned analysis artifact, not a cleanup plan. It may be written only to an explicitly selected existing directory outside the Calibre library, using a guarded temporary sibling and publish step. It contains generated/reviewed evidence and staleness, but no removal, command, approval, backup, mutation ordering, or expected pre-operation state. The exporter rejects the library root, descendants, and reparse-point destinations.
+
 ## Plan validation
 
 Before execution verify library identity, record existence, paths, file hashes, format state, target validity, conflicts, backup destination, and Calibre tool availability. Any mismatch invalidates the plan.

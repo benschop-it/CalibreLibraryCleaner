@@ -1,4 +1,5 @@
 using CalibreLibraryCleaner.Application.Libraries;
+using CalibreLibraryCleaner.Domain.Recommendations;
 using CalibreLibraryCleaner.Infrastructure.Tests.Fixtures;
 using FluentAssertions;
 using Microsoft.Extensions.DependencyInjection;
@@ -35,6 +36,13 @@ public sealed class ExactMetadataDuplicateAnalysisTests
         outcome.Snapshot!.ExactMetadataDuplicateGroups.Should().ContainSingle();
         outcome.Snapshot.ExactMetadataDuplicateGroups[0].Members.Select(member => member.Value).Should().Equal(1, 2);
         outcome.Snapshot.ExactBinaryDuplicateGroups.Should().BeEmpty();
+        outcome.Snapshot.ConsolidationRecommendations.Should().ContainSingle();
+        outcome.Snapshot.ConsolidationRecommendations[0].FormatSelections.Should().NotBeEmpty(
+            "warnings were {0}",
+            string.Join(" | ", outcome.Snapshot.ConsolidationRecommendations[0].Warnings.Select(value => $"{value.Code}:{value.Explanation}")));
+        outcome.Snapshot.ConsolidationRecommendations[0].FormatSelections.Single().ResolutionStatus.Should().Be(
+            FormatResolutionStatus.UnresolvedConflict);
+        outcome.Snapshot.ConsolidationRecommendations[0].FormatSelections.Single().ProposedExcludedAlternatives.Should().BeEmpty();
     }
 
     [Fact]
@@ -86,6 +94,10 @@ public sealed class ExactMetadataDuplicateAnalysisTests
 
         outcome.Snapshot!.ExactBinaryDuplicateGroups.Should().ContainSingle();
         outcome.Snapshot.ExactMetadataDuplicateGroups.Should().ContainSingle();
+        outcome.Snapshot.ConsolidationRecommendations.Should().ContainSingle();
+        outcome.Snapshot.ConsolidationRecommendations[0].FormatSelections.Single().ResolutionStatus.Should().Be(
+            FormatResolutionStatus.Selected);
+        outcome.Snapshot.ConsolidationRecommendations[0].ProposedRedundantRecords.Should().ContainSingle();
     }
 
     [Fact]

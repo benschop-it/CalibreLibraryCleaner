@@ -14,5 +14,7 @@ public enum LibraryErrorCode
     DatabaseBusy,
     HashingFailed,
     EpubAssessmentFailed,
+    RecommendationGenerationFailed,
+    RecommendationExportFailed,
     UnexpectedReadFailure,
 }

@@ -8,11 +8,13 @@ public enum LibraryScanPhase
     ReadingBooks,
     ReadingAuthors,
     ReadingIdentifiers,
+    ReadingPublicationMetadata,
     ReadingFormats,
     ResolvingFiles,
     HashingFormats,
     AssessingEpubFormats,
     GroupingExactDuplicates,
     GroupingExactMetadataDuplicates,
+    GeneratingConsolidationRecommendations,
     Completed,
 }

@@ -14,6 +14,14 @@ public sealed class SqliteCalibreMetadataReaderTests
     {
         using SyntheticCalibreLibrary library = new();
         library.AddBook();
+        library.SetPublicationMetadata(
+            1,
+            publisher: "Example Publisher",
+            publicationDate: "2020-05-06 00:00:00+00:00",
+            series: "Example Series",
+            seriesIndex: 2.5m,
+            languages: ["eng", "deu"],
+            hasCover: true);
         using ServiceProvider provider = TestServices.CreateProvider();
         ICalibreMetadataReader reader = provider.GetRequiredService<ICalibreMetadataReader>();
 
@@ -33,6 +41,13 @@ public sealed class SqliteCalibreMetadataReaderTests
         book.Authors.Select(author => author.SortName).Should().Equal("Author, Second", "Author, First");
         book.Identifiers.Select(identifier => identifier.Type).Should().Equal("asin", "isbn");
         book.Formats.Should().ContainSingle(format => format.Format == "EPUB" && format.StoredName == "Book");
+        book.Publication.Should().NotBeNull();
+        book.Publication!.Publisher.Should().Be("Example Publisher");
+        book.Publication.PublicationDate!.Value.Year.Should().Be(2020);
+        book.Publication.Series.Should().Be("Example Series");
+        book.Publication.SeriesIndex.Should().Be(2.5m);
+        book.Publication.Languages.Should().Equal("eng", "deu");
+        book.Publication.HasCover.Should().BeTrue();
     }
 
     [Fact]

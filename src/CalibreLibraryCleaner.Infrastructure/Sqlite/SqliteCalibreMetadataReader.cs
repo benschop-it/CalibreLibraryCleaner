@@ -76,9 +76,9 @@ internal sealed class SqliteCalibreMetadataReader(
                 return CalibreCatalogReadOutcome.Failure(schema.Error!);
             }
 
-            string libraryUuid = ReadLibraryUuid(connection, cancellationToken);
-            Dictionary<long, MutableBookRecord> books = ReadBooks(connection, progress, cancellationToken);
             List<CalibreCatalogIssueRecord> issues = [];
+            string libraryUuid = ReadLibraryUuid(connection, cancellationToken);
+            Dictionary<long, MutableBookRecord> books = ReadBooks(connection, issues, progress, cancellationToken);
             foreach (MutableBookRecord book in books.Values.Where(book => string.IsNullOrWhiteSpace(book.AuthorSort)))
             {
                 issues.Add(new(
@@ -90,6 +90,7 @@ internal sealed class SqliteCalibreMetadataReader(
 
             ReadAuthors(connection, books, issues, progress, cancellationToken);
             ReadIdentifiers(connection, books, issues, progress, cancellationToken);
+            ReadPublicationMetadata(connection, books, issues, progress, cancellationToken);
             ReadFormats(connection, books, progress, cancellationToken);
 
             CalibreBookRecord[] records = books.Values
@@ -164,13 +165,14 @@ internal sealed class SqliteCalibreMetadataReader(
 
     private static Dictionary<long, MutableBookRecord> ReadBooks(
         SqliteConnection connection,
+        List<CalibreCatalogIssueRecord> issues,
         IProgress<LibraryScanProgress>? progress,
         CancellationToken cancellationToken)
     {
         long total = Count(connection, "books");
         progress?.Report(new(LibraryScanPhase.ReadingBooks, 0, total, "Reading books"));
         using SqliteCommand command = connection.CreateCommand();
-        command.CommandText = "SELECT id, title, author_sort, path FROM books ORDER BY id;";
+        command.CommandText = "SELECT id, title, author_sort, path, pubdate, series_index, has_cover FROM books ORDER BY id;";
         using SqliteDataReader reader = command.ExecuteReader();
         Dictionary<long, MutableBookRecord> books = [];
         long completed = 0;
@@ -181,7 +183,17 @@ internal sealed class SqliteCalibreMetadataReader(
             string title = reader.IsDBNull(1) ? string.Empty : reader.GetString(1);
             string authorSort = reader.IsDBNull(2) ? string.Empty : reader.GetString(2);
             string path = reader.IsDBNull(3) ? string.Empty : reader.GetString(3);
-            if (id <= 0 || string.IsNullOrWhiteSpace(title) || !books.TryAdd(id, new(id, title, authorSort, path)))
+            DateTimeOffset? publicationDate = ReadOptionalDate(reader, 4, id, issues);
+            decimal? seriesIndex = ReadOptionalDecimal(reader, 5, id, issues);
+            bool hasCover = ReadCoverFlag(reader, 6, id, issues);
+            if (id <= 0 || string.IsNullOrWhiteSpace(title) || !books.TryAdd(id, new(
+                    id,
+                    title,
+                    authorSort,
+                    path,
+                    publicationDate,
+                    seriesIndex,
+                    hasCover)))
             {
                 throw new InvalidDataException("A book row has an invalid or duplicate identity/title.");
             }
@@ -192,6 +204,89 @@ internal sealed class SqliteCalibreMetadataReader(
 
         return books;
     }
+
+    private static DateTimeOffset? ReadOptionalDate(
+        SqliteDataReader reader,
+        int ordinal,
+        long bookId,
+        List<CalibreCatalogIssueRecord> issues)
+    {
+        if (reader.IsDBNull(ordinal))
+        {
+            return null;
+        }
+
+        string value = Convert.ToString(reader.GetValue(ordinal), System.Globalization.CultureInfo.InvariantCulture) ?? string.Empty;
+        if (DateTimeOffset.TryParse(
+                value,
+                System.Globalization.CultureInfo.InvariantCulture,
+                System.Globalization.DateTimeStyles.AllowWhiteSpaces | System.Globalization.DateTimeStyles.AssumeUniversal,
+                out DateTimeOffset result))
+        {
+            return result;
+        }
+
+        issues.Add(InvalidOptionalValue(bookId, "publication date"));
+        return null;
+    }
+
+    private static decimal? ReadOptionalDecimal(
+        SqliteDataReader reader,
+        int ordinal,
+        long bookId,
+        List<CalibreCatalogIssueRecord> issues)
+    {
+        if (reader.IsDBNull(ordinal))
+        {
+            return null;
+        }
+
+        try
+        {
+            decimal value = Convert.ToDecimal(reader.GetValue(ordinal), System.Globalization.CultureInfo.InvariantCulture);
+            if (value >= 0)
+            {
+                return value;
+            }
+        }
+        catch (Exception exception) when (exception is FormatException or InvalidCastException or OverflowException)
+        {
+        }
+
+        issues.Add(InvalidOptionalValue(bookId, "series index"));
+        return null;
+    }
+
+    private static bool ReadCoverFlag(
+        SqliteDataReader reader,
+        int ordinal,
+        long bookId,
+        List<CalibreCatalogIssueRecord> issues)
+    {
+        if (!reader.IsDBNull(ordinal))
+        {
+            try
+            {
+                long value = Convert.ToInt64(reader.GetValue(ordinal), System.Globalization.CultureInfo.InvariantCulture);
+                if (value is 0 or 1)
+                {
+                    return value == 1;
+                }
+            }
+            catch (Exception exception) when (exception is FormatException or InvalidCastException or OverflowException)
+            {
+            }
+        }
+
+        issues.Add(InvalidOptionalValue(bookId, "cover-availability flag"));
+        return false;
+    }
+
+    private static CalibreCatalogIssueRecord InvalidOptionalValue(long bookId, string field) => new(
+        "CATALOG_VALUE_INVALID",
+        $"A book has an invalid stored {field} value.",
+        "Review the stored metadata in Calibre.",
+        bookId);
 
     private static void ReadAuthors(
         SqliteConnection connection,
@@ -331,6 +426,144 @@ internal sealed class SqliteCalibreMetadataReader(
         }
     }
 
+    private static void ReadPublicationMetadata(
+        SqliteConnection connection,
+        IReadOnlyDictionary<long, MutableBookRecord> books,
+        List<CalibreCatalogIssueRecord> issues,
+        IProgress<LibraryScanProgress>? progress,
+        CancellationToken cancellationToken)
+    {
+        long total = Count(connection, "books_publishers_link")
+            + Count(connection, "books_series_link")
+            + Count(connection, "books_languages_link");
+        progress?.Report(new(
+            LibraryScanPhase.ReadingPublicationMetadata,
+            0,
+            total,
+            "Reading publication metadata"));
+        long completed = 0;
+        ReadSingleValueLinks(
+            connection,
+            books,
+            issues,
+            """
+            SELECT link.book, value.id, value.name
+            FROM books_publishers_link AS link
+            LEFT JOIN publishers AS value ON value.id = link.publisher
+            ORDER BY link.id;
+            """,
+            "publisher",
+            static (book, value) => book.Publisher = value,
+            ref completed,
+            total,
+            progress,
+            cancellationToken);
+        ReadSingleValueLinks(
+            connection,
+            books,
+            issues,
+            """
+            SELECT link.book, value.id, value.name
+            FROM books_series_link AS link
+            LEFT JOIN series AS value ON value.id = link.series
+            ORDER BY link.id;
+            """,
+            "series",
+            static (book, value) => book.Series = value,
+            ref completed,
+            total,
+            progress,
+            cancellationToken);
+
+        using SqliteCommand command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT link.book, language.id, language.lang_code
+            FROM books_languages_link AS link
+            LEFT JOIN languages AS language ON language.id = link.lang_code
+            ORDER BY link.book, link.item_order, link.id;
+            """;
+        using SqliteDataReader reader = command.ExecuteReader();
+        while (reader.Read())
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            long bookId = reader.GetInt64(0);
+            if (!books.TryGetValue(bookId, out MutableBookRecord? book))
+            {
+                throw new InvalidDataException("A language link references a missing book.");
+            }
+
+            if (reader.IsDBNull(1) || reader.IsDBNull(2) || string.IsNullOrWhiteSpace(reader.GetString(2)))
+            {
+                issues.Add(new(
+                    "CATALOG_VALUE_INVALID",
+                    "A language link references a missing or invalid language.",
+                    "Use Calibre's Library maintenance tools to inspect this book.",
+                    bookId));
+            }
+            else
+            {
+                string language = reader.GetString(2);
+                if (book.Languages.Contains(language, StringComparer.OrdinalIgnoreCase))
+                {
+                    throw new InvalidDataException("A book has duplicate language links.");
+                }
+
+                book.Languages.Add(language);
+            }
+
+            completed++;
+            ReportRowProgress(progress, LibraryScanPhase.ReadingPublicationMetadata, completed, total, "Reading publication metadata");
+        }
+    }
+
+    private static void ReadSingleValueLinks(
+        SqliteConnection connection,
+        IReadOnlyDictionary<long, MutableBookRecord> books,
+        List<CalibreCatalogIssueRecord> issues,
+        string sql,
+        string fieldName,
+        Action<MutableBookRecord, string> assign,
+        ref long completed,
+        long total,
+        IProgress<LibraryScanProgress>? progress,
+        CancellationToken cancellationToken)
+    {
+        using SqliteCommand command = connection.CreateCommand();
+        command.CommandText = sql;
+        using SqliteDataReader reader = command.ExecuteReader();
+        HashSet<long> linkedBooks = [];
+        while (reader.Read())
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            long bookId = reader.GetInt64(0);
+            if (!books.TryGetValue(bookId, out MutableBookRecord? book))
+            {
+                throw new InvalidDataException($"A {fieldName} link references a missing book.");
+            }
+
+            if (!linkedBooks.Add(bookId))
+            {
+                throw new InvalidDataException($"A book has ambiguous {fieldName} links.");
+            }
+
+            if (reader.IsDBNull(1) || reader.IsDBNull(2) || string.IsNullOrWhiteSpace(reader.GetString(2)))
+            {
+                issues.Add(new(
+                    "CATALOG_VALUE_INVALID",
+                    $"A {fieldName} link references a missing or invalid value.",
+                    "Use Calibre's Library maintenance tools to inspect this book.",
+                    bookId));
+            }
+            else
+            {
+                assign(book, reader.GetString(2));
+            }
+
+            completed++;
+            ReportRowProgress(progress, LibraryScanPhase.ReadingPublicationMetadata, completed, total, "Reading publication metadata");
+        }
+    }
+
     private static long Count(SqliteConnection connection, string table)
     {
         using SqliteCommand command = connection.CreateCommand();
@@ -379,7 +612,10 @@ internal sealed class SqliteCalibreMetadataReader(
         long id,
         string title,
         string authorSort,
-        string relativeDirectory)
+        string relativeDirectory,
+        DateTimeOffset? publicationDate,
+        decimal? seriesIndex,
+        bool hasCover)
     {
         public long Id { get; } = id;
 
@@ -395,6 +631,18 @@ internal sealed class SqliteCalibreMetadataReader(
 
         public List<CalibreFormatRecord> Formats { get; } = [];
 
+        public string? Publisher { get; set; }
+
+        public DateTimeOffset? PublicationDate { get; } = publicationDate;
+
+        public string? Series { get; set; }
+
+        public decimal? SeriesIndex { get; } = seriesIndex;
+
+        public List<string> Languages { get; } = [];
+
+        public bool HasCover { get; } = hasCover;
+
         public CalibreBookRecord ToRecord() => new(
             Id,
             Title,
@@ -402,6 +650,13 @@ internal sealed class SqliteCalibreMetadataReader(
             RelativeDirectory,
             Authors.AsReadOnly(),
             Identifiers.AsReadOnly(),
-            Formats.AsReadOnly());
+            Formats.AsReadOnly(),
+            new(
+                Publisher,
+                PublicationDate,
+                Series,
+                SeriesIndex,
+                Languages.AsReadOnly(),
+                HasCover));
     }
 }

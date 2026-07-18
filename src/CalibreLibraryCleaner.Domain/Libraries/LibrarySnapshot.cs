@@ -2,6 +2,7 @@ using System.Collections.ObjectModel;
 using CalibreLibraryCleaner.Domain.Assessments;
 using CalibreLibraryCleaner.Domain.Duplicates;
 using CalibreLibraryCleaner.Domain.Findings;
+using CalibreLibraryCleaner.Domain.Recommendations;
 
 namespace CalibreLibraryCleaner.Domain.Libraries;
 
@@ -14,7 +15,8 @@ public sealed record LibrarySnapshot
         IEnumerable<LibraryFinding> findings,
         IEnumerable<ExactBinaryDuplicateGroup>? exactBinaryDuplicateGroups = null,
         IEnumerable<ExactMetadataDuplicateGroup>? exactMetadataDuplicateGroups = null,
-        IEnumerable<FormatAssessment>? epubAssessments = null)
+        IEnumerable<FormatAssessment>? epubAssessments = null,
+        IEnumerable<ConsolidationRecommendation>? consolidationRecommendations = null)
     {
         ArgumentNullException.ThrowIfNull(identity);
         ArgumentNullException.ThrowIfNull(books);
@@ -40,6 +42,31 @@ public sealed record LibrarySnapshot
         }
 
         EpubAssessments = new ReadOnlyCollection<FormatAssessment>(orderedAssessments);
+        ConsolidationRecommendation[] providedRecommendations = (consolidationRecommendations ?? []).ToArray();
+        if (providedRecommendations.Select(value => value.GroupId).Distinct().Count() != providedRecommendations.Length)
+        {
+            throw new ArgumentException("Recommendation group associations must be unique.", nameof(consolidationRecommendations));
+        }
+
+        ConsolidationRecommendation[] orderedRecommendations;
+        if (providedRecommendations.Length == 0)
+        {
+            orderedRecommendations = [];
+        }
+        else
+        {
+            Dictionary<ExactMetadataDuplicateGroupId, ConsolidationRecommendation> recommendationsByGroup = providedRecommendations
+                .ToDictionary(value => value.GroupId);
+            if (recommendationsByGroup.Count != ExactMetadataDuplicateGroups.Count
+                || ExactMetadataDuplicateGroups.Any(group => !recommendationsByGroup.ContainsKey(group.Id)))
+            {
+                throw new ArgumentException("A populated recommendation collection requires exactly one recommendation per metadata group.", nameof(consolidationRecommendations));
+            }
+
+            orderedRecommendations = ExactMetadataDuplicateGroups.Select(group => recommendationsByGroup[group.Id]).ToArray();
+        }
+
+        ConsolidationRecommendations = new ReadOnlyCollection<ConsolidationRecommendation>(orderedRecommendations);
     }
 
     public LibraryIdentity Identity { get; }
@@ -55,4 +82,6 @@ public sealed record LibrarySnapshot
     public IReadOnlyList<ExactMetadataDuplicateGroup> ExactMetadataDuplicateGroups { get; }
 
     public IReadOnlyList<FormatAssessment> EpubAssessments { get; }
+
+    public IReadOnlyList<ConsolidationRecommendation> ConsolidationRecommendations { get; }
 }

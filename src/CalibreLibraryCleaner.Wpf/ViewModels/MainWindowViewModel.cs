@@ -1,9 +1,12 @@
 using System.Collections.ObjectModel;
 using System.Collections.Specialized;
 using System.ComponentModel;
+using CalibreLibraryCleaner.Application.Abstractions;
 using CalibreLibraryCleaner.Application.Libraries;
+using CalibreLibraryCleaner.Application.Recommendations;
 using CalibreLibraryCleaner.Domain.Duplicates;
 using CalibreLibraryCleaner.Domain.Libraries;
+using CalibreLibraryCleaner.Domain.Recommendations;
 using CalibreLibraryCleaner.Wpf.Services;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
@@ -15,12 +18,15 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
     private readonly ValidateLibraryUseCase _validateLibrary;
     private readonly ScanLibraryUseCase _scanLibrary;
     private readonly ILibraryFolderPicker _folderPicker;
+    private readonly ExportRecommendationsUseCase? _exportRecommendations;
+    private readonly IRecommendationExportFilePicker? _exportFilePicker;
+    private readonly IClock? _clock;
     private readonly BulkObservableCollection<BookRowViewModel> _books = [];
     private readonly BulkObservableCollection<ExactDuplicateGroupRowViewModel> _exactDuplicateGroups = [];
     private readonly BulkObservableCollection<MetadataDuplicateGroupRowViewModel> _metadataDuplicateGroups = [];
     private readonly BulkObservableCollection<EpubAssessmentRowViewModel> _epubAssessments = [];
     private readonly BulkObservableCollection<EpubAssessmentFindingRowViewModel> _epubFindings = [];
-    private readonly HashSet<DeferredMetadataGroupKey> _deferredMetadataGroups = [];
+    private readonly Dictionary<RecommendationReviewKey, ReviewedConsolidationRecommendation> _recommendationReviews = [];
     private IReadOnlyList<MetadataDuplicateGroupRowViewModel> _allMetadataDuplicateGroups = [];
     private CancellationTokenSource? _scanCancellation;
     private string _selectedLibraryPath = string.Empty;
@@ -40,15 +46,22 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
     private EpubAssessmentRowViewModel? _selectedEpubAssessment;
     private EpubFindingFilterMode _epubFindingFilterMode;
     private string? _currentLibraryUuid;
+    private LibrarySnapshot? _currentSnapshot;
 
     public MainWindowViewModel(
         ValidateLibraryUseCase validateLibrary,
         ScanLibraryUseCase scanLibrary,
-        ILibraryFolderPicker folderPicker)
+        ILibraryFolderPicker folderPicker,
+        ExportRecommendationsUseCase? exportRecommendations = null,
+        IRecommendationExportFilePicker? exportFilePicker = null,
+        IClock? clock = null)
     {
         _validateLibrary = validateLibrary;
         _scanLibrary = scanLibrary;
         _folderPicker = folderPicker;
+        _exportRecommendations = exportRecommendations;
+        _exportFilePicker = exportFilePicker;
+        _clock = clock;
         Books = new ReadOnlyObservableCollection<BookRowViewModel>(_books);
         ExactDuplicateGroups = new ReadOnlyObservableCollection<ExactDuplicateGroupRowViewModel>(_exactDuplicateGroups);
         MetadataDuplicateGroups = new ReadOnlyObservableCollection<MetadataDuplicateGroupRowViewModel>(
@@ -69,6 +82,12 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
         ToggleMetadataDuplicateDeferredCommand = new RelayCommand(
             ToggleMetadataDuplicateDeferred,
             () => !IsBusy && SelectedMetadataDuplicateGroup is not null && _currentLibraryUuid is not null);
+        AcceptRecommendationCommand = new RelayCommand(() => ApplySelectedReview(RecommendationReviewStatus.Accepted), CanReviewSelected);
+        SaveManualAdjustmentCommand = new RelayCommand(SaveManualAdjustment, CanReviewSelected);
+        KeepSeparateRecommendationCommand = new RelayCommand(() => ApplySelectedReview(RecommendationReviewStatus.KeepSeparate), CanReviewSelected);
+        MarkNotDuplicatesCommand = new RelayCommand(() => ApplySelectedReview(RecommendationReviewStatus.NotDuplicates), CanReviewSelected);
+        ResetRecommendationCommand = new RelayCommand(ResetSelectedReview, CanReviewSelected);
+        ExportRecommendationsCommand = new AsyncRelayCommand(ExportRecommendationsAsync, () => !IsBusy && _currentSnapshot is not null && _exportRecommendations is not null && _exportFilePicker is not null);
     }
 
     public string SelectedLibraryPath
@@ -114,6 +133,7 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
                 NextMetadataDuplicateGroupCommand.NotifyCanExecuteChanged();
                 PreviousMetadataDuplicateGroupCommand.NotifyCanExecuteChanged();
                 ToggleMetadataDuplicateDeferredCommand.NotifyCanExecuteChanged();
+                NotifyRecommendationCommands();
             }
         }
     }
@@ -219,13 +239,47 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
             {
                 OnPropertyChanged(nameof(SelectedMetadataDuplicateMembers));
                 OnPropertyChanged(nameof(MetadataDeferAction));
+                OnPropertyChanged(nameof(SelectedRecommendationFormats));
+                OnPropertyChanged(nameof(SelectedRecommendationReasons));
+                OnPropertyChanged(nameof(SelectedRecommendationWarnings));
+                OnPropertyChanged(nameof(SelectedMetadataSourceOptions));
+                OnPropertyChanged(nameof(ReviewedMetadataSource));
+                OnPropertyChanged(nameof(StaleOverrideSummary));
                 ToggleMetadataDuplicateDeferredCommand.NotifyCanExecuteChanged();
+                NotifyRecommendationCommands();
             }
         }
     }
 
     public IReadOnlyList<MetadataDuplicateMemberRowViewModel> SelectedMetadataDuplicateMembers =>
         SelectedMetadataDuplicateGroup?.Members ?? [];
+
+    public IReadOnlyList<RecommendationFormatRowViewModel> SelectedRecommendationFormats =>
+        SelectedMetadataDuplicateGroup?.FormatRows ?? [];
+
+    public IReadOnlyList<RecommendationReasonRowViewModel> SelectedRecommendationReasons =>
+        SelectedMetadataDuplicateGroup?.ReasonRows ?? [];
+
+    public IReadOnlyList<RecommendationWarningRowViewModel> SelectedRecommendationWarnings =>
+        SelectedMetadataDuplicateGroup?.WarningRows ?? [];
+
+    public string StaleOverrideSummary => SelectedMetadataDuplicateGroup?.StaleOverrideSummary ?? string.Empty;
+
+    public IReadOnlyList<RecommendationSourceOptionViewModel> SelectedMetadataSourceOptions =>
+        SelectedMetadataDuplicateGroup?.MetadataSourceOptions ?? [];
+
+    public RecommendationSourceOptionViewModel? ReviewedMetadataSource
+    {
+        get => SelectedMetadataDuplicateGroup?.ReviewedMetadataSource;
+        set
+        {
+            if (SelectedMetadataDuplicateGroup is not null)
+            {
+                SelectedMetadataDuplicateGroup.ReviewedMetadataSource = value;
+                OnPropertyChanged();
+            }
+        }
+    }
 
     public EpubAssessmentRowViewModel? SelectedEpubAssessment
     {
@@ -268,6 +322,18 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
     public IRelayCommand PreviousMetadataDuplicateGroupCommand { get; }
 
     public IRelayCommand ToggleMetadataDuplicateDeferredCommand { get; }
+
+    public IRelayCommand AcceptRecommendationCommand { get; }
+
+    public IRelayCommand SaveManualAdjustmentCommand { get; }
+
+    public IRelayCommand KeepSeparateRecommendationCommand { get; }
+
+    public IRelayCommand MarkNotDuplicatesCommand { get; }
+
+    public IRelayCommand ResetRecommendationCommand { get; }
+
+    public IAsyncRelayCommand ExportRecommendationsCommand { get; }
 
     public void Dispose()
     {
@@ -348,7 +414,7 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
     {
         _scanCancellation?.Cancel();
         CancelCommand.NotifyCanExecuteChanged();
-        StatusMessage = "Canceling scan...";
+        StatusMessage = "Scan canceled. Waiting for the current read to stop...";
     }
 
     private void UpdateProgress(LibraryScanProgress progress)
@@ -382,12 +448,16 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
             groups[index] = new(snapshot.ExactBinaryDuplicateGroups[index], booksById);
         }
 
+        Dictionary<ExactMetadataDuplicateGroupId, ConsolidationRecommendation> recommendations = snapshot.ConsolidationRecommendations
+            .ToDictionary(value => value.GroupId);
         MetadataDuplicateGroupRowViewModel[] metadataGroups = new MetadataDuplicateGroupRowViewModel[
             snapshot.ExactMetadataDuplicateGroups.Count];
         for (int index = 0; index < snapshot.ExactMetadataDuplicateGroups.Count; index++)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            metadataGroups[index] = new(snapshot.ExactMetadataDuplicateGroups[index], booksById);
+            ExactMetadataDuplicateGroup metadataGroup = snapshot.ExactMetadataDuplicateGroups[index];
+            recommendations.TryGetValue(metadataGroup.Id, out ConsolidationRecommendation? recommendation);
+            metadataGroups[index] = new(metadataGroup, booksById, recommendation);
         }
 
         EpubAssessmentRowViewModel[] epubAssessments = new EpubAssessmentRowViewModel[snapshot.EpubAssessments.Count];
@@ -426,9 +496,23 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
         _currentLibraryUuid = snapshot.Identity.CalibreLibraryUuid;
         foreach (MetadataDuplicateGroupRowViewModel group in presentation.MetadataGroups)
         {
-            group.SetDeferred(_deferredMetadataGroups.Contains(new(_currentLibraryUuid, group.GroupId)));
+            if (group.Recommendation is null)
+            {
+                continue;
+            }
+
+            RecommendationReviewKey key = new(_currentLibraryUuid, group.GroupId);
+            ReviewedConsolidationRecommendation reviewed = _recommendationReviews.TryGetValue(key, out ReviewedConsolidationRecommendation? previous)
+                ? RecommendationReviewStalenessEvaluator.Reconcile(group.Recommendation, previous)
+                : ApplyRecommendationOverrideUseCase.Reset(group.Recommendation);
+            group.SetReviewed(reviewed);
+            if (previous is not null)
+            {
+                _recommendationReviews[key] = reviewed;
+            }
         }
 
+        _currentSnapshot = snapshot;
         _allMetadataDuplicateGroups = presentation.MetadataGroups;
         ApplyMetadataDuplicateFilter();
         _epubAssessments.ReplaceAll(presentation.EpubAssessments);
@@ -438,6 +522,7 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
             : $"Scan complete: {snapshot.Books.Count} books, {snapshot.ExactBinaryDuplicateGroups.Count} exact file duplicate groups, {snapshot.ExactMetadataDuplicateGroups.Count} exact metadata candidate groups, {presentation.MissingCount} missing format files.";
         IsProgressIndeterminate = false;
         ProgressPercentage = 100;
+        ExportRecommendationsCommand.NotifyCanExecuteChanged();
     }
 
     private void ClearError()
@@ -499,25 +584,189 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
 
     private void ToggleMetadataDuplicateDeferred()
     {
-        if (SelectedMetadataDuplicateGroup is null || _currentLibraryUuid is null)
+        if (SelectedMetadataDuplicateGroup?.Recommendation is null || _currentLibraryUuid is null)
         {
             return;
         }
 
-        DeferredMetadataGroupKey key = new(_currentLibraryUuid, SelectedMetadataDuplicateGroup.GroupId);
-        bool isDeferred = !SelectedMetadataDuplicateGroup.IsDeferred;
-        if (isDeferred)
+        if (SelectedMetadataDuplicateGroup.IsDeferred)
         {
-            _deferredMetadataGroups.Add(key);
+            ResetSelectedReview();
         }
         else
         {
-            _deferredMetadataGroups.Remove(key);
+            SaveReviewAdjustment(RecommendationReviewStatus.Deferred);
         }
 
-        SelectedMetadataDuplicateGroup.SetDeferred(isDeferred);
         OnPropertyChanged(nameof(MetadataDeferAction));
         ApplyMetadataDuplicateFilter();
+    }
+
+    private bool CanReviewSelected() => !IsBusy
+        && SelectedMetadataDuplicateGroup?.Recommendation is not null
+        && _currentLibraryUuid is not null;
+
+    private void ApplySelectedReview(RecommendationReviewStatus status)
+    {
+        if (SelectedMetadataDuplicateGroup?.Recommendation is not { } generated || _currentLibraryUuid is null)
+        {
+            return;
+        }
+
+        IReadOnlyList<CalibreBookId> separate = status == RecommendationReviewStatus.KeepSeparate
+            ? generated.MemberIds
+            : [];
+        UserRecommendationOverride proposed = new(
+            generated.ModelVersion,
+            generated.InputVersion,
+            status,
+            _clock?.GetUtcNow() ?? DateTimeOffset.UtcNow,
+            retainedSeparateBookIds: separate);
+        ApplyOverride(proposed);
+    }
+
+    private void SaveManualAdjustment() => SaveReviewAdjustment(RecommendationReviewStatus.ManuallyAdjusted);
+
+    private void SaveReviewAdjustment(RecommendationReviewStatus requestedStatus)
+    {
+        if (SelectedMetadataDuplicateGroup?.Recommendation is not { } generated)
+        {
+            return;
+        }
+
+        List<FormatRecommendationOverride> formatOverrides = [];
+        foreach (RecommendationFormatRowViewModel row in SelectedMetadataDuplicateGroup.FormatRows)
+        {
+            RecommendationSourceOptionViewModel? selected = row.ReviewedSource;
+            FormatSourceSelection original = generated.FormatSelections.Single(value => value.Format == row.Format);
+            if (selected?.Action == "MarkUnresolved")
+            {
+                if (original.ResolutionStatus != FormatResolutionStatus.UnresolvedConflict) formatOverrides.Add(new(row.Format, FormatOverrideAction.MarkUnresolved));
+            }
+            else if (selected?.Action == "ExcludeFinalFormat")
+            {
+                formatOverrides.Add(new(row.Format, FormatOverrideAction.ExcludeFinalFormat));
+            }
+            else if (selected?.BookId is long sourceId && original.ProposedSource?.BookId.Value != sourceId)
+            {
+                formatOverrides.Add(new(row.Format, FormatOverrideAction.SelectSource, new CalibreBookId(sourceId)));
+            }
+        }
+
+        CalibreBookId? metadata = ReviewedMetadataSource?.BookId is long metadataId
+            && generated.MetadataSource?.SelectedBookId.Value != metadataId
+            ? new CalibreBookId(metadataId)
+            : null;
+        CalibreBookId[] retained = SelectedMetadataDuplicateGroup.Members
+            .Where(value => value.IsRetainedSeparate)
+            .Select(value => new CalibreBookId(value.BookId))
+            .ToArray();
+        UserRecommendationOverride proposed = new(
+            generated.ModelVersion,
+            generated.InputVersion,
+            requestedStatus,
+            _clock?.GetUtcNow() ?? DateTimeOffset.UtcNow,
+            metadata,
+            formatOverrides,
+            retained);
+        ApplyOverride(proposed);
+    }
+
+    private void ApplyOverride(UserRecommendationOverride proposed)
+    {
+        RecommendationOverrideOutcome outcome = ApplyRecommendationOverrideUseCase.Execute(
+            SelectedMetadataDuplicateGroup!.Recommendation!,
+            proposed);
+        if (!outcome.IsSuccess)
+        {
+            ErrorMessage = string.Join(" ", outcome.Errors.Select(value => value.Message));
+            ErrorAction = "Correct the selected records/formats or reset to the generated recommendation.";
+            return;
+        }
+
+        ClearError();
+        ReviewedConsolidationRecommendation reviewed = outcome.Reviewed!;
+        SelectedMetadataDuplicateGroup.SetReviewed(reviewed);
+        _recommendationReviews[new(_currentLibraryUuid!, SelectedMetadataDuplicateGroup.GroupId)] = reviewed;
+        RefreshSelectedRecommendationBindings();
+        ApplyMetadataDuplicateFilter();
+    }
+
+    private void ResetSelectedReview()
+    {
+        if (SelectedMetadataDuplicateGroup?.Recommendation is null || _currentLibraryUuid is null)
+        {
+            return;
+        }
+
+        ReviewedConsolidationRecommendation reviewed = ApplyRecommendationOverrideUseCase.Reset(SelectedMetadataDuplicateGroup.Recommendation);
+        _recommendationReviews.Remove(new(_currentLibraryUuid, SelectedMetadataDuplicateGroup.GroupId));
+        SelectedMetadataDuplicateGroup.SetReviewed(reviewed);
+        ClearError();
+        RefreshSelectedRecommendationBindings();
+        ApplyMetadataDuplicateFilter();
+    }
+
+    private async Task ExportRecommendationsAsync()
+    {
+        if (_currentSnapshot is null || _exportRecommendations is null || _exportFilePicker is null)
+        {
+            return;
+        }
+
+        string? destination = _exportFilePicker.PickJsonDestination();
+        if (destination is null)
+        {
+            return;
+        }
+
+        ReviewedConsolidationRecommendation[] reviews = _allMetadataDuplicateGroups
+            .Where(value => value.Reviewed is not null)
+            .Select(value => value.Reviewed!)
+            .ToArray();
+        try
+        {
+            RecommendationExportWriteOutcome outcome = await _exportRecommendations.ExecuteAsync(
+                _currentSnapshot,
+                reviews,
+                destination,
+                CancellationToken.None).ConfigureAwait(true);
+            if (outcome.IsSuccess)
+            {
+                StatusMessage = $"Recommendation review artifact exported to {outcome.PublishedPath}.";
+                ClearError();
+            }
+            else
+            {
+                ErrorMessage = outcome.Error!.Message;
+                ErrorAction = "Choose an existing destination outside the Calibre library and retry.";
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            StatusMessage = "Recommendation export canceled; no partial artifact was published.";
+        }
+    }
+
+    private void RefreshSelectedRecommendationBindings()
+    {
+        OnPropertyChanged(nameof(SelectedRecommendationFormats));
+        OnPropertyChanged(nameof(SelectedRecommendationReasons));
+        OnPropertyChanged(nameof(SelectedRecommendationWarnings));
+        OnPropertyChanged(nameof(ReviewedMetadataSource));
+        OnPropertyChanged(nameof(StaleOverrideSummary));
+        OnPropertyChanged(nameof(MetadataDeferAction));
+        NotifyRecommendationCommands();
+    }
+
+    private void NotifyRecommendationCommands()
+    {
+        AcceptRecommendationCommand.NotifyCanExecuteChanged();
+        SaveManualAdjustmentCommand.NotifyCanExecuteChanged();
+        KeepSeparateRecommendationCommand.NotifyCanExecuteChanged();
+        MarkNotDuplicatesCommand.NotifyCanExecuteChanged();
+        ResetRecommendationCommand.NotifyCanExecuteChanged();
+        ExportRecommendationsCommand.NotifyCanExecuteChanged();
     }
 
     private void ApplyEpubFindingFilter()
@@ -538,7 +787,7 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
         IReadOnlyList<EpubAssessmentRowViewModel> EpubAssessments,
         int MissingCount);
 
-    private sealed record DeferredMetadataGroupKey(
+    private sealed record RecommendationReviewKey(
         string LibraryUuid,
         ExactMetadataDuplicateGroupId GroupId);
 

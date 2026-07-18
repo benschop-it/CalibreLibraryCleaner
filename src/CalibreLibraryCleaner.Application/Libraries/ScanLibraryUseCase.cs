@@ -1,9 +1,11 @@
 using CalibreLibraryCleaner.Application.Abstractions;
 using CalibreLibraryCleaner.Application.Assessments;
+using CalibreLibraryCleaner.Application.Recommendations;
 using CalibreLibraryCleaner.Domain.Assessments;
 using CalibreLibraryCleaner.Domain.Duplicates;
 using CalibreLibraryCleaner.Domain.Findings;
 using CalibreLibraryCleaner.Domain.Libraries;
+using CalibreLibraryCleaner.Domain.Recommendations;
 
 namespace CalibreLibraryCleaner.Application.Libraries;
 
@@ -13,7 +15,8 @@ public sealed class ScanLibraryUseCase(
     IFormatFileHasher formatFileHasher,
     IClock clock,
     LibraryAnalysisOptions options,
-    AssessEpubFormatsUseCase? assessEpubFormats = null)
+    AssessEpubFormatsUseCase? assessEpubFormats = null,
+    GenerateConsolidationRecommendationsUseCase? generateRecommendations = null)
 {
     public async Task<LibraryScanOutcome> ExecuteAsync(
         string? candidatePath,
@@ -199,14 +202,50 @@ public sealed class ScanLibraryUseCase(
             .ThenBy(finding => finding.Code, StringComparer.Ordinal)
             .ToList();
         cancellationToken.ThrowIfCancellationRequested();
-        LibrarySnapshot snapshot = new(
-            new LibraryIdentity(catalog.LibraryUuid, catalog.SchemaVersion, validation.Location!.LibraryRoot),
-            clock.GetUtcNow(),
+        LibraryIdentity identity = new(catalog.LibraryUuid, catalog.SchemaVersion, validation.Location!.LibraryRoot);
+        DateTimeOffset scannedAt = clock.GetUtcNow();
+        LibrarySnapshot analysisSnapshot = new(
+            identity,
+            scannedAt,
             books,
             findings,
             exactBinaryGroups,
             exactMetadataGroups,
             epubAssessments);
+        IReadOnlyList<ConsolidationRecommendation> recommendations;
+        try
+        {
+            GenerateConsolidationRecommendationsUseCase generator = generateRecommendations ?? new(new());
+            IProgress<RecommendationGenerationProgress>? recommendationProgress = progress is null
+                ? null
+                : new RecommendationProgressAdapter(progress);
+            recommendations = await generator.ExecuteAsync(
+                analysisSnapshot,
+                recommendationProgress,
+                cancellationToken).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch
+        {
+            return LibraryScanOutcome.Failure(new(
+                LibraryErrorCode.RecommendationGenerationFailed,
+                "Consolidation recommendations could not be generated reliably.",
+                "Retry the scan. No library content was changed."));
+        }
+
+        cancellationToken.ThrowIfCancellationRequested();
+        LibrarySnapshot snapshot = new(
+            identity,
+            scannedAt,
+            books,
+            findings,
+            exactBinaryGroups,
+            exactMetadataGroups,
+            epubAssessments,
+            recommendations);
         cancellationToken.ThrowIfCancellationRequested();
         progress?.Report(new(LibraryScanPhase.Completed, 1, 1, "Scan complete"));
         return LibraryScanOutcome.Success(snapshot);
@@ -282,7 +321,16 @@ public sealed class ScanLibraryUseCase(
                 .ThenBy(identifier => identifier.Value, StringComparer.Ordinal)
                 .Select(identifier => new BookIdentifier(identifier.Type, identifier.Value)),
             formats,
-            prepared.Record.RelativeDirectory);
+            prepared.Record.RelativeDirectory,
+            prepared.Record.Publication is null
+                ? BookPublicationMetadata.Empty
+                : new BookPublicationMetadata(
+                    prepared.Record.Publication.Publisher,
+                    prepared.Record.Publication.PublicationDate,
+                    prepared.Record.Publication.Series,
+                    prepared.Record.Publication.SeriesIndex,
+                    prepared.Record.Publication.Languages,
+                    prepared.Record.Publication.HasCover));
     }
 
     private static LibraryFinding MapIssue(CalibreCatalogIssueRecord issue) => new(
@@ -425,5 +473,14 @@ public sealed class ScanLibraryUseCase(
             string.IsNullOrWhiteSpace(value.CurrentRelativePath)
                 ? $"Assessing EPUB files: {value.CompletedFiles} of {value.TotalFiles} complete"
                 : $"Assessing EPUB files: {value.CompletedFiles} of {value.TotalFiles} complete — {value.Stage}: {value.CurrentRelativePath}"));
+    }
+
+    private sealed class RecommendationProgressAdapter(IProgress<LibraryScanProgress> progress) : IProgress<RecommendationGenerationProgress>
+    {
+        public void Report(RecommendationGenerationProgress value) => progress.Report(new(
+            LibraryScanPhase.GeneratingConsolidationRecommendations,
+            value.CompletedGroups,
+            value.TotalGroups,
+            $"Generating consolidation recommendations: {value.CompletedGroups} of {value.TotalGroups} complete"));
     }
 }

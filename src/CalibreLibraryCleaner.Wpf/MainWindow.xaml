@@ -197,6 +197,18 @@
             <TextBlock Margin="0,4,0,0"
                        Text="{Binding MetadataDuplicateSummary}"
                        TextWrapping="Wrap" />
+            <TextBlock Margin="0,4,0,0"
+                       Text="{Binding StaleOverrideSummary}"
+                       TextWrapping="Wrap"
+                       AutomationProperties.Name="Previous stale recommendation choices" />
+            <WrapPanel Margin="0,8,0,0">
+              <Button Margin="0,0,6,0" Padding="8,4" Content="_Accept generated" Command="{Binding AcceptRecommendationCommand}" AutomationProperties.HelpText="Accept the unchanged generated recommendation" />
+              <Button Margin="0,0,6,0" Padding="8,4" Content="Save _adjustments" Command="{Binding SaveManualAdjustmentCommand}" />
+              <Button Margin="0,0,6,0" Padding="8,4" Content="_Keep separate" Command="{Binding KeepSeparateRecommendationCommand}" />
+              <Button Margin="0,0,6,0" Padding="8,4" Content="_Not duplicates" Command="{Binding MarkNotDuplicatesCommand}" />
+              <Button Margin="0,0,6,0" Padding="8,4" Content="_Reset generated" Command="{Binding ResetRecommendationCommand}" />
+              <Button Padding="8,4" Content="_Export JSON" Command="{Binding ExportRecommendationsCommand}" AutomationProperties.HelpText="Export a non-destructive review artifact outside the Calibre library" />
+            </WrapPanel>
           </StackPanel>
           <Grid Grid.Row="1" Margin="0,0,0,8">
             <Grid.ColumnDefinitions>
@@ -247,32 +259,79 @@
                       AutoGenerateColumns="False"
                       IsReadOnly="True"
                       SelectionMode="Single"
+                      EnableRowVirtualization="True"
+                      EnableColumnVirtualization="True"
+                      VirtualizingPanel.VirtualizationMode="Recycling"
                       AutomationProperties.Name="Exact normalized metadata candidate groups">
               <DataGrid.Columns>
                 <DataGridTextColumn Width="2*" Header="Normalized title" Binding="{Binding NormalizedTitle}" />
                 <DataGridTextColumn Width="2*" Header="Normalized author set" Binding="{Binding NormalizedAuthors}" />
                 <DataGridTextColumn Width="80" Header="Records" Binding="{Binding RecordCount}" />
                 <DataGridTextColumn Width="130" Header="Review state" Binding="{Binding ReviewStatus}" />
+                <DataGridTextColumn Width="110" Header="Confidence" Binding="{Binding Confidence}" />
+                <DataGridTextColumn Width="90" Header="Freshness" Binding="{Binding Freshness}" />
+                <DataGridTextColumn Width="80" Header="Warnings" Binding="{Binding WarningCount}" />
+                <DataGridCheckBoxColumn Width="85" Header="Overridden" Binding="{Binding IsOverridden}" />
                 <DataGridTextColumn Width="2*" Header="Category" Binding="{Binding Category}" />
                 <DataGridTextColumn Width="3*" Header="Match reason" Binding="{Binding Reason}" />
               </DataGrid.Columns>
             </DataGrid>
           </GroupBox>
-          <GroupBox Grid.Row="3" Margin="0,8,0,0" Header="Records in selected metadata group">
-            <DataGrid ItemsSource="{Binding SelectedMetadataDuplicateMembers}"
-                      AutoGenerateColumns="False"
-                      IsReadOnly="True"
-                      AutomationProperties.Name="Records in selected exact metadata candidate group">
-              <DataGrid.Columns>
-                <DataGridTextColumn Width="80" Header="Record ID" Binding="{Binding BookId}" />
-                <DataGridTextColumn Width="2*" Header="Original title" Binding="{Binding Title}" />
-                <DataGridTextColumn Width="2*" Header="Original authors" Binding="{Binding Authors}" />
-                <DataGridTextColumn Width="2*" Header="Author sort (context)" Binding="{Binding AuthorSort}" />
-                <DataGridTextColumn Width="*" Header="Formats" Binding="{Binding Formats}" />
-                <DataGridTextColumn Width="2*" Header="Identifiers (context only)" Binding="{Binding Identifiers}" />
-              </DataGrid.Columns>
-            </DataGrid>
-          </GroupBox>
+          <TabControl Grid.Row="3" Margin="0,8,0,0">
+            <TabItem Header="_Records and metadata">
+              <Grid Margin="4">
+                <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="*" /></Grid.RowDefinitions>
+                <StackPanel Orientation="Horizontal" Margin="0,0,0,4">
+                  <Label Target="{Binding ElementName=MetadataSourceBox}" Content="Reviewed metadata _source:" />
+                  <ComboBox x:Name="MetadataSourceBox" MinWidth="160" ItemsSource="{Binding SelectedMetadataSourceOptions}" SelectedItem="{Binding ReviewedMetadataSource}" DisplayMemberPath="Label" />
+                  <TextBlock Margin="12,4,0,0" Text="Generated and reviewed selections remain separate; stored metadata is never rewritten." TextWrapping="Wrap" />
+                </StackPanel>
+                <DataGrid Grid.Row="1" ItemsSource="{Binding SelectedMetadataDuplicateMembers}" AutoGenerateColumns="False" EnableRowVirtualization="True" EnableColumnVirtualization="True" VirtualizingPanel.VirtualizationMode="Recycling" AutomationProperties.Name="Records in selected exact metadata candidate group">
+                  <DataGrid.Columns>
+                    <DataGridCheckBoxColumn Width="105" Header="Retain separate" Binding="{Binding IsRetainedSeparate}" />
+                    <DataGridTextColumn IsReadOnly="True" Width="70" Header="Record ID" Binding="{Binding BookId}" />
+                    <DataGridTextColumn IsReadOnly="True" Width="2*" Header="Original title" Binding="{Binding Title}" />
+                    <DataGridTextColumn IsReadOnly="True" Width="2*" Header="Original authors" Binding="{Binding Authors}" />
+                    <DataGridTextColumn IsReadOnly="True" Width="*" Header="Publisher" Binding="{Binding Publisher}" />
+                    <DataGridTextColumn IsReadOnly="True" Width="100" Header="Publication date" Binding="{Binding PublicationDate}" />
+                    <DataGridTextColumn IsReadOnly="True" Width="*" Header="Languages" Binding="{Binding Languages}" />
+                    <DataGridTextColumn IsReadOnly="True" Width="*" Header="Series/index" Binding="{Binding Series}" />
+                    <DataGridTextColumn IsReadOnly="True" Width="80" Header="Cover flag" Binding="{Binding HasCover}" />
+                    <DataGridTextColumn IsReadOnly="True" Width="3*" Header="Metadata quality facts" Binding="{Binding MetadataQualityFacts}" />
+                    <DataGridTextColumn IsReadOnly="True" Width="2*" Header="Formats/status" Binding="{Binding Formats}" />
+                    <DataGridTextColumn IsReadOnly="True" Width="2*" Header="Identifiers (context)" Binding="{Binding Identifiers}" />
+                  </DataGrid.Columns>
+                </DataGrid>
+              </Grid>
+            </TabItem>
+            <TabItem Header="_Format selections">
+              <DataGrid Margin="4" ItemsSource="{Binding SelectedRecommendationFormats}" AutoGenerateColumns="False" EnableRowVirtualization="True" EnableColumnVirtualization="True" VirtualizingPanel.VirtualizationMode="Recycling" AutomationProperties.Name="Format recommendation comparison">
+                <DataGrid.Columns>
+                  <DataGridTextColumn IsReadOnly="True" Width="75" Header="Format" Binding="{Binding Format}" />
+                  <DataGridTextColumn IsReadOnly="True" Width="130" Header="Generated source" Binding="{Binding GeneratedSource}" />
+                  <DataGridTemplateColumn Width="2*" Header="Reviewed source/action">
+                    <DataGridTemplateColumn.CellTemplate><DataTemplate><ComboBox ItemsSource="{Binding SourceOptions}" SelectedItem="{Binding ReviewedSource}" DisplayMemberPath="Label" /></DataTemplate></DataGridTemplateColumn.CellTemplate>
+                  </DataGridTemplateColumn>
+                  <DataGridTextColumn IsReadOnly="True" Width="130" Header="Resolution" Binding="{Binding Resolution}" />
+                  <DataGridTextColumn IsReadOnly="True" Width="100" Header="Strength" Binding="{Binding Strength}" />
+                  <DataGridTextColumn IsReadOnly="True" Width="3*" Header="All candidates" Binding="{Binding Candidates}" />
+                  <DataGridTextColumn IsReadOnly="True" Width="140" Header="Exact binary" Binding="{Binding ExactBinary}" />
+                  <DataGridTextColumn IsReadOnly="True" Width="3*" Header="EPUB assessment (separate score)" Binding="{Binding EpubAssessment}" />
+                  <DataGridTextColumn IsReadOnly="True" Width="2*" Header="Warnings" Binding="{Binding Warnings}" />
+                </DataGrid.Columns>
+              </DataGrid>
+            </TabItem>
+            <TabItem Header="_Reasons">
+              <DataGrid Margin="4" ItemsSource="{Binding SelectedRecommendationReasons}" AutoGenerateColumns="False" IsReadOnly="True" EnableRowVirtualization="True" VirtualizingPanel.VirtualizationMode="Recycling">
+                <DataGrid.Columns><DataGridTextColumn Width="2*" Header="Code" Binding="{Binding Code}" /><DataGridTextColumn Width="*" Header="Subject" Binding="{Binding Subject}" /><DataGridTextColumn Width="4*" Header="Explanation" Binding="{Binding Explanation}" /><DataGridTextColumn Width="2*" Header="Evidence" Binding="{Binding Evidence}" /></DataGrid.Columns>
+              </DataGrid>
+            </TabItem>
+            <TabItem Header="_Warnings">
+              <DataGrid Margin="4" ItemsSource="{Binding SelectedRecommendationWarnings}" AutoGenerateColumns="False" IsReadOnly="True" EnableRowVirtualization="True" VirtualizingPanel.VirtualizationMode="Recycling">
+                <DataGrid.Columns><DataGridTextColumn Width="2*" Header="Code" Binding="{Binding Code}" /><DataGridTextColumn Width="100" Header="Severity" Binding="{Binding Severity}" /><DataGridTextColumn Width="*" Header="Subject" Binding="{Binding Subject}" /><DataGridTextColumn Width="4*" Header="Manual-review warning" Binding="{Binding Explanation}" /><DataGridTextColumn Width="2*" Header="Evidence" Binding="{Binding Evidence}" /></DataGrid.Columns>
+              </DataGrid>
+            </TabItem>
+          </TabControl>
         </Grid>
       </TabItem>
       <TabItem Header="_EPUB assessments" AutomationProperties.Name="EPUB assessments">

@@ -2,6 +2,7 @@ using CalibreLibraryCleaner.Application.Abstractions;
 using CalibreLibraryCleaner.Infrastructure.Epub;
 using CalibreLibraryCleaner.Infrastructure.Hashing;
 using CalibreLibraryCleaner.Infrastructure.Paths;
+using CalibreLibraryCleaner.Infrastructure.Recommendations;
 using CalibreLibraryCleaner.Infrastructure.Sqlite;
 using CalibreLibraryCleaner.Infrastructure.Time;
 using Microsoft.Extensions.DependencyInjection;
@@ -18,6 +19,7 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<ICalibreMetadataReader, SqliteCalibreMetadataReader>();
         services.AddSingleton<IFormatFileHasher, StreamingSha256FormatFileHasher>();
         services.AddSingleton<IEpubInspector, VersOneEpubInspector>();
+        services.AddSingleton<IRecommendationExporter, VersionedJsonRecommendationExporter>();
         return services;
     }
 }

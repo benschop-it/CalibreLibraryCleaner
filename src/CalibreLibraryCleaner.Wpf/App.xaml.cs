@@ -1,5 +1,7 @@
 using CalibreLibraryCleaner.Application.Assessments;
 using CalibreLibraryCleaner.Application.Libraries;
+using CalibreLibraryCleaner.Application.Recommendations;
+using CalibreLibraryCleaner.Domain.Recommendations;
 using CalibreLibraryCleaner.Infrastructure.DependencyInjection;
 using CalibreLibraryCleaner.Wpf.Services;
 using CalibreLibraryCleaner.Wpf.ViewModels;
@@ -19,9 +21,13 @@ public partial class App : System.Windows.Application
         builder.Services.AddSingleton<ValidateLibraryUseCase>();
         builder.Services.AddSingleton<EpubAssessmentEngine>();
         builder.Services.AddSingleton<AssessEpubFormatsUseCase>();
+        builder.Services.AddSingleton<ConsolidationRecommendationPolicy>();
+        builder.Services.AddSingleton<GenerateConsolidationRecommendationsUseCase>();
         builder.Services.AddSingleton<ScanLibraryUseCase>();
+        builder.Services.AddSingleton<ExportRecommendationsUseCase>();
         builder.Services.AddSingleton(new LibraryAnalysisOptions());
         builder.Services.AddSingleton<ILibraryFolderPicker, OpenFolderDialogLibraryFolderPicker>();
+        builder.Services.AddSingleton<IRecommendationExportFilePicker, SaveFileDialogRecommendationExportFilePicker>();
         builder.Services.AddSingleton<MainWindowViewModel>();
         builder.Services.AddSingleton<MainWindow>();
         _host = builder.Build();

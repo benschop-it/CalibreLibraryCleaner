@@ -39,6 +39,8 @@ All repeated evidence remains visible after its scoring cap, with zero applied a
 
 Keep metadata quality separate from each format's quality. A record recommendation may select metadata from one record and EPUB/AZW3/PDF from others.
 
+Milestone 5 may prefer one non-identical EPUB only when current matching assessments use the same analyzer/scoring-model versions and either a completed assessment is compared with a disqualified assessment or the completed score is at least 10 points above every competitor with a decisive structural/readability finding advantage of at least four applied points and no countervailing decisive error. Cover or embedded-metadata findings alone never authorize that preference. Close, equal, contradictory, missing, stale, or incompatible assessments remain unresolved. EPUB score never proves equivalent content or edition.
+
 ## Explainability
 
 Prefer explicit reasoning over a single number. Example: keep EPUB A because it has navigation, a useful cover, complete resources, and equivalent text; reject EPUB B because it has broken references and a lower structural score.

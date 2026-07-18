@@ -35,7 +35,9 @@ Member IDs are ordered ascending. Groups are ordered by normalized title ordinal
 
 Every group records reason code `EXACT_NORMALIZED_TITLE_AUTHOR_SET`, category `Exact normalized metadata candidate`, and the explanation that normalized title and order-independent normalized author set are exactly equal. These are candidate duplicate records, not proof of identical files, content, or editions.
 
-Exact metadata groups remain separate from exact binary file groups. A pair can appear in either collection, both collections, or neither; the application does not combine the signals or calculate a recommendation.
+Exact metadata groups remain separate from exact binary file groups. A pair can appear in either collection, both collections, or neither; grouping itself does not combine the signals or imply a recommendation.
+
+Milestone 5 consumes these existing collections without changing either group definition. Recommendations may use exact-binary membership to choose among byte-identical same-format alternatives and exact-metadata groups as their review scope. Exact equality remains file-level evidence only; it cannot hide a unique/unavailable/unresolved format or establish content/edition equivalence for a non-identical file.
 
 ## EPUB fingerprints
 

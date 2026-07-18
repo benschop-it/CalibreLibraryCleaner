@@ -4,6 +4,7 @@ using CalibreLibraryCleaner.Application.Abstractions;
 using CalibreLibraryCleaner.Application.Assessments;
 using CalibreLibraryCleaner.Application.Libraries;
 using CalibreLibraryCleaner.Domain.Libraries;
+using CalibreLibraryCleaner.Domain.Recommendations;
 using CalibreLibraryCleaner.Infrastructure.DependencyInjection;
 using CalibreLibraryCleaner.Wpf.Services;
 using CalibreLibraryCleaner.Wpf.ViewModels;
@@ -274,8 +275,12 @@ public sealed class MainWindowViewModelTests
         viewModel.MetadataDuplicateFilterText = "beta";
         viewModel.MetadataDuplicateGroups.Should().ContainSingle();
         viewModel.SelectedMetadataDuplicateGroup!.NormalizedTitle.Should().Be("BETA BOOK");
+        RecommendationFormatRowViewModel formatReview = viewModel.SelectedRecommendationFormats.Single();
+        formatReview.ReviewedSource = formatReview.SourceOptions.Single(value => value.Action == "ExcludeFinalFormat");
         viewModel.ToggleMetadataDuplicateDeferredCommand.Execute(null);
         viewModel.SelectedMetadataDuplicateGroup!.IsDeferred.Should().BeTrue();
+        viewModel.SelectedMetadataDuplicateGroup.Reviewed!.CurrentOverride!.FormatOverrides
+            .Should().ContainSingle(value => value.Action == FormatOverrideAction.ExcludeFinalFormat);
         viewModel.MetadataDuplicateFilterMode = MetadataDuplicateFilterMode.Active;
         viewModel.MetadataDuplicateGroups.Should().BeEmpty();
         viewModel.MetadataDuplicateFilterMode = MetadataDuplicateFilterMode.Deferred;
@@ -425,11 +430,17 @@ public sealed class MainWindowViewModelTests
             command.CommandText = """
                 PRAGMA user_version=27;
                 CREATE TABLE library_id (id INTEGER PRIMARY KEY, uuid TEXT NOT NULL UNIQUE);
-                CREATE TABLE books (id INTEGER PRIMARY KEY, title TEXT NOT NULL, author_sort TEXT, path TEXT NOT NULL);
+                CREATE TABLE books (id INTEGER PRIMARY KEY, title TEXT NOT NULL, author_sort TEXT, path TEXT NOT NULL, pubdate TIMESTAMP, series_index REAL NOT NULL DEFAULT 1.0, has_cover BOOL DEFAULT 0);
                 CREATE TABLE authors (id INTEGER PRIMARY KEY, name TEXT NOT NULL, sort TEXT);
                 CREATE TABLE books_authors_link (id INTEGER PRIMARY KEY, book INTEGER NOT NULL, author INTEGER NOT NULL, UNIQUE(book, author));
                 CREATE TABLE identifiers (id INTEGER PRIMARY KEY, book INTEGER NOT NULL, type TEXT NOT NULL COLLATE NOCASE, val TEXT NOT NULL COLLATE NOCASE, UNIQUE(book, type));
                 CREATE TABLE data (id INTEGER PRIMARY KEY, book INTEGER NOT NULL, format TEXT NOT NULL COLLATE NOCASE, name TEXT NOT NULL, UNIQUE(book, format));
+                CREATE TABLE publishers (id INTEGER PRIMARY KEY, name TEXT NOT NULL);
+                CREATE TABLE books_publishers_link (id INTEGER PRIMARY KEY, book INTEGER NOT NULL, publisher INTEGER NOT NULL, UNIQUE(book));
+                CREATE TABLE series (id INTEGER PRIMARY KEY, name TEXT NOT NULL);
+                CREATE TABLE books_series_link (id INTEGER PRIMARY KEY, book INTEGER NOT NULL, series INTEGER NOT NULL, UNIQUE(book));
+                CREATE TABLE languages (id INTEGER PRIMARY KEY, lang_code TEXT NOT NULL);
+                CREATE TABLE books_languages_link (id INTEGER PRIMARY KEY, book INTEGER NOT NULL, lang_code INTEGER NOT NULL, item_order INTEGER NOT NULL DEFAULT 0, UNIQUE(book, lang_code));
                 INSERT INTO library_id(id, uuid) VALUES (1, '87f7ed1f-59a8-45a6-975a-7e06fd84780d');
                 INSERT INTO books(id, title, author_sort, path) VALUES (1, 'Book 1', 'Author 1', 'Author 1/Book (1)');
                 INSERT INTO books(id, title, author_sort, path) VALUES (2, 'Book 2', 'Author 2', 'Author 2/Book (2)');
