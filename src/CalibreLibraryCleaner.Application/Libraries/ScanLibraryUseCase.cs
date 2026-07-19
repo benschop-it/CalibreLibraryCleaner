@@ -290,7 +290,13 @@ public sealed class ScanLibraryUseCase(
                     "Wait for Calibre or file synchronization to finish, then retry."),
                 _ => throw new InvalidOperationException("Unknown format hash result status."),
             };
-            formats.Add(new(format.Format, format.StoredName, format.RelativePath, status, result.Fingerprint));
+            formats.Add(new(
+                format.Format,
+                format.StoredName,
+                format.RelativePath,
+                status,
+                result.Fingerprint,
+                result.Observation));
             if (findingCode is not null)
             {
                 findings.Add(new(

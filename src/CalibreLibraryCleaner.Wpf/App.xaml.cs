@@ -1,5 +1,6 @@
 using CalibreLibraryCleaner.Application.Assessments;
 using CalibreLibraryCleaner.Application.Libraries;
+using CalibreLibraryCleaner.Application.Plans;
 using CalibreLibraryCleaner.Application.Recommendations;
 using CalibreLibraryCleaner.Domain.Recommendations;
 using CalibreLibraryCleaner.Infrastructure.DependencyInjection;
@@ -25,9 +26,18 @@ public partial class App : System.Windows.Application
         builder.Services.AddSingleton<GenerateConsolidationRecommendationsUseCase>();
         builder.Services.AddSingleton<ScanLibraryUseCase>();
         builder.Services.AddSingleton<ExportRecommendationsUseCase>();
+        builder.Services.AddSingleton<GenerateCleanupPlanUseCase>();
+        builder.Services.AddSingleton<ValidateCleanupPlanUseCase>();
+        builder.Services.AddSingleton<ApproveCleanupPlanUseCase>();
+        builder.Services.AddSingleton<RevokeCleanupPlanUseCase>();
+        builder.Services.AddSingleton<ExportCleanupPlanUseCase>();
+        builder.Services.AddSingleton<ImportCleanupPlanUseCase>();
         builder.Services.AddSingleton(new LibraryAnalysisOptions());
         builder.Services.AddSingleton<ILibraryFolderPicker, OpenFolderDialogLibraryFolderPicker>();
         builder.Services.AddSingleton<IRecommendationExportFilePicker, SaveFileDialogRecommendationExportFilePicker>();
+        builder.Services.AddSingleton<ICleanupPlanFilePicker, OpenSaveCleanupPlanFilePicker>();
+        builder.Services.AddSingleton<ICleanupPlanConfirmationService, MessageBoxCleanupPlanConfirmationService>();
+        builder.Services.AddSingleton<CleanupPlanWorkspaceViewModel>();
         builder.Services.AddSingleton<MainWindowViewModel>();
         builder.Services.AddSingleton<MainWindow>();
         _host = builder.Build();

@@ -432,7 +432,8 @@ public sealed class ConsolidationRecommendationPolicyTests
         Path.GetFileNameWithoutExtension(path),
         path,
         FormatFileStatus.Present,
-        fingerprint);
+        fingerprint,
+        new FormatFileObservation(fingerprint.SizeInBytes, DateTimeOffset.UnixEpoch, DateTimeOffset.UnixEpoch, 0));
 
     private static FormatFileFingerprint Fingerprint(long size, string seed) => new(size, new Sha256Digest(seed.PadRight(64, seed[0])));
 

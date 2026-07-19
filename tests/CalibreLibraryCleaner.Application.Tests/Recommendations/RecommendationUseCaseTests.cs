@@ -228,7 +228,13 @@ public sealed class RecommendationUseCaseTests
     private static CalibreBook Book(long id)
     {
         FormatFileFingerprint fingerprint = new(id, new(new string((char)('a' + id), 64)));
-        BookFormat[] formats = id == 1 ? [new BookFormat("PDF", "book", $"book-{id}.pdf", FormatFileStatus.Present, fingerprint)] : [];
+        BookFormat[] formats = id == 1 ? [new BookFormat(
+            "PDF",
+            "book",
+            $"book-{id}.pdf",
+            FormatFileStatus.Present,
+            fingerprint,
+            new FormatFileObservation(fingerprint.SizeInBytes, DateTimeOffset.UnixEpoch, DateTimeOffset.UnixEpoch, 0))] : [];
         return new(new(id), "Shared", "Author", [new(new(id), "Author", "Author")], [], formats, $"Book ({id})");
     }
 

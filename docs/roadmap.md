@@ -28,6 +28,8 @@ Choose metadata and format sources independently, warn about conflicts, support 
 
 Immutable plans, expected states, validation, approval, export/import. Still no mutation.
 
+Implemented as a separate `cleanup-plan/1.0` artifact with immutable semantic bodies, canonical hash-bound approval, terminal stale/blocked/revoked states, guarded external import/export, and WPF review. Backup creation, Calibre tooling, execution, and rollback remain Milestone 7 or later.
+
 ## Milestone 7 — Safe execution
 
 Calibre CLI discovery, verified backups, command execution, post-operation verification, and audit history.

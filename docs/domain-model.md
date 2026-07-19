@@ -39,6 +39,8 @@ Milestone 3 adds `NormalizedTitle`, `NormalizedAuthorName`, `NormalizedAuthorSet
 
 Milestone 5 adds stored `BookPublicationMetadata` (publisher, publication date, series/index, ordered languages, and Calibre's cover flag) and immutable `ConsolidationRecommendation` aggregates. A recommendation records independent metadata and per-format sources, all format candidates, exact-binary exclusions, unresolved conflicts, retained-separate/potentially-redundant records, linked reasons/warnings, decision strength, qualitative confidence, model version, and canonical input version. `UserRecommendationOverride` remains separate from the generated aggregate; `ReviewedConsolidationRecommendation` records current/effective/stale state and review status without modifying the generated value.
 
+Milestone 6 adds `FormatFileObservation` to present `BookFormat` values and immutable cleanup-plan values under `Domain.Plans`. A cleanup plan has a frozen semantic definition containing expected state, one target/metadata source, final-format retentions, reviewed format removals, non-target record removals, complete declarative backup requirements, and recommendation/review/override provenance. Its canonical SHA-256 covers only that deterministic semantic definition. Lifecycle revisions (`Draft`, `Valid`, `Blocked`, `Approved`, `Stale`, `Revoked`) reuse the same body and digest; operational-content changes require a new plan ID.
+
 ## Invariants
 
 - Record-duplicate groups contain at least two distinct records. Exact binary file groups contain at least two distinct managed files and may occur within one record or across records.
@@ -51,6 +53,9 @@ Milestone 5 adds stored `BookPublicationMetadata` (publisher, publication date, 
 - A cleanup plan cannot remove its target record.
 - Destructive plans require backups and expected pre-operation states.
 - Approved plans are immutable.
+- Only `Draft -> Valid|Blocked`, `Valid -> Approved|Stale|Blocked`, and `Approved -> Stale|Revoked` transitions are legal. Blocked, stale, and revoked plan definitions are terminal.
+- Approval binds to the canonical immutable-body digest. Staleness prevents further approval and preserves any prior approval only as audit information.
+- Every involved record requires a metadata backup; every affected format requires file and managed-state backups; reported covers require later resolution/backup; and plan/audit artifacts remain mandatory.
 - AI confidence is distinct from deterministic duplicate confidence.
 - Recommendation confidence is distinct from exact-metadata match evidence, exact-binary equality, EPUB assessment status, EPUB quality score, and per-decision strength.
 - A non-identical unassessed same-format conflict has no generated source or exclusion. A proposed redundant record has at least one available format and exact-binary coverage for every available format, and contributes no selection or unresolved/unavailable/separate evidence.

@@ -46,6 +46,12 @@ Application owns the provider-neutral `IEpubInspector` contract, inspection limi
 
 Domain owns immutable recommendation selections, reasons, warnings, decision strength, qualitative confidence, review values, and invariants. Application indexes completed Milestone 2â€“4 evidence, orchestrates deterministic generation, validates overrides, evaluates staleness, and owns the external export port. Infrastructure alone owns JSON parsing/serialization and guarded file publication outside the selected library. WPF owns session review interaction and file selection; ViewModels call Application use cases and do not write files. Recommendation review artifacts contain no cleanup-plan or mutation instructions.
 
+## Cleanup-plan boundary
+
+Domain owns immutable cleanup-plan bodies, expected library/record/format state, declarative retention and removal intentions, backup requirements, provenance, validation issues, canonical semantic hashes, and lifecycle transition rules. Application owns explicit generation from one current reviewed recommendation, current-snapshot validation, staleness, approval, revocation, and import/export orchestration. Infrastructure alone owns `cleanup-plan/1.0` JSON parsing/serialization and guarded external file storage. WPF owns review and confirmation interaction; ViewModels do not serialize or access files.
+
+Cleanup plans are non-executable data. Milestone 6 introduces no Calibre process, command, backup creator, lock, mutation, simulation, or rollback boundary.
+
 ## Errors
 
 Distinguish validation failures, read failures, missing-file findings, malformed-format findings, operation conflicts, process failures, verification failures, and unexpected faults.

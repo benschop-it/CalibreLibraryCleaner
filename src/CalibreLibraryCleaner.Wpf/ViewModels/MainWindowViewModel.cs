@@ -54,7 +54,8 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
         ILibraryFolderPicker folderPicker,
         ExportRecommendationsUseCase? exportRecommendations = null,
         IRecommendationExportFilePicker? exportFilePicker = null,
-        IClock? clock = null)
+        IClock? clock = null,
+        CleanupPlanWorkspaceViewModel? cleanupPlans = null)
     {
         _validateLibrary = validateLibrary;
         _scanLibrary = scanLibrary;
@@ -62,6 +63,7 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
         _exportRecommendations = exportRecommendations;
         _exportFilePicker = exportFilePicker;
         _clock = clock;
+        CleanupPlans = cleanupPlans;
         Books = new ReadOnlyObservableCollection<BookRowViewModel>(_books);
         ExactDuplicateGroups = new ReadOnlyObservableCollection<ExactDuplicateGroupRowViewModel>(_exactDuplicateGroups);
         MetadataDuplicateGroups = new ReadOnlyObservableCollection<MetadataDuplicateGroupRowViewModel>(
@@ -160,6 +162,8 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
 
     public ReadOnlyObservableCollection<EpubAssessmentFindingRowViewModel> EpubFindings { get; }
 
+    public CleanupPlanWorkspaceViewModel? CleanupPlans { get; }
+
     public IReadOnlyList<EpubFindingFilterMode> EpubFindingFilterModes { get; } = Enum.GetValues<EpubFindingFilterMode>();
 
     public IReadOnlyList<MetadataDuplicateFilterMode> MetadataDuplicateFilterModes { get; } =
@@ -247,6 +251,7 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
                 OnPropertyChanged(nameof(StaleOverrideSummary));
                 ToggleMetadataDuplicateDeferredCommand.NotifyCanExecuteChanged();
                 NotifyRecommendationCommands();
+                CleanupPlans?.UpdateContext(_currentSnapshot, value?.Reviewed);
             }
         }
     }
@@ -513,6 +518,7 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
         }
 
         _currentSnapshot = snapshot;
+        CleanupPlans?.ReconcileAfterSuccessfulScan(snapshot);
         _allMetadataDuplicateGroups = presentation.MetadataGroups;
         ApplyMetadataDuplicateFilter();
         _epubAssessments.ReplaceAll(presentation.EpubAssessments);
@@ -687,6 +693,7 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
         ClearError();
         ReviewedConsolidationRecommendation reviewed = outcome.Reviewed!;
         SelectedMetadataDuplicateGroup.SetReviewed(reviewed);
+        CleanupPlans?.UpdateContext(_currentSnapshot, reviewed);
         _recommendationReviews[new(_currentLibraryUuid!, SelectedMetadataDuplicateGroup.GroupId)] = reviewed;
         RefreshSelectedRecommendationBindings();
         ApplyMetadataDuplicateFilter();
@@ -702,6 +709,7 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
         ReviewedConsolidationRecommendation reviewed = ApplyRecommendationOverrideUseCase.Reset(SelectedMetadataDuplicateGroup.Recommendation);
         _recommendationReviews.Remove(new(_currentLibraryUuid, SelectedMetadataDuplicateGroup.GroupId));
         SelectedMetadataDuplicateGroup.SetReviewed(reviewed);
+        CleanupPlans?.UpdateContext(_currentSnapshot, reviewed);
         ClearError();
         RefreshSelectedRecommendationBindings();
         ApplyMetadataDuplicateFilter();

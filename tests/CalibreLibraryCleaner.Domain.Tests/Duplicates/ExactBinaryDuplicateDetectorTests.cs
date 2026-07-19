@@ -34,8 +34,8 @@ public sealed class ExactBinaryDuplicateDetectorTests
         CalibreBook book = CreateBook(
             1,
             [
-                new BookFormat("EPUB", "Book", "Book.epub", FormatFileStatus.Present, fingerprint),
-                new BookFormat("PDF", "Book", "Book.pdf", FormatFileStatus.Present, fingerprint),
+                Present("EPUB", "Book.epub", fingerprint),
+                Present("PDF", "Book.pdf", fingerprint),
             ]);
 
         ExactBinaryDuplicateGroup group = ExactBinaryDuplicateDetector.Detect([book]).Single();
@@ -90,7 +90,15 @@ public sealed class ExactBinaryDuplicateDetectorTests
         string path,
         FormatFileFingerprint fingerprint) => CreateBook(
         id,
-        [new BookFormat(format, "Book", path, FormatFileStatus.Present, fingerprint)]);
+        [Present(format, path, fingerprint)]);
+
+    private static BookFormat Present(string format, string path, FormatFileFingerprint fingerprint) => new(
+        format,
+        "Book",
+        path,
+        FormatFileStatus.Present,
+        fingerprint,
+        new FormatFileObservation(fingerprint.SizeInBytes, DateTimeOffset.UnixEpoch, DateTimeOffset.UnixEpoch, 0));
 
     private static CalibreBook CreateBook(long id, IEnumerable<BookFormat> formats) => new(
         new CalibreBookId(id),

@@ -7,6 +7,7 @@ using System.Xml.Linq;
 using CalibreLibraryCleaner.Application.Abstractions;
 using CalibreLibraryCleaner.Application.Assessments;
 using CalibreLibraryCleaner.Application.Libraries;
+using CalibreLibraryCleaner.Domain.Libraries;
 using HtmlAgilityPack;
 using Microsoft.Extensions.Logging;
 using VersOne.Epub;

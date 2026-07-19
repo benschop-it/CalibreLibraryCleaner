@@ -167,6 +167,7 @@ public sealed class ExactMetadataDuplicateDetectorTests
             $"Book {id}",
             $"Book {id}/Book.epub",
             FormatFileStatus.Present,
-            new FormatFileFingerprint(id, new Sha256Digest(new string(digestCharacter, 64))))],
+            new FormatFileFingerprint(id, new Sha256Digest(new string(digestCharacter, 64))),
+            new FormatFileObservation(id, DateTimeOffset.UnixEpoch, DateTimeOffset.UnixEpoch, 0))],
         $"Book {id}");
 }

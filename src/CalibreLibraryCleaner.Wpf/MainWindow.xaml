@@ -334,6 +334,175 @@
           </TabControl>
         </Grid>
       </TabItem>
+      <TabItem Header="_Cleanup plans" AutomationProperties.Name="Non-executable cleanup plans">
+        <Grid Margin="8" DataContext="{Binding CleanupPlans}">
+          <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+            <RowDefinition Height="2*" />
+          </Grid.RowDefinitions>
+          <StackPanel Grid.Row="0">
+            <TextBlock Text="Cleanup plans are immutable descriptive artifacts. Approval creates no backup and makes no Calibre change."
+                       FontWeight="Bold"
+                       TextWrapping="Wrap"
+                       AutomationProperties.Name="Cleanup plan safety boundary" />
+            <WrapPanel Margin="0,8,0,4">
+              <Button Margin="0,0,6,0" Padding="8,4" Content="_Generate" Command="{Binding GenerateCommand}" AutomationProperties.HelpText="Generate from the current explicitly reviewed recommendation" />
+              <Button Margin="0,0,6,0" Padding="8,4" Content="_Validate" Command="{Binding ValidateCommand}" />
+              <Button Margin="0,0,6,0" Padding="8,4" Content="_Approve" Command="{Binding ApproveCommand}" AutomationProperties.HelpText="Approve the exact immutable body digest" />
+              <Label Target="{Binding ElementName=RevocationReasonBox}" Content="_Revocation reason:" />
+              <TextBox x:Name="RevocationReasonBox" Width="240" Margin="4,0,6,0" Text="{Binding RevocationReason, UpdateSourceTrigger=PropertyChanged}" />
+              <Button Margin="0,0,6,0" Padding="8,4" Content="_Revoke" Command="{Binding RevokeCommand}" />
+              <Button Margin="0,0,6,0" Padding="8,4" Content="_Export" Command="{Binding ExportCommand}" />
+              <Button Padding="8,4" Content="_Import" Command="{Binding ImportCommand}" />
+            </WrapPanel>
+            <TextBlock Text="{Binding Status}" TextWrapping="Wrap" AutomationProperties.Name="Cleanup plan status" />
+          </StackPanel>
+          <Grid Grid.Row="1" Margin="0,8,0,0">
+            <Grid.ColumnDefinitions><ColumnDefinition Width="2*" /><ColumnDefinition Width="3*" /></Grid.ColumnDefinitions>
+            <GroupBox Header="Plan revisions">
+              <DataGrid ItemsSource="{Binding Plans}" SelectedItem="{Binding SelectedPlan}" AutoGenerateColumns="False" IsReadOnly="True"
+                        EnableRowVirtualization="True" VirtualizingPanel.VirtualizationMode="Recycling"
+                        AutomationProperties.Name="Cleanup plan immutable revisions">
+                <DataGrid.Columns>
+                  <DataGridTextColumn Width="2*" Header="Plan ID" Binding="{Binding PlanId}" />
+                  <DataGridTextColumn Width="70" Header="Revision" Binding="{Binding Revision}" />
+                  <DataGridTextColumn Width="90" Header="State" Binding="{Binding State}" />
+                  <DataGridTextColumn Width="80" Header="Target" Binding="{Binding TargetRecordId}" />
+                  <DataGridTextColumn Width="2*" Header="Approval" Binding="{Binding ApprovalState}" />
+                </DataGrid.Columns>
+              </DataGrid>
+            </GroupBox>
+            <GroupBox Grid.Column="1" Margin="8,0,0,0" Header="Selected plan identity and provenance">
+              <StackPanel Margin="6">
+                <TextBlock Text="{Binding PlanIdentity}" TextWrapping="Wrap" />
+                <TextBlock Margin="0,3,0,0" Text="{Binding PlanTimes}" TextWrapping="Wrap" />
+                <TextBlock Margin="0,3,0,0" Text="{Binding ContentDigest}" TextWrapping="Wrap" AutomationProperties.Name="Canonical immutable body SHA-256" />
+                <TextBlock Margin="0,3,0,0" Text="{Binding SourceIdentity}" TextWrapping="Wrap" />
+                <TextBlock Margin="0,3,0,0" Text="{Binding GroupAndMembers}" TextWrapping="Wrap" />
+                <TextBlock Margin="0,3,0,0" Text="{Binding TargetAndMetadata}" TextWrapping="Wrap" />
+                <TextBlock Margin="0,3,0,0" Text="{Binding ProvenanceSummary}" TextWrapping="Wrap" />
+                <TextBlock Margin="0,3,0,0" Text="{Binding OverrideSummary}" TextWrapping="Wrap" />
+                <TextBlock Margin="0,3,0,0" Text="{Binding ApprovalSummary}" TextWrapping="Wrap" />
+                <TextBlock Margin="0,3,0,0" Text="{Binding RevocationSummary}" TextWrapping="Wrap" />
+              </StackPanel>
+            </GroupBox>
+          </Grid>
+          <TabControl Grid.Row="2" Margin="0,8,0,0">
+            <TabItem Header="_Retentions">
+              <DataGrid ItemsSource="{Binding FormatRetentions}" AutoGenerateColumns="False" IsReadOnly="True" EnableRowVirtualization="True">
+                <DataGrid.Columns>
+                  <DataGridTextColumn Width="80" Header="Format" Binding="{Binding Format}" />
+                  <DataGridTextColumn Width="80" Header="Source" Binding="{Binding SourceRecordId}" />
+                  <DataGridTextColumn Width="80" Header="Target" Binding="{Binding TargetRecordId}" />
+                  <DataGridTextColumn Width="2*" Header="Source relative path" Binding="{Binding SourcePath}" />
+                  <DataGridTextColumn Width="100" Header="Length" Binding="{Binding Length}" />
+                  <DataGridTextColumn Width="3*" Header="Expected SHA-256" Binding="{Binding Sha256}" />
+                  <DataGridTextColumn Width="150" Header="Retention mode" Binding="{Binding Mode}" />
+                  <DataGridTextColumn Width="3*" Header="Preconditions" Binding="{Binding Preconditions}" />
+                </DataGrid.Columns>
+              </DataGrid>
+            </TabItem>
+            <TabItem Header="Format _removals">
+              <DataGrid ItemsSource="{Binding FormatRemovals}" AutoGenerateColumns="False" IsReadOnly="True" EnableRowVirtualization="True">
+                <DataGrid.Columns>
+                  <DataGridTextColumn Width="80" Header="Record" Binding="{Binding RecordId}" />
+                  <DataGridTextColumn Width="80" Header="Format" Binding="{Binding Format}" />
+                  <DataGridTextColumn Width="2*" Header="Expected relative path" Binding="{Binding RelativePath}" />
+                  <DataGridTextColumn Width="2*" Header="Reviewed classification" Binding="{Binding Reason}" />
+                  <DataGridTextColumn Width="2*" Header="Retained destination" Binding="{Binding RetainedInstruction}" />
+                  <DataGridTextColumn Width="2*" Header="Required backup" Binding="{Binding BackupRequirement}" />
+                  <DataGridCheckBoxColumn Width="100" Header="Byte-identical" Binding="{Binding ByteIdentical}" />
+                </DataGrid.Columns>
+              </DataGrid>
+            </TabItem>
+            <TabItem Header="_Record removals">
+              <DataGrid ItemsSource="{Binding RecordRemovals}" AutoGenerateColumns="False" IsReadOnly="True">
+                <DataGrid.Columns>
+                  <DataGridTextColumn Width="80" Header="Record" Binding="{Binding RecordId}" />
+                  <DataGridTextColumn Width="3*" Header="Backup requirements" Binding="{Binding BackupRequirements}" />
+                  <DataGridTextColumn Width="2*" Header="Preserved contributions" Binding="{Binding RequiredRetentions}" />
+                  <DataGridTextColumn Width="4*" Header="Preconditions" Binding="{Binding Preconditions}" />
+                </DataGrid.Columns>
+              </DataGrid>
+            </TabItem>
+            <TabItem Header="Expected _records">
+              <DataGrid ItemsSource="{Binding ExpectedRecords}" AutoGenerateColumns="False" IsReadOnly="True" EnableRowVirtualization="True">
+                <DataGrid.Columns>
+                  <DataGridTextColumn Width="70" Header="Record" Binding="{Binding RecordId}" />
+                  <DataGridTextColumn Width="2*" Header="Stored title" Binding="{Binding Title}" />
+                  <DataGridTextColumn Width="2*" Header="Stored authors/IDs" Binding="{Binding Authors}" />
+                  <DataGridTextColumn Width="2*" Header="Identifiers" Binding="{Binding Identifiers}" />
+                  <DataGridTextColumn Width="2*" Header="Publication/series" Binding="{Binding Publication}" />
+                  <DataGridTextColumn Width="*" Header="Languages" Binding="{Binding Languages}" />
+                  <DataGridTextColumn Width="*" Header="Cover state" Binding="{Binding Cover}" />
+                  <DataGridTextColumn Width="2*" Header="Managed directory" Binding="{Binding RelativeDirectory}" />
+                </DataGrid.Columns>
+              </DataGrid>
+            </TabItem>
+            <TabItem Header="Expected _files">
+              <DataGrid ItemsSource="{Binding ExpectedFormats}" AutoGenerateColumns="False" IsReadOnly="True" EnableRowVirtualization="True">
+                <DataGrid.Columns>
+                  <DataGridTextColumn Width="70" Header="Record" Binding="{Binding RecordId}" />
+                  <DataGridTextColumn Width="70" Header="Format" Binding="{Binding Format}" />
+                  <DataGridTextColumn Width="*" Header="Stored name" Binding="{Binding StoredName}" />
+                  <DataGridTextColumn Width="2*" Header="Relative path" Binding="{Binding RelativePath}" />
+                  <DataGridTextColumn Width="90" Header="Status" Binding="{Binding Status}" />
+                  <DataGridTextColumn Width="90" Header="Length" Binding="{Binding Length}" />
+                  <DataGridTextColumn Width="3*" Header="SHA-256" Binding="{Binding Sha256}" />
+                  <DataGridTextColumn Width="150" Header="Created UTC" Binding="{Binding CreationTimeUtc}" />
+                  <DataGridTextColumn Width="150" Header="Written UTC" Binding="{Binding LastWriteTimeUtc}" />
+                  <DataGridTextColumn Width="90" Header="Attributes" Binding="{Binding Attributes}" />
+                  <DataGridTextColumn Width="180" Header="Observation source" Binding="{Binding ObservationSourceVersion}" />
+                </DataGrid.Columns>
+              </DataGrid>
+            </TabItem>
+            <TabItem Header="_Backups">
+              <DataGrid ItemsSource="{Binding BackupRequirements}" AutoGenerateColumns="False" IsReadOnly="True" EnableRowVirtualization="True">
+                <DataGrid.Columns>
+                  <DataGridTextColumn Width="2*" Header="Requirement ID" Binding="{Binding Id}" />
+                  <DataGridTextColumn Width="2*" Header="Kind" Binding="{Binding Kind}" />
+                  <DataGridTextColumn Width="80" Header="Record" Binding="{Binding RecordId}" />
+                  <DataGridTextColumn Width="80" Header="Format" Binding="{Binding Format}" />
+                  <DataGridTextColumn Width="2*" Header="Status" Binding="{Binding Status}" />
+                  <DataGridTextColumn Width="4*" Header="Requirement" Binding="{Binding Explanation}" />
+                </DataGrid.Columns>
+              </DataGrid>
+            </TabItem>
+            <TabItem Header="_Issues">
+              <Grid>
+                <Grid.RowDefinitions><RowDefinition Height="*" /><RowDefinition Height="*" /></Grid.RowDefinitions>
+                <DataGrid ItemsSource="{Binding Issues}" AutoGenerateColumns="False" IsReadOnly="True" AutomationProperties.Name="Current cleanup plan blocking errors warnings and information">
+                  <DataGrid.Columns>
+                    <DataGridTextColumn Width="130" Header="Severity" Binding="{Binding Severity}" />
+                    <DataGridTextColumn Width="2*" Header="Code" Binding="{Binding Code}" />
+                    <DataGridTextColumn Width="2*" Header="Subject" Binding="{Binding Subject}" />
+                    <DataGridTextColumn Width="4*" Header="Explanation" Binding="{Binding Explanation}" />
+                  </DataGrid.Columns>
+                </DataGrid>
+                <DataGrid Grid.Row="1" Margin="0,6,0,0" ItemsSource="{Binding GenerationIssues}" AutoGenerateColumns="False" IsReadOnly="True" AutomationProperties.Name="Cleanup plan generation issues when no plan was produced">
+                  <DataGrid.Columns>
+                    <DataGridTextColumn Width="130" Header="Severity" Binding="{Binding Severity}" />
+                    <DataGridTextColumn Width="2*" Header="Code" Binding="{Binding Code}" />
+                    <DataGridTextColumn Width="2*" Header="Subject" Binding="{Binding Subject}" />
+                    <DataGridTextColumn Width="4*" Header="Explanation" Binding="{Binding Explanation}" />
+                  </DataGrid.Columns>
+                </DataGrid>
+              </Grid>
+            </TabItem>
+            <TabItem Header="_Lifecycle">
+              <DataGrid ItemsSource="{Binding LifecycleHistory}" AutoGenerateColumns="False" IsReadOnly="True">
+                <DataGrid.Columns>
+                  <DataGridTextColumn Width="80" Header="Revision" Binding="{Binding Revision}" />
+                  <DataGridTextColumn Width="2*" Header="Transition" Binding="{Binding Transition}" />
+                  <DataGridTextColumn Width="160" Header="Changed UTC" Binding="{Binding ChangedAtUtc}" />
+                  <DataGridTextColumn Width="4*" Header="Audit reason" Binding="{Binding Reason}" />
+                </DataGrid.Columns>
+              </DataGrid>
+            </TabItem>
+          </TabControl>
+        </Grid>
+      </TabItem>
       <TabItem Header="_EPUB assessments" AutomationProperties.Name="EPUB assessments">
         <Grid Margin="8">
           <Grid.RowDefinitions>

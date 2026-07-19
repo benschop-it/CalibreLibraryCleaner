@@ -1,5 +1,10 @@
 using CalibreLibraryCleaner.Application.Abstractions;
 using CalibreLibraryCleaner.Application.Libraries;
+using CalibreLibraryCleaner.Application.Plans;
+using CalibreLibraryCleaner.Application.Recommendations;
+using CalibreLibraryCleaner.Domain.Libraries;
+using CalibreLibraryCleaner.Domain.Plans;
+using CalibreLibraryCleaner.Domain.Recommendations;
 using CalibreLibraryCleaner.Infrastructure.Tests.Fixtures;
 using FluentAssertions;
 using Microsoft.Extensions.DependencyInjection;
@@ -9,6 +14,49 @@ namespace CalibreLibraryCleaner.Infrastructure.Tests.Safety;
 
 public sealed class ReadOnlyLibraryScanSafetyTests
 {
+    [Fact]
+    public async Task CleanupPlanLifecycleAndExternalRoundTripDoNotChangeSyntheticLibrary()
+    {
+        using SyntheticCalibreLibrary library = new();
+        library.AddMetadataBook(1, "Book", ["Author"], ["Author"], [1, 2, 3]);
+        library.AddMetadataBook(2, "BOOK", ["Author"], ["Different sort"], [1, 2, 3]);
+        IReadOnlyList<LibraryEntryState> before = LibraryStateCapture.Capture(library.RootPath);
+        using ServiceProvider provider = TestServices.CreateProvider();
+        LibraryScanOutcome scan = await TestServices.CreateScanUseCase(provider)
+            .ExecuteAsync(library.RootPath, null, CancellationToken.None);
+        LibrarySnapshot analysis = scan.Snapshot!;
+        ConsolidationRecommendation[] recommendations = (await new GenerateConsolidationRecommendationsUseCase(
+            new ConsolidationRecommendationPolicy()).ExecuteAsync(analysis, null, CancellationToken.None)).ToArray();
+        LibrarySnapshot snapshot = new(
+            analysis.Identity, analysis.ScannedAt, analysis.Books, analysis.Findings,
+            analysis.ExactBinaryDuplicateGroups, analysis.ExactMetadataDuplicateGroups, analysis.EpubAssessments, recommendations);
+        ConsolidationRecommendation generated = recommendations.Single();
+        ReviewedConsolidationRecommendation reviewed = ApplyRecommendationOverrideUseCase.Execute(generated, new(
+            generated.ModelVersion, generated.InputVersion, RecommendationReviewStatus.Accepted,
+            provider.GetRequiredService<IClock>().GetUtcNow())).Reviewed!;
+        CleanupPlan valid = new GenerateCleanupPlanUseCase(
+            provider.GetRequiredService<ICleanupPlanIdGenerator>(),
+            provider.GetRequiredService<IClock>()).Execute(snapshot, reviewed).Plan!;
+        CleanupPlan approved = new ApproveCleanupPlanUseCase(provider.GetRequiredService<IClock>()).Execute(valid, snapshot, reviewed).Plan!;
+        using TemporaryDirectory external = new();
+        string artifact = Path.Combine(external.Path, "plan.cleanup-plan.json");
+        ICleanupPlanStore store = provider.GetRequiredService<ICleanupPlanStore>();
+
+        CleanupPlanStoreWriteResult write = await store.WriteAsync(approved, library.RootPath, artifact, CancellationToken.None);
+        CleanupPlanStoreReadResult import = await store.ReadAsync(library.RootPath, artifact, CancellationToken.None);
+
+        write.IsSuccess.Should().BeTrue();
+        import.IsSuccess.Should().BeTrue();
+        import.Plan!.State.Should().Be(CleanupPlanState.Approved);
+        LibraryStateCapture.Capture(library.RootPath)
+            .Should().BeEquivalentTo(before, options => options.WithStrictOrdering());
+        Directory.EnumerateFiles(library.RootPath, "*", SearchOption.AllDirectories)
+            .Should().NotContain(path => path.EndsWith(".cleanup-plan.json", StringComparison.OrdinalIgnoreCase)
+                || path.Contains(".tmp", StringComparison.OrdinalIgnoreCase)
+                || path.Contains("backup", StringComparison.OrdinalIgnoreCase)
+                || path.Contains("lock", StringComparison.OrdinalIgnoreCase));
+    }
+
     [Fact]
     public async Task ValidEpubAssessmentDoesNotChangeSyntheticLibrary()
     {

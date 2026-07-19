@@ -17,3 +17,5 @@ Generate synthetic temporary Calibre-style libraries for empty, valid, binary du
 ## Safety assertions
 
 Analysis must not modify database bytes, file timestamps, names, or contents and must not create files inside the library. Execution tests must prove backup precedes mutation, backup failure prevents mutation, stale preconditions block execution, and verification always occurs.
+
+Milestone 6 tests cover cleanup-plan eligibility failures, no-silent-loss and backup coverage, canonical hashing, immutable lifecycle transitions, approval/revocation binding, staleness, deterministic JSON round trips, malformed/future/unsafe imports, external-only storage, cancellation, architecture boundaries, WPF presentation, and recursive synthetic-library manifests. These tests must not introduce or exercise execution behavior.

@@ -134,6 +134,7 @@ public sealed class DependencyDirectionTests
                 SearchOption.AllDirectories))
                 .Where(path => !path.Contains($"{Path.DirectorySeparatorChar}obj{Path.DirectorySeparatorChar}", StringComparison.Ordinal))
                 .Where(path => !path.Contains($"{Path.DirectorySeparatorChar}Recommendations{Path.DirectorySeparatorChar}", StringComparison.Ordinal))
+                .Where(path => !path.Contains($"{Path.DirectorySeparatorChar}Plans{Path.DirectorySeparatorChar}", StringComparison.Ordinal))
                 .Select(File.ReadAllText));
 
         source.Should().NotContain("FileStream");
@@ -236,7 +237,35 @@ public sealed class DependencyDirectionTests
     }
 
     [Fact]
-    public void MilestoneFiveProductionSourceHasNoFutureMutationFeatures()
+    public void CleanupPlanIntegrationAndInteractionBoundariesRemainConfined()
+    {
+        string domainSource = ReadSource(DomainProject, "Plans");
+        string applicationSource = ReadSource(ApplicationProject, "Plans");
+        string infrastructureSource = ReadSource(InfrastructureProject, "Plans");
+        string viewModelSource = ReadSource(WpfProject, "ViewModels");
+        string wpfSource = ReadSource(WpfProject, string.Empty);
+        string nonCompositionWpf = string.Join(Environment.NewLine,
+            Directory.EnumerateFiles(Path.Combine(RepositoryRoot, "src", WpfProject), "*.cs", SearchOption.AllDirectories)
+                .Where(path => !path.EndsWith("App.xaml.cs", StringComparison.Ordinal))
+                .Select(File.ReadAllText));
+
+        domainSource.Should().NotContain("System.Text.Json").And.NotContain("System.IO")
+            .And.NotContain("Microsoft.Data.Sqlite").And.NotContain("System.Windows");
+        applicationSource.Should().NotContain("System.Text.Json").And.NotContain("File.")
+            .And.NotContain("Directory.").And.NotContain("Microsoft.Win32");
+        viewModelSource.Should().NotContain("System.Text.Json").And.NotContain("File.")
+            .And.NotContain("Directory.").And.NotContain("Microsoft.Win32");
+        infrastructureSource.Should().Contain("System.Text.Json").And.Contain("FileStream");
+        nonCompositionWpf.Should().NotContain("CalibreLibraryCleaner.Infrastructure");
+        string upper = (domainSource + applicationSource + infrastructureSource + wpfSource).ToUpperInvariant();
+        upper.Should().NotContain("PROCESSSTARTINFO").And.NotContain("CALIBREDB")
+            .And.NotContain("EXECUTECLEANUP").And.NotContain("SIMULATECLEANUP")
+            .And.NotContain("CREATEBACKUP").And.NotContain("RESTOREBACKUP")
+            .And.NotContain("ACQUIRELOCK");
+    }
+
+    [Fact]
+    public void MilestoneSixProductionSourceHasNoExecutionOrFutureMutationFeatures()
     {
         string source = string.Join(
             Environment.NewLine,
@@ -247,7 +276,12 @@ public sealed class DependencyDirectionTests
         string upper = source.ToUpperInvariant();
 
         upper.Should().NotContain("CALIBREDB");
-        upper.Should().NotContain("CLEANUPPLAN");
+        upper.Should().NotContain("EXECUTECLEANUP");
+        upper.Should().NotContain("SIMULATECLEANUP");
+        upper.Should().NotContain("CREATEBACKUP");
+        upper.Should().NotContain("RESTOREBACKUP");
+        upper.Should().NotContain("ACQUIRELOCK");
+        upper.Should().NotContain("PROCESSSTARTINFO");
         upper.Should().NotContain("PDFPIG");
         upper.Should().NotContain("LEVENSHTEIN");
         upper.Should().NotContain("HTTPCLIENT");

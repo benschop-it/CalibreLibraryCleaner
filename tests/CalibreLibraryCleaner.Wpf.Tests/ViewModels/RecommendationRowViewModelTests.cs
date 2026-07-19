@@ -14,7 +14,7 @@ public sealed class RecommendationRowViewModelTests
     public void RowDisplaysGeneratedEvidenceAndKeepsReviewedStateSeparate()
     {
         FormatFileFingerprint fingerprint = new(10, new(new string('a', 64)));
-        CalibreBook first = Book(1, [new("PDF", "book", "one.pdf", FormatFileStatus.Present, fingerprint)], new(hasCover: true, languages: ["eng"]));
+        CalibreBook first = Book(1, [Present("PDF", "one.pdf", fingerprint)], new(hasCover: true, languages: ["eng"]));
         CalibreBook second = Book(2, [], new(languages: ["eng"]));
         CalibreBook[] books = [first, second];
         ExactMetadataDuplicateGroup group = ExactMetadataDuplicateDetector.Detect(books).Single();
@@ -44,7 +44,7 @@ public sealed class RecommendationRowViewModelTests
     {
         FormatFileFingerprint fingerprint = new(10, new(new string('a', 64)));
         CalibreBook[] books = [
-            Book(1, [new("PDF", "book", "one.pdf", FormatFileStatus.Present, fingerprint)], new(languages: ["eng"])),
+            Book(1, [Present("PDF", "one.pdf", fingerprint)], new(languages: ["eng"])),
             Book(2, [], new(languages: ["eng"])),
         ];
         ExactMetadataDuplicateGroup group = ExactMetadataDuplicateDetector.Detect(books).Single();
@@ -112,4 +112,12 @@ public sealed class RecommendationRowViewModelTests
         formats,
         $"Book ({id})",
         metadata);
+
+    private static BookFormat Present(string format, string path, FormatFileFingerprint fingerprint) => new(
+        format,
+        "book",
+        path,
+        FormatFileStatus.Present,
+        fingerprint,
+        new FormatFileObservation(fingerprint.SizeInBytes, DateTimeOffset.UnixEpoch, DateTimeOffset.UnixEpoch, 0));
 }

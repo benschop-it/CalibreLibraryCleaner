@@ -63,6 +63,7 @@ public sealed class LibrarySnapshotTests
             "Book",
             "Author/Book/Book.epub",
             FormatFileStatus.Present,
-            new FormatFileFingerprint(4, new Sha256Digest(new string('a', 64))))],
+            new FormatFileFingerprint(4, new Sha256Digest(new string('a', 64))),
+            new FormatFileObservation(4, DateTimeOffset.UnixEpoch, DateTimeOffset.UnixEpoch, 0))],
         "Author/Book");
 }

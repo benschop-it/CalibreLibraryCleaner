@@ -203,7 +203,13 @@ public sealed class RecommendationJsonTests
     private static RecommendationReviewExportDocument Document(string relativePath = "Author/Book (1)/book.pdf")
     {
         FormatFileFingerprint fingerprint = new(5, new(new string('a', 64)));
-        CalibreBook first = new(new(1), "Shared", "Author", [new(new(1), "Author", "Author")], [], [new BookFormat("PDF", "book", relativePath, FormatFileStatus.Present, fingerprint)], "Author/Book (1)");
+        CalibreBook first = new(new(1), "Shared", "Author", [new(new(1), "Author", "Author")], [], [new BookFormat(
+            "PDF",
+            "book",
+            relativePath,
+            FormatFileStatus.Present,
+            fingerprint,
+            new FormatFileObservation(fingerprint.SizeInBytes, DateTimeOffset.UnixEpoch, DateTimeOffset.UnixEpoch, 0))], "Author/Book (1)");
         CalibreBook second = new(new(2), "Shared", "Author", [new(new(2), "Author", "Author")], [], [], "Author/Book (2)");
         CalibreBook[] books = [first, second];
         ExactMetadataDuplicateGroup group = ExactMetadataDuplicateDetector.Detect(books).Single();
