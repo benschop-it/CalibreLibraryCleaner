@@ -1205,12 +1205,13 @@ shell invocation, broader version range, or rollback implementation.
 ## Progress
 
 Implementation started on 2026-07-19. The pre-change baseline passed all 288
-tests. Work is being delivered in the Domain, Application, Infrastructure, and
-WPF increments below; the optional exact-Calibre integration suite remains
-separately gated and must never use a user library.
+tests. The Domain, Application, Infrastructure, WPF, and automated-test
+increments are implemented; the optional exact-Calibre integration suite
+remains separately gated and must never use a user library.
 
-Safety-critical post-implementation review on 2026-07-24 identified a focused
-hardening increment before disposable-library qualification:
+Safety-critical post-implementation review on 2026-07-24 identified and
+completed a focused hardening increment before disposable-library
+qualification:
 
 - bind local confirmation and durable audit state to the canonical library root
   and deterministic operation graph, not only the library UUID and plan digest;
@@ -1227,13 +1228,16 @@ hardening increment before disposable-library qualification:
 - give Calibre a fixed minimal environment rather than inheriting arbitrary
   parent-process variables.
 
-The exact-version profile remains disabled while these corrections are made and
-until the opt-in Calibre 9.11.0 suite passes afterward.
+The implementation and safety-hardening corrections were committed in
+`607a829` (`Implement Milestone 7 safe Calibre execution`). Repository
+line-ending policy and normalization were committed afterward; the handoff
+baseline is `12871b7`. The exact-version profile remains disabled until the
+opt-in Calibre 9.11.0 suite passes against a caller-marked disposable test root.
 
 - [x] Read root and nested agent instructions and `PLANS.md`.
 - [x] Read all requested product, requirements, architecture, domain, algorithm,
   safety, testing, roadmap, and workflow documentation.
-- [x] Read accepted ADRs `0001` through `0006`.
+- [x] Read accepted ADRs `0001` through `0007`.
 - [x] Read completed Milestone 0 through Milestone 6 execution plans.
 - [x] Inspect current production implementation, tests, project dependencies,
   and working-tree state.
@@ -1247,12 +1251,37 @@ until the opt-in Calibre 9.11.0 suite passes afterward.
 - [x] Implement Infrastructure lease, backup, process, journal, and history
   boundaries.
 - [x] Implement the WPF execution workspace.
+- [x] Complete the safety-critical hardening increment: canonical root/graph
+  confirmation binding, per-command full preflight, application-local recovery
+  guard, terminal journal/summary agreement, executable and backup-file
+  substitution resistance, reparse-point hardening, minimal child-process
+  environment, and fail-closed cover handling.
 - [x] Pass Domain, Application, controlled-executable Infrastructure,
   architecture, and WPF tests.
 - [ ] Run the opt-in exact-version real-Calibre test. It is implemented but was
   skipped because `CALIBRE_TEST_EXE` and `CALIBRE_TEST_ROOT` were not supplied;
   the runtime profile therefore remains disabled by default.
 - [x] Complete diff and safety review.
+- [x] Create `docs/handoffs/milestone-7-handoff.md` with the self-contained
+  implementation state and continuation instructions.
+
+Current verification on 2026-07-24:
+
+- an isolated `dotnet restore --configfile .nuget-verification.config`
+  using only `https://api.nuget.org/v3/index.json` succeeded;
+- `dotnet build --no-restore` then succeeded with zero warnings and errors;
+- `dotnet test --no-build` passed 344 tests, failed zero, and skipped the one
+  opt-in real-Calibre test;
+- `dotnet format style --verify-no-changes --no-restore` and
+  `dotnet format analyzers --verify-no-changes --no-restore` succeeded;
+- the unisolated build fails with `NU1507` because this machine contributes nine
+  global NuGet feeds while central package management and warnings-as-errors are
+  enabled; and
+- full whitespace verification remains blocked in this checkout because
+  tracked files declared as CRLF are physically present as LF or mixed endings.
+  The Git index is normalized and a fresh local clone was verified to apply the
+  attributes correctly, so this is a checkout/formatter issue rather than a
+  Milestone 7 semantic test failure.
 
 ## Final outcome
 
