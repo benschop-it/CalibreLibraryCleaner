@@ -22,6 +22,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "CalibreLibraryCleaner.Archi
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "CalibreLibraryCleaner.Wpf.Tests", "tests\CalibreLibraryCleaner.Wpf.Tests\CalibreLibraryCleaner.Wpf.Tests.csproj", "{D1F2E3A4-B5C6-47D8-90E1-F2A3B4C5D6E7}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "CalibreLibraryCleaner.TestCalibre", "tests\CalibreLibraryCleaner.TestCalibre\CalibreLibraryCleaner.TestCalibre.csproj", "{C7A6B4E2-9D10-4F28-A61B-5E3C8D7F9021}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -140,6 +142,18 @@ Global
 		{D1F2E3A4-B5C6-47D8-90E1-F2A3B4C5D6E7}.Release|x64.Build.0 = Release|Any CPU
 		{D1F2E3A4-B5C6-47D8-90E1-F2A3B4C5D6E7}.Release|x86.ActiveCfg = Release|Any CPU
 		{D1F2E3A4-B5C6-47D8-90E1-F2A3B4C5D6E7}.Release|x86.Build.0 = Release|Any CPU
+		{C7A6B4E2-9D10-4F28-A61B-5E3C8D7F9021}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{C7A6B4E2-9D10-4F28-A61B-5E3C8D7F9021}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{C7A6B4E2-9D10-4F28-A61B-5E3C8D7F9021}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{C7A6B4E2-9D10-4F28-A61B-5E3C8D7F9021}.Debug|x64.Build.0 = Debug|Any CPU
+		{C7A6B4E2-9D10-4F28-A61B-5E3C8D7F9021}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{C7A6B4E2-9D10-4F28-A61B-5E3C8D7F9021}.Debug|x86.Build.0 = Debug|Any CPU
+		{C7A6B4E2-9D10-4F28-A61B-5E3C8D7F9021}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{C7A6B4E2-9D10-4F28-A61B-5E3C8D7F9021}.Release|Any CPU.Build.0 = Release|Any CPU
+		{C7A6B4E2-9D10-4F28-A61B-5E3C8D7F9021}.Release|x64.ActiveCfg = Release|Any CPU
+		{C7A6B4E2-9D10-4F28-A61B-5E3C8D7F9021}.Release|x64.Build.0 = Release|Any CPU
+		{C7A6B4E2-9D10-4F28-A61B-5E3C8D7F9021}.Release|x86.ActiveCfg = Release|Any CPU
+		{C7A6B4E2-9D10-4F28-A61B-5E3C8D7F9021}.Release|x86.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
@@ -154,5 +168,6 @@ Global
 		{74936870-7E21-4DB8-8780-B868CE4EA463} = {0AB3BF05-4346-4AA6-1389-037BE0695223}
 		{AEFB612E-64B1-426F-A5F1-D741C046A69C} = {0AB3BF05-4346-4AA6-1389-037BE0695223}
 		{D1F2E3A4-B5C6-47D8-90E1-F2A3B4C5D6E7} = {0AB3BF05-4346-4AA6-1389-037BE0695223}
+		{C7A6B4E2-9D10-4F28-A61B-5E3C8D7F9021} = {0AB3BF05-4346-4AA6-1389-037BE0695223}
 	EndGlobalSection
 EndGlobal

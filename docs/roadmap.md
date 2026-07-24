@@ -34,6 +34,28 @@ Implemented as a separate `cleanup-plan/1.0` artifact with immutable semantic bo
 
 Calibre CLI discovery, verified backups, command execution, post-operation verification, and audit history.
 
+Implemented as a single-plan, serial, fail-closed execution workflow for the
+exact Calibre 9.11.0 Windows compatibility profile. The supported mutation
+mapping is limited to `add_format` additions/replacements and non-permanent
+`remove` of redundant source records, after an exclusive application lease,
+fresh plan revalidation, and a complete independently hash-verified external
+backup. Every mutation uses a direct no-shell process boundary and is followed
+by a fresh semantic scan. Hash-chained journals, recovery-required
+reconciliation, safe-stop semantics, WPF confirmations, progress, and durable
+results are included. Automatic rollback, resume, retry, repair, bulk
+execution, metadata transfer, cover replacement, and standalone format removal
+remain unsupported.
+
+Post-implementation hardening binds confirmation to canonical root and operation
+graph, repeats a complete preflight before every command, prevents verified
+executable/backup substitution, and persists an application-local recovery
+guard. Cover-bearing plans are blocked until cover bytes are modeled and can be
+verified exactly.
+
+The exact 9.11.0 runtime profile remains disabled by default until its opt-in
+real-Calibre compatibility suite passes against a caller-marked disposable
+test root.
+
 ## Milestone 8 — Rollback
 
 Rollback plans, supported restore operations, verification, and history UI.

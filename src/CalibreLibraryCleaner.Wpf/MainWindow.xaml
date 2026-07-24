@@ -503,6 +503,99 @@
           </TabControl>
         </Grid>
       </TabItem>
+      <TabItem Header="Cleanup _execution" AutomationProperties.Name="Safe single-plan Calibre execution">
+        <Grid Margin="8" DataContext="{Binding CleanupExecutions}">
+          <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="2*" />
+            <RowDefinition Height="*" />
+          </Grid.RowDefinitions>
+          <StackPanel Grid.Row="0">
+            <TextBlock FontWeight="Bold" TextWrapping="Wrap"
+                       Text="Milestone 7 can modify this Calibre library. It executes one approved plan through direct supported Calibre commands only, after fresh scans and complete verified external backups. Automatic rollback is not available."
+                       AutomationProperties.Name="Real mutation safety warning" />
+            <TextBlock Margin="0,5,0,0" Text="{Binding LibrarySummary}" TextWrapping="Wrap" />
+            <TextBlock Margin="0,3,0,0" Text="{Binding PlanSummary}" TextWrapping="Wrap" />
+            <TextBlock Margin="0,3,0,0" Text="{Binding PlanDigest}" TextWrapping="Wrap" AutomationProperties.Name="Approved plan canonical SHA-256" />
+            <TextBlock Margin="0,3,0,0" Text="{Binding ImportedApprovalNotice}" FontWeight="Bold" TextWrapping="Wrap" />
+            <TextBlock Margin="0,3,0,0" Text="{Binding CompatibilitySummary}" TextWrapping="Wrap" />
+          </StackPanel>
+          <StackPanel Grid.Row="1" Margin="0,8,0,4">
+            <WrapPanel>
+              <Button Margin="0,0,6,0" Padding="8,4" Content="Choose _backup folder" Command="{Binding ChooseBackupCommand}" />
+              <TextBox Width="420" Margin="0,0,6,0" IsReadOnly="True" Text="{Binding BackupDestination}" AutomationProperties.Name="External verified backup location" />
+              <Button Margin="0,0,6,0" Padding="8,4" Content="_Prepare and preflight" Command="{Binding PrepareCommand}" />
+              <Button Margin="0,0,6,0" Padding="8,4" Content="_Execute one plan" Command="{Binding ExecuteCommand}" />
+              <Button Padding="8,4" Content="{Binding CancelActionText}" Command="{Binding CancelOrSafeStopCommand}" />
+            </WrapPanel>
+            <CheckBox Margin="0,5,0,0" IsChecked="{Binding OtherMutatorsClosed}"
+                      Content="I confirm that Calibre and every other library-mutating tool are closed." />
+            <CheckBox Margin="0,3,0,0" IsChecked="{Binding RecoveryLimitationsAccepted}"
+                      Content="I understand that cancellation is delayed after mutation begins and Milestone 7 cannot automatically roll back or resume." />
+            <ProgressBar Height="16" Margin="0,6,0,0" Minimum="0" Maximum="100" Value="{Binding ProgressPercentage}" />
+            <TextBlock Margin="0,3,0,0" Text="{Binding ProgressMessage}" TextWrapping="Wrap" />
+            <TextBlock Margin="0,3,0,0" Text="{Binding Status}" FontWeight="Bold" TextWrapping="Wrap" />
+            <TextBlock Margin="0,3,0,0" Text="{Binding ResultSummary}" FontWeight="Bold" TextWrapping="Wrap" AutomationProperties.Name="Execution terminal result" />
+            <TextBlock Margin="0,3,0,0" Text="{Binding ArtifactSummary}" TextWrapping="Wrap" />
+          </StackPanel>
+          <TabControl Grid.Row="2" Margin="0,6,0,0">
+            <TabItem Header="Planned _effects">
+              <DataGrid ItemsSource="{Binding Effects}" AutoGenerateColumns="False" IsReadOnly="True"
+                        EnableRowVirtualization="True" AutomationProperties.Name="Formats to add replace and remove and records to remove">
+                <DataGrid.Columns>
+                  <DataGridTextColumn Width="150" Header="Effect" Binding="{Binding Effect}" />
+                  <DataGridTextColumn Width="90" Header="Record" Binding="{Binding RecordId}" />
+                  <DataGridTextColumn Width="90" Header="Format" Binding="{Binding Format}" />
+                  <DataGridTextColumn Width="4*" Header="Exact consequence and supported command behavior" Binding="{Binding Detail}" />
+                </DataGrid.Columns>
+              </DataGrid>
+            </TabItem>
+            <TabItem Header="_Ordered operations">
+              <DataGrid ItemsSource="{Binding Operations}" AutoGenerateColumns="False" IsReadOnly="True" SelectionMode="Single"
+                        EnableRowVirtualization="True" AutomationProperties.Name="Dependency ordered execution operations">
+                <DataGrid.Columns>
+                  <DataGridTextColumn Width="110" Header="Phase" Binding="{Binding Phase}" />
+                  <DataGridTextColumn Width="180" Header="Operation" Binding="{Binding Operation}" />
+                  <DataGridTextColumn Width="80" Header="Target" Binding="{Binding TargetRecordId}" />
+                  <DataGridTextColumn Width="80" Header="Source" Binding="{Binding SourceRecordId}" />
+                  <DataGridTextColumn Width="80" Header="Format" Binding="{Binding Format}" />
+                  <DataGridTextColumn Width="3*" Header="Exact effect" Binding="{Binding Effect}" />
+                  <DataGridTextColumn Width="3*" Header="Dependencies" Binding="{Binding Dependencies}" />
+                </DataGrid.Columns>
+              </DataGrid>
+            </TabItem>
+            <TabItem Header="Preflight and execution _issues">
+              <DataGrid ItemsSource="{Binding Issues}" AutoGenerateColumns="False" IsReadOnly="True"
+                        AutomationProperties.Name="Execution blocking errors warnings and information">
+                <DataGrid.Columns>
+                  <DataGridTextColumn Width="120" Header="Severity" Binding="{Binding Severity}" />
+                  <DataGridTextColumn Width="2*" Header="Code" Binding="{Binding Code}" />
+                  <DataGridTextColumn Width="*" Header="Subject" Binding="{Binding Subject}" />
+                  <DataGridTextColumn Width="4*" Header="Explanation" Binding="{Binding Explanation}" />
+                </DataGrid.Columns>
+              </DataGrid>
+            </TabItem>
+          </TabControl>
+          <GroupBox Grid.Row="3" Margin="0,8,0,0" Header="Execution history">
+            <DockPanel>
+              <Button DockPanel.Dock="Top" HorizontalAlignment="Left" Margin="4" Padding="8,4"
+                      Content="_Refresh history" Command="{Binding RefreshHistoryCommand}" />
+              <DataGrid ItemsSource="{Binding History}" AutoGenerateColumns="False" IsReadOnly="True" EnableRowVirtualization="True">
+                <DataGrid.Columns>
+                  <DataGridTextColumn Width="2*" Header="Execution ID" Binding="{Binding ExecutionId}" />
+                  <DataGridTextColumn Width="130" Header="State" Binding="{Binding State}" />
+                  <DataGridTextColumn Width="130" Header="Disposition" Binding="{Binding Disposition}" />
+                  <DataGridTextColumn Width="150" Header="Failure" Binding="{Binding Failure}" />
+                  <DataGridTextColumn Width="160" Header="Finished UTC" Binding="{Binding FinishedAtUtc}" />
+                  <DataGridCheckBoxColumn Width="100" Header="Mutation began" Binding="{Binding MutationStarted}" />
+                  <DataGridTextColumn Width="3*" Header="Recovery bundle" Binding="{Binding BundlePath}" />
+                </DataGrid.Columns>
+              </DataGrid>
+            </DockPanel>
+          </GroupBox>
+        </Grid>
+      </TabItem>
       <TabItem Header="_EPUB assessments" AutomationProperties.Name="EPUB assessments">
         <Grid Margin="8">
           <Grid.RowDefinitions>

@@ -31,9 +31,28 @@ Back up all formats, cover, exported metadata/OPF where available, original path
 7. Verify metadata, formats, paths, and hashes.
 8. Persist audit result.
 
+Milestone 7 implements this order with two complete pre-mutation scans, a
+write-ahead mutation marker, constructive format operations, an explicit
+destructive gate, record removals last, and a complete read-only scan after every
+Calibre command. A complete scan, lease check, immutable plan/graph check, tool
+identity check, backup recheck, and confirmation check also run immediately
+before every command. The local recovery guard is durable before the first
+mutation marker. Only exact-profile typed `calibredb` operations are allowed.
+Cancellation after mutation starts is a safe-stop request between verified
+operations; the active Calibre process is never killed. Any uncertain partial
+state is durably marked `RecoveryRequired`.
+
+V1 does not hash cover content in the library snapshot. Therefore any plan
+whose involved records report a cover is unsupported and blocks before backup
+or mutation; cover preservation must not be inferred from presence alone.
+
 ## Rollback
 
 Rollback is a first-class verified operation that restores records, metadata, formats, and covers through supported mechanisms. It must not rely only on `.caltrash`.
+
+Rollback execution is not part of Milestone 7. Milestone 7 preserves the
+verified recovery bundle and reports recovery requirements but never restores,
+retries, or resumes automatically.
 
 ## Concurrency
 

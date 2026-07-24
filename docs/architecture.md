@@ -52,6 +52,28 @@ Domain owns immutable cleanup-plan bodies, expected library/record/format state,
 
 Cleanup plans are non-executable data. Milestone 6 introduces no Calibre process, command, backup creator, lock, mutation, simulation, or rollback boundary.
 
+## Safe execution boundary
+
+Milestone 7 keeps cleanup plans immutable and introduces a separate execution
+aggregate. Domain owns lifecycle, operation dependencies, backup-manifest
+values, verification results, and recovery invariants. Application owns live
+preflight, backup sequencing, constructive/destructive gates, cancellation
+policy, and serial orchestration. Infrastructure alone owns Calibre discovery,
+the exact-version typed command mapping, direct process invocation, external
+backup and journal files, execution leases, free-space checks, and crash
+reconciliation. WPF owns explicit confirmation, progress, safe-stop requests,
+and accurate terminal-state presentation.
+
+Every mutation uses direct `calibredb` invocation with a fixed executable and
+argument list. No shell, GUI automation, direct SQLite write, or managed-library
+filesystem write is permitted. Complete fresh read-only scans revalidate the
+plan before every mutation and semantically verify each command. Confirmation
+is bound to the canonical library root and operation graph. An application-local
+recovery guard precedes the first mutation marker, and reconciliation requires
+the terminal journal and immutable summary to agree. Plans with cover-bearing
+records fail closed because V1 does not model cover bytes. Milestone 7 does not
+implement rollback or resume.
+
 ## Errors
 
 Distinguish validation failures, read failures, missing-file findings, malformed-format findings, operation conflicts, process failures, verification failures, and unexpected faults.

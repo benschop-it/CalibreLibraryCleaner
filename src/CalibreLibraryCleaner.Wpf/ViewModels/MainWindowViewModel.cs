@@ -55,7 +55,8 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
         ExportRecommendationsUseCase? exportRecommendations = null,
         IRecommendationExportFilePicker? exportFilePicker = null,
         IClock? clock = null,
-        CleanupPlanWorkspaceViewModel? cleanupPlans = null)
+        CleanupPlanWorkspaceViewModel? cleanupPlans = null,
+        CleanupExecutionWorkspaceViewModel? cleanupExecutions = null)
     {
         _validateLibrary = validateLibrary;
         _scanLibrary = scanLibrary;
@@ -64,6 +65,7 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
         _exportFilePicker = exportFilePicker;
         _clock = clock;
         CleanupPlans = cleanupPlans;
+        CleanupExecutions = cleanupExecutions;
         Books = new ReadOnlyObservableCollection<BookRowViewModel>(_books);
         ExactDuplicateGroups = new ReadOnlyObservableCollection<ExactDuplicateGroupRowViewModel>(_exactDuplicateGroups);
         MetadataDuplicateGroups = new ReadOnlyObservableCollection<MetadataDuplicateGroupRowViewModel>(
@@ -163,6 +165,8 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
     public ReadOnlyObservableCollection<EpubAssessmentFindingRowViewModel> EpubFindings { get; }
 
     public CleanupPlanWorkspaceViewModel? CleanupPlans { get; }
+
+    public CleanupExecutionWorkspaceViewModel? CleanupExecutions { get; }
 
     public IReadOnlyList<EpubFindingFilterMode> EpubFindingFilterModes { get; } = Enum.GetValues<EpubFindingFilterMode>();
 
@@ -519,6 +523,7 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
 
         _currentSnapshot = snapshot;
         CleanupPlans?.ReconcileAfterSuccessfulScan(snapshot);
+        CleanupExecutions?.UpdateSnapshot(snapshot);
         _allMetadataDuplicateGroups = presentation.MetadataGroups;
         ApplyMetadataDuplicateFilter();
         _epubAssessments.ReplaceAll(presentation.EpubAssessments);

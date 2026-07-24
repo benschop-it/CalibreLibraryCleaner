@@ -8,6 +8,7 @@
     <ProjectReference Include="..\..\src\CalibreLibraryCleaner.Application\CalibreLibraryCleaner.Application.csproj" />
     <ProjectReference Include="..\..\src\CalibreLibraryCleaner.Domain\CalibreLibraryCleaner.Domain.csproj" />
     <ProjectReference Include="..\..\src\CalibreLibraryCleaner.Infrastructure\CalibreLibraryCleaner.Infrastructure.csproj" />
+    <ProjectReference Include="..\CalibreLibraryCleaner.TestCalibre\CalibreLibraryCleaner.TestCalibre.csproj" />
   </ItemGroup>
 
   <ItemGroup>

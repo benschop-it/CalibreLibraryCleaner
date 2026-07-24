@@ -41,6 +41,13 @@ Milestone 5 adds stored `BookPublicationMetadata` (publisher, publication date, 
 
 Milestone 6 adds `FormatFileObservation` to present `BookFormat` values and immutable cleanup-plan values under `Domain.Plans`. A cleanup plan has a frozen semantic definition containing expected state, one target/metadata source, final-format retentions, reviewed format removals, non-target record removals, complete declarative backup requirements, and recommendation/review/override provenance. Its canonical SHA-256 covers only that deterministic semantic definition. Lifecycle revisions (`Draft`, `Valid`, `Blocked`, `Approved`, `Stale`, `Revoked`) reuse the same body and digest; operational-content changes require a new plan ID.
 
+Milestone 7 adds a separate immutable execution model under `Domain.Executions`.
+It records a plan/digest-bound confirmation, a deterministic dependency-ordered
+operation graph, verified backup-manifest identity, lifecycle transitions,
+operation status, verification findings, failure classification, mutation
+boundary, and recovery disposition. Cleanup execution never changes the
+Milestone 6 plan body or lifecycle.
+
 ## Invariants
 
 - Record-duplicate groups contain at least two distinct records. Exact binary file groups contain at least two distinct managed files and may occur within one record or across records.
@@ -56,6 +63,13 @@ Milestone 6 adds `FormatFileObservation` to present `BookFormat` values and immu
 - Only `Draft -> Valid|Blocked`, `Valid -> Approved|Stale|Blocked`, and `Approved -> Stale|Revoked` transitions are legal. Blocked, stale, and revoked plan definitions are terminal.
 - Approval binds to the canonical immutable-body digest. Staleness prevents further approval and preserves any prior approval only as audit information.
 - Every involved record requires a metadata backup; every affected format requires file and managed-state backups; reported covers require later resolution/backup; and plan/audit artifacts remain mandatory.
+- An execution cannot cross the mutation boundary without an approved current
+  plan, a held lease, an exact supported tool, two fresh matching scans, and a
+  complete verified backup manifest.
+- Constructive operations precede destructive record removals. Each mutation is
+  serial and must be semantically verified before dependent operations start.
+- Any incomplete or unverifiable execution after the mutation boundary requires
+  recovery and cannot be reported as completed.
 - AI confidence is distinct from deterministic duplicate confidence.
 - Recommendation confidence is distinct from exact-metadata match evidence, exact-binary equality, EPUB assessment status, EPUB quality score, and per-decision strength.
 - A non-identical unassessed same-format conflict has no generated source or exclusion. A proposed redundant record has at least one available format and exact-binary coverage for every available format, and contributes no selection or unresolved/unavailable/separate evidence.

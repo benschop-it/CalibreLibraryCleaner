@@ -1,4 +1,6 @@
+using CalibreLibraryCleaner.Application.Abstractions;
 using CalibreLibraryCleaner.Application.Assessments;
+using CalibreLibraryCleaner.Application.Executions;
 using CalibreLibraryCleaner.Application.Libraries;
 using CalibreLibraryCleaner.Application.Plans;
 using CalibreLibraryCleaner.Application.Recommendations;
@@ -25,6 +27,7 @@ public partial class App : System.Windows.Application
         builder.Services.AddSingleton<ConsolidationRecommendationPolicy>();
         builder.Services.AddSingleton<GenerateConsolidationRecommendationsUseCase>();
         builder.Services.AddSingleton<ScanLibraryUseCase>();
+        builder.Services.AddSingleton<IExecutionLibraryScanner, FullExecutionLibraryScanner>();
         builder.Services.AddSingleton<ExportRecommendationsUseCase>();
         builder.Services.AddSingleton<GenerateCleanupPlanUseCase>();
         builder.Services.AddSingleton<ValidateCleanupPlanUseCase>();
@@ -32,12 +35,25 @@ public partial class App : System.Windows.Application
         builder.Services.AddSingleton<RevokeCleanupPlanUseCase>();
         builder.Services.AddSingleton<ExportCleanupPlanUseCase>();
         builder.Services.AddSingleton<ImportCleanupPlanUseCase>();
+        builder.Services.AddSingleton<PrepareCleanupExecutionUseCase>();
+        builder.Services.AddSingleton<ExecuteApprovedCleanupPlanUseCase>();
+        builder.Services.AddSingleton<IPrepareCleanupExecution>(provider =>
+            provider.GetRequiredService<PrepareCleanupExecutionUseCase>());
+        builder.Services.AddSingleton<IExecuteApprovedCleanupPlan>(provider =>
+            provider.GetRequiredService<ExecuteApprovedCleanupPlanUseCase>());
         builder.Services.AddSingleton(new LibraryAnalysisOptions());
         builder.Services.AddSingleton<ILibraryFolderPicker, OpenFolderDialogLibraryFolderPicker>();
         builder.Services.AddSingleton<IRecommendationExportFilePicker, SaveFileDialogRecommendationExportFilePicker>();
         builder.Services.AddSingleton<ICleanupPlanFilePicker, OpenSaveCleanupPlanFilePicker>();
         builder.Services.AddSingleton<ICleanupPlanConfirmationService, MessageBoxCleanupPlanConfirmationService>();
+        builder.Services.AddSingleton<IExecutionBackupFolderPicker, OpenFolderDialogExecutionBackupFolderPicker>();
+        builder.Services.AddSingleton<MessageBoxCleanupExecutionConfirmationService>();
+        builder.Services.AddSingleton<ICleanupExecutionConfirmationService>(provider =>
+            provider.GetRequiredService<MessageBoxCleanupExecutionConfirmationService>());
+        builder.Services.AddSingleton<IDestructiveExecutionConfirmation>(provider =>
+            provider.GetRequiredService<MessageBoxCleanupExecutionConfirmationService>());
         builder.Services.AddSingleton<CleanupPlanWorkspaceViewModel>();
+        builder.Services.AddSingleton<CleanupExecutionWorkspaceViewModel>();
         builder.Services.AddSingleton<MainWindowViewModel>();
         builder.Services.AddSingleton<MainWindow>();
         _host = builder.Build();

@@ -13,6 +13,7 @@ namespace CalibreLibraryCleaner.Wpf.ViewModels;
 
 public sealed class CleanupPlanWorkspaceViewModel : ObservableObject
 {
+    public event Action<CleanupPlan?, bool>? SelectedPlanChanged;
     private readonly GenerateCleanupPlanUseCase _generate;
     private readonly ValidateCleanupPlanUseCase _validate;
     private readonly ApproveCleanupPlanUseCase _approve;
@@ -77,6 +78,7 @@ public sealed class CleanupPlanWorkspaceViewModel : ObservableObject
                 _selectedValidation = value?.Plan.Validation;
                 RefreshDetails();
                 NotifyCommands();
+                SelectedPlanChanged?.Invoke(value?.Plan, value?.IsImported ?? false);
             }
         }
     }

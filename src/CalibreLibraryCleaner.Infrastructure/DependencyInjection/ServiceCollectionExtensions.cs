@@ -1,5 +1,7 @@
 using CalibreLibraryCleaner.Application.Abstractions;
+using CalibreLibraryCleaner.Infrastructure.Calibre;
 using CalibreLibraryCleaner.Infrastructure.Epub;
+using CalibreLibraryCleaner.Infrastructure.Execution;
 using CalibreLibraryCleaner.Infrastructure.Hashing;
 using CalibreLibraryCleaner.Infrastructure.Paths;
 using CalibreLibraryCleaner.Infrastructure.Plans;
@@ -23,6 +25,16 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<IRecommendationExporter, VersionedJsonRecommendationExporter>();
         services.AddSingleton<ICleanupPlanIdGenerator, SystemCleanupPlanIdGenerator>();
         services.AddSingleton<ICleanupPlanStore, VersionedJsonCleanupPlanStore>();
+        services.AddSingleton(new CalibreExecutionOptions());
+        services.AddSingleton(new ExecutionStorageOptions());
+        services.AddSingleton<DirectCalibreProcessRunner>();
+        services.AddSingleton<ICalibreToolDiscovery, CalibreToolDiscovery>();
+        services.AddSingleton<ICalibreCommandGateway, CalibreCommandGateway>();
+        services.AddSingleton<ICleanupExecutionLease, FileCleanupExecutionLease>();
+        services.AddSingleton<IExecutionBackupStore, FileExecutionBackupStore>();
+        services.AddSingleton<IExecutionJournalStore, JsonLinesExecutionJournalStore>();
+        services.AddSingleton<IExecutionHistoryStore, FileExecutionHistoryStore>();
+        services.AddSingleton<ICleanupExecutionIdGenerator, SystemCleanupExecutionIdGenerator>();
         return services;
     }
 }

@@ -135,6 +135,7 @@ public sealed class DependencyDirectionTests
                 .Where(path => !path.Contains($"{Path.DirectorySeparatorChar}obj{Path.DirectorySeparatorChar}", StringComparison.Ordinal))
                 .Where(path => !path.Contains($"{Path.DirectorySeparatorChar}Recommendations{Path.DirectorySeparatorChar}", StringComparison.Ordinal))
                 .Where(path => !path.Contains($"{Path.DirectorySeparatorChar}Plans{Path.DirectorySeparatorChar}", StringComparison.Ordinal))
+                .Where(path => !path.Contains($"{Path.DirectorySeparatorChar}Executions{Path.DirectorySeparatorChar}", StringComparison.Ordinal))
                 .Select(File.ReadAllText));
 
         source.Should().NotContain("FileStream");
@@ -243,7 +244,6 @@ public sealed class DependencyDirectionTests
         string applicationSource = ReadSource(ApplicationProject, "Plans");
         string infrastructureSource = ReadSource(InfrastructureProject, "Plans");
         string viewModelSource = ReadSource(WpfProject, "ViewModels");
-        string wpfSource = ReadSource(WpfProject, string.Empty);
         string nonCompositionWpf = string.Join(Environment.NewLine,
             Directory.EnumerateFiles(Path.Combine(RepositoryRoot, "src", WpfProject), "*.cs", SearchOption.AllDirectories)
                 .Where(path => !path.EndsWith("App.xaml.cs", StringComparison.Ordinal))
@@ -257,34 +257,71 @@ public sealed class DependencyDirectionTests
             .And.NotContain("Directory.").And.NotContain("Microsoft.Win32");
         infrastructureSource.Should().Contain("System.Text.Json").And.Contain("FileStream");
         nonCompositionWpf.Should().NotContain("CalibreLibraryCleaner.Infrastructure");
-        string upper = (domainSource + applicationSource + infrastructureSource + wpfSource).ToUpperInvariant();
+        string upper = (domainSource + applicationSource + infrastructureSource).ToUpperInvariant();
         upper.Should().NotContain("PROCESSSTARTINFO").And.NotContain("CALIBREDB")
-            .And.NotContain("EXECUTECLEANUP").And.NotContain("SIMULATECLEANUP")
-            .And.NotContain("CREATEBACKUP").And.NotContain("RESTOREBACKUP")
-            .And.NotContain("ACQUIRELOCK");
+            .And.NotContain("RESTOREBACKUP");
     }
 
     [Fact]
-    public void MilestoneSixProductionSourceHasNoExecutionOrFutureMutationFeatures()
+    public void ExecutionCoreRemainsFreeOfProcessFileSystemSqliteJsonAndWpfTypes()
     {
-        string source = string.Join(
-            Environment.NewLine,
-            new[] { DomainProject, ApplicationProject, InfrastructureProject, WpfProject }
-                .SelectMany(project => Directory.EnumerateFiles(Path.Combine(RepositoryRoot, "src", project), "*.cs", SearchOption.AllDirectories))
-                .Where(path => !path.Contains($"{Path.DirectorySeparatorChar}obj{Path.DirectorySeparatorChar}", StringComparison.Ordinal))
-                .Select(File.ReadAllText));
-        string upper = source.ToUpperInvariant();
+        string domainSource = ReadSource(DomainProject, "Executions");
+        string applicationSource = ReadSource(ApplicationProject, "Executions") +
+                                   ReadSource(ApplicationProject, "Abstractions");
 
-        upper.Should().NotContain("CALIBREDB");
-        upper.Should().NotContain("EXECUTECLEANUP");
-        upper.Should().NotContain("SIMULATECLEANUP");
-        upper.Should().NotContain("CREATEBACKUP");
-        upper.Should().NotContain("RESTOREBACKUP");
-        upper.Should().NotContain("ACQUIRELOCK");
-        upper.Should().NotContain("PROCESSSTARTINFO");
-        upper.Should().NotContain("PDFPIG");
-        upper.Should().NotContain("LEVENSHTEIN");
-        upper.Should().NotContain("HTTPCLIENT");
+        domainSource.Should().NotContain("System.IO").And.NotContain("System.Text.Json")
+            .And.NotContain("Process").And.NotContain("Microsoft.Data.Sqlite")
+            .And.NotContain("System.Windows").And.NotContain("calibredb");
+        applicationSource.Should().NotContain("System.IO").And.NotContain("System.Text.Json")
+            .And.NotContain("ProcessStartInfo").And.NotContain("File.")
+            .And.NotContain("Directory.").And.NotContain("Microsoft.Data.Sqlite")
+            .And.NotContain("System.Windows");
+    }
+
+    [Fact]
+    public void CalibreExecutionUsesOneDirectNoShellProcessBoundary()
+    {
+        string infrastructureRoot = Path.Combine(RepositoryRoot, "src", InfrastructureProject);
+        string[] processSources = Directory.EnumerateFiles(infrastructureRoot, "*.cs", SearchOption.AllDirectories)
+            .Where(path => File.ReadAllText(path).Contains("ProcessStartInfo", StringComparison.Ordinal))
+            .ToArray();
+        string runner = File.ReadAllText(Path.Combine(infrastructureRoot, "Calibre", "DirectCalibreProcessRunner.cs"));
+        string allProductionSource = string.Join(Environment.NewLine,
+            new[] { DomainProject, ApplicationProject, InfrastructureProject, WpfProject }
+                .SelectMany(project => Directory.EnumerateFiles(
+                    Path.Combine(RepositoryRoot, "src", project), "*.cs", SearchOption.AllDirectories))
+                .Select(File.ReadAllText));
+
+        processSources.Should().ContainSingle()
+            .Which.Should().EndWith("DirectCalibreProcessRunner.cs");
+        runner.Should().Contain("UseShellExecute = false").And.Contain("ArgumentList.Add")
+            .And.Contain("mayTerminateOnCancellation");
+        allProductionSource.Should().NotContain("UseShellExecute = true")
+            .And.NotContain("cmd.exe").And.NotContain("powershell.exe")
+            .And.NotContain("bash.exe").And.NotContain("/bin/bash");
+    }
+
+    [Fact]
+    public void CalibreMutationMappingIsFixedAndExcludesPermanentOrRollbackCommands()
+    {
+        string gateway = File.ReadAllText(Path.Combine(
+            RepositoryRoot, "src", InfrastructureProject, "Calibre", "CalibreCommandGateway.cs"));
+
+        gateway.Should().Contain("\"add_format\"").And.Contain("\"remove\"")
+            .And.Contain("\"export\"");
+        gateway.Should().NotContain("--permanent").And.NotContain("remove_format")
+            .And.NotContain("restore_database").And.NotContain("backup_metadata")
+            .And.NotContain("shell");
+    }
+
+    [Fact]
+    public void ExecutionUiDoesNotInvokeProcessesOrInfrastructureFileApis()
+    {
+        string viewModels = ReadSource(WpfProject, "ViewModels");
+
+        viewModels.Should().NotContain("CalibreLibraryCleaner.Infrastructure")
+            .And.NotContain("ProcessStartInfo").And.NotContain("System.Diagnostics")
+            .And.NotContain("System.IO").And.NotContain("File.").And.NotContain("Directory.");
     }
 
     private static string ReadSource(string project, string folder)
