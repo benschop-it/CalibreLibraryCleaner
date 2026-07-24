@@ -24,3 +24,9 @@ indent_size = 2
 
 [*.md]
 trim_trailing_whitespace = false
+
+[.gitattributes]
+end_of_line = lf
+
+[.editorconfig]
+end_of_line = lf
