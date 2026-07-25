@@ -8,10 +8,11 @@ using CalibreLibraryCleaner.Infrastructure.Calibre;
 
 namespace CalibreLibraryCleaner.Infrastructure.Execution;
 
-internal sealed class FileCleanupExecutionLease(ExecutionStorageOptions options) : ICleanupExecutionLease
+internal sealed class FileLibraryMutationLease(
+    ExecutionStorageOptions options) : ILibraryMutationLease
 {
-    public async Task<ExecutionLeaseAcquisition> TryAcquireAsync(
-        ExecutionLeaseRequest request,
+    public async Task<LibraryMutationLeaseAcquisition> TryAcquireAsync(
+        LibraryMutationLeaseRequest request,
         CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(request);
@@ -44,13 +45,13 @@ internal sealed class FileCleanupExecutionLease(ExecutionStorageOptions options)
             try
             {
                 byte[] owner = JsonSerializer.SerializeToUtf8Bytes(new LeaseOwner(
-                    request.ExecutionId.ToString(), Environment.ProcessId,
+                    request.OperationId, request.MutationKind, Environment.ProcessId,
                     Environment.ProcessPath ?? string.Empty, request.RequestedAtUtc.ToUniversalTime(),
                     request.LibraryUuid, root));
                 stream.SetLength(0);
                 await stream.WriteAsync(owner, cancellationToken).ConfigureAwait(false);
                 stream.Flush(flushToDisk: true);
-                return new(new Handle(stream, leasePath), []);
+                return new(new Handle(stream, leasePath, request.MutationKind), []);
             }
             catch
             {
@@ -68,22 +69,27 @@ internal sealed class FileCleanupExecutionLease(ExecutionStorageOptions options)
         }
     }
 
-    private static ExecutionLeaseAcquisition Failed(string code, string explanation) => new(null,
+    private static LibraryMutationLeaseAcquisition Failed(string code, string explanation) => new(null,
         [new ExecutionIssue(code, ExecutionIssueSeverity.BlockingError, explanation)]);
 
     private sealed record LeaseOwner(
-        string ExecutionId,
+        string OperationId,
+        LibraryMutationKind MutationKind,
         int ProcessId,
         string ProcessPath,
         DateTimeOffset CreatedAtUtc,
         string LibraryUuid,
         string CanonicalLibraryRoot);
 
-    private sealed class Handle(FileStream stream, string identity) : ICleanupExecutionLeaseHandle
+    private sealed class Handle(
+        FileStream stream,
+        string identity,
+        LibraryMutationKind mutationKind) : ILibraryMutationLeaseHandle
     {
         private FileStream? _stream = stream;
         public string LeaseIdentity { get; } = identity;
         public bool IsHeld => _stream is not null;
+        public LibraryMutationKind MutationKind { get; } = mutationKind;
 
         public async ValueTask DisposeAsync()
         {

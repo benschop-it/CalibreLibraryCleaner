@@ -10,7 +10,7 @@ public sealed class ExecuteApprovedCleanupPlanUseCase(
     IExecutionLibraryScanner scanLibrary,
     ICalibreToolDiscovery toolDiscovery,
     ICalibreCommandGateway commandGateway,
-    ICleanupExecutionLease executionLease,
+    ILibraryMutationLease executionLease,
     IExecutionBackupStore backupStore,
     IExecutionJournalStore journalStore,
     IExecutionHistoryStore historyStore,
@@ -47,14 +47,15 @@ public sealed class ExecuteApprovedCleanupPlanUseCase(
         execution = execution.Transition(CleanupExecutionState.AcquiringLease);
         progress?.Report(new(CleanupExecutionProgressPhase.AcquiringLease, "Acquiring the exclusive application execution lease.", 0,
             execution.Graph.Operations.Count, false));
-        ExecutionLeaseAcquisition acquisition = await executionLease.TryAcquireAsync(new(
-            executionId, request.LibraryRoot, request.Plan.InputIdentity.LibraryUuid, clock.GetUtcNow()), cancellationToken).ConfigureAwait(false);
+        LibraryMutationLeaseAcquisition acquisition = await executionLease.TryAcquireAsync(new(
+            executionId.ToString(), LibraryMutationKind.Cleanup, request.LibraryRoot,
+            request.Plan.InputIdentity.LibraryUuid, clock.GetUtcNow()), cancellationToken).ConfigureAwait(false);
         issues.AddRange(acquisition.Issues);
         if (!acquisition.IsAcquired)
             return Result(executionId, CleanupExecutionState.PreflightFailed, CleanupExecutionDisposition.Failed,
                 CleanupExecutionFailureClassification.Preflight, issues, null, null, null, false);
 
-        await using ICleanupExecutionLeaseHandle lease = acquisition.Lease!;
+        await using ILibraryMutationLeaseHandle lease = acquisition.Lease!;
         IExecutionJournalSession? journal = null;
         ExecutionWorkspace? workspace = null;
         VerifiedBackupManifest? manifest = null;
@@ -532,7 +533,7 @@ public sealed class ExecuteApprovedCleanupPlanUseCase(
         CalibreToolDescriptor expectedTool,
         ExecutionWorkspace workspace,
         VerifiedBackupManifest manifest,
-        ICleanupExecutionLeaseHandle lease,
+        ILibraryMutationLeaseHandle lease,
         IEnumerable<string> processedRetentions,
         IEnumerable<CalibreBookId> removedRecords,
         Sha256Digest unaffectedBaseline,

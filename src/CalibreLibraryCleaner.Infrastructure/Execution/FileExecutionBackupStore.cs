@@ -512,7 +512,9 @@ internal sealed class FileExecutionBackupStore : IExecutionBackupStore
             && pair.First.Format == pair.Second.Format
             && pair.First.RequirementIds.SequenceEqual(pair.Second.RequirementIds));
 
-    private static async Task<VerifiedBackupManifest> ReadManifestAsync(string path, CancellationToken cancellationToken)
+    internal static async Task<VerifiedBackupManifest> ReadManifestAsync(
+        string path,
+        CancellationToken cancellationToken)
     {
         byte[] bytes = await ReadBoundedAsync(path, 64L * 1024 * 1024, cancellationToken).ConfigureAwait(false);
         ManifestDto dto = JsonSerializer.Deserialize<ManifestDto>(bytes, JsonOptions)

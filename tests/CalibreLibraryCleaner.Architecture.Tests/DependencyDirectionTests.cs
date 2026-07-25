@@ -136,6 +136,7 @@ public sealed class DependencyDirectionTests
                 .Where(path => !path.Contains($"{Path.DirectorySeparatorChar}Recommendations{Path.DirectorySeparatorChar}", StringComparison.Ordinal))
                 .Where(path => !path.Contains($"{Path.DirectorySeparatorChar}Plans{Path.DirectorySeparatorChar}", StringComparison.Ordinal))
                 .Where(path => !path.Contains($"{Path.DirectorySeparatorChar}Executions{Path.DirectorySeparatorChar}", StringComparison.Ordinal))
+                .Where(path => !path.Contains($"{Path.DirectorySeparatorChar}Recoveries{Path.DirectorySeparatorChar}", StringComparison.Ordinal))
                 .Select(File.ReadAllText));
 
         source.Should().NotContain("FileStream");
@@ -279,6 +280,37 @@ public sealed class DependencyDirectionTests
     }
 
     [Fact]
+    public void RecoveryCoreAndUiRespectLayerAndAutomationSafetyBoundaries()
+    {
+        string domain = ReadSource(DomainProject, "Recoveries");
+        string application = ReadSource(ApplicationProject, "Recoveries")
+            + ReadSource(ApplicationProject, "Abstractions");
+        string viewModels = ReadSource(WpfProject, "ViewModels");
+        string production = string.Join(Environment.NewLine,
+            new[] { DomainProject, ApplicationProject, InfrastructureProject, WpfProject }
+                .SelectMany(project => Directory.EnumerateFiles(
+                    Path.Combine(RepositoryRoot, "src", project), "*.cs",
+                    SearchOption.AllDirectories))
+                .Select(File.ReadAllText));
+
+        domain.Should().NotContain("System.IO").And.NotContain("System.Text.Json")
+            .And.NotContain("Process").And.NotContain("Microsoft.Data.Sqlite")
+            .And.NotContain("System.Windows").And.NotContain("calibredb")
+            .And.NotContain("Microsoft.Extensions.");
+        application.Should().NotContain("System.IO").And.NotContain("System.Text.Json")
+            .And.NotContain("ProcessStartInfo").And.NotContain("File.")
+            .And.NotContain("Directory.Create").And.NotContain("Directory.Delete")
+            .And.NotContain("Directory.Move").And.NotContain("FileStream")
+            .And.NotContain("Microsoft.Data.Sqlite")
+            .And.NotContain("System.Windows");
+        viewModels.Should().NotContain("CalibreLibraryCleaner.Infrastructure")
+            .And.NotContain("System.IO").And.NotContain("ProcessStartInfo");
+        production.Should().NotContain("AutomaticRollback")
+            .And.NotContain("AutoResume").And.NotContain("RollbackRollback")
+            .And.NotContain("BulkRecovery");
+    }
+
+    [Fact]
     public void CalibreExecutionUsesOneDirectNoShellProcessBoundary()
     {
         string infrastructureRoot = Path.Combine(RepositoryRoot, "src", InfrastructureProject);
@@ -302,14 +334,15 @@ public sealed class DependencyDirectionTests
     }
 
     [Fact]
-    public void CalibreMutationMappingIsFixedAndExcludesPermanentOrRollbackCommands()
+    public void CalibreMutationMappingIsFixedAndExcludesPermanentOrUndocumentedRollbackCommands()
     {
         string gateway = File.ReadAllText(Path.Combine(
             RepositoryRoot, "src", InfrastructureProject, "Calibre", "CalibreCommandGateway.cs"));
 
         gateway.Should().Contain("\"add_format\"").And.Contain("\"remove\"")
-            .And.Contain("\"export\"");
-        gateway.Should().NotContain("--permanent").And.NotContain("remove_format")
+            .And.Contain("\"export\"").And.Contain("\"remove_format\"")
+            .And.Contain("\"set_metadata\"").And.Contain("\"add\"");
+        gateway.Should().NotContain("--permanent")
             .And.NotContain("restore_database").And.NotContain("backup_metadata")
             .And.NotContain("shell");
     }

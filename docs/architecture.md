@@ -74,6 +74,35 @@ the terminal journal and immutable summary to agree. Plans with cover-bearing
 records fail closed because V1 does not model cover bytes. Milestone 7 does not
 implement rollback or resume.
 
+## Verified recovery boundary
+
+Milestone 8 adds a separate recovery aggregate and never rewrites the source
+cleanup plan, execution journal, terminal summary, or original backup.
+Domain owns reconciliation classifications, semantic recovery identities,
+immutable recovery plans, dependency graphs, approval/revocation, execution
+lifecycle, record-ID mappings, and final-verification invariants. Application
+owns three-way reconciliation, plan generation, staleness, the two-backup gate,
+constructive-before-destructive ordering, safe-boundary cancellation, and
+semantic verification.
+
+Infrastructure strictly reads and rehashes Milestone 7 bundles, persists
+versioned recovery plans, creates and independently verifies a new current-state
+backup, stores hash-chained recovery journals and append-only history, and maps
+typed recovery requests onto the existing direct `calibredb` runner. Cleanup
+and recovery share one canonical library-mutation lease key. WPF owns
+single-execution selection, review, individual warning acknowledgement,
+approval, backup selection, destructive-phase confirmation, progress, safe-stop
+requests, ID-mapping display, and accurate terminal outcomes.
+
+Original and current-state backup generations must both verify before the first
+recovery mutation. Constructive commands are verified before the separately
+confirmed destructive phase; every command is followed by a complete fresh
+read-only scan. Changed Calibre numeric IDs are accepted only through a unique
+semantic scan delta and durable mapping. Unexpected current content is retained
+and backed up, restored into a separate record where safe, or blocks automation.
+The exact 9.11.0 recovery capability profile remains disabled by default until
+its opt-in disposable-library qualification passes per capability.
+
 ## Errors
 
 Distinguish validation failures, read failures, missing-file findings, malformed-format findings, operation conflicts, process failures, verification failures, and unexpected faults.

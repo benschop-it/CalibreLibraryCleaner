@@ -50,10 +50,60 @@ or mutation; cover preservation must not be inferred from presence alone.
 
 Rollback is a first-class verified operation that restores records, metadata, formats, and covers through supported mechanisms. It must not rely only on `.caltrash`.
 
-Rollback execution is not part of Milestone 7. Milestone 7 preserves the
-verified recovery bundle and reports recovery requirements but never restores,
-retries, or resumes automatically.
+Milestone 8 implements recovery as a separately generated and explicitly
+approved immutable plan. Eligibility strictly reloads and cross-checks the
+Milestone 7 cleanup plan, hash-chained journal, any journal-proven terminal
+summary, manifest, and every original backup item. Nonterminal source execution
+is recoverable without inventing a summary; an orphan summary without a
+terminal journal event is ignored. A complete fresh read-only scan is reconciled
+against verified pre-state and durable execution progress. Unknown journal
+state, identity mismatch, ambiguity, unsupported capability, or potential
+silent data loss blocks recovery.
+
+Before mutation, recovery creates a distinct versioned backup of every current
+affected record. It contains raw current formats, strict Calibre exports,
+metadata, covers, inventory and fingerprints, the approved recovery plan, and
+new audit copies of the source plan, journal, summary, and original manifest.
+The original Milestone 7 bundle is opened read-only and never changed. Every
+new manifest entry and both manifest hashes are independently reverified.
+Affected semantic inventory and strict Calibre OPF exports must agree before
+the backup can authorize mutation.
+
+Recovery then executes in this order:
+
+1. Hold the shared cleanup/recovery lease and repeat source, tool, plan, and
+   current-state checks.
+2. Create and verify the current-state backup.
+3. Apply constructive operations serially through typed Calibre commands.
+4. Rescan after every command and verify restored hashes and semantic identity.
+5. Verify all constructive and preservation expectations.
+6. Obtain a separate confirmation bound to the exact destructive graph.
+7. Apply approved destructive operations last, without automatic retry.
+8. Perform final semantic verification, including unrelated and preserved data.
+9. Finalize every scan-discovered record-ID mapping with the verified formats
+   and identifiers, then persist the terminal journal, history, and resolution
+   link.
+
+An unplanned format on an affected record, collateral affected-record metadata
+change, preservation mismatch, or unrelated-record change blocks semantic
+success. A process exit code of zero records transport success only; every
+mutation still requires a fresh full read-only scan and semantic verification.
+
+Cancellation before mutation is immediate. During backup it prevents mutation.
+After mutation begins it is a safe-stop request honored only after the active
+Calibre process finishes and its effect is scanned. Recovery never kills a
+mutation process, resumes automatically, retries destructive work, or performs
+a rollback of a rollback. `Recovered` requires final semantic success;
+constructive partial results report `PartiallyRecovered`, final mismatch reports
+`VerificationFailed`, and destructive or indeterminate failure reports
+`ManualInterventionRequired`.
+
+Cover restoration and every exact Calibre mutation capability remain disabled
+unless separately qualified. The production 9.11.0 recovery profile is
+therefore fail-closed by default.
 
 ## Concurrency
 
-Only one cleanup operation may execute at a time. Warn the user not to run other library-mutating operations concurrently.
+Only one cleanup or recovery operation may hold the shared library-mutation
+lease at a time. Warn the user not to run Calibre or other library-mutating
+tools concurrently.

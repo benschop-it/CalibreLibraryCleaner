@@ -76,6 +76,12 @@ internal sealed partial class CalibreToolDiscovery(
                 ["remove-help"] = ["remove", "--help"],
                 ["export-help"] = ["export", "--help"],
             };
+            if (options.IsValidatedRecoveryProfileEnabled)
+            {
+                probes.Add("add-help", ["add", "--help"]);
+                probes.Add("set-metadata-help", ["set_metadata", "--help"]);
+                probes.Add("remove-format-help", ["remove_format", "--help"]);
+            }
             Dictionary<string, string> help = new(StringComparer.Ordinal);
             foreach ((string name, string[] arguments) in probes)
             {
@@ -95,6 +101,12 @@ internal sealed partial class CalibreToolDiscovery(
                 || !ContainsAll(help.GetValueOrDefault("export-help"), "export", "--dont-save-extra-files",
                     "--dont-update-metadata", "--to-dir", "--single-dir"))
                 issues.Add(Block("EXECUTION.CALIBRE_CAPABILITY_UNKNOWN", "The exact required documented Calibre commands and options could not be confirmed."));
+            if (options.IsValidatedRecoveryProfileEnabled
+                && (!ContainsAll(help.GetValueOrDefault("add-help"), "add", "--empty", "--title", "--authors")
+                    || !ContainsAll(help.GetValueOrDefault("set-metadata-help"), "set_metadata", "--field")
+                    || !ContainsAll(help.GetValueOrDefault("remove-format-help"), "remove_format")))
+                issues.Add(Block("RECOVERY.CALIBRE_CAPABILITY_UNKNOWN",
+                    "The exact required recovery commands and options could not be confirmed."));
         }
 
         if (issues.Any(value => value.Severity == ExecutionIssueSeverity.BlockingError)) return new(null, issues);

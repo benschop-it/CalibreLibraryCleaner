@@ -60,6 +60,22 @@ test root.
 
 Rollback plans, supported restore operations, verification, and history UI.
 
+Implemented as a single-execution, explicitly approved, reconciliation-driven
+recovery workflow. It strictly reverifies Milestone 7 source artifacts, performs
+a fresh full scan, generates a canonical immutable recovery plan, preserves or
+blocks on unexpected current data, creates and verifies a separate current-state
+backup, restores constructively before separately confirmed destructive work,
+rescans after every command, verifies the final semantic state, and persists
+hash-chained journals, append-only history, source-resolution links, and changed
+record-ID mappings. Cleanup and recovery share one lease domain. No direct
+database or managed-library filesystem mutation, shell invocation, automatic
+retry, resume, bulk recovery, or rollback-of-rollback is included.
+
+The exact Calibre 9.11.0 recovery mutation capabilities remain disabled by
+default until the opt-in disposable-library qualification passes per
+capability. Unsupported cover restoration and ambiguous or data-losing cases
+remain manual-intervention blockers.
+
 ## Later milestones
 
 PDF analysis, EPUB text fingerprints, optional AI assistance, cover comparison, series normalization, plugins, multi-library comparison, and possible cross-platform UI.

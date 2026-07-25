@@ -20,7 +20,10 @@ if (values.Contains("--help", StringComparer.Ordinal))
         "add_format" => "calibredb add_format [options] id ebook_file --dont-replace",
         "remove" => "calibredb remove [options] ids --permanent",
         "export" => "calibredb export [options] ids --dont-save-extra-files --dont-update-metadata --to-dir --single-dir",
-        _ => "calibredb --with-library export add_format remove",
+        "add" => "calibredb add [options] files --empty --title --authors",
+        "set_metadata" => "calibredb set_metadata [options] id --field",
+        "remove_format" => "calibredb remove_format id formats",
+        _ => "calibredb --with-library export add add_format remove remove_format set_metadata",
     });
     return 0;
 }

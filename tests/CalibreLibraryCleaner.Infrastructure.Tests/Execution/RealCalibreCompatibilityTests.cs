@@ -26,21 +26,35 @@ public sealed class RealCalibreCompatibilityTests
         executable.Should().NotBeNullOrWhiteSpace("both opt-in variables are mandatory");
         parent.Should().NotBeNullOrWhiteSpace("both opt-in variables are mandatory");
         string canonicalExecutable = Path.GetFullPath(executable!);
-        string canonicalParent = Path.GetFullPath(parent!);
+        string canonicalParent = Path.TrimEndingDirectorySeparator(
+            Path.GetFullPath(parent!));
         File.Exists(canonicalExecutable).Should().BeTrue("an explicitly supplied calibredb executable is required");
         Directory.Exists(canonicalParent).Should().BeTrue("an explicitly supplied disposable parent is required");
+        IsPhysicalPath(canonicalParent).Should().BeTrue(
+            "the disposable parent and every ancestor must be physical");
         string tempRoot = Path.TrimEndingDirectorySeparator(Path.GetFullPath(Path.GetTempPath())) + Path.DirectorySeparatorChar;
-        canonicalParent.Should().StartWith(tempRoot, "real-Calibre tests are restricted to the operating-system temporary root");
-        File.Exists(Path.Combine(canonicalParent, ".calibre-library-cleaner-disposable-test-root")).Should().BeTrue(
+        (canonicalParent + Path.DirectorySeparatorChar).Should().StartWith(tempRoot, "real-Calibre tests are restricted to the operating-system temporary root");
+        string marker = Path.Combine(canonicalParent,
+            ".calibre-library-cleaner-disposable-test-root");
+        File.Exists(marker).Should().BeTrue(
             "the caller must place an explicit disposable-root marker");
+        IsPhysicalPath(marker).Should().BeTrue(
+            "the disposable marker must be a physical regular file");
         File.Exists(Path.Combine(canonicalParent, "metadata.db")).Should().BeFalse("a supplied Calibre library is never accepted as a test parent");
-        string testRoot = Path.Combine(canonicalParent, $"calibre-integration-{Guid.NewGuid():N}");
-        Directory.CreateDirectory(testRoot);
-        string library = Path.Combine(testRoot, "library");
-        string config = Path.Combine(testRoot, "config");
-        string external = Path.Combine(testRoot, "external");
+        string testRoot = Path.Combine(canonicalParent,
+            $"calibre-integration-{Guid.NewGuid():N}");
+        string canonicalTestRoot = Path.GetFullPath(testRoot);
+        canonicalTestRoot.Should().StartWith(
+            canonicalParent + Path.DirectorySeparatorChar);
+        Directory.CreateDirectory(canonicalTestRoot);
+        IsPhysicalPath(canonicalTestRoot).Should().BeTrue();
+        string library = Path.Combine(canonicalTestRoot, "library");
+        string config = Path.Combine(canonicalTestRoot, "config");
+        string external = Path.Combine(canonicalTestRoot, "external");
         Directory.CreateDirectory(config);
         Directory.CreateDirectory(external);
+        IsPhysicalPath(config).Should().BeTrue();
+        IsPhysicalPath(external).Should().BeTrue();
         try
         {
             string first = Path.Combine(external, "first.txt");
@@ -49,6 +63,7 @@ public sealed class RealCalibreCompatibilityTests
             await File.WriteAllTextAsync(second, "second disposable record");
             (await RunInitializationAsync(canonicalExecutable, config, ["--with-library", library, "add", first]))
                 .Should().Be(0);
+            IsPhysicalPath(library).Should().BeTrue();
             (await RunInitializationAsync(canonicalExecutable, config, ["--with-library", library, "add", second]))
                 .Should().Be(0);
 
@@ -68,6 +83,8 @@ public sealed class RealCalibreCompatibilityTests
             Sha256Digest firstPdfDigest = Sha256("first-pdf"u8.ToArray());
             (await gateway.AddOrReplaceFormatAsync(new(tool, library, new(1), "PDF", pdf,
                 new(new FileInfo(pdf).Length, firstPdfDigest)), CancellationToken.None)).IsSuccess.Should().BeTrue();
+            (await File.ReadAllBytesAsync(pdf)).Should().Equal(
+                "first-pdf"u8.ToArray());
             LibraryScanOutcome added = await Scanner(provider).ExecuteAsync(library, null, CancellationToken.None);
             added.IsSuccess.Should().BeTrue();
             added.Snapshot!.Books.Single(value => value.Id == new CalibreBookId(1)).Formats
@@ -78,6 +95,8 @@ public sealed class RealCalibreCompatibilityTests
             Sha256Digest replacementPdfDigest = Sha256("replacement-pdf"u8.ToArray());
             (await gateway.AddOrReplaceFormatAsync(new(tool, library, new(1), "PDF", pdf,
                 new(new FileInfo(pdf).Length, replacementPdfDigest)), CancellationToken.None)).IsSuccess.Should().BeTrue();
+            (await File.ReadAllBytesAsync(pdf)).Should().Equal(
+                "replacement-pdf"u8.ToArray());
             LibraryScanOutcome replaced = await Scanner(provider).ExecuteAsync(library, null, CancellationToken.None);
             replaced.Snapshot!.Books.Single(value => value.Id == new CalibreBookId(1)).Formats
                 .Should().Contain(value => value.Format == "PDF"
@@ -90,7 +109,16 @@ public sealed class RealCalibreCompatibilityTests
         }
         finally
         {
-            if (Directory.Exists(testRoot)) Directory.Delete(testRoot, recursive: true);
+            string deleteTarget = Path.GetFullPath(canonicalTestRoot);
+            if (Directory.Exists(deleteTarget)
+                && deleteTarget.StartsWith(
+                    canonicalParent + Path.DirectorySeparatorChar,
+                    StringComparison.OrdinalIgnoreCase)
+                && File.Exists(marker)
+                && IsPhysicalPath(marker)
+                && IsPhysicalPath(deleteTarget)
+                && IsPhysicalTree(deleteTarget))
+                Directory.Delete(deleteTarget, recursive: true);
         }
     }
 
@@ -138,6 +166,65 @@ public sealed class RealCalibreCompatibilityTests
 
     private static ScanLibraryUseCase Scanner(ServiceProvider provider) => provider.GetRequiredService<ScanLibraryUseCase>();
     private static Sha256Digest Sha256(byte[] bytes) => new(Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(bytes)).ToLowerInvariant());
+
+    private static bool IsPhysicalPath(string path)
+    {
+        try
+        {
+            FileSystemInfo? current = File.Exists(path)
+                ? new FileInfo(Path.GetFullPath(path))
+                : new DirectoryInfo(Path.GetFullPath(path));
+            while (current is not null)
+            {
+                if ((current.Attributes & FileAttributes.ReparsePoint) != 0)
+                    return false;
+                current = current switch
+                {
+                    FileInfo file => file.Directory,
+                    DirectoryInfo directory => directory.Parent,
+                    _ => null,
+                };
+            }
+            return true;
+        }
+        catch (Exception exception) when (exception is IOException
+                   or UnauthorizedAccessException or ArgumentException
+                   or NotSupportedException)
+        {
+            return false;
+        }
+    }
+
+    private static bool IsPhysicalTree(string root)
+    {
+        try
+        {
+            Stack<string> pending = new();
+            pending.Push(Path.GetFullPath(root));
+            while (pending.Count > 0)
+            {
+                string directory = pending.Pop();
+                if ((File.GetAttributes(directory) & FileAttributes.ReparsePoint) != 0)
+                    return false;
+                foreach (string entry in Directory.EnumerateFileSystemEntries(
+                             directory, "*", SearchOption.TopDirectoryOnly))
+                {
+                    FileAttributes attributes = File.GetAttributes(entry);
+                    if ((attributes & FileAttributes.ReparsePoint) != 0)
+                        return false;
+                    if ((attributes & FileAttributes.Directory) != 0)
+                        pending.Push(entry);
+                }
+            }
+            return true;
+        }
+        catch (Exception exception) when (exception is IOException
+                   or UnauthorizedAccessException or ArgumentException
+                   or NotSupportedException)
+        {
+            return false;
+        }
+    }
 
     private sealed class RealCalibreFactAttribute : FactAttribute
     {

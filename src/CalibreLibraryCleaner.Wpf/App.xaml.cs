@@ -4,6 +4,7 @@ using CalibreLibraryCleaner.Application.Executions;
 using CalibreLibraryCleaner.Application.Libraries;
 using CalibreLibraryCleaner.Application.Plans;
 using CalibreLibraryCleaner.Application.Recommendations;
+using CalibreLibraryCleaner.Application.Recoveries;
 using CalibreLibraryCleaner.Domain.Recommendations;
 using CalibreLibraryCleaner.Infrastructure.DependencyInjection;
 using CalibreLibraryCleaner.Wpf.Services;
@@ -41,6 +42,26 @@ public partial class App : System.Windows.Application
             provider.GetRequiredService<PrepareCleanupExecutionUseCase>());
         builder.Services.AddSingleton<IExecuteApprovedCleanupPlan>(provider =>
             provider.GetRequiredService<ExecuteApprovedCleanupPlanUseCase>());
+        builder.Services.AddSingleton<ICurrentStateReconciler, CurrentStateReconciler>();
+        builder.Services.AddSingleton<IRecoveryEligibilityValidator, RecoveryEligibilityValidator>();
+        builder.Services.AddSingleton<IRecoveryPlanValidator, RecoveryPlanValidator>();
+        builder.Services.AddSingleton<RecoveryPlanGenerator>();
+        builder.Services.AddSingleton<IRecoveryPlanGenerator>(provider =>
+            provider.GetRequiredService<RecoveryPlanGenerator>());
+        builder.Services.AddSingleton<IRecoveryStateVerifier, RecoveryStateVerifier>();
+        builder.Services.AddSingleton<InspectRecoverySourceExecutionUseCase>();
+        builder.Services.AddSingleton<ReconcileCurrentRecoveryStateUseCase>();
+        builder.Services.AddSingleton<EvaluateRecoveryEligibilityUseCase>();
+        builder.Services.AddSingleton<GenerateRecoveryPlanUseCase>();
+        builder.Services.AddSingleton<ApproveRecoveryPlanUseCase>();
+        builder.Services.AddSingleton<RevokeRecoveryPlanUseCase>();
+        builder.Services.AddSingleton<ExportRecoveryArtifactsUseCase>();
+        builder.Services.AddSingleton<PrepareRecoveryExecutionUseCase>();
+        builder.Services.AddSingleton<ExecuteApprovedRecoveryPlanUseCase>();
+        builder.Services.AddSingleton<IPrepareRecoveryExecution>(provider =>
+            provider.GetRequiredService<PrepareRecoveryExecutionUseCase>());
+        builder.Services.AddSingleton<IExecuteApprovedRecoveryPlan>(provider =>
+            provider.GetRequiredService<ExecuteApprovedRecoveryPlanUseCase>());
         builder.Services.AddSingleton(new LibraryAnalysisOptions());
         builder.Services.AddSingleton<ILibraryFolderPicker, OpenFolderDialogLibraryFolderPicker>();
         builder.Services.AddSingleton<IRecommendationExportFilePicker, SaveFileDialogRecommendationExportFilePicker>();
@@ -52,8 +73,16 @@ public partial class App : System.Windows.Application
             provider.GetRequiredService<MessageBoxCleanupExecutionConfirmationService>());
         builder.Services.AddSingleton<IDestructiveExecutionConfirmation>(provider =>
             provider.GetRequiredService<MessageBoxCleanupExecutionConfirmationService>());
+        builder.Services.AddSingleton<IRecoverySourceFolderPicker, OpenFolderDialogRecoverySourceFolderPicker>();
+        builder.Services.AddSingleton<IRecoveryPlanFilePicker, SaveFileDialogRecoveryPlanFilePicker>();
+        builder.Services.AddSingleton<MessageBoxRecoveryWorkflowConfirmationService>();
+        builder.Services.AddSingleton<IRecoveryWorkflowConfirmationService>(provider =>
+            provider.GetRequiredService<MessageBoxRecoveryWorkflowConfirmationService>());
+        builder.Services.AddSingleton<IDestructiveRecoveryConfirmation>(provider =>
+            provider.GetRequiredService<MessageBoxRecoveryWorkflowConfirmationService>());
         builder.Services.AddSingleton<CleanupPlanWorkspaceViewModel>();
         builder.Services.AddSingleton<CleanupExecutionWorkspaceViewModel>();
+        builder.Services.AddSingleton<RecoveryWorkspaceViewModel>();
         builder.Services.AddSingleton<MainWindowViewModel>();
         builder.Services.AddSingleton<MainWindow>();
         _host = builder.Build();

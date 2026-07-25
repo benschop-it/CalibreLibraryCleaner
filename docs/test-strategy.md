@@ -31,3 +31,33 @@ cancellation, and durable recovery-required results. Journal tests require an
 agreeing immutable terminal summary after mutation, and cover-bearing plans
 must fail closed. Real-Calibre tests are opt-in and create only a caller-supplied
 disposable library; they never discover or use a default/user library.
+
+Milestone 8 adds Domain tests for immutable recovery bodies, canonical hashes,
+dependency gates, lifecycle rules, final-verification invariants, and changed
+record IDs. Application tests use faked ports and mutable synthetic snapshots
+to prove three-way reconciliation, mismatch and unexpected-data
+classification, warning-bound approval, current-backup-before-mutation,
+constructive-before-destructive ordering, safe cancellation, no retry,
+process-success semantic failure, partial recovery, destructive failure, final
+verification, and durable mappings.
+
+Infrastructure recovery tests use temporary directories, synthetic Milestone 7
+bundles, controlled helper executables, strict plan round trips, manifest
+rehashing, source audit copies, append-only history, journal crash/terminal
+reconciliation, shared lease exclusion, and fixed no-shell command arguments.
+Adversarial cases cover source-bundle substitution, orphan terminal summaries,
+nonterminal recovery sources, source and current-backup tampering, reparse
+points, semantic OPF mismatch, journal event ordering, missing or substituted
+final record-ID mappings, collateral metadata changes, unexpected affected
+formats, unrelated-record changes, destructive target drift, nonzero exits,
+post-mutation journal failure, and terminal persistence gaps.
+WPF tests require individual warning acknowledgements and accurate immutable
+approval state. Architecture tests prohibit filesystem/process/JSON/UI leakage
+into recovery core layers, direct alternate process boundaries, shell use, and
+automatic rollback/resume/bulk recovery.
+
+Real-Calibre recovery qualification is opt-in only. It requires an exact
+explicit executable and caller-marked disposable test root and must qualify
+each capability before that capability can be enabled in production. The
+ordinary automated suite never discovers Calibre's default library or accepts a
+production library path.

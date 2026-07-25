@@ -596,6 +596,123 @@
           </GroupBox>
         </Grid>
       </TabItem>
+      <TabItem Header="_Recovery" AutomationProperties.Name="Verified single-execution recovery">
+        <Grid Margin="8" DataContext="{Binding Recoveries}">
+          <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+          </Grid.RowDefinitions>
+          <StackPanel Grid.Row="0">
+            <TextBlock FontWeight="Bold" TextWrapping="Wrap"
+                       Text="Recovery is not a blind inverse. Select one Milestone 7 execution, reconcile it with a fresh read-only scan, review and approve an immutable plan, then create a new verified current-state backup before any Calibre mutation."
+                       AutomationProperties.Name="Recovery safety explanation" />
+            <TextBlock Margin="0,4,0,0" Text="{Binding LibrarySummary}" TextWrapping="Wrap" />
+            <TextBlock Margin="0,2,0,0" Text="{Binding SourceSummary}" TextWrapping="Wrap" />
+            <TextBlock Margin="0,2,0,0" Text="{Binding OriginalBackupStatus}" FontWeight="Bold" TextWrapping="Wrap" />
+            <TextBlock Margin="0,2,0,0" Text="{Binding CurrentBackupStatus}" FontWeight="Bold" TextWrapping="Wrap" />
+            <TextBlock Margin="0,2,0,0" Text="{Binding PlanSummary}" TextWrapping="Wrap"
+                       AutomationProperties.Name="Immutable recovery plan identity and canonical hash" />
+            <TextBlock Margin="0,2,0,0" Text="{Binding CapabilitySummary}" TextWrapping="Wrap" />
+          </StackPanel>
+          <StackPanel Grid.Row="1" Margin="0,8,0,5">
+            <WrapPanel>
+              <Button Margin="0,0,6,0" Padding="8,4" Content="Select _execution bundle" Command="{Binding SelectSourceCommand}" />
+              <TextBox Width="330" Margin="0,0,6,0" IsReadOnly="True" Text="{Binding SourceBundle}"
+                       AutomationProperties.Name="Selected Milestone 7 execution bundle" />
+              <Button Margin="0,0,6,0" Padding="8,4" Content="_Reconcile and plan" Command="{Binding ReconcileAndPlanCommand}" />
+              <Button Margin="0,0,6,0" Padding="8,4" Content="_Approve exact plan" Command="{Binding ApprovePlanCommand}" />
+              <Button Padding="8,4" Content="E_xport plan" Command="{Binding ExportPlanCommand}" />
+            </WrapPanel>
+            <WrapPanel Margin="0,5,0,0">
+              <Button Margin="0,0,6,0" Padding="8,4" Content="Choose current-state _backup folder" Command="{Binding ChooseBackupCommand}" />
+              <TextBox Width="330" Margin="0,0,6,0" IsReadOnly="True" Text="{Binding BackupDestination}"
+                       AutomationProperties.Name="Recovery current-state backup location" />
+              <Button Margin="0,0,6,0" Padding="8,4" Content="_Prepare recovery" Command="{Binding PrepareCommand}" />
+              <Button Margin="0,0,6,0" Padding="8,4" Content="Begin _recovery" Command="{Binding ExecuteCommand}" />
+              <Button Padding="8,4" Content="{Binding CancelActionText}" Command="{Binding CancelOrSafeStopCommand}" />
+            </WrapPanel>
+            <CheckBox Margin="0,5,0,0" IsChecked="{Binding OtherMutatorsClosed}"
+                      Content="I confirm that Calibre and all other cleanup or recovery mutators are closed." />
+            <CheckBox Margin="0,3,0,0" IsChecked="{Binding SafeBoundaryUnderstood}"
+                      Content="I understand that an active Calibre process is never terminated and cancellation after mutation waits for the next verified safe boundary." />
+            <ProgressBar Height="16" Margin="0,5,0,0" Minimum="0" Maximum="100" Value="{Binding ProgressPercent}" />
+            <TextBlock Margin="0,2,0,0" Text="{Binding ProgressMessage}" TextWrapping="Wrap" />
+            <TextBlock Margin="0,2,0,0" Text="{Binding Status}" FontWeight="Bold" TextWrapping="Wrap" />
+            <TextBlock Margin="0,2,0,0" Text="{Binding ResultSummary}" FontWeight="Bold" TextWrapping="Wrap"
+                       AutomationProperties.Name="Recovered partially recovered verification failed or manual intervention result" />
+            <TextBlock Margin="0,2,0,0" Text="{Binding ArtifactStatus}" TextWrapping="Wrap" />
+          </StackPanel>
+          <TabControl Grid.Row="2" Margin="0,6,0,0">
+            <TabItem Header="_Reconciliation">
+              <DataGrid ItemsSource="{Binding ReconciliationRecords}" AutoGenerateColumns="False" IsReadOnly="True"
+                        AutomationProperties.Name="Verified pre-state journal and actual current-state reconciliation">
+                <DataGrid.Columns>
+                  <DataGridTextColumn Width="2*" Header="Logical identity" Binding="{Binding LogicalRecord}" />
+                  <DataGridTextColumn Width="90" Header="Original ID" Binding="{Binding OriginalRecordId}" />
+                  <DataGridTextColumn Width="90" Header="Current ID" Binding="{Binding CurrentRecordId}" />
+                  <DataGridTextColumn Width="3*" Header="Classifications" Binding="{Binding Classifications}" />
+                  <DataGridTextColumn Width="4*" Header="Formats" Binding="{Binding Formats}" />
+                </DataGrid.Columns>
+              </DataGrid>
+            </TabItem>
+            <TabItem Header="_Operations">
+              <DataGrid ItemsSource="{Binding Operations}" AutoGenerateColumns="False" IsReadOnly="True"
+                        AutomationProperties.Name="Dependency ordered constructive then destructive recovery operations">
+                <DataGrid.Columns>
+                  <DataGridTextColumn Width="50" Header="#" Binding="{Binding Order}" />
+                  <DataGridTextColumn Width="105" Header="Phase" Binding="{Binding Phase}" />
+                  <DataGridTextColumn Width="180" Header="Operation" Binding="{Binding Kind}" />
+                  <DataGridTextColumn Width="2*" Header="Logical identity" Binding="{Binding LogicalRecord}" />
+                  <DataGridTextColumn Width="90" Header="Target" Binding="{Binding TargetRecord}" />
+                  <DataGridTextColumn Width="70" Header="Format" Binding="{Binding Format}" />
+                  <DataGridTextColumn Width="2*" Header="Dependencies" Binding="{Binding Dependencies}" />
+                  <DataGridTextColumn Width="90" Header="Risk" Binding="{Binding Risk}" />
+                  <DataGridTextColumn Width="2*" Header="Capability" Binding="{Binding Capability}" />
+                  <DataGridTextColumn Width="4*" Header="Reason" Binding="{Binding Reason}" />
+                </DataGrid.Columns>
+              </DataGrid>
+            </TabItem>
+            <TabItem Header="_Preserved unexpected content">
+              <DataGrid ItemsSource="{Binding PreservedContent}" AutoGenerateColumns="False" IsReadOnly="True"
+                        AutomationProperties.Name="Unexpected current content preserved by the recovery plan">
+                <DataGrid.Columns>
+                  <DataGridTextColumn Width="2*" Header="Logical identity" Binding="{Binding LogicalRecord}" />
+                  <DataGridTextColumn Width="90" Header="Current ID" Binding="{Binding CurrentRecordId}" />
+                  <DataGridTextColumn Width="70" Header="Format" Binding="{Binding Format}" />
+                  <DataGridTextColumn Width="3*" Header="SHA-256" Binding="{Binding Sha256}" />
+                  <DataGridTextColumn Width="100" Header="Bytes" Binding="{Binding SizeInBytes}" />
+                  <DataGridTextColumn Width="4*" Header="Preservation reason" Binding="{Binding Reason}" />
+                </DataGrid.Columns>
+              </DataGrid>
+            </TabItem>
+            <TabItem Header="_Blocking issues and warnings">
+              <DataGrid ItemsSource="{Binding Issues}" AutoGenerateColumns="False" IsReadOnly="True"
+                        AutomationProperties.Name="Separate recovery blockers acknowledgement warnings and information">
+                <DataGrid.Columns>
+                  <DataGridTextColumn Width="130" Header="Severity" Binding="{Binding Severity}" />
+                  <DataGridTextColumn Width="2*" Header="Code" Binding="{Binding Code}" />
+                  <DataGridTextColumn Width="2*" Header="Subject" Binding="{Binding Subject}" />
+                  <DataGridTextColumn Width="5*" Header="Explanation" Binding="{Binding Explanation}" />
+                </DataGrid.Columns>
+              </DataGrid>
+            </TabItem>
+            <TabItem Header="Record-ID _mappings">
+              <DataGrid ItemsSource="{Binding RecordIdMappings}" AutoGenerateColumns="False" IsReadOnly="True"
+                        AutomationProperties.Name="Original cleanup target and recovered Calibre record ID mappings">
+                <DataGrid.Columns>
+                  <DataGridTextColumn Width="2*" Header="Logical identity" Binding="{Binding LogicalRecord}" />
+                  <DataGridTextColumn Width="90" Header="Original ID" Binding="{Binding OriginalRecordId}" />
+                  <DataGridTextColumn Width="110" Header="Cleanup/current ID" Binding="{Binding CurrentRecordId}" />
+                  <DataGridTextColumn Width="100" Header="Recovered ID" Binding="{Binding RecoveredRecordId}" />
+                  <DataGridTextColumn Width="2*" Header="Restored formats" Binding="{Binding RestoredFormats}" />
+                  <DataGridTextColumn Width="3*" Header="Identifiers" Binding="{Binding Identifiers}" />
+                </DataGrid.Columns>
+              </DataGrid>
+            </TabItem>
+          </TabControl>
+        </Grid>
+      </TabItem>
       <TabItem Header="_EPUB assessments" AutomationProperties.Name="EPUB assessments">
         <Grid Margin="8">
           <Grid.RowDefinitions>

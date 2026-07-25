@@ -48,6 +48,26 @@ operation status, verification findings, failure classification, mutation
 boundary, and recovery disposition. Cleanup execution never changes the
 Milestone 6 plan body or lifecycle.
 
+Milestone 8 adds immutable recovery values under `Domain.Recoveries`. A
+`CurrentStateReconciliation` binds verified pre-execution state, durable source
+journal progress, and a fresh actual snapshot. A `RecoveryPlan` binds that
+reconciliation, the source plan/execution/journal/manifest hashes, current
+library identity, capability profile, preservation expectations, dependency
+graph, expected semantic final state, issues, and canonical immutable-body
+digest. Its lifecycle is `Draft -> Valid|Blocked`, `Valid -> Approved|Stale|
+Revoked`, and `Approved -> Stale|Revoked|Completed`; semantic input changes
+require a new recovery-plan ID.
+
+`RecoveryExecution` records the verified current-state manifest, mutation and
+destructive boundaries, per-operation durable status, final semantic
+verification, failure classification, and `RecoveryRecordIdMapping` values.
+Logical recovery identity remains stable when Calibre assigns a new numeric
+record ID. A created record first records its actual scan-discovered numeric
+mapping. After complete final verification, the same mapping is finalized with
+the exact restored formats and verified identifiers. A recovered terminal
+journal is invalid unless every created-record mapping has this matching
+finalized event.
+
 ## Invariants
 
 - Record-duplicate groups contain at least two distinct records. Exact binary file groups contain at least two distinct managed files and may occur within one record or across records.
@@ -70,6 +90,19 @@ Milestone 6 plan body or lifecycle.
   serial and must be semantically verified before dependent operations start.
 - Any incomplete or unverifiable execution after the mutation boundary requires
   recovery and cannot be reported as completed.
+- A recovery mutation cannot start until the immutable source backup and a new
+  complete current-state backup both verify.
+- A destructive recovery operation requires verified constructive and
+  preservation dependencies plus a separate exact destructive-graph
+  confirmation.
+- `Recovered` is unreachable until every recovery expectation is satisfied and
+  final semantic verification passes. Destructive uncertainty requires manual
+  intervention.
+- Unexpected current content is an explicit preservation expectation; it is
+  never discarded by filename, timestamp, size, or numeric record ID.
+- A changed Calibre record ID is valid only when the logical record is uniquely
+  rediscovered, mapped, semantically verified, and finalized in the durable
+  journal without changing its actual numeric identities.
 - AI confidence is distinct from deterministic duplicate confidence.
 - Recommendation confidence is distinct from exact-metadata match evidence, exact-binary equality, EPUB assessment status, EPUB quality score, and per-decision strength.
 - A non-identical unassessed same-format conflict has no generated source or exclusion. A proposed redundant record has at least one available format and exact-binary coverage for every available format, and contributes no selection or unresolved/unavailable/separate evidence.

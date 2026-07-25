@@ -75,20 +75,6 @@ public sealed record RemoveCalibreRecordRequest(
     string LibraryRoot,
     CalibreBookId RecordId);
 
-public sealed record ExecutionLeaseRequest(
-    CleanupExecutionId ExecutionId,
-    string LibraryRoot,
-    string LibraryUuid,
-    DateTimeOffset RequestedAtUtc);
-
-public sealed record ExecutionLeaseAcquisition(
-    ICleanupExecutionLeaseHandle? Lease,
-    IReadOnlyList<ExecutionIssue> Issues)
-{
-    public bool IsAcquired => Lease is not null
-        && Issues.All(value => value.Severity != ExecutionIssueSeverity.BlockingError);
-}
-
 public sealed record BackupDestinationValidation(
     string? CanonicalDestinationIdentity,
     long AvailableBytes,

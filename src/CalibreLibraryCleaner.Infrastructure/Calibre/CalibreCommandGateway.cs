@@ -1,12 +1,14 @@
 using CalibreLibraryCleaner.Application.Abstractions;
 using CalibreLibraryCleaner.Application.Executions;
+using CalibreLibraryCleaner.Application.Recoveries;
+using CalibreLibraryCleaner.Domain.Libraries;
 using CalibreLibraryCleaner.Infrastructure.Execution;
 
 namespace CalibreLibraryCleaner.Infrastructure.Calibre;
 
 internal sealed class CalibreCommandGateway(
     CalibreExecutionOptions options,
-    DirectCalibreProcessRunner processRunner) : ICalibreCommandGateway
+    DirectCalibreProcessRunner processRunner) : ICalibreCommandGateway, IRecoveryCalibreGateway
 {
     public async Task<CalibreCommandResult> ExportRecordAsync(
         ExportCalibreRecordRequest request,
@@ -101,6 +103,123 @@ internal sealed class CalibreCommandGateway(
             [validation.CanonicalLibraryRoot!], false, null, CancellationToken.None).ConfigureAwait(false);
     }
 
+    public async Task<RecoveryCalibreCommandResult> CreateEmptyRecordAsync(
+        CreateRecoveryRecordCommand request,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        if (!Supports(request.Tool, request.Profile, RecoveryCapability.CreateEmptyRecord)
+            || !request.Profile.Supports(RecoveryCapability.FindCreatedRecord))
+            return RecoveryFailed("add-empty", "CALIBRE_RECOVERY_CAPABILITY_DISABLED");
+        ToolBoundaryValidation validation = await ValidateToolAndLibraryAsync(
+            request.Tool, request.LibraryRoot, CalibreExecutionCapability.ExportRecord,
+            cancellationToken).ConfigureAwait(false);
+        await using FileStream? executableLock = validation.ExecutableLock;
+        if (validation.FailureCode is not null)
+            return RecoveryFailed("add-empty", validation.FailureCode);
+        string authors = string.Join(" & ", request.Authors);
+        string[] arguments =
+        [
+            "--with-library", validation.CanonicalLibraryRoot!,
+            "add", "--empty", "--title", request.Title, "--authors", authors,
+        ];
+        CalibreCommandResult result = await processRunner.RunAsync(
+            request.Tool.CanonicalExecutablePath, validation.CanonicalLibraryRoot!, "add-empty",
+            arguments, [validation.CanonicalLibraryRoot!], false, null,
+            CancellationToken.None).ConfigureAwait(false);
+        return Convert(result, TryReadCreatedId(result));
+    }
+
+    public async Task<RecoveryCalibreCommandResult> SetMetadataFieldAsync(
+        SetRecoveryMetadataFieldCommand request,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        RecoveryCapability capability = MetadataCapability(request.Field);
+        if (!Supports(request.Tool, request.Profile, capability))
+            return RecoveryFailed("set_metadata", "CALIBRE_RECOVERY_CAPABILITY_DISABLED");
+        ToolBoundaryValidation validation = await ValidateToolAndLibraryAsync(
+            request.Tool, request.LibraryRoot, CalibreExecutionCapability.ExportRecord,
+            cancellationToken).ConfigureAwait(false);
+        await using FileStream? executableLock = validation.ExecutableLock;
+        if (validation.FailureCode is not null)
+            return RecoveryFailed("set_metadata", validation.FailureCode);
+        string field = MetadataField(request.Field);
+        string separator = request.Field == RecoveryCalibreMetadataField.Authors ? " & " : ",";
+        string value = string.Join(separator, request.Values);
+        string[] arguments =
+        [
+            "--with-library", validation.CanonicalLibraryRoot!,
+            "set_metadata", request.RecordId.Value.ToString(
+                System.Globalization.CultureInfo.InvariantCulture),
+            "--field", $"{field}:{value}",
+        ];
+        return Convert(await processRunner.RunAsync(
+            request.Tool.CanonicalExecutablePath, validation.CanonicalLibraryRoot!, "set_metadata",
+            arguments, [validation.CanonicalLibraryRoot!], false, null,
+            CancellationToken.None).ConfigureAwait(false));
+    }
+
+    public async Task<RecoveryCalibreCommandResult> AddOrReplaceFormatAsync(
+        RestoreRecoveryFormatCommand request,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        RecoveryCapability capability = request.ReplacesExisting
+            ? RecoveryCapability.ReplaceExistingFormat
+            : RecoveryCapability.AddBackedUpFormat;
+        if (!Supports(request.Tool, request.Profile, capability))
+            return RecoveryFailed("add_format", "CALIBRE_RECOVERY_CAPABILITY_DISABLED");
+        AddOrReplaceCalibreFormatRequest command = new(
+            request.Tool, request.LibraryRoot, request.RecordId, request.CanonicalFormat,
+            request.VerifiedOriginalBackupPhysicalIdentity, request.ExpectedFingerprint);
+        CalibreCommandResult result = await AddOrReplaceFormatAsync(command,
+            cancellationToken).ConfigureAwait(false);
+        return Convert(result);
+    }
+
+    public async Task<RecoveryCalibreCommandResult> RemoveFormatAsync(
+        RemoveRecoveryFormatCommand request,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        if (!Supports(request.Tool, request.Profile, RecoveryCapability.RemoveCleanupAddedFormat))
+            return RecoveryFailed("remove_format", "CALIBRE_RECOVERY_CAPABILITY_DISABLED");
+        ToolBoundaryValidation validation = await ValidateToolAndLibraryAsync(
+            request.Tool, request.LibraryRoot, CalibreExecutionCapability.ExportRecord,
+            cancellationToken).ConfigureAwait(false);
+        await using FileStream? executableLock = validation.ExecutableLock;
+        if (validation.FailureCode is not null)
+            return RecoveryFailed("remove_format", validation.FailureCode);
+        string format = request.CanonicalFormat.ToUpperInvariant();
+        if (format.Length == 0 || !format.All(char.IsAsciiLetterOrDigit))
+            return RecoveryFailed("remove_format", "CALIBRE_FORMAT_INVALID");
+        string[] arguments =
+        [
+            "--with-library", validation.CanonicalLibraryRoot!,
+            "remove_format", request.RecordId.Value.ToString(
+                System.Globalization.CultureInfo.InvariantCulture), format,
+        ];
+        return Convert(await processRunner.RunAsync(
+            request.Tool.CanonicalExecutablePath, validation.CanonicalLibraryRoot!, "remove_format",
+            arguments, [validation.CanonicalLibraryRoot!], false, null,
+            CancellationToken.None).ConfigureAwait(false));
+    }
+
+    public async Task<RecoveryCalibreCommandResult> RemoveRecordAsync(
+        RemoveRecoveryRecordCommand request,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        if (!Supports(request.Tool, request.Profile, RecoveryCapability.RemoveCleanupCreatedRecord))
+            return RecoveryFailed("remove", "CALIBRE_RECOVERY_CAPABILITY_DISABLED");
+        RemoveCalibreRecordRequest command = new(
+            request.Tool, request.LibraryRoot, request.RecordId);
+        CalibreCommandResult result = await RemoveRecordAsync(command,
+            cancellationToken).ConfigureAwait(false);
+        return Convert(result);
+    }
+
     private async Task<ToolBoundaryValidation> ValidateToolAndLibraryAsync(
         CalibreToolDescriptor tool,
         string libraryRoot,
@@ -118,7 +237,8 @@ internal sealed class CalibreCommandGateway(
         {
             return FailedValidation("CALIBRE_TOOL_IDENTITY_INVALID");
         }
-        if (!tool.Capabilities.Contains(requiredCapability)
+        if (!options.IsValidatedCompatibilityProfileEnabled
+            || !tool.Capabilities.Contains(requiredCapability)
             || tool.Identity.ProductVersion != options.SupportedVersion
             || tool.Identity.CapabilityProfile != options.CapabilityProfile
             || !string.Equals(toolPath, trustedPath, StringComparison.OrdinalIgnoreCase)
@@ -168,4 +288,68 @@ internal sealed class CalibreCommandGateway(
 
     private static CalibreCommandResult Failed(string command, string code) =>
         new(command, false, null, [], string.Empty, string.Empty, TimeSpan.Zero, code);
+
+    private bool Supports(
+        CalibreToolDescriptor tool,
+        RecoveryCapabilityProfile profile,
+        RecoveryCapability capability) =>
+        options.IsValidatedRecoveryProfileEnabled
+        && profile.ToolIdentity == tool.Identity
+        && profile.ProfileIdentity == $"{options.CapabilityProfile}/recovery/1.0"
+        && profile.Supports(capability)
+        && options.EnabledRecoveryCapabilities.Contains(capability);
+
+    private static RecoveryCapability MetadataCapability(RecoveryCalibreMetadataField field) => field switch
+    {
+        RecoveryCalibreMetadataField.Title => RecoveryCapability.RestoreTitle,
+        RecoveryCalibreMetadataField.Authors => RecoveryCapability.RestoreAuthors,
+        RecoveryCalibreMetadataField.AuthorSort => RecoveryCapability.RestoreAuthorSort,
+        RecoveryCalibreMetadataField.Publisher => RecoveryCapability.RestorePublisher,
+        RecoveryCalibreMetadataField.PublicationDate => RecoveryCapability.RestorePublicationDate,
+        RecoveryCalibreMetadataField.Languages => RecoveryCapability.RestoreLanguages,
+        RecoveryCalibreMetadataField.Identifiers => RecoveryCapability.RestoreIdentifiers,
+        RecoveryCalibreMetadataField.Series => RecoveryCapability.RestoreSeries,
+        RecoveryCalibreMetadataField.SeriesIndex => RecoveryCapability.RestoreSeriesIndex,
+        _ => throw new ArgumentOutOfRangeException(nameof(field)),
+    };
+
+    private static string MetadataField(RecoveryCalibreMetadataField field) => field switch
+    {
+        RecoveryCalibreMetadataField.Title => "title",
+        RecoveryCalibreMetadataField.Authors => "authors",
+        RecoveryCalibreMetadataField.AuthorSort => "author_sort",
+        RecoveryCalibreMetadataField.Publisher => "publisher",
+        RecoveryCalibreMetadataField.PublicationDate => "pubdate",
+        RecoveryCalibreMetadataField.Languages => "languages",
+        RecoveryCalibreMetadataField.Identifiers => "identifiers",
+        RecoveryCalibreMetadataField.Series => "series",
+        RecoveryCalibreMetadataField.SeriesIndex => "series_index",
+        _ => throw new ArgumentOutOfRangeException(nameof(field)),
+    };
+
+    private static RecoveryCalibreCommandResult Convert(
+        CalibreCommandResult result,
+        CalibreBookId? createdId = null) =>
+        new(result.CommandKind, result.Started, result.ExitCode,
+            result.SanitizedArguments, result.SanitizedStandardOutput,
+            result.SanitizedStandardError, result.Duration, createdId, result.FailureCode);
+
+    private static RecoveryCalibreCommandResult RecoveryFailed(string command, string code) =>
+        new(command, false, null, [], string.Empty, string.Empty, TimeSpan.Zero,
+            FailureCode: code);
+
+    private static CalibreBookId? TryReadCreatedId(CalibreCommandResult result)
+    {
+        if (!result.IsSuccess) return null;
+        string text = result.SanitizedStandardOutput + "\n" + result.SanitizedStandardError;
+        System.Text.RegularExpressions.Match match =
+            System.Text.RegularExpressions.Regex.Match(text,
+                @"\b(?:book\s+ids?|id)\D{0,16}(\d+)\b",
+                System.Text.RegularExpressions.RegexOptions.IgnoreCase
+                | System.Text.RegularExpressions.RegexOptions.CultureInvariant);
+        return match.Success && long.TryParse(match.Groups[1].Value,
+            System.Globalization.NumberStyles.None,
+            System.Globalization.CultureInfo.InvariantCulture, out long id) && id > 0
+            ? new(id) : null;
+    }
 }

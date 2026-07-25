@@ -18,15 +18,20 @@ public sealed class ExecutionLeaseAndJournalTests
         using TemporaryDirectory temporary = new();
         InfrastructureExecutionFixture fixture = InfrastructureExecutionTestData.Create(temporary.Path);
         using ServiceProvider provider = Provider(temporary.Path);
-        ICleanupExecutionLease lease = provider.GetRequiredService<ICleanupExecutionLease>();
-        ExecutionLeaseRequest firstRequest = new(new(Guid.NewGuid()), fixture.LibraryRoot,
+        ILibraryMutationLease lease = provider.GetRequiredService<ILibraryMutationLease>();
+        LibraryMutationLeaseRequest firstRequest = new(Guid.NewGuid().ToString(),
+            LibraryMutationKind.Cleanup, fixture.LibraryRoot,
             fixture.Plan.InputIdentity.LibraryUuid, DateTimeOffset.UtcNow);
-        ExecutionLeaseRequest secondRequest = firstRequest with { ExecutionId = new(Guid.NewGuid()) };
+        LibraryMutationLeaseRequest secondRequest = firstRequest with
+        {
+            OperationId = Guid.NewGuid().ToString(),
+            MutationKind = LibraryMutationKind.Recovery,
+        };
 
-        ExecutionLeaseAcquisition first = await lease.TryAcquireAsync(firstRequest, CancellationToken.None);
-        ExecutionLeaseAcquisition concurrent = await lease.TryAcquireAsync(secondRequest, CancellationToken.None);
+        LibraryMutationLeaseAcquisition first = await lease.TryAcquireAsync(firstRequest, CancellationToken.None);
+        LibraryMutationLeaseAcquisition concurrent = await lease.TryAcquireAsync(secondRequest, CancellationToken.None);
         await first.Lease!.DisposeAsync();
-        ExecutionLeaseAcquisition afterRelease = await lease.TryAcquireAsync(secondRequest, CancellationToken.None);
+        LibraryMutationLeaseAcquisition afterRelease = await lease.TryAcquireAsync(secondRequest, CancellationToken.None);
 
         first.IsAcquired.Should().BeTrue();
         concurrent.IsAcquired.Should().BeFalse();
@@ -52,8 +57,9 @@ public sealed class ExecutionLeaseAndJournalTests
         }
         using ServiceProvider provider = Provider(Path.Combine(temporary.Path, "storage"));
 
-        ExecutionLeaseAcquisition result = await provider.GetRequiredService<ICleanupExecutionLease>()
-            .TryAcquireAsync(new(new(Guid.NewGuid()), alias, fixture.Plan.InputIdentity.LibraryUuid,
+        LibraryMutationLeaseAcquisition result = await provider.GetRequiredService<ILibraryMutationLease>()
+            .TryAcquireAsync(new(Guid.NewGuid().ToString(), LibraryMutationKind.Cleanup,
+                alias, fixture.Plan.InputIdentity.LibraryUuid,
                 DateTimeOffset.UtcNow), CancellationToken.None);
 
         result.IsAcquired.Should().BeFalse();

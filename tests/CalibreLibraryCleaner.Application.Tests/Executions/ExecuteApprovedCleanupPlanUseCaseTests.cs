@@ -121,15 +121,15 @@ public sealed class ExecuteApprovedCleanupPlanUseCaseTests
         CleanupExecutionResult result = await harness.ExecuteAsync();
 
         result.State.Should().Be(CleanupExecutionState.PreflightFailed);
-        A.CallTo(() => harness.Lease.TryAcquireAsync(A<ExecutionLeaseRequest>._, A<CancellationToken>._)).MustNotHaveHappened();
+        A.CallTo(() => harness.Lease.TryAcquireAsync(A<LibraryMutationLeaseRequest>._, A<CancellationToken>._)).MustNotHaveHappened();
     }
 
     [Fact]
     public async Task LeaseContentionFailsBeforeWorkspaceBackupScanOrMutation()
     {
         Harness harness = Harness.Success();
-        A.CallTo(() => harness.Lease.TryAcquireAsync(A<ExecutionLeaseRequest>._, A<CancellationToken>._))
-            .Returns(Task.FromResult(new ExecutionLeaseAcquisition(null,
+        A.CallTo(() => harness.Lease.TryAcquireAsync(A<LibraryMutationLeaseRequest>._, A<CancellationToken>._))
+            .Returns(Task.FromResult(new LibraryMutationLeaseAcquisition(null,
                 [new("EXECUTION.LEASE_HELD", ExecutionIssueSeverity.BlockingError, "Held.")])));
 
         CleanupExecutionResult result = await harness.ExecuteAsync();
@@ -233,7 +233,7 @@ public sealed class ExecuteApprovedCleanupPlanUseCaseTests
             Scanner = A.Fake<IExecutionLibraryScanner>();
             Tools = A.Fake<ICalibreToolDiscovery>();
             Commands = A.Fake<ICalibreCommandGateway>();
-            Lease = A.Fake<ICleanupExecutionLease>();
+            Lease = A.Fake<ILibraryMutationLease>();
             Backup = A.Fake<IExecutionBackupStore>();
             Journals = A.Fake<IExecutionJournalStore>();
             Journal = A.Fake<IExecutionJournalSession>();
@@ -241,7 +241,7 @@ public sealed class ExecuteApprovedCleanupPlanUseCaseTests
             ICleanupExecutionIdGenerator ids = A.Fake<ICleanupExecutionIdGenerator>();
             IDestructiveExecutionConfirmation destructive = A.Fake<IDestructiveExecutionConfirmation>();
             IClock clock = A.Fake<IClock>();
-            ICleanupExecutionLeaseHandle handle = A.Fake<ICleanupExecutionLeaseHandle>();
+            ILibraryMutationLeaseHandle handle = A.Fake<ILibraryMutationLeaseHandle>();
             Tool = new("C:\\trusted\\calibredb.exe", new("C:\\trusted\\calibredb.exe", "9.11.0",
                 new(new string('b', 64)), "calibredb/windows/9.11.0"), Enum.GetValues<CalibreExecutionCapability>());
             CleanupExecutionId executionId = new(Guid.Parse("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"));
@@ -271,10 +271,11 @@ public sealed class ExecuteApprovedCleanupPlanUseCaseTests
                 .ReturnsLazily(() => Task.FromResult(LibraryScanOutcome.Success(_scans.Dequeue())));
             A.CallTo(() => Tools.DiscoverAndProbeAsync(A<string>._, A<CancellationToken>._))
                 .Returns(Task.FromResult(new CalibreToolDiscoveryResult(Tool, [])));
-            A.CallTo(() => Lease.TryAcquireAsync(A<ExecutionLeaseRequest>._, A<CancellationToken>._))
+            A.CallTo(() => Lease.TryAcquireAsync(A<LibraryMutationLeaseRequest>._, A<CancellationToken>._))
                 .Invokes(() => Trace.Add("lease"))
-                .Returns(Task.FromResult(new ExecutionLeaseAcquisition(handle, [])));
+                .Returns(Task.FromResult(new LibraryMutationLeaseAcquisition(handle, [])));
             A.CallTo(() => handle.IsHeld).Returns(true);
+            A.CallTo(() => handle.MutationKind).Returns(LibraryMutationKind.Cleanup);
             A.CallTo(() => Backup.ValidateDestinationAsync(A<string>._, A<string>._, A<long>._, A<CancellationToken>._))
                 .Returns(Task.FromResult(new BackupDestinationValidation("C:\\backup", long.MaxValue, [])));
             A.CallTo(() => Backup.CreateWorkspaceAsync(A<CleanupExecutionId>._, A<string>._, A<CancellationToken>._))
@@ -337,7 +338,7 @@ public sealed class ExecuteApprovedCleanupPlanUseCaseTests
         public IExecutionLibraryScanner Scanner { get; }
         public ICalibreToolDiscovery Tools { get; }
         public ICalibreCommandGateway Commands { get; }
-        public ICleanupExecutionLease Lease { get; }
+        public ILibraryMutationLease Lease { get; }
         public IExecutionBackupStore Backup { get; }
         public IExecutionJournalStore Journals { get; }
         public IExecutionJournalSession Journal { get; }
