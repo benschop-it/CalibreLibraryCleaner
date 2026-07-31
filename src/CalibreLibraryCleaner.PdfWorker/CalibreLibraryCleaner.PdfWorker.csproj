@@ -1,0 +1,10 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <AssemblyName>CalibreLibraryCleaner.PdfWorker</AssemblyName>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\CalibreLibraryCleaner.Infrastructure\CalibreLibraryCleaner.Infrastructure.csproj" />
+  </ItemGroup>
+</Project>

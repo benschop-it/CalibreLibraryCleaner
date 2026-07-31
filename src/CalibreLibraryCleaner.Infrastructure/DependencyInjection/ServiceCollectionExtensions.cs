@@ -4,6 +4,7 @@ using CalibreLibraryCleaner.Infrastructure.Epub;
 using CalibreLibraryCleaner.Infrastructure.Execution;
 using CalibreLibraryCleaner.Infrastructure.Hashing;
 using CalibreLibraryCleaner.Infrastructure.Paths;
+using CalibreLibraryCleaner.Infrastructure.Pdf;
 using CalibreLibraryCleaner.Infrastructure.Plans;
 using CalibreLibraryCleaner.Infrastructure.Recommendations;
 using CalibreLibraryCleaner.Infrastructure.Recovery;
@@ -23,6 +24,8 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<ICalibreMetadataReader, SqliteCalibreMetadataReader>();
         services.AddSingleton<IFormatFileHasher, StreamingSha256FormatFileHasher>();
         services.AddSingleton<IEpubInspector, VersOneEpubInspector>();
+        services.AddSingleton(new PdfWorkerOptions());
+        services.AddSingleton<IPdfInspector, IsolatedPdfInspector>();
         services.AddSingleton<IRecommendationExporter, VersionedJsonRecommendationExporter>();
         services.AddSingleton<ICleanupPlanIdGenerator, SystemCleanupPlanIdGenerator>();
         services.AddSingleton<ICleanupPlanStore, VersionedJsonCleanupPlanStore>();

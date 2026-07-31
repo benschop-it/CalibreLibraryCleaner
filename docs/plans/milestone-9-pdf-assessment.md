@@ -2085,6 +2085,19 @@ Milestone 9 objective:
 
 ## Progress
 
+### Post-review remediation (2026-07-31)
+
+- [x] Keep PDF assessment out of Milestone 7 execution and Milestone 8 recovery scans.
+- [x] Fail closed when Windows worker containment cannot be established.
+- [x] Enforce the frozen V1 resource ceilings and parent-side total protocol budget.
+- [x] Correct structural object/action evidence, page sampling, text evidence,
+  repeat detection, ISBN/XMP validation, and content scoring thresholds.
+- [x] Add non-embedded-font and hidden-text reliability disclosure and confidence limits.
+- [x] Correct disqualified-score and classification-limitation presentation.
+- [x] Restore the documented project dependency boundary.
+- [x] Add the missing hostile-input, containment, cancellation, and regression tests.
+- [x] Run the complete verification workflow and update the handoff.
+
 - [x] Read root and all nested `AGENTS.md` files and `PLANS.md`.
 - [x] Read all specifically requested product, functional, architecture,
   domain, quality, safety, test, roadmap, workflow, and accepted ADR documents.
@@ -2102,20 +2115,53 @@ Milestone 9 objective:
 - [x] Confirm no OCR engine, scan penalty, third-party type leakage, write-mode
   PDF access, execution/recovery behavior change, or unbounded pathological-file
   path is planned.
-- [ ] Accept ADR 0009 and freeze V1 dependency/options/limits/thresholds/weights.
-- [ ] Implement the shared assessment refactor with EPUB compatibility proof.
-- [ ] Implement and verify the PDF assessment vertical slice.
+- [x] Accept ADR 0009 and freeze V1 dependency/options/limits/thresholds/weights.
+- [x] Implement the shared assessment refactor with EPUB compatibility proof.
+- [x] Implement and verify the PDF assessment vertical slice.
 - [ ] Complete manual synthetic-library acceptance.
+
+Implementation started on 2026-07-31. The pre-change baseline completed with
+408 passed, zero failed, and two skipped caller-gated real-Calibre tests. ADR
+0009 accepts the planned PdfPig 0.1.15, strict stream-only parser options,
+process-per-file containment, V1 limits, deterministic sampling,
+classification, and 85/15 findings-derived scoring model without deviation.
+
+The shared result now has explicit score components and typed EPUB/PDF wrappers.
+Existing EPUB and recommendation behavior remains green. The PDF Domain and
+Application policies, isolated worker protocol, strict PdfPig integration,
+quota filter provider, scan/snapshot association, WPF presentation, generated
+fixtures, security boundaries, and read-only synthetic-library coverage are
+implemented. Final verification completed with 503 passed, zero failed, two
+skipped caller-gated real-Calibre tests, a zero-warning build, clean format
+verification, and no `git diff --check` whitespace errors. Automated
+synthetic-library acceptance is complete; the genuinely manual WPF walkthrough
+remains unchecked and is documented in the handoff.
 
 ## Final outcome
 
-Planning completed on 2026-07-25. No production code, test code, project file,
-package reference, ADR, or behavior was changed by this planning task; only this
-execution plan was created.
+Milestone 9 implementation completed on 2026-07-31. PdfPig 0.1.15 is pinned and
+referenced only by Infrastructure behind a disposable bounded worker. The
+delivered slice provides deterministic all-page/bounded sampling, independent
+classification and confidence, bounded feature and identifier evidence,
+findings-derived 85/15 PDF-only scoring, disqualifiers, verified identity,
+version stamps, progress/cancellation, WPF presentation, and synthetic-fixture
+coverage. It does not perform OCR, rendering, attachment extraction, network
+access, PDF comparison, cross-file similarity, recommendation ranking, Calibre
+mutation, cleanup execution, or recovery changes.
 
-The planned slice adds independent read-only PDF assessment with PdfPig 0.1.15
-behind a disposable bounded worker, deterministic page sampling and
-classification, findings-derived 85/15 technical/metadata scoring, conservative
-blank/repeat/ISBN evidence, and WPF presentation. It explicitly excludes OCR,
-rendering, content fingerprints, PDF comparison, recommendations, Calibre
-mutation, cleanup, execution, and recovery changes.
+The frozen versions are `pdf-inspector/1.0.0`, `pdf-quality/1.0.0`,
+`pdf-classification/1.0.0`, `pdf-sampling/1.0.0`, `pdf-limits/1.0.0`, and
+`pdf-worker-protocol/1.0`. Every non-zero score contribution is a deterministic
+finding; incompatible scoring versions are not compared silently. Hard limits
+fail closed, image/text/scan properties are neutral by themselves, and
+classification never changes the quality score.
+
+One dependency limitation remains explicit: PdfPig exposes the hard parser
+stack option but not observed stack depth, so depth 64 is enforced while the
+planned advisory at 48 cannot be emitted. PdfPig also does not expose stable
+indirect image/content identities through the supported high-level API;
+therefore production repeat detection uses the approved complete bounded
+normalized-text rule and otherwise reports insufficient evidence rather than
+decoding content or relying on unstable internals. See
+`docs/handoffs/milestone-9-handoff.md` for the complete file inventory, limits,
+rules, commands, results, limitations, risks, and exact next step.

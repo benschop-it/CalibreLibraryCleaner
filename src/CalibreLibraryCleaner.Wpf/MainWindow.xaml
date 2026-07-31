@@ -764,6 +764,58 @@
           </Grid>
         </Grid>
       </TabItem>
+      <TabItem Header="_PDF assessments" AutomationProperties.Name="PDF assessments">
+        <Grid Margin="8">
+          <Grid.RowDefinitions>
+            <RowDefinition Height="2*" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+          </Grid.RowDefinitions>
+          <DataGrid Grid.Row="0" ItemsSource="{Binding PdfAssessments}" SelectedItem="{Binding SelectedPdfAssessment}"
+                    AutoGenerateColumns="False" IsReadOnly="True" SelectionMode="Single"
+                    AutomationProperties.Name="PDF assessment summary">
+            <DataGrid.Columns>
+              <DataGridTextColumn Width="70" Header="Book ID" Binding="{Binding BookId}" />
+              <DataGridTextColumn Width="*" Header="Calibre title (context)" Binding="{Binding BookTitle}" />
+              <DataGridTextColumn Width="2*" Header="Expected path" Binding="{Binding ExpectedRelativePath}" />
+              <DataGridTextColumn Width="110" Header="Status" Binding="{Binding Status}" />
+              <DataGridTextColumn Width="150" Header="Score" Binding="{Binding Score}" />
+              <DataGridTextColumn Width="150" Header="Classification" Binding="{Binding Classification}" />
+              <DataGridTextColumn Width="90" Header="Confidence" Binding="{Binding Confidence}" />
+              <DataGridTextColumn Width="80" Header="Pages" Binding="{Binding PageCount}" />
+              <DataGridTextColumn Width="160" Header="Sampling" Binding="{Binding Sampling}" />
+              <DataGridTextColumn Width="170" Header="Encryption" Binding="{Binding Encryption}" />
+              <DataGridTextColumn Width="140" Header="Analyzer" Binding="{Binding AnalyzerVersion}" />
+              <DataGridTextColumn Width="140" Header="Scoring model" Binding="{Binding ScoringModelVersion}" />
+              <DataGridTextColumn Width="150" Header="Classification policy" Binding="{Binding ClassificationVersion}" />
+              <DataGridTextColumn Width="140" Header="Resource profile" Binding="{Binding ResourceProfileVersion}" />
+            </DataGrid.Columns>
+          </DataGrid>
+          <TextBlock Grid.Row="1" Margin="0,8,0,4" TextWrapping="Wrap" Text="{Binding PdfDisqualificationMessage}" FontWeight="Bold" AutomationProperties.Name="PDF disqualification status" />
+          <TextBlock Grid.Row="2" Margin="0,4,0,8" TextWrapping="Wrap" Text="{Binding SelectedPdfFeatureSummary}" AutomationProperties.Name="Selected PDF bounded feature and classification summary" />
+          <Grid Grid.Row="3">
+            <Grid.RowDefinitions>
+              <RowDefinition Height="Auto" />
+              <RowDefinition Height="*" />
+            </Grid.RowDefinitions>
+            <StackPanel Orientation="Horizontal" Margin="0,0,0,4">
+              <Label Target="{Binding ElementName=PdfFindingFilter}" Content="Finding _severity:" />
+              <ComboBox x:Name="PdfFindingFilter" MinWidth="140" ItemsSource="{Binding PdfFindingFilterModes}" SelectedItem="{Binding PdfFindingFilterMode}" AutomationProperties.Name="Filter PDF findings by severity" />
+            </StackPanel>
+            <DataGrid Grid.Row="1" ItemsSource="{Binding PdfFindings}" AutoGenerateColumns="False" IsReadOnly="True" AutomationProperties.Name="PDF assessment findings">
+              <DataGrid.Columns>
+                <DataGridTextColumn Width="110" Header="Severity" Binding="{Binding Severity}" />
+                <DataGridTextColumn Width="220" Header="Rule" Binding="{Binding RuleId}" />
+                <DataGridTextColumn Width="130" Header="Component" Binding="{Binding Component}" />
+                <DataGridTextColumn Width="90" Header="Adjustment" Binding="{Binding Adjustment}" />
+                <DataGridTextColumn Width="2*" Header="Explanation" Binding="{Binding Explanation}" />
+                <DataGridTextColumn Width="2*" Header="Evidence" Binding="{Binding Evidence}" />
+              </DataGrid.Columns>
+            </DataGrid>
+          </Grid>
+        </Grid>
+      </TabItem>
     </TabControl>
   </Grid>
 </Window>

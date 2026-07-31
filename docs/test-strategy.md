@@ -6,13 +6,15 @@ Use xUnit, FakeItEasy, and FluentAssertions.
 
 - Domain unit tests: invariants, normalization, scores, confidence, recommendations, and plans.
 - Application tests: validation, cancellation, missing files, grouping, recommendation, stale plans, backup ordering, and verification failures.
-- Infrastructure integration tests: read-only SQLite, paths, hashes, malformed EPUBs, process wrapper, JSON storage, and backups.
+- Infrastructure integration tests: read-only SQLite, paths, hashes, malformed EPUBs/PDFs, isolated process wrappers, JSON storage, and backups.
 - Architecture tests: dependency direction and prohibited references.
 - Focused UI tests: library choice, scan cancellation, group navigation, overrides, warnings, and approval.
 
 ## Fixtures
 
-Generate synthetic temporary Calibre-style libraries for empty, valid, binary duplicate, conflicting EPUB, missing file, malformed EPUB, missing cover/TOC, conflicting ISBN, non-conflicting formats, and stale-plan scenarios.
+Generate synthetic temporary Calibre-style libraries for empty, valid, binary duplicate, conflicting EPUB, missing file, malformed EPUB/PDF, missing cover/TOC/outline, conflicting ISBN, non-conflicting formats, and stale-plan scenarios. PDF fixtures are programmatically generated with PdfPig's writer or small explicit object graphs; no copyrighted or personal library content is used.
+
+PDF coverage includes digital text, image-only scan evidence, existing text layers, mixed/illustrated content, metadata/outline variants, valid/invalid ISBN evidence, encryption/password-required, zero/truncated/non-PDF/malformed/zero-page inputs, resource families, deterministic sampling/classification/scoring/finding order, penalty caps, disqualification, worker timeout/cancellation/no-orphan behavior, bounded concurrency, prohibited network/action/attachment/OCR/image-decode APIs, no full-text retention or content logging, read-only library manifests, and parser-type architecture boundaries.
 
 ## Safety assertions
 

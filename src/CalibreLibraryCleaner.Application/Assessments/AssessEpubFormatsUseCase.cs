@@ -6,7 +6,7 @@ namespace CalibreLibraryCleaner.Application.Assessments;
 
 public sealed class AssessEpubFormatsUseCase(IEpubInspector inspector, EpubAssessmentEngine engine)
 {
-    public async Task<IReadOnlyList<FormatAssessment>> ExecuteAsync(
+    public async Task<IReadOnlyList<EpubAssessment>> ExecuteAsync(
         IReadOnlyList<EpubAssessmentTarget> allTargets,
         int maxConcurrency,
         EpubInspectionLimits limits,
@@ -23,7 +23,7 @@ public sealed class AssessEpubFormatsUseCase(IEpubInspector inspector, EpubAsses
             .OrderBy(target => target.BookId.Value)
             .ThenBy(target => target.ExpectedRelativePath, StringComparer.Ordinal)
             .ToArray();
-        FormatAssessment?[] results = new FormatAssessment?[targets.Length];
+        EpubAssessment?[] results = new EpubAssessment?[targets.Length];
         int completed = 0;
         object progressGate = new();
         progress?.Report(new(0, targets.Length, string.Empty, "Starting"));

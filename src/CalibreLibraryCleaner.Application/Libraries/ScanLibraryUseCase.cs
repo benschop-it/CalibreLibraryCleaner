@@ -1,5 +1,6 @@
 using CalibreLibraryCleaner.Application.Abstractions;
 using CalibreLibraryCleaner.Application.Assessments;
+using CalibreLibraryCleaner.Application.Assessments.Pdf;
 using CalibreLibraryCleaner.Application.Recommendations;
 using CalibreLibraryCleaner.Domain.Assessments;
 using CalibreLibraryCleaner.Domain.Duplicates;
@@ -16,12 +17,14 @@ public sealed class ScanLibraryUseCase(
     IClock clock,
     LibraryAnalysisOptions options,
     AssessEpubFormatsUseCase? assessEpubFormats = null,
-    GenerateConsolidationRecommendationsUseCase? generateRecommendations = null)
+    GenerateConsolidationRecommendationsUseCase? generateRecommendations = null,
+    AssessPdfFormatsUseCase? assessPdfFormats = null)
 {
     public async Task<LibraryScanOutcome> ExecuteAsync(
         string? candidatePath,
         IProgress<LibraryScanProgress>? progress,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        bool includePdfAssessments = true)
     {
         cancellationToken.ThrowIfCancellationRequested();
         progress?.Report(new(LibraryScanPhase.Validating, 0, 1, "Validating library"));
@@ -134,7 +137,7 @@ public sealed class ScanLibraryUseCase(
         List<CalibreBook> books = preparedBooks
             .Select(book => MapBook(book, resultsBySequence, findings, cancellationToken))
             .ToList();
-        IReadOnlyList<FormatAssessment> epubAssessments = [];
+        IReadOnlyList<EpubAssessment> epubAssessments = [];
         if (assessEpubFormats is not null)
         {
             try
@@ -157,6 +160,33 @@ public sealed class ScanLibraryUseCase(
                 return LibraryScanOutcome.Failure(new(
                     LibraryErrorCode.EpubAssessmentFailed,
                     "The EPUB files could not be assessed reliably.",
+                    "Close tools changing the library and retry the scan."));
+            }
+        }
+
+        IReadOnlyList<PdfAssessment> pdfAssessments = [];
+        if (includePdfAssessments && assessPdfFormats is not null)
+        {
+            try
+            {
+                List<PdfAssessmentTarget> pdfTargets = CreatePdfTargets(preparedBooks, requests, resultsBySequence);
+                IProgress<PdfAssessmentProgress>? pdfProgress = progress is null ? null : new PdfProgressAdapter(progress);
+                pdfAssessments = await assessPdfFormats.ExecuteAsync(
+                    pdfTargets,
+                    options.MaxPdfAssessmentConcurrency,
+                    PdfInspectionLimits.V1,
+                    pdfProgress,
+                    cancellationToken).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch
+            {
+                return LibraryScanOutcome.Failure(new(
+                    LibraryErrorCode.PdfAssessmentFailed,
+                    "The PDF files could not be assessed reliably.",
                     "Close tools changing the library and retry the scan."));
             }
         }
@@ -211,7 +241,8 @@ public sealed class ScanLibraryUseCase(
             findings,
             exactBinaryGroups,
             exactMetadataGroups,
-            epubAssessments);
+            epubAssessments,
+            pdfAssessments: pdfAssessments);
         IReadOnlyList<ConsolidationRecommendation> recommendations;
         try
         {
@@ -245,7 +276,8 @@ public sealed class ScanLibraryUseCase(
             exactBinaryGroups,
             exactMetadataGroups,
             epubAssessments,
-            recommendations);
+            recommendations,
+            pdfAssessments);
         cancellationToken.ThrowIfCancellationRequested();
         progress?.Report(new(LibraryScanPhase.Completed, 1, 1, "Scan complete"));
         return LibraryScanOutcome.Success(snapshot);
@@ -442,6 +474,41 @@ public sealed class ScanLibraryUseCase(
         return targets;
     }
 
+    private static List<PdfAssessmentTarget> CreatePdfTargets(
+        IReadOnlyList<PreparedBook> preparedBooks,
+        IReadOnlyList<FormatHashRequest> requests,
+        Dictionary<int, FormatHashResult> results)
+    {
+        Dictionary<int, FormatHashRequest> requestsBySequence = requests.ToDictionary(request => request.Sequence);
+        List<PdfAssessmentTarget> targets = [];
+        foreach (PreparedBook book in preparedBooks)
+        {
+            foreach (PreparedFormat format in book.Formats.Where(format => string.Equals(format.Format, "PDF", StringComparison.OrdinalIgnoreCase)))
+            {
+                CalibreBookId bookId = new(book.Record.Id);
+                if (format.Sequence is null)
+                {
+                    targets.Add(new(bookId, "PDF", string.Empty, null, null, FormatFileStatus.InvalidPath, null, null));
+                    continue;
+                }
+
+                FormatHashResult result = results[format.Sequence.Value];
+                ResolvedFormatPath path = requestsBySequence[format.Sequence.Value].Path;
+                targets.Add(new(
+                    bookId,
+                    "PDF",
+                    format.RelativePath,
+                    path.LibraryRoot,
+                    path.FullPath,
+                    MapFileStatus(result.Status),
+                    result.Fingerprint,
+                    result.Observation));
+            }
+        }
+
+        return targets;
+    }
+
     private static FormatFileStatus MapFileStatus(FormatHashResultStatus status) => status switch
     {
         FormatHashResultStatus.Success => FormatFileStatus.Present,
@@ -479,6 +546,17 @@ public sealed class ScanLibraryUseCase(
             string.IsNullOrWhiteSpace(value.CurrentRelativePath)
                 ? $"Assessing EPUB files: {value.CompletedFiles} of {value.TotalFiles} complete"
                 : $"Assessing EPUB files: {value.CompletedFiles} of {value.TotalFiles} complete — {value.Stage}: {value.CurrentRelativePath}"));
+    }
+
+    private sealed class PdfProgressAdapter(IProgress<LibraryScanProgress> progress) : IProgress<PdfAssessmentProgress>
+    {
+        public void Report(PdfAssessmentProgress value) => progress.Report(new(
+            LibraryScanPhase.AssessingPdfFormats,
+            value.CompletedFiles,
+            value.TotalFiles,
+            string.IsNullOrWhiteSpace(value.CurrentRelativePath)
+                ? $"Assessing PDF files: {value.CompletedFiles} of {value.TotalFiles} complete"
+                : $"Assessing PDF files: {value.CompletedFiles} of {value.TotalFiles} complete — {value.Stage}: {value.CurrentRelativePath}"));
     }
 
     private sealed class RecommendationProgressAdapter(IProgress<LibraryScanProgress> progress) : IProgress<RecommendationGenerationProgress>

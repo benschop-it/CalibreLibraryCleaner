@@ -13,7 +13,8 @@ public sealed record AssessmentFinding
         FindingSeverity severity,
         int scoreAdjustment,
         string explanation,
-        IReadOnlyDictionary<string, string>? evidence = null)
+        IReadOnlyDictionary<string, string>? evidence = null,
+        AssessmentScoreComponentId? scoreComponentId = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(ruleId);
         ArgumentException.ThrowIfNullOrWhiteSpace(explanation);
@@ -40,6 +41,7 @@ public sealed record AssessmentFinding
         ScoreAdjustment = scoreAdjustment;
         Explanation = explanation.Trim();
         Evidence = new ReadOnlyDictionary<string, string>(safeEvidence);
+        ScoreComponentId = scoreComponentId ?? AssessmentScoreComponentId.Overall;
     }
 
     public string RuleId { get; }
@@ -51,6 +53,8 @@ public sealed record AssessmentFinding
     public string Explanation { get; }
 
     public IReadOnlyDictionary<string, string> Evidence { get; }
+
+    public AssessmentScoreComponentId ScoreComponentId { get; }
 
     internal string EvidenceKey => string.Join(
         "\u001f",

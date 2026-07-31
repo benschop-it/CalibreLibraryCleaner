@@ -9,5 +9,5 @@ public sealed class FullExecutionLibraryScanner(ScanLibraryUseCase scanLibrary) 
         string libraryRoot,
         IProgress<LibraryScanProgress>? progress,
         CancellationToken cancellationToken) =>
-        scanLibrary.ExecuteAsync(libraryRoot, progress, cancellationToken);
+        scanLibrary.ExecuteAsync(libraryRoot, progress, cancellationToken, includePdfAssessments: false);
 }

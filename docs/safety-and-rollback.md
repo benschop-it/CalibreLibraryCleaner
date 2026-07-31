@@ -6,6 +6,12 @@ Allowed: read database and files, hash, parse, and create application-owned repo
 
 Forbidden: rename, move, overwrite, delete, change metadata, add formats, or create Calibre-managed files.
 
+PDF assessment treats every document as untrusted. It validates root containment and rejects reparse points, opens read-only with restrictive sharing, checks the expected observation and SHA-256, and rechecks identity before returning. Signature/trailer, file, object, stream, page, sample, text, image, pixel, operation, dimension, metadata, XMP, outline, finding, protocol, wall-time, CPU, heap, and working-set bounds fail closed.
+
+PDF parsing runs in a disposable per-file worker. The parent terminates the process tree on cancellation, timeout, CPU, or memory breach; Windows uses a kill-on-close single-process Job Object when available. Production code never invokes PDF action, hyperlink, attachment, rendering, image-decoding, OCR, network, or external-viewer APIs. Only bounded aggregates, short normalized fingerprints, short metadata, and validated identifiers survive; PDF text and embedded content are never logged.
+
+PDF findings and scores are analysis evidence only. They cannot approve or trigger cleanup, mutation, rollback, or recovery. Milestone 7 execution and Milestone 8 recovery behavior is unchanged.
+
 Milestone 5 recommendation review JSON is an application-owned analysis artifact, not a cleanup plan. It may be written only to an explicitly selected existing directory outside the Calibre library, using a guarded temporary sibling and publish step. It contains generated/reviewed evidence and staleness, but no removal, command, approval, backup, mutation ordering, or expected pre-operation state. The exporter rejects the library root, descendants, and reparse-point destinations.
 
 ## Plan validation

@@ -20,7 +20,7 @@ public sealed class EpubAssessmentTests
     {
         EpubInspectionResult result = Healthy(new CalibreBookId(1), "Book.epub");
 
-        FormatAssessment assessment = new EpubAssessmentEngine().Assess(new CalibreBookId(1), "Book.epub", Fingerprint, result);
+        EpubAssessment assessment = new EpubAssessmentEngine().Assess(new CalibreBookId(1), "Book.epub", Fingerprint, result);
 
         assessment.Score!.Value.Value.Should().Be(100);
         assessment.Findings.Sum(finding => finding.ScoreAdjustment).Should().Be(100);
@@ -51,8 +51,8 @@ public sealed class EpubAssessmentTests
         };
         EpubAssessmentEngine engine = new();
 
-        FormatAssessment first = engine.Assess(new CalibreBookId(1), "Book.epub", Fingerprint, result);
-        FormatAssessment second = engine.Assess(new CalibreBookId(1), "Book.epub", Fingerprint, result);
+        EpubAssessment first = engine.Assess(new CalibreBookId(1), "Book.epub", Fingerprint, result);
+        EpubAssessment second = engine.Assess(new CalibreBookId(1), "Book.epub", Fingerprint, result);
 
         first.Score!.Value.Value.Should().Be(0);
         first.Findings.Sum(finding => finding.ScoreAdjustment).Should().BeLessThan(0);
@@ -74,7 +74,7 @@ public sealed class EpubAssessmentTests
             CoverHeaderMalformed = true,
         };
 
-        FormatAssessment assessment = new EpubAssessmentEngine().Assess(new CalibreBookId(1), "Book.epub", Fingerprint, result);
+        EpubAssessment assessment = new EpubAssessmentEngine().Assess(new CalibreBookId(1), "Book.epub", Fingerprint, result);
 
         assessment.Findings.Should().ContainSingle(finding =>
             finding.RuleId == "EPUB.COVER.DIMENSIONS"
@@ -93,8 +93,8 @@ public sealed class EpubAssessmentTests
             OptionalTruncations = ["css:styles/book.css"],
         };
 
-        FormatAssessment unsafeAssessment = engine.Assess(new CalibreBookId(1), "Unsafe.epub", Fingerprint, unsafeResult);
-        FormatAssessment truncatedAssessment = engine.Assess(new CalibreBookId(2), "Truncated.epub", Fingerprint, truncatedResult);
+        EpubAssessment unsafeAssessment = engine.Assess(new CalibreBookId(1), "Unsafe.epub", Fingerprint, unsafeResult);
+        EpubAssessment truncatedAssessment = engine.Assess(new CalibreBookId(2), "Truncated.epub", Fingerprint, truncatedResult);
 
         unsafeAssessment.Status.Should().Be(AssessmentStatus.Disqualified);
         unsafeAssessment.Score.Should().BeNull();
@@ -112,7 +112,7 @@ public sealed class EpubAssessmentTests
             TotalMissingSpineResources = 10,
         };
 
-        FormatAssessment assessment = new EpubAssessmentEngine().Assess(new CalibreBookId(1), "Book.epub", Fingerprint, result);
+        EpubAssessment assessment = new EpubAssessmentEngine().Assess(new CalibreBookId(1), "Book.epub", Fingerprint, result);
 
         assessment.Findings.Where(finding => finding.RuleId == "EPUB.SPINE.RESOURCE_EXISTS")
             .Sum(finding => finding.ScoreAdjustment).Should().Be(-20);
@@ -133,7 +133,7 @@ public sealed class EpubAssessmentTests
     {
         EpubInspectionResult result = EpubInspectionResult.Failed(new CalibreBookId(1), "Book.epub", code, "Safe explanation");
 
-        FormatAssessment assessment = new EpubAssessmentEngine().Assess(new CalibreBookId(1), "Book.epub", Fingerprint, result);
+        EpubAssessment assessment = new EpubAssessmentEngine().Assess(new CalibreBookId(1), "Book.epub", Fingerprint, result);
 
         assessment.Status.Should().Be(AssessmentStatus.Disqualified);
         assessment.Score.Should().BeNull();
@@ -149,7 +149,7 @@ public sealed class EpubAssessmentTests
         AssessEpubFormatsUseCase useCase = new(inspector, new());
         EpubAssessmentTarget target = new(new CalibreBookId(2), "EPUB", "Missing.epub", null, null, FormatFileStatus.Missing, null, null);
 
-        IReadOnlyList<FormatAssessment> results = await useCase.ExecuteAsync([target], 2, EpubInspectionLimits.V1, null, CancellationToken.None);
+        IReadOnlyList<EpubAssessment> results = await useCase.ExecuteAsync([target], 2, EpubInspectionLimits.V1, null, CancellationToken.None);
 
         results.Should().ContainSingle().Which.Status.Should().Be(AssessmentStatus.Disqualified);
         A.CallTo(() => inspector.InspectAsync(A<EpubInspectionRequest>._, A<IProgress<EpubInspectionProgress>?>._, A<CancellationToken>._)).MustNotHaveHappened();
@@ -174,7 +174,7 @@ public sealed class EpubAssessmentTests
             new(new CalibreBookId(2), "PDF", "b.pdf", "root", "b", FormatFileStatus.Present, Fingerprint, Observation),
         ];
 
-        IReadOnlyList<FormatAssessment> results = await useCase.ExecuteAsync(targets, 2, EpubInspectionLimits.V1, null, CancellationToken.None);
+        IReadOnlyList<EpubAssessment> results = await useCase.ExecuteAsync(targets, 2, EpubInspectionLimits.V1, null, CancellationToken.None);
 
         results.Select(result => result.CalibreBookId.Value).Should().Equal(1, 3);
     }
@@ -203,7 +203,7 @@ public sealed class EpubAssessmentTests
             .ToArray();
         AssessEpubFormatsUseCase useCase = new(inspector, new());
 
-        Task<IReadOnlyList<FormatAssessment>> operation = useCase.ExecuteAsync(targets, 2, EpubInspectionLimits.V1, null, CancellationToken.None);
+        Task<IReadOnlyList<EpubAssessment>> operation = useCase.ExecuteAsync(targets, 2, EpubInspectionLimits.V1, null, CancellationToken.None);
         await twoStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
         maximum.Should().Be(2);
         release.SetResult();
@@ -232,7 +232,7 @@ public sealed class EpubAssessmentTests
         AssessEpubFormatsUseCase useCase = new(inspector, new());
         ConcurrentQueue<EpubAssessmentProgress> progress = new();
 
-        IReadOnlyList<FormatAssessment> results = await useCase.ExecuteAsync(
+        IReadOnlyList<EpubAssessment> results = await useCase.ExecuteAsync(
             targets, 4, EpubInspectionLimits.V1, new InlineProgress(progress.Enqueue), CancellationToken.None);
 
         results.Should().HaveCount(2_000);

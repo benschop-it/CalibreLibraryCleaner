@@ -1,5 +1,6 @@
 using CalibreLibraryCleaner.Application.Abstractions;
 using CalibreLibraryCleaner.Application.Assessments;
+using CalibreLibraryCleaner.Application.Assessments.Pdf;
 using CalibreLibraryCleaner.Application.Executions;
 using CalibreLibraryCleaner.Application.Libraries;
 using CalibreLibraryCleaner.Application.Plans;
@@ -25,6 +26,10 @@ public partial class App : System.Windows.Application
         builder.Services.AddSingleton<ValidateLibraryUseCase>();
         builder.Services.AddSingleton<EpubAssessmentEngine>();
         builder.Services.AddSingleton<AssessEpubFormatsUseCase>();
+        builder.Services.AddSingleton<PdfPageSamplingPolicy>();
+        builder.Services.AddSingleton<PdfClassificationPolicy>();
+        builder.Services.AddSingleton<PdfAssessmentEngine>();
+        builder.Services.AddSingleton<AssessPdfFormatsUseCase>();
         builder.Services.AddSingleton<ConsolidationRecommendationPolicy>();
         builder.Services.AddSingleton<GenerateConsolidationRecommendationsUseCase>();
         builder.Services.AddSingleton<ScanLibraryUseCase>();

@@ -40,7 +40,7 @@ public sealed class ConsolidationRecommendationPolicy
         ExactMetadataDuplicateGroup group,
         IReadOnlyList<CalibreBook> members,
         IReadOnlyList<ExactBinaryDuplicateGroup> exactBinaryGroups,
-        IReadOnlyList<FormatAssessment> epubAssessments,
+        IReadOnlyList<EpubAssessment> epubAssessments,
         IReadOnlyList<LibraryFinding> findings,
         CancellationToken cancellationToken = default)
     {
@@ -130,7 +130,7 @@ public sealed class ConsolidationRecommendationPolicy
                 RecommendationConfidence.Unsupported);
         }
 
-        Dictionary<(CalibreBookId BookId, string Path), FormatAssessment> assessments = epubAssessments
+        Dictionary<(CalibreBookId BookId, string Path), EpubAssessment> assessments = epubAssessments
             .Where(value => cohort.Any(book => book.Id == value.CalibreBookId))
             .ToDictionary(value => (value.CalibreBookId, NormalizeRelativePath(value.ExpectedRelativePath)));
         AddFormatAvailabilityWarning(cohort, warnings);
@@ -750,7 +750,7 @@ public sealed class ConsolidationRecommendationPolicy
         return best;
     }
 
-    private static bool HasDecisiveAdvantage(FormatAssessment best, FormatAssessment competitor)
+    private static bool HasDecisiveAdvantage(EpubAssessment best, EpubAssessment competitor)
     {
         Dictionary<string, int> bestAdjustments = DecisiveAdjustments(best);
         Dictionary<string, int> competitorAdjustments = DecisiveAdjustments(competitor);
@@ -763,12 +763,12 @@ public sealed class ConsolidationRecommendationPolicy
         return decisiveDifference && !countervailing;
     }
 
-    private static Dictionary<string, int> DecisiveAdjustments(FormatAssessment assessment) => assessment.Findings
+    private static Dictionary<string, int> DecisiveAdjustments(EpubAssessment assessment) => assessment.Findings
         .Where(finding => DecisiveEpubRules.Contains(finding.RuleId))
         .GroupBy(finding => finding.RuleId, StringComparer.Ordinal)
         .ToDictionary(group => group.Key, group => group.Sum(finding => finding.ScoreAdjustment), StringComparer.Ordinal);
 
-    private static bool HasDecisiveDisqualifier(FormatAssessment assessment) => assessment.Findings.Any(finding =>
+    private static bool HasDecisiveDisqualifier(EpubAssessment assessment) => assessment.Findings.Any(finding =>
         finding.Severity == FindingSeverity.Disqualifying && DecisiveEpubRules.Contains(finding.RuleId));
 
     private static Dictionary<string, string> BuildEpubDecisionEvidence(
@@ -788,7 +788,7 @@ public sealed class ConsolidationRecommendationPolicy
                 continue;
             }
 
-            FormatAssessment assessment = candidate.Assessment;
+            EpubAssessment assessment = candidate.Assessment;
             evidence[prefix + "status"] = assessment.Status.ToString();
             evidence[prefix + "score"] = assessment.Score?.Value.ToString(CultureInfo.InvariantCulture) ?? "not-scored";
             evidence[prefix + "analyzerVersion"] = assessment.AnalyzerVersion.Value;
@@ -880,10 +880,10 @@ public sealed class ConsolidationRecommendationPolicy
 
     private static bool AssessmentEvidenceIsStructurallyConsistent(
         IReadOnlyList<CalibreBook> members,
-        IReadOnlyList<FormatAssessment> assessments)
+        IReadOnlyList<EpubAssessment> assessments)
     {
         HashSet<(CalibreBookId BookId, string Format, string Path)> seen = [];
-        foreach (FormatAssessment assessment in assessments.Where(value => members.Any(book => book.Id == value.CalibreBookId)))
+        foreach (EpubAssessment assessment in assessments.Where(value => members.Any(book => book.Id == value.CalibreBookId)))
         {
             if (!seen.Add((assessment.CalibreBookId, assessment.Format, assessment.ExpectedRelativePath))
                 || !string.Equals(assessment.Format, "EPUB", StringComparison.Ordinal)
@@ -901,9 +901,9 @@ public sealed class ConsolidationRecommendationPolicy
     private static RecommendationFormatCandidate CreateCandidate(
         CalibreBookId bookId,
         BookFormat format,
-        Dictionary<(CalibreBookId BookId, string Path), FormatAssessment> assessments)
+        Dictionary<(CalibreBookId BookId, string Path), EpubAssessment> assessments)
     {
-        assessments.TryGetValue((bookId, NormalizeRelativePath(format.ExpectedRelativePath)), out FormatAssessment? assessment);
+        assessments.TryGetValue((bookId, NormalizeRelativePath(format.ExpectedRelativePath)), out EpubAssessment? assessment);
         return new(bookId, format.Format, format.ExpectedRelativePath, format.FileStatus, format.Fingerprint, assessment);
     }
 
@@ -997,7 +997,7 @@ public sealed class ConsolidationRecommendationPolicy
         ExactMetadataDuplicateGroup group,
         IReadOnlyList<CalibreBook> members,
         IReadOnlyList<ExactBinaryDuplicateGroup> binaryGroups,
-        IReadOnlyList<FormatAssessment> assessments,
+        IReadOnlyList<EpubAssessment> assessments,
         IReadOnlyList<LibraryFinding> findings,
         CancellationToken cancellationToken)
     {
@@ -1037,7 +1037,7 @@ public sealed class ConsolidationRecommendationPolicy
             { Append(canonical, member.BookId.Value.ToString(CultureInfo.InvariantCulture)); Append(canonical, member.Format); Append(canonical, member.ExpectedRelativePath); }
         }
 
-        foreach (FormatAssessment assessment in assessments.Where(value => group.Members.Contains(value.CalibreBookId)).OrderBy(value => value.CalibreBookId.Value).ThenBy(value => value.ExpectedRelativePath, StringComparer.Ordinal))
+        foreach (EpubAssessment assessment in assessments.Where(value => group.Members.Contains(value.CalibreBookId)).OrderBy(value => value.CalibreBookId.Value).ThenBy(value => value.ExpectedRelativePath, StringComparer.Ordinal))
         {
             Append(canonical, assessment.CalibreBookId.Value.ToString(CultureInfo.InvariantCulture)); Append(canonical, assessment.ExpectedRelativePath); Append(canonical, assessment.Status.ToString());
             Append(canonical, assessment.ObservedFingerprint?.SizeInBytes.ToString(CultureInfo.InvariantCulture) ?? string.Empty);

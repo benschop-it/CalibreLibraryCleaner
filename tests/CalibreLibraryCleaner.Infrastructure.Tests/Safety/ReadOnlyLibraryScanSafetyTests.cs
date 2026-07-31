@@ -6,6 +6,7 @@ using CalibreLibraryCleaner.Domain.Libraries;
 using CalibreLibraryCleaner.Domain.Plans;
 using CalibreLibraryCleaner.Domain.Recommendations;
 using CalibreLibraryCleaner.Infrastructure.Tests.Fixtures;
+using CalibreLibraryCleaner.Infrastructure.Tests.Pdf;
 using FluentAssertions;
 using Microsoft.Extensions.DependencyInjection;
 using Xunit;
@@ -75,6 +76,32 @@ public sealed class ReadOnlyLibraryScanSafetyTests
         outcome.Snapshot!.EpubAssessments.Should().ContainSingle(assessment => assessment.Score.HasValue);
         LibraryStateCapture.Capture(library.RootPath)
             .Should().BeEquivalentTo(before, options => options.WithStrictOrdering());
+    }
+
+    [Fact]
+    public async Task ValidPdfAssessmentDoesNotChangeSyntheticLibraryOrMetadataDatabase()
+    {
+        using SyntheticPdfFixture fixture = SyntheticPdfFixture.CreateText(
+            text: string.Concat(Enumerable.Repeat("Synthetic PDF safety assessment. ", 30)));
+        using SyntheticCalibreLibrary library = new();
+        library.AddSimpleBook(1, await File.ReadAllBytesAsync(fixture.Path), "PDF");
+        IReadOnlyList<LibraryEntryState> before = LibraryStateCapture.Capture(library.RootPath);
+        using ServiceProvider provider = TestServices.CreateProvider();
+
+        LibraryScanOutcome outcome = await TestServices.CreateScanUseCase(provider)
+            .ExecuteAsync(library.RootPath, null, CancellationToken.None);
+
+        outcome.IsSuccess.Should().BeTrue();
+        outcome.Snapshot!.PdfAssessments.Should().ContainSingle(assessment =>
+            assessment.Score.HasValue
+            && assessment.Features.Classification == Domain.Assessments.PdfDocumentClassification.DigitalText);
+        LibraryStateCapture.Capture(library.RootPath)
+            .Should().BeEquivalentTo(before, options => options.WithStrictOrdering());
+        Directory.EnumerateFiles(library.RootPath, "*", SearchOption.AllDirectories)
+            .Should().NotContain(path => path.EndsWith(".tmp", StringComparison.OrdinalIgnoreCase)
+                || path.Contains("backup", StringComparison.OrdinalIgnoreCase)
+                || path.EndsWith("-journal", StringComparison.OrdinalIgnoreCase)
+                || path.EndsWith("-wal", StringComparison.OrdinalIgnoreCase));
     }
 
     [Fact]

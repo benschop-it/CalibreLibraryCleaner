@@ -14,4 +14,11 @@
     <PackageReference Include="CommunityToolkit.Mvvm" />
     <PackageReference Include="Microsoft.Extensions.Hosting" />
   </ItemGroup>
+
+  <Target Name="CopyPdfInspectionWorker" AfterTargets="Build">
+    <ItemGroup>
+      <_PdfInspectionWorkerFile Include="$(MSBuildThisFileDirectory)..\CalibreLibraryCleaner.PdfWorker\bin\$(Configuration)\net10.0\CalibreLibraryCleaner.PdfWorker*" />
+    </ItemGroup>
+    <Copy SourceFiles="@(_PdfInspectionWorkerFile)" DestinationFolder="$(OutDir)" SkipUnchangedFiles="true" />
+  </Target>
 </Project>

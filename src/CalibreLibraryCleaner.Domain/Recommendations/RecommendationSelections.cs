@@ -51,7 +51,7 @@ public sealed record RecommendationFormatCandidate
         string expectedRelativePath,
         FormatFileStatus fileStatus,
         FormatFileFingerprint? fingerprint,
-        FormatAssessment? assessment = null)
+        EpubAssessment? assessment = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(format);
         ArgumentNullException.ThrowIfNull(expectedRelativePath);
@@ -81,7 +81,7 @@ public sealed record RecommendationFormatCandidate
     public string ExpectedRelativePath { get; }
     public FormatFileStatus FileStatus { get; }
     public FormatFileFingerprint? Fingerprint { get; }
-    public FormatAssessment? Assessment { get; }
+    public EpubAssessment? Assessment { get; }
 
     private static string NormalizePath(string value) => value.Replace('\\', '/');
 }

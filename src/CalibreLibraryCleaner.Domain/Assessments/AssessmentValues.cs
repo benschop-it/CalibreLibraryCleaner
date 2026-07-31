@@ -39,3 +39,45 @@ public sealed record ScoringModelVersion
 
     public override string ToString() => Value;
 }
+
+public sealed record AssessmentScoreComponentId
+{
+    public static AssessmentScoreComponentId Overall { get; } = new("overall");
+
+    public AssessmentScoreComponentId(string value)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(value);
+        string normalized = value.Trim().ToLowerInvariant();
+        if (normalized.Length > 64 || normalized.Any(character => !char.IsAsciiLetterOrDigit(character) && character != '-'))
+        {
+            throw new ArgumentException("A score component identifier must be a bounded lowercase token.", nameof(value));
+        }
+
+        Value = normalized;
+    }
+
+    public string Value { get; }
+
+    public override string ToString() => Value;
+}
+
+public sealed record AssessmentScoreComponent
+{
+    public AssessmentScoreComponent(AssessmentScoreComponentId id, int maximumScore)
+    {
+        ArgumentNullException.ThrowIfNull(id);
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(maximumScore);
+        Id = id;
+        MaximumScore = maximumScore;
+    }
+
+    public AssessmentScoreComponentId Id { get; }
+
+    public int MaximumScore { get; }
+}
+
+public sealed record AssessmentScoreComponentResult(
+    AssessmentScoreComponentId Id,
+    int MaximumScore,
+    int RawContribution,
+    int Score);

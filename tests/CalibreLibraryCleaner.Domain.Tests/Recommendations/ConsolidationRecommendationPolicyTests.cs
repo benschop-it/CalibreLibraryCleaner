@@ -66,8 +66,8 @@ public sealed class ConsolidationRecommendationPolicyTests
     {
         CalibreBook first = Book(1, [Format("EPUB", 10, "01")]);
         CalibreBook second = Book(2, [Format("EPUB", 20, "02")]);
-        FormatAssessment strong = Assessment(first, 80, 80);
-        FormatAssessment weaker = Assessment(second, 80 - scoreGap, 80 - scoreGap);
+        EpubAssessment strong = Assessment(first, 80, 80);
+        EpubAssessment weaker = Assessment(second, 80 - scoreGap, 80 - scoreGap);
 
         ConsolidationRecommendation recommendation = Generate([first, second], [strong, weaker]);
 
@@ -145,8 +145,8 @@ public sealed class ConsolidationRecommendationPolicyTests
     {
         CalibreBook first = Book(1, [Format("EPUB", 10, "01")]);
         CalibreBook second = Book(2, [Format("EPUB", 20, "02")]);
-        FormatAssessment strongCoverOnly = Assessment(first, 80, 80, "EPUB.COVER.PRESENT");
-        FormatAssessment weakerCoverOnly = Assessment(second, 60, 60, "EPUB.COVER.PRESENT");
+        EpubAssessment strongCoverOnly = Assessment(first, 80, 80, "EPUB.COVER.PRESENT");
+        EpubAssessment weakerCoverOnly = Assessment(second, 60, 60, "EPUB.COVER.PRESENT");
 
         ConsolidationRecommendation recommendation = Generate([first, second], [strongCoverOnly, weakerCoverOnly]);
 
@@ -158,9 +158,9 @@ public sealed class ConsolidationRecommendationPolicyTests
     {
         CalibreBook first = Book(1, [Format("EPUB", 10, "01")]);
         CalibreBook second = Book(2, [Format("EPUB", 20, "02")]);
-        FormatAssessment completed = Assessment(first, 70, 70);
+        EpubAssessment completed = Assessment(first, 70, 70);
         BookFormat failedFormat = second.Formats.Single();
-        FormatAssessment failed = new(
+        EpubAssessment failed = new(
             second.Id,
             "EPUB",
             failedFormat.ExpectedRelativePath,
@@ -221,9 +221,9 @@ public sealed class ConsolidationRecommendationPolicyTests
     {
         CalibreBook first = Book(1, [Format("EPUB", 10, "01")]);
         CalibreBook second = Book(2, [Format("EPUB", 20, "02")]);
-        FormatAssessment completed = Assessment(first, 70, 70);
+        EpubAssessment completed = Assessment(first, 70, 70);
         BookFormat failedFormat = second.Formats.Single();
-        FormatAssessment failed = new(
+        EpubAssessment failed = new(
             second.Id,
             "EPUB",
             failedFormat.ExpectedRelativePath,
@@ -359,9 +359,9 @@ public sealed class ConsolidationRecommendationPolicyTests
     {
         CalibreBook first = Book(1, [Format("EPUB", 10, "01")], new(languages: ["eng"]));
         CalibreBook second = Book(2, [Format("EPUB", 20, "02")], new(languages: ["eng"]));
-        FormatAssessment current = Assessment(first, 80, 80);
-        FormatAssessment competitor = Assessment(second, 60, 60);
-        FormatAssessment stale = new(
+        EpubAssessment current = Assessment(first, 80, 80);
+        EpubAssessment competitor = Assessment(second, 60, 60);
+        EpubAssessment stale = new(
             current.CalibreBookId,
             current.Format,
             current.ExpectedRelativePath,
@@ -402,7 +402,7 @@ public sealed class ConsolidationRecommendationPolicyTests
 
     private static ConsolidationRecommendation Generate(
         CalibreBook[] books,
-        IReadOnlyList<FormatAssessment>? assessments = null)
+        IReadOnlyList<EpubAssessment>? assessments = null)
     {
         ExactMetadataDuplicateGroup group = ExactMetadataDuplicateDetector.Detect(books).Single();
         return new ConsolidationRecommendationPolicy().Generate(
@@ -446,7 +446,7 @@ public sealed class ConsolidationRecommendationPolicyTests
         [],
         $"Author/Book ({id})");
 
-    private static FormatAssessment Assessment(CalibreBook book, int score, int decisiveAdjustment, string ruleId = "EPUB.NAVIGATION")
+    private static EpubAssessment Assessment(CalibreBook book, int score, int decisiveAdjustment, string ruleId = "EPUB.NAVIGATION")
     {
         BookFormat format = book.Formats.Single();
         return new(

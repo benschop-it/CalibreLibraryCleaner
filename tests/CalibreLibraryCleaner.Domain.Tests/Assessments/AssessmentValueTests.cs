@@ -19,7 +19,7 @@ public sealed class AssessmentValueTests
     {
         AssessmentFinding finding = new("EPUB.SCORE.BASELINE", FindingSeverity.Positive, 50, "Baseline");
 
-        FluentActions.Invoking(() => new FormatAssessment(
+        FluentActions.Invoking(() => new EpubAssessment(
                 new CalibreBookId(1), "EPUB", "Author/Book.epub", null, AssessmentStatus.Completed,
                 new QualityScore(51), new AnalyzerVersion("epub-inspector/1.0.0"),
                 new ScoringModelVersion("epub-quality/1.0.0"), new EpubFeatureSummary(true, true), [finding]))
@@ -29,7 +29,7 @@ public sealed class AssessmentValueTests
     [Fact]
     public void DisqualifiedAssessmentHasNoNumericScore()
     {
-        FormatAssessment assessment = new(
+        EpubAssessment assessment = new(
             new CalibreBookId(1), "epub", "Author/Book.epub", null, AssessmentStatus.Disqualified, null,
             new AnalyzerVersion("epub-inspector/1.0.0"), new ScoringModelVersion("epub-quality/1.0.0"),
             new EpubFeatureSummary(false, false),
@@ -45,7 +45,7 @@ public sealed class AssessmentValueTests
     [InlineData("C:/drive.epub")]
     public void AssessmentRejectsUnsafePresentationPath(string path)
     {
-        Func<FormatAssessment> act = () => new(
+        Func<EpubAssessment> act = () => new(
             new CalibreBookId(1), "EPUB", path, null, AssessmentStatus.Disqualified, null,
             new AnalyzerVersion("epub-inspector/1.0.0"), new ScoringModelVersion("epub-quality/1.0.0"),
             new EpubFeatureSummary(false, false),
@@ -63,7 +63,7 @@ public sealed class AssessmentValueTests
             new("EPUB.WARNING", FindingSeverity.Warning, -1, "Warning", mutableEvidence),
             new("EPUB.POSITIVE", FindingSeverity.Positive, 51, "Positive"),
         ];
-        FormatAssessment assessment = new(
+        EpubAssessment assessment = new(
             new CalibreBookId(1), "EPUB", "Book.epub", null, AssessmentStatus.Completed, new QualityScore(50),
             new AnalyzerVersion("epub-inspector/1.0.0"), new ScoringModelVersion("epub-quality/1.0.0"),
             new EpubFeatureSummary(true, true), mutableFindings);
@@ -79,7 +79,7 @@ public sealed class AssessmentValueTests
     [Fact]
     public void SnapshotRejectsDuplicateAssessmentAssociations()
     {
-        FormatAssessment assessment = new(
+        EpubAssessment assessment = new(
             new CalibreBookId(1), "EPUB", "Book.epub", null, AssessmentStatus.Disqualified, null,
             new AnalyzerVersion("epub-inspector/1.0.0"), new ScoringModelVersion("epub-quality/1.0.0"),
             new EpubFeatureSummary(false, false),

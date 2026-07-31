@@ -9,7 +9,7 @@ public sealed class EpubAssessmentRowViewModel
     private readonly Lazy<IReadOnlyList<EpubAssessmentFindingRowViewModel>> _findings;
     private readonly Lazy<string> _featureSummary;
 
-    public EpubAssessmentRowViewModel(FormatAssessment assessment, CalibreBook? book)
+    public EpubAssessmentRowViewModel(EpubAssessment assessment, CalibreBook? book)
     {
         BookId = assessment.CalibreBookId.Value;
         BookTitle = book?.Title ?? string.Empty;

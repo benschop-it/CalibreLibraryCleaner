@@ -1,5 +1,8 @@
 using CalibreLibraryCleaner.Application.Abstractions;
+using CalibreLibraryCleaner.Application.Assessments.Pdf;
+using CalibreLibraryCleaner.Application.Executions;
 using CalibreLibraryCleaner.Application.Libraries;
+using CalibreLibraryCleaner.Domain.Assessments;
 using CalibreLibraryCleaner.Domain.Libraries;
 using FakeItEasy;
 using FluentAssertions;
@@ -9,6 +12,88 @@ namespace CalibreLibraryCleaner.Application.Tests.Libraries;
 
 public sealed class ScanLibraryUseCaseTests
 {
+    [Fact]
+    public async Task SuccessfulPdfAssessmentIsAssociatedStoredAndReportedWithoutEnteringRecommendations()
+    {
+        ILibraryPathResolver resolver = A.Fake<ILibraryPathResolver>();
+        ICalibreMetadataReader reader = A.Fake<ICalibreMetadataReader>();
+        IFormatFileHasher hasher = A.Fake<IFormatFileHasher>();
+        IClock clock = A.Fake<IClock>();
+        IPdfInspector inspector = A.Fake<IPdfInspector>();
+        ValidatedLibraryLocation location = new("C:/Library", "C:/Library/metadata.db");
+        CalibreCatalogRecord epubCatalog = CreateCatalog(1);
+        CalibreBookRecord sourceBook = epubCatalog.Books.Single();
+        CalibreCatalogRecord catalog = new(
+            epubCatalog.LibraryUuid,
+            epubCatalog.SchemaVersion,
+            [sourceBook with { Formats = [new CalibreFormatRecord("PDF", "Book")] }]);
+        FormatFileFingerprint fingerprint = new(100, new(new string('a', 64)));
+        FormatFileObservation observation = new(100, DateTimeOffset.UnixEpoch, DateTimeOffset.UnixEpoch, 0);
+        A.CallTo(() => resolver.ValidateAsync("C:/Library", A<CancellationToken>._)).Returns(LibraryValidationOutcome.Success(location));
+        A.CallTo(() => reader.ReadAsync(location, A<IProgress<LibraryScanProgress>?>._, A<CancellationToken>._))
+            .Returns(CalibreCatalogReadOutcome.Success(catalog));
+        A.CallTo(() => resolver.ResolveFormat(location, A<string>._, "Book", "PDF"))
+            .Returns(ResolvedFormatPathOutcome.Success(new("C:/Library", "C:/Library/Author/Book.pdf", "Author/Book.pdf")));
+        A.CallTo(() => hasher.HashAsync(A<IReadOnlyList<FormatHashRequest>>._, A<int>._, A<IProgress<FormatHashProgress>?>._, A<CancellationToken>._))
+            .Returns([FormatHashResult.Success(0, fingerprint, observation)]);
+        A.CallTo(() => inspector.InspectAsync(
+                A<PdfInspectionRequest>._,
+                A<Func<PdfDocumentHeaderFacts, CancellationToken, ValueTask<IReadOnlyList<int>>>>._,
+                A<IProgress<PdfInspectionProgress>?>._,
+                A<CancellationToken>._))
+            .ReturnsLazily(async call =>
+            {
+                PdfInspectionRequest request = call.GetArgument<PdfInspectionRequest>(0)!;
+                Func<PdfDocumentHeaderFacts, CancellationToken, ValueTask<IReadOnlyList<int>>> select =
+                    call.GetArgument<Func<PdfDocumentHeaderFacts, CancellationToken, ValueTask<IReadOnlyList<int>>>>(1)!;
+                CancellationToken token = call.GetArgument<CancellationToken>(3);
+                IReadOnlyList<int> selected = await select(new(request.BookId, request.ExpectedRelativePath, 1, []), token);
+                return new(
+                    request.BookId,
+                    request.ExpectedRelativePath,
+                    PdfOpenStatus.Opened,
+                    PdfEncryptionStatus.NotEncrypted,
+                    1,
+                    "1.7",
+                    PdfDocumentMetadataSummary.Empty,
+                    false,
+                    0,
+                    new(0, 0, 0),
+                    selected,
+                    [new(1, true, 1_000, 2_000, 0, 0, 0, 20, 595_000, 842_000, null, "text", true, null, null, false, false)],
+                    [],
+                    0,
+                    10,
+                    0,
+                    true,
+                    false,
+                    []);
+            });
+        AssessPdfFormatsUseCase pdfUseCase = new(inspector, new(), new(new()));
+        ScanLibraryUseCase useCase = new(resolver, reader, hasher, clock, new(), assessPdfFormats: pdfUseCase);
+        List<LibraryScanProgress> progress = [];
+
+        LibraryScanOutcome outcome = await useCase.ExecuteAsync("C:/Library", new InlineProgress(progress.Add), CancellationToken.None);
+
+        outcome.IsSuccess.Should().BeTrue();
+        outcome.Snapshot!.PdfAssessments.Should().ContainSingle(assessment =>
+            assessment.CalibreBookId.Value == 1 && assessment.Features.Classification == PdfDocumentClassification.DigitalText);
+        outcome.Snapshot.EpubAssessments.Should().BeEmpty();
+        outcome.Snapshot.ConsolidationRecommendations.Should().BeEmpty();
+        progress.Should().Contain(update => update.Phase == LibraryScanPhase.AssessingPdfFormats);
+
+        Fake.ClearRecordedCalls(inspector);
+        LibraryScanOutcome executionScan = await new FullExecutionLibraryScanner(useCase)
+            .ScanFreshAsync("C:/Library", null, CancellationToken.None);
+        executionScan.IsSuccess.Should().BeTrue();
+        executionScan.Snapshot!.PdfAssessments.Should().BeEmpty();
+        A.CallTo(() => inspector.InspectAsync(
+            A<PdfInspectionRequest>._,
+            A<Func<PdfDocumentHeaderFacts, CancellationToken, ValueTask<IReadOnlyList<int>>>>._,
+            A<IProgress<PdfInspectionProgress>?>._,
+            A<CancellationToken>._)).MustNotHaveHappened();
+    }
+
     [Theory]
     [InlineData(FormatHashResultStatus.Missing, "FORMAT_FILE_MISSING", FormatFileStatus.Missing)]
     [InlineData(FormatHashResultStatus.Inaccessible, "FORMAT_FILE_INACCESSIBLE", FormatFileStatus.Inaccessible)]

@@ -15,12 +15,15 @@ public sealed record FormatAssessment
         QualityScore? score,
         AnalyzerVersion analyzerVersion,
         ScoringModelVersion scoringModelVersion,
-        EpubFeatureSummary features,
-        IEnumerable<AssessmentFinding> findings)
+        IEnumerable<AssessmentFinding> findings,
+        IEnumerable<AssessmentScoreComponent>? scoreComponents = null,
+        FormatFileObservation? observedObservation = null)
     {
-        if (!string.Equals(format, "EPUB", StringComparison.OrdinalIgnoreCase))
+        ArgumentException.ThrowIfNullOrWhiteSpace(format);
+        string canonicalFormat = format.Trim().ToUpperInvariant();
+        if (canonicalFormat.Length > 16 || canonicalFormat.Any(character => !char.IsAsciiLetterOrDigit(character)))
         {
-            throw new ArgumentException("Only EPUB assessments are supported.", nameof(format));
+            throw new ArgumentException("The assessment format must be a bounded canonical token.", nameof(format));
         }
 
         ArgumentException.ThrowIfNullOrWhiteSpace(expectedRelativePath);
@@ -34,20 +37,49 @@ public sealed record FormatAssessment
 
         ArgumentNullException.ThrowIfNull(analyzerVersion);
         ArgumentNullException.ThrowIfNull(scoringModelVersion);
-        ArgumentNullException.ThrowIfNull(features);
         ArgumentNullException.ThrowIfNull(findings);
-        AssessmentFinding[] ordered = findings
+        if (observedFingerprint is not null && observedObservation is not null
+            && observedFingerprint.SizeInBytes != observedObservation.Length)
+        {
+            throw new ArgumentException("The assessment fingerprint and verified observation lengths must agree.", nameof(observedObservation));
+        }
+        AssessmentFinding[] orderedFindings = findings
             .OrderBy(finding => SeverityOrder(finding.Severity))
             .ThenBy(finding => finding.RuleId, StringComparer.Ordinal)
+            .ThenBy(finding => finding.ScoreComponentId.Value, StringComparer.Ordinal)
             .ThenBy(finding => finding.EvidenceKey, StringComparer.Ordinal)
             .ThenBy(finding => finding.Explanation, StringComparer.Ordinal)
             .ToArray();
-        if (ordered.Length == 0)
+        if (orderedFindings.Length == 0)
         {
             throw new ArgumentException("An assessment requires findings.", nameof(findings));
         }
 
-        bool hasDisqualifier = ordered.Any(finding => finding.Severity == FindingSeverity.Disqualifying);
+        AssessmentScoreComponent[] declaredComponents = (scoreComponents ?? [new(AssessmentScoreComponentId.Overall, 100)])
+            .OrderBy(component => component.Id.Value, StringComparer.Ordinal)
+            .ToArray();
+        if (declaredComponents.Length == 0
+            || declaredComponents.Select(component => component.Id).Distinct().Count() != declaredComponents.Length
+            || declaredComponents.Sum(component => component.MaximumScore) != 100)
+        {
+            throw new ArgumentException("Score components must be unique and sum to 100.", nameof(scoreComponents));
+        }
+
+        HashSet<AssessmentScoreComponentId> declaredIds = declaredComponents.Select(component => component.Id).ToHashSet();
+        if (orderedFindings.Any(finding => finding.ScoreAdjustment != 0 && !declaredIds.Contains(finding.ScoreComponentId)))
+        {
+            throw new ArgumentException("Every nonzero finding must belong to one declared score component.", nameof(findings));
+        }
+
+        AssessmentScoreComponentResult[] componentResults = declaredComponents.Select(component =>
+        {
+            int raw = orderedFindings
+                .Where(finding => finding.Severity != FindingSeverity.Disqualifying && finding.ScoreComponentId == component.Id)
+                .Sum(finding => finding.ScoreAdjustment);
+            return new AssessmentScoreComponentResult(component.Id, component.MaximumScore, raw, Math.Clamp(raw, 0, component.MaximumScore));
+        }).ToArray();
+
+        bool hasDisqualifier = orderedFindings.Any(finding => finding.Severity == FindingSeverity.Disqualifying);
         if (status == AssessmentStatus.Disqualified)
         {
             if (!hasDisqualifier || score is not null)
@@ -57,35 +89,37 @@ public sealed record FormatAssessment
         }
         else
         {
-            int expectedScore = Math.Clamp(ordered.Sum(finding => finding.ScoreAdjustment), 0, 100);
+            int expectedScore = componentResults.Sum(component => component.Score);
             if (hasDisqualifier || score is null || score.Value.Value != expectedScore)
             {
-                throw new ArgumentException("A completed score must be derived entirely from its findings.", nameof(score));
+                throw new ArgumentException("A completed score must be derived entirely from its findings and components.", nameof(score));
             }
         }
 
         CalibreBookId = calibreBookId;
-        Format = "EPUB";
+        Format = canonicalFormat;
         ExpectedRelativePath = normalizedPath;
         ObservedFingerprint = observedFingerprint;
+        ObservedObservation = observedObservation;
         Status = status;
         Score = score;
         AnalyzerVersion = analyzerVersion;
         ScoringModelVersion = scoringModelVersion;
-        Features = features;
-        Findings = new ReadOnlyCollection<AssessmentFinding>(ordered);
+        Findings = new ReadOnlyCollection<AssessmentFinding>(orderedFindings);
+        ScoreComponents = new ReadOnlyCollection<AssessmentScoreComponentResult>(componentResults);
     }
 
     public CalibreBookId CalibreBookId { get; }
     public string Format { get; }
     public string ExpectedRelativePath { get; }
     public FormatFileFingerprint? ObservedFingerprint { get; }
+    public FormatFileObservation? ObservedObservation { get; }
     public AssessmentStatus Status { get; }
     public QualityScore? Score { get; }
     public AnalyzerVersion AnalyzerVersion { get; }
     public ScoringModelVersion ScoringModelVersion { get; }
-    public EpubFeatureSummary Features { get; }
     public IReadOnlyList<AssessmentFinding> Findings { get; }
+    public IReadOnlyList<AssessmentScoreComponentResult> ScoreComponents { get; }
 
     private static int SeverityOrder(FindingSeverity severity) => severity switch
     {

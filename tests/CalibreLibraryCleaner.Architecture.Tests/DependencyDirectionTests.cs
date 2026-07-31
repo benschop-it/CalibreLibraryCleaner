@@ -11,6 +11,7 @@ public sealed class DependencyDirectionTests
     private const string DomainProject = "CalibreLibraryCleaner.Domain";
     private const string InfrastructureProject = "CalibreLibraryCleaner.Infrastructure";
     private const string WpfProject = "CalibreLibraryCleaner.Wpf";
+    private const string PdfWorkerProject = "CalibreLibraryCleaner.PdfWorker";
 
     private static readonly string RepositoryRoot = FindRepositoryRoot();
 
@@ -20,6 +21,7 @@ public sealed class DependencyDirectionTests
         { ApplicationProject, [DomainProject] },
         { InfrastructureProject, [ApplicationProject] },
         { WpfProject, [ApplicationProject, InfrastructureProject] },
+        { PdfWorkerProject, [InfrastructureProject] },
     };
 
     [Theory]
@@ -48,6 +50,7 @@ public sealed class DependencyDirectionTests
             "System.Data.SQLite",
             "VersOne.Epub",
             "HtmlAgilityPack",
+            "PdfPig",
         ];
 
         string[] packageReferences = ReadItemNames(projectName, "PackageReference");
@@ -69,6 +72,7 @@ public sealed class DependencyDirectionTests
             "System.Data.SQLite",
             "System.Xaml",
             "VersOne.Epub",
+            "UglyToad.PdfPig",
             "WindowsBase",
         ];
 
@@ -89,6 +93,7 @@ public sealed class DependencyDirectionTests
         string[] forbiddenAssemblyPrefixes =
         [
             "Microsoft.Data.Sqlite",
+            "UglyToad.PdfPig",
             "PresentationCore",
             "PresentationFramework",
             "System.Xaml",
@@ -287,7 +292,7 @@ public sealed class DependencyDirectionTests
             + ReadSource(ApplicationProject, "Abstractions");
         string viewModels = ReadSource(WpfProject, "ViewModels");
         string production = string.Join(Environment.NewLine,
-            new[] { DomainProject, ApplicationProject, InfrastructureProject, WpfProject }
+            new[] { DomainProject, ApplicationProject, InfrastructureProject, WpfProject, PdfWorkerProject }
                 .SelectMany(project => Directory.EnumerateFiles(
                     Path.Combine(RepositoryRoot, "src", project), "*.cs",
                     SearchOption.AllDirectories))
@@ -324,13 +329,103 @@ public sealed class DependencyDirectionTests
                     Path.Combine(RepositoryRoot, "src", project), "*.cs", SearchOption.AllDirectories))
                 .Select(File.ReadAllText));
 
-        processSources.Should().ContainSingle()
-            .Which.Should().EndWith("DirectCalibreProcessRunner.cs");
+        processSources.Should().HaveCount(2);
+        processSources.Should().Contain(path => path.EndsWith("DirectCalibreProcessRunner.cs", StringComparison.Ordinal));
+        processSources.Should().Contain(path => path.EndsWith("IsolatedPdfInspector.cs", StringComparison.Ordinal));
         runner.Should().Contain("UseShellExecute = false").And.Contain("ArgumentList.Add")
             .And.Contain("mayTerminateOnCancellation");
+        string pdfRunner = File.ReadAllText(Path.Combine(infrastructureRoot, "Pdf", "IsolatedPdfInspector.cs"));
+        pdfRunner.Should().Contain("UseShellExecute = false").And.Contain("ArgumentList.Add(\"--stdio\")")
+            .And.Contain("RedirectStandardInput = true").And.Contain("RedirectStandardOutput = true")
+            .And.Contain("Environment.Clear()").And.Contain("Kill(entireProcessTree: true)");
         allProductionSource.Should().NotContain("UseShellExecute = true")
             .And.NotContain("cmd.exe").And.NotContain("powershell.exe")
             .And.NotContain("bash.exe").And.NotContain("/bin/bash");
+    }
+
+    [Fact]
+    public void PdfParserTypesAndPackageStayInsideInfrastructure()
+    {
+        string nonInfrastructureSource = string.Join(Environment.NewLine,
+            new[] { DomainProject, ApplicationProject, WpfProject, PdfWorkerProject }
+                .SelectMany(project => Directory.EnumerateFiles(
+                    Path.Combine(RepositoryRoot, "src", project), "*.cs", SearchOption.AllDirectories))
+                .Select(File.ReadAllText));
+        string[] projectsWithPdfPig = Directory.EnumerateFiles(Path.Combine(RepositoryRoot, "src"), "*.csproj", SearchOption.AllDirectories)
+            .Where(path => File.ReadAllText(path).Contains("PackageReference Include=\"PdfPig\"", StringComparison.Ordinal))
+            .Select(path => Path.GetFileNameWithoutExtension(path)!)
+            .ToArray();
+
+        nonInfrastructureSource.Should().NotContain("UglyToad.PdfPig").And.NotContain("PdfPig.");
+        projectsWithPdfPig.Should().Equal(InfrastructureProject);
+    }
+
+    [Fact]
+    public void PdfProductionBoundaryDoesNotDecodeImagesExtractAttachmentsOrUseNetworkApis()
+    {
+        string source = ReadSource(InfrastructureProject, "Pdf");
+
+        source.Should().NotContain("TryGetEmbeddedFiles")
+            .And.NotContain("TryGetBytesAsMemory")
+            .And.NotContain("TryGetPng")
+            .And.NotContain("RawMemory")
+            .And.NotContain("RawBytes")
+            .And.NotContain("HttpClient")
+            .And.NotContain("WebRequest")
+            .And.NotContain("WebClient")
+            .And.NotContain("Socket")
+            .And.NotContain("Process.Start(\"")
+            .And.NotContain("File.ReadAllBytes")
+            .And.NotContain("File.WriteAllBytes")
+            .And.NotContain("File.WriteAllText")
+            .And.NotContain("FileMode.Create")
+            .And.NotContain("FileMode.Append")
+            .And.NotContain("FileMode.Truncate")
+            .And.NotContain("FileAccess.Write")
+            .And.NotContain("File.Delete")
+            .And.NotContain("File.Move")
+            .And.NotContain("File.Replace")
+            .And.NotContain("Directory.CreateDirectory")
+            .And.NotContain("Directory.Delete")
+            .And.NotContain("PdfDocumentBuilder")
+            .And.Contain("PdfDocument.Open(stream, options)");
+    }
+
+    [Fact]
+    public void PdfCoreAndUiBoundariesContainNoParserFileProcessOrJsonTypes()
+    {
+        string domain = ReadSource(DomainProject, "Assessments");
+        string application = ReadSource(ApplicationProject, "Assessments");
+        string viewModels = ReadSource(WpfProject, "ViewModels");
+        string worker = string.Join(Environment.NewLine,
+            Directory.EnumerateFiles(Path.Combine(RepositoryRoot, "src", PdfWorkerProject), "*.cs", SearchOption.AllDirectories)
+                .Select(File.ReadAllText));
+
+        domain.Should().NotContain("UglyToad.PdfPig").And.NotContain("System.IO")
+            .And.NotContain("System.Text.Json").And.NotContain("Microsoft.Data.Sqlite")
+            .And.NotContain("Microsoft.Extensions.").And.NotContain("System.Windows");
+        application.Should().NotContain("UglyToad.PdfPig").And.NotContain("System.IO")
+            .And.NotContain("System.Text.Json").And.NotContain("ProcessStartInfo")
+            .And.NotContain("Microsoft.Data.Sqlite").And.NotContain("System.Windows");
+        viewModels.Should().NotContain("UglyToad.PdfPig").And.NotContain("ProcessStartInfo")
+            .And.NotContain("CalibreLibraryCleaner.Infrastructure");
+        worker.Should().NotContain("UglyToad.PdfPig").And.NotContain("PdfDocument.Open");
+    }
+
+    [Fact]
+    public void PdfNativeInteropIsConfinedToTheJobObjectWrapper()
+    {
+        string pdfPath = Path.Combine(RepositoryRoot, "src", InfrastructureProject, "Pdf");
+        string[] nativeSources = Directory.EnumerateFiles(pdfPath, "*.cs", SearchOption.AllDirectories)
+            .Where(path => File.ReadAllText(path).Contains("LibraryImport", StringComparison.Ordinal)
+                || File.ReadAllText(path).Contains("DllImport", StringComparison.Ordinal))
+            .Select(path => Path.GetFileName(path)!)
+            .ToArray();
+
+        nativeSources.Should().Equal("PdfWorkerJobObject.cs");
+        string nativeSource = File.ReadAllText(Path.Combine(pdfPath, "PdfWorkerJobObject.cs"));
+        nativeSource.Should().Contain("[DllImport(\"kernel32.dll\"")
+            .And.NotContain("pdfium").And.NotContain("mupdf").And.NotContain("poppler");
     }
 
     [Fact]

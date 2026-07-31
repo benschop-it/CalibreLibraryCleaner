@@ -76,6 +76,10 @@ default until the opt-in disposable-library qualification passes per
 capability. Unsupported cover restoration and ambiguous or data-losing cases
 remain manual-intervention blockers.
 
+## Milestone 9 — PDF assessment
+
+Safe read-only PDF assessment with an isolated PdfPig worker, deterministic bounded sampling, separate explainable classification, PDF-specific findings-derived scoring, bounded text/image/metadata/identifier evidence, resource enforcement, progress/cancellation, and WPF presentation. PDF assessment does not rank retained PDFs or change cleanup, execution, or recovery behavior.
+
 ## Later milestones
 
-PDF analysis, EPUB text fingerprints, optional AI assistance, cover comparison, series normalization, plugins, multi-library comparison, and possible cross-platform UI.
+EPUB/PDF content fingerprints and comparisons (Milestone 10 or later), optional AI assistance, cover comparison, series normalization, plugins, multi-library comparison, and possible cross-platform UI.

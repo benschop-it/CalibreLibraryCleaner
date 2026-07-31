@@ -14,7 +14,7 @@ public sealed class EpubAssessmentRowViewModelTests
     public void FindingRowsAreMaterializedOnlyWhenRequested()
     {
         AssessmentFinding finding = new("EPUB.BASELINE", FindingSeverity.Information, 50, "Baseline.");
-        FormatAssessment assessment = new(
+        EpubAssessment assessment = new(
             new CalibreBookId(1),
             "EPUB",
             "Book/Book.epub",

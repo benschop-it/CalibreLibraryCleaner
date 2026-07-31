@@ -11,7 +11,7 @@ public sealed class EpubAssessmentEngine
     public static AnalyzerVersion AnalyzerVersion { get; } = new("epub-inspector/1.0.1");
     public static ScoringModelVersion ScoringModelVersion { get; } = new("epub-quality/1.0.0");
 
-    public FormatAssessment Assess(
+    public EpubAssessment Assess(
         CalibreBookId bookId,
         string expectedRelativePath,
         FormatFileFingerprint? fingerprint,

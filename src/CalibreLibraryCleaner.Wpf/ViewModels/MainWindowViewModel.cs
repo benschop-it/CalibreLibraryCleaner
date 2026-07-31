@@ -26,6 +26,8 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
     private readonly BulkObservableCollection<MetadataDuplicateGroupRowViewModel> _metadataDuplicateGroups = [];
     private readonly BulkObservableCollection<EpubAssessmentRowViewModel> _epubAssessments = [];
     private readonly BulkObservableCollection<EpubAssessmentFindingRowViewModel> _epubFindings = [];
+    private readonly BulkObservableCollection<PdfAssessmentRowViewModel> _pdfAssessments = [];
+    private readonly BulkObservableCollection<PdfAssessmentFindingRowViewModel> _pdfFindings = [];
     private readonly Dictionary<RecommendationReviewKey, ReviewedConsolidationRecommendation> _recommendationReviews = [];
     private IReadOnlyList<MetadataDuplicateGroupRowViewModel> _allMetadataDuplicateGroups = [];
     private CancellationTokenSource? _scanCancellation;
@@ -45,6 +47,8 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
     private MetadataDuplicateGroupRowViewModel? _selectedMetadataDuplicateGroup;
     private EpubAssessmentRowViewModel? _selectedEpubAssessment;
     private EpubFindingFilterMode _epubFindingFilterMode;
+    private PdfAssessmentRowViewModel? _selectedPdfAssessment;
+    private EpubFindingFilterMode _pdfFindingFilterMode;
     private string? _currentLibraryUuid;
     private LibrarySnapshot? _currentSnapshot;
 
@@ -74,6 +78,8 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
             _metadataDuplicateGroups);
         EpubAssessments = new ReadOnlyObservableCollection<EpubAssessmentRowViewModel>(_epubAssessments);
         EpubFindings = new ReadOnlyObservableCollection<EpubAssessmentFindingRowViewModel>(_epubFindings);
+        PdfAssessments = new ReadOnlyObservableCollection<PdfAssessmentRowViewModel>(_pdfAssessments);
+        PdfFindings = new ReadOnlyObservableCollection<PdfAssessmentFindingRowViewModel>(_pdfFindings);
         SelectLibraryCommand = new AsyncRelayCommand(SelectLibraryAsync, () => !IsBusy);
         ScanCommand = new AsyncRelayCommand(ScanAsync, () => !IsBusy && !string.IsNullOrWhiteSpace(SelectedLibraryPath));
         CancelCommand = new RelayCommand(
@@ -166,6 +172,10 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
 
     public ReadOnlyObservableCollection<EpubAssessmentFindingRowViewModel> EpubFindings { get; }
 
+    public ReadOnlyObservableCollection<PdfAssessmentRowViewModel> PdfAssessments { get; }
+
+    public ReadOnlyObservableCollection<PdfAssessmentFindingRowViewModel> PdfFindings { get; }
+
     public CleanupPlanWorkspaceViewModel? CleanupPlans { get; }
 
     public CleanupExecutionWorkspaceViewModel? CleanupExecutions { get; }
@@ -173,6 +183,8 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
     public RecoveryWorkspaceViewModel? Recoveries { get; }
 
     public IReadOnlyList<EpubFindingFilterMode> EpubFindingFilterModes { get; } = Enum.GetValues<EpubFindingFilterMode>();
+
+    public IReadOnlyList<EpubFindingFilterMode> PdfFindingFilterModes { get; } = Enum.GetValues<EpubFindingFilterMode>();
 
     public IReadOnlyList<MetadataDuplicateFilterMode> MetadataDuplicateFilterModes { get; } =
         Enum.GetValues<MetadataDuplicateFilterMode>();
@@ -317,6 +329,39 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
     public string SelectedEpubFeatureSummary => SelectedEpubAssessment?.FeatureSummary ?? "Select an EPUB assessment to view bounded format facts.";
 
     public string EpubDisqualificationMessage => SelectedEpubAssessment?.Status == "Disqualified"
+        ? "Not scored — disqualified. See the disqualifying finding below."
+        : string.Empty;
+
+    public PdfAssessmentRowViewModel? SelectedPdfAssessment
+    {
+        get => _selectedPdfAssessment;
+        set
+        {
+            if (SetProperty(ref _selectedPdfAssessment, value))
+            {
+                ApplyPdfFindingFilter();
+                OnPropertyChanged(nameof(SelectedPdfFeatureSummary));
+                OnPropertyChanged(nameof(PdfDisqualificationMessage));
+            }
+        }
+    }
+
+    public EpubFindingFilterMode PdfFindingFilterMode
+    {
+        get => _pdfFindingFilterMode;
+        set
+        {
+            if (SetProperty(ref _pdfFindingFilterMode, value))
+            {
+                ApplyPdfFindingFilter();
+            }
+        }
+    }
+
+    public string SelectedPdfFeatureSummary => SelectedPdfAssessment?.FeatureSummary
+        ?? "Select a PDF assessment to view bounded format facts and classification limitations.";
+
+    public string PdfDisqualificationMessage => SelectedPdfAssessment?.Status == "Disqualified"
         ? "Not scored — disqualified. See the disqualifying finding below."
         : string.Empty;
 
@@ -478,9 +523,18 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
         for (int index = 0; index < snapshot.EpubAssessments.Count; index++)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            Domain.Assessments.FormatAssessment assessment = snapshot.EpubAssessments[index];
+            Domain.Assessments.EpubAssessment assessment = snapshot.EpubAssessments[index];
             booksById.TryGetValue(assessment.CalibreBookId, out CalibreBook? book);
             epubAssessments[index] = new(assessment, book);
+        }
+
+        PdfAssessmentRowViewModel[] pdfAssessments = new PdfAssessmentRowViewModel[snapshot.PdfAssessments.Count];
+        for (int index = 0; index < snapshot.PdfAssessments.Count; index++)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            Domain.Assessments.PdfAssessment assessment = snapshot.PdfAssessments[index];
+            booksById.TryGetValue(assessment.CalibreBookId, out CalibreBook? book);
+            pdfAssessments[index] = new(assessment, book);
         }
 
         int missingCount = 0;
@@ -493,7 +547,7 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
             }
         }
 
-        return new(books, groups, metadataGroups, epubAssessments, missingCount);
+        return new(books, groups, metadataGroups, epubAssessments, pdfAssessments, missingCount);
     }
 
     private void ApplySnapshot(LibrarySnapshot snapshot, SnapshotPresentation presentation)
@@ -534,6 +588,8 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
         ApplyMetadataDuplicateFilter();
         _epubAssessments.ReplaceAll(presentation.EpubAssessments);
         SelectedEpubAssessment = _epubAssessments.FirstOrDefault();
+        _pdfAssessments.ReplaceAll(presentation.PdfAssessments);
+        SelectedPdfAssessment = _pdfAssessments.FirstOrDefault();
         StatusMessage = snapshot.Books.Count == 0
             ? "Scan complete. The library contains no books."
             : $"Scan complete: {snapshot.Books.Count} books, {snapshot.ExactBinaryDuplicateGroups.Count} exact file duplicate groups, {snapshot.ExactMetadataDuplicateGroups.Count} exact metadata candidate groups, {presentation.MissingCount} missing format files.";
@@ -799,11 +855,23 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
         _epubFindings.ReplaceAll(findings);
     }
 
+    private void ApplyPdfFindingFilter()
+    {
+        IEnumerable<PdfAssessmentFindingRowViewModel> findings = SelectedPdfAssessment?.Findings ?? [];
+        if (PdfFindingFilterMode != EpubFindingFilterMode.All)
+        {
+            findings = findings.Where(finding => string.Equals(finding.Severity, PdfFindingFilterMode.ToString(), StringComparison.Ordinal));
+        }
+
+        _pdfFindings.ReplaceAll(findings);
+    }
+
     private sealed record SnapshotPresentation(
         IReadOnlyList<BookRowViewModel> Books,
         IReadOnlyList<ExactDuplicateGroupRowViewModel> Groups,
         IReadOnlyList<MetadataDuplicateGroupRowViewModel> MetadataGroups,
         IReadOnlyList<EpubAssessmentRowViewModel> EpubAssessments,
+        IReadOnlyList<PdfAssessmentRowViewModel> PdfAssessments,
         int MissingCount);
 
     private sealed record RecommendationReviewKey(

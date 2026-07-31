@@ -15,8 +15,9 @@ public sealed record LibrarySnapshot
         IEnumerable<LibraryFinding> findings,
         IEnumerable<ExactBinaryDuplicateGroup>? exactBinaryDuplicateGroups = null,
         IEnumerable<ExactMetadataDuplicateGroup>? exactMetadataDuplicateGroups = null,
-        IEnumerable<FormatAssessment>? epubAssessments = null,
-        IEnumerable<ConsolidationRecommendation>? consolidationRecommendations = null)
+        IEnumerable<EpubAssessment>? epubAssessments = null,
+        IEnumerable<ConsolidationRecommendation>? consolidationRecommendations = null,
+        IEnumerable<PdfAssessment>? pdfAssessments = null)
     {
         ArgumentNullException.ThrowIfNull(identity);
         ArgumentNullException.ThrowIfNull(books);
@@ -30,7 +31,7 @@ public sealed record LibrarySnapshot
             (exactBinaryDuplicateGroups ?? []).ToArray());
         ExactMetadataDuplicateGroups = new ReadOnlyCollection<ExactMetadataDuplicateGroup>(
             (exactMetadataDuplicateGroups ?? []).ToArray());
-        FormatAssessment[] orderedAssessments = (epubAssessments ?? [])
+        EpubAssessment[] orderedAssessments = (epubAssessments ?? [])
             .OrderBy(assessment => assessment.CalibreBookId.Value)
             .ThenBy(assessment => assessment.Format, StringComparer.Ordinal)
             .ThenBy(assessment => assessment.ExpectedRelativePath, StringComparer.Ordinal)
@@ -41,7 +42,18 @@ public sealed record LibrarySnapshot
             throw new ArgumentException("EPUB assessment associations must be unique.", nameof(epubAssessments));
         }
 
-        EpubAssessments = new ReadOnlyCollection<FormatAssessment>(orderedAssessments);
+        EpubAssessments = new ReadOnlyCollection<EpubAssessment>(orderedAssessments);
+        PdfAssessment[] orderedPdfAssessments = (pdfAssessments ?? [])
+            .OrderBy(assessment => assessment.CalibreBookId.Value)
+            .ThenBy(assessment => assessment.ExpectedRelativePath, StringComparer.Ordinal)
+            .ToArray();
+        if (orderedPdfAssessments.Select(assessment => (assessment.CalibreBookId, assessment.ExpectedRelativePath))
+            .Distinct().Count() != orderedPdfAssessments.Length)
+        {
+            throw new ArgumentException("PDF assessment associations must be unique.", nameof(pdfAssessments));
+        }
+
+        PdfAssessments = new ReadOnlyCollection<PdfAssessment>(orderedPdfAssessments);
         ConsolidationRecommendation[] providedRecommendations = (consolidationRecommendations ?? []).ToArray();
         if (providedRecommendations.Select(value => value.GroupId).Distinct().Count() != providedRecommendations.Length)
         {
@@ -81,7 +93,9 @@ public sealed record LibrarySnapshot
 
     public IReadOnlyList<ExactMetadataDuplicateGroup> ExactMetadataDuplicateGroups { get; }
 
-    public IReadOnlyList<FormatAssessment> EpubAssessments { get; }
+    public IReadOnlyList<EpubAssessment> EpubAssessments { get; }
+
+    public IReadOnlyList<PdfAssessment> PdfAssessments { get; }
 
     public IReadOnlyList<ConsolidationRecommendation> ConsolidationRecommendations { get; }
 }

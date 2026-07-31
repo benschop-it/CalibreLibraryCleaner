@@ -45,6 +45,16 @@ Milestone 5 may prefer one non-identical EPUB only when current matching assessm
 
 Prefer explicit reasoning over a single number. Example: keep EPUB A because it has navigation, a useful cover, complete resources, and equivalent text; reject EPUB B because it has broken references and a lower structural score.
 
+## PDF V1 model
+
+PDF scoring uses `pdf-quality/1.0.0` and is separate from EPUB scoring. Its 100 points comprise technical (maximum 85) and embedded-metadata (maximum 15) components. Every nonzero contribution is an `AssessmentFinding`; component sums are clamped independently. Analyzer `pdf-inspector/1.0.0`, classification `pdf-classification/1.0.0`, sampling `pdf-sampling/1.0.0`, and limits `pdf-limits/1.0.0` are retained.
+
+Technical positives are strict open +50, valid page tree +10, page coverage +10/+8/+5, observable content +8/+4, resources within soft thresholds +5, and outline +2. Metadata positives are useful title +4, author +4, semantic date +2, checksum-valid bounded ISBN +3, and another useful field +2.
+
+Penalties are unreadable sampled pages -2 each (cap -10), content not observable -8, conservative suspicious blanks -2 each (cap -8), exact repeated extra pages -4 each, likely repeated image pages -2 each (combined repeat cap -12), unusual permitted dimensions -3 each (cap -9), unusual resources -5 each (cap -15), partial unsupported font/filter facts -5 each (cap -15), and malformed/truncated metadata -1 per field (cap -3). More than 20% unreadable sampled pages and every hard file, structure, encryption, limit, timeout, memory, worker, protocol, or changed-file condition disqualify without a score.
+
+Classification, sampling, text availability, image presence, action/link/attachment markers, outline absence, and scan/image-heavy presentation remain zero-adjustment evidence. File name, file size, and timestamps are not quality evidence. PDF scores never rank retained PDFs or change consolidation recommendations; incompatible scoring models are not compared silently.
+
 ## Special cases
 
 Different editions, languages, translations, abridgements, and scanned historical editions must not be treated as interchangeable merely because one has a higher generic score.
