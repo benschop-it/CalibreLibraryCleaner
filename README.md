@@ -1,15 +1,33 @@
-# Calibre Library Cleaner — Rider and Codex Starter
+# Calibre Library Cleaner
 
-This folder contains the initial specifications and Codex instructions for starting Calibre Library Cleaner in JetBrains Rider.
+Calibre Library Cleaner is a Windows/.NET 10 WPF application for safe,
+explainable analysis and consolidation of Calibre libraries. Development uses
+Visual Studio Code and GitHub Copilot Business.
 
-## Start
+## Current status
 
-1. Extract the ZIP into an empty project folder.
-2. Open that folder in Rider.
-3. Open Rider AI Chat and select Codex.
-4. Ask Codex to read `AGENTS.md` and the documentation.
-5. Use the prompt in `docs/workflows/first-task.md`.
-6. Review the proposed execution plan before allowing code changes.
+Milestones 0 through 9 are implemented. The application can build immutable
+read-only snapshots, hash formats, detect exact binary and exact normalized
+metadata candidates, assess EPUB and PDF quality, generate and review
+recommendations and cleanup plans, execute narrowly supported plans through
+Calibre tooling, and produce verified recovery plans.
+
+Mutation and recovery capabilities remain fail-closed unless their exact
+Calibre profile has passed the caller-gated disposable-library qualification.
+Milestone 9 PDF assessment is analysis-only and does not affect retained-format
+selection, cleanup, execution, or recovery.
+
+The next planned roadmap milestone is Milestone 10 content fingerprints and
+comparisons, after completion of the outstanding Milestone 9 manual WPF
+acceptance.
+
+## Development
+
+1. Open the repository root in Visual Studio Code.
+2. Read `AGENTS.md`, nested instruction files, and the relevant documentation.
+3. Review or create an execution plan under `docs/plans/` for substantial work.
+4. Implement only the approved milestone or vertical slice.
+5. Run the standard verification commands before reporting completion.
 
 ## Important files
 
@@ -21,16 +39,14 @@ This folder contains the initial specifications and Codex instructions for start
 - `docs/adr/` — accepted architectural decisions.
 - nested `AGENTS.md` files — project-specific instructions.
 
-## Initial MVP
+## Standard verification
 
-The first useful version is read-only:
+```powershell
+dotnet restore
+dotnet build --no-restore
+dotnet test --no-build
+dotnet format --verify-no-changes
+```
 
-- select and validate a Calibre library;
-- open `metadata.db` read-only;
-- read books, authors, identifiers, and formats;
-- report missing files;
-- calculate SHA-256 hashes;
-- group exact normalized title/author duplicates;
-- assess EPUB quality;
-- display explainable recommendations;
-- make no library changes.
+Never use a personal Calibre library in automated tests. Use synthetic fixtures
+and temporary directories. Never write directly to `metadata.db`.

@@ -341,14 +341,19 @@ weakened.
 Automated synthetic-library acceptance is complete and proves no PDF,
 `metadata.db`, or other Calibre-managed file changes. A human has not yet
 performed the plan's manual WPF walkthrough, so that checklist item remains
-open. It is safe to perform only on Windows in a copied, disposable synthetic
-Calibre library, with Calibre closed, execution/recovery disabled, and no
-irreplaceable files in scope. Do not use a personal library or treat worker
-isolation as a complete hostile-code sandbox. Residual risk is concentrated in
-parser behavior before quota callbacks; the isolated worker and process limits
-contain, but do not eliminate, a malicious native/runtime defect.
+open. It is safe to perform only on Windows with controlled generated fixtures
+and an explicitly disposable production-derived copy, with Calibre closed,
+execution/recovery disabled, and no irreplaceable files in scope. Never select
+the source library or treat worker isolation as a complete hostile-code
+sandbox. Residual risk is concentrated in parser behavior before quota
+callbacks; the isolated worker and process limits contain, but do not eliminate,
+a malicious native/runtime defect.
 
-The next exact step is to run the manual WPF synthetic-library acceptance on a
-generated fixture set, verify the PDF tab/filter/progress/cancel presentation,
-record the result in the Milestone 9 plan, and only then begin a separately
-approved Milestone 10 plan.
+The next exact step is to execute
+`docs/plans/milestone-9-manual-wpf-acceptance.md`. It combines deterministic
+generated fixtures with a read-only scale/presentation pass over the explicitly
+disposable production-derived copy at
+`D:\dev\Private\Calibre Temp Library 1`. Record the result in the Milestone 9
+plan and this handoff, and only then begin a separately approved Milestone 10
+plan. The copied library never replaces controlled fixture expectations and
+must not be used for cleanup, execution, or recovery acceptance.

@@ -1,5 +1,10 @@
 # First Codex Task in Rider
 
+> Historical bootstrap workflow: this prompt predates the implemented
+> Milestones 0 through 9 and is retained only as project history. Do not use it
+> to determine current capabilities or the next milestone; use
+> `docs/roadmap.md` and the latest handoff instead.
+
 After opening the extracted folder in Rider, select Codex in AI Chat and use this prompt:
 
 ```text

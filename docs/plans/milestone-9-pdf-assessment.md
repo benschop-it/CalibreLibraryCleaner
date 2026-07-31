@@ -118,12 +118,12 @@ The following sources are authoritative:
 - `docs/handoffs/milestone-8-handoff.md`; and
 - the implemented and remediated Milestone 4 EPUB assessment slice.
 
-`docs/roadmap.md` currently places both PDF analysis and EPUB text fingerprints
-under “Later milestones” rather than naming a Milestone 9 section. This plan
-uses the user's explicit authorization to define PDF assessment as Milestone 9
-only. The first documentation step will make that split explicit in the
-roadmap: PDF assessment is Milestone 9, while content fingerprints remain
-Milestone 10 or later. No content-fingerprint implementation is included here.
+At planning time, `docs/roadmap.md` placed both PDF analysis and EPUB text
+fingerprints under “Later milestones” rather than naming a Milestone 9 section.
+The user's explicit authorization defined PDF assessment as Milestone 9 only.
+The completed implementation updated the roadmap accordingly; subsequent
+continuity work names content fingerprints and comparisons as Milestone 10. No
+content-fingerprint implementation is included here.
 
 The governing invariants are:
 
@@ -2118,7 +2118,10 @@ Milestone 9 objective:
 - [x] Accept ADR 0009 and freeze V1 dependency/options/limits/thresholds/weights.
 - [x] Implement the shared assessment refactor with EPUB compatibility proof.
 - [x] Implement and verify the PDF assessment vertical slice.
-- [ ] Complete manual synthetic-library acceptance.
+- [x] Create the detailed manual WPF acceptance plan in
+  `docs/plans/milestone-9-manual-wpf-acceptance.md`.
+- [ ] Complete manual WPF acceptance using controlled fixtures and the
+  disposable production-derived copy.
 
 Implementation started on 2026-07-31. The pre-change baseline completed with
 408 passed, zero failed, and two skipped caller-gated real-Calibre tests. ADR

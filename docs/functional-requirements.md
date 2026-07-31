@@ -26,7 +26,23 @@ Inspect readability, package metadata, identifiers, language, cover, navigation,
 
 ## PDF analysis
 
-Later milestone: readability, encryption, page count, metadata, text extraction, scanned/digital classification, OCR evidence, repeated/blank pages, and identifier detection.
+Milestone 9 implements safe read-only PDF assessment for verified PDF formats in
+the library snapshot. It reports strict readability, encryption/password
+status, page count, bounded metadata, deterministic all-page or sampled-page
+text/image evidence, scan-like/digital/mixed classification with confidence,
+outline and inert active-content facts, conservative repeated/blank-page
+evidence, checksum-valid bounded ISBN evidence, resource-limit outcomes, and a
+PDF-specific explainable quality score.
+
+PDF parsing runs in one disposable bounded worker per file. It does not render,
+perform OCR, decode images for presentation, extract attachments, execute PDF
+actions, follow links, retain complete text, access the network, or mutate the
+library. Classification is evidence rather than score, and PDF assessments do
+not rank retained PDFs or affect recommendations, cleanup, execution, or
+recovery.
+
+Cross-document EPUB/PDF content fingerprints, equality/similarity comparisons,
+and any resulting recommendation-policy changes begin in Milestone 10 or later.
 
 ## Scoring and recommendations
 

@@ -39,9 +39,16 @@ Exact metadata groups remain separate from exact binary file groups. A pair can 
 
 Milestone 5 consumes these existing collections without changing either group definition. Recommendations may use exact-binary membership to choose among byte-identical same-format alternatives and exact-metadata groups as their review scope. Exact equality remains file-level evidence only; it cannot hide a unique/unavailable/unresolved format or establish content/edition equivalence for a non-identical file.
 
-## EPUB fingerprints
+## Content fingerprints (Milestone 10)
 
 Traverse spine order, extract visible text, decode entities, normalize Unicode and whitespace, calculate strict and punctuation-insensitive hashes, and retain chapter count and text length. Use multiple signals rather than one hash.
+
+PDF fingerprints must disclose whether all pages or a deterministic bounded
+sample contributed. Sampled evidence cannot establish whole-document equality.
+Cross-format comparisons must use explicitly compatible, versioned
+normalization semantics and retain no book prose. Content comparison is
+evidence only until a separately reviewed recommendation policy defines safe
+use.
 
 ## Automation policy
 
