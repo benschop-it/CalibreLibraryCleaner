@@ -9,6 +9,7 @@
 - Calculate SHA-256 using streaming I/O, cancellation, progress, and bounded concurrency.
 - Persist the latest complete successful scan per canonical library folder outside the Calibre library.
 - List persisted library folders and explicitly load a prior result instead of rescanning, while identifying it as potentially stale.
+- Invalidate the persisted result before an approved library mutation; only a later complete normal scan may repopulate it.
 
 ## Duplicate detection
 

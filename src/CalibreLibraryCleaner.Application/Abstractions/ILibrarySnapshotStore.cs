@@ -9,6 +9,8 @@ public interface ILibrarySnapshotStore
     Task<LibrarySnapshot?> ReadAsync(string libraryRoot, CancellationToken cancellationToken);
 
     Task WriteAsync(LibrarySnapshot snapshot, CancellationToken cancellationToken);
+
+    Task DeleteAsync(string libraryRoot, CancellationToken cancellationToken);
 }
 
 public sealed record PersistedLibrarySnapshotInfo(string LibraryRoot, DateTimeOffset ScannedAt);

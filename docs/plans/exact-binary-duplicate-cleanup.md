@@ -12,6 +12,7 @@ Let a user select one keeper in an exact-binary duplicate group, explicitly mark
 - Back up complete marked records, including metadata, covers, unique formats, and managed state.
 - Generate, validate, approve, back up, execute, journal, and verify marked record removals.
 - Revalidate group membership, file identity, hashes, paths, library identity, and approval immediately before mutation.
+- Invalidate the persisted library snapshot before mutation so the next application run requires a fresh scan.
 - Use only the typed non-permanent `calibredb remove` boundary for removal.
 
 ## Out of scope

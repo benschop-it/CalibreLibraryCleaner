@@ -47,6 +47,21 @@ public sealed class VersionedJsonLibrarySnapshotStoreTests
         (await store.ListAsync(CancellationToken.None)).Should().BeEmpty();
     }
 
+    [Fact]
+    public async Task DeleteInvalidatesPersistedSnapshotForCanonicalLibraryPath()
+    {
+        using TemporaryDirectory directory = new();
+        InfrastructureExecutionFixture fixture = InfrastructureExecutionTestData.Create(directory.Path);
+        VersionedJsonLibrarySnapshotStore store = new(new() { StorageRoot = Path.Combine(directory.Path, "cache") });
+        await store.WriteAsync(fixture.Snapshot, CancellationToken.None);
+
+        await store.DeleteAsync(fixture.Snapshot.Identity.LibraryRoot + Path.DirectorySeparatorChar,
+            CancellationToken.None);
+
+        (await store.ReadAsync(fixture.Snapshot.Identity.LibraryRoot, CancellationToken.None)).Should().BeNull();
+        (await store.ListAsync(CancellationToken.None)).Should().BeEmpty();
+    }
+
     private static LibrarySnapshot CopyAt(LibrarySnapshot snapshot, DateTimeOffset scannedAt) => new(
         snapshot.Identity,
         scannedAt,

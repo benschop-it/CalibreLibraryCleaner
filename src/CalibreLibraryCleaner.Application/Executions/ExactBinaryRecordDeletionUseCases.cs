@@ -87,6 +87,7 @@ public sealed class ExecuteExactBinaryRecordDeletionUseCase(
     IExactBinaryRecordBackupStore backupStore,
     ICleanupExecutionIdGenerator executionIds,
     IExactBinaryRecordDeletionConfirmation confirmation,
+    PersistedLibrarySnapshotsUseCase persistedSnapshots,
     IClock clock)
 {
     public async Task<ExactBinaryRecordDeletionResult> ExecuteAsync(
@@ -198,6 +199,17 @@ public sealed class ExecuteExactBinaryRecordDeletionUseCase(
                     "Final marked-record deletion confirmation was declined."), cancellationToken).ConfigureAwait(false);
                 return Result(ExactBinaryRecordDeletionState.CancelledBeforeMutation);
             }
+
+            PersistedLibrarySnapshotInvalidateResult invalidation = await persistedSnapshots.InvalidateAsync(
+                request.LibraryRoot, cancellationToken).ConfigureAwait(false);
+            if (!invalidation.IsSuccess)
+            {
+                issues.Add(Block("BINARY_EXECUTION.SNAPSHOT_INVALIDATION_FAILED",
+                    "The stored library snapshot could not be invalidated; record deletion was blocked."));
+                return Result(ExactBinaryRecordDeletionState.PreflightFailed);
+            }
+            await backupStore.AppendAuditAsync(workspace, new(clock.GetUtcNow(), "StoredSnapshotInvalidated",
+                "The persisted library snapshot was deleted before mutation."), cancellationToken).ConfigureAwait(false);
 
             CalibreToolDescriptor expectedTool = tool.Tool!;
             foreach (CalibreBookId recordId in request.Plan.Definition.RecordIdsToRemove)

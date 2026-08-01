@@ -67,6 +67,27 @@ public sealed class PersistedLibrarySnapshotsUseCase(ILibrarySnapshotStore store
             return new(false, "The scan completed, but its result could not be persisted.");
         }
     }
+
+    public async Task<PersistedLibrarySnapshotInvalidateResult> InvalidateAsync(
+        string libraryRoot,
+        CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(libraryRoot))
+            return new(false, "The persisted scan result could not be identified for invalidation.");
+        try
+        {
+            await store.DeleteAsync(libraryRoot, cancellationToken).ConfigureAwait(false);
+            return new(true, null);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch
+        {
+            return new(false, "The persisted scan result could not be invalidated safely.");
+        }
+    }
 }
 
 public sealed record PersistedLibrarySnapshotListResult(
@@ -79,3 +100,4 @@ public sealed record PersistedLibrarySnapshotLoadResult(LibrarySnapshot? Snapsho
 }
 
 public sealed record PersistedLibrarySnapshotSaveResult(bool IsSuccess, string? Error);
+public sealed record PersistedLibrarySnapshotInvalidateResult(bool IsSuccess, string? Error);

@@ -1,5 +1,6 @@
 using CalibreLibraryCleaner.Application.Abstractions;
 using CalibreLibraryCleaner.Application.Executions;
+using CalibreLibraryCleaner.Application.Libraries;
 using CalibreLibraryCleaner.Application.Plans;
 using CalibreLibraryCleaner.Domain.Duplicates;
 using CalibreLibraryCleaner.Domain.Libraries;
@@ -37,6 +38,7 @@ public sealed class ExactBinaryCleanupPlanWorkspaceViewModelTests
         ICleanupExecutionIdGenerator executionIds = A.Fake<ICleanupExecutionIdGenerator>();
         IExactBinaryRecordDeletionConfirmation deletionConfirmation = A.Fake<IExactBinaryRecordDeletionConfirmation>();
         IExecutionBackupFolderPicker backupPicker = A.Fake<IExecutionBackupFolderPicker>();
+        PersistedLibrarySnapshotsUseCase persistedSnapshots = new(A.Fake<ILibrarySnapshotStore>());
         A.CallTo(() => ids.Create()).Returns(new CleanupPlanId(Guid.Parse("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee")));
         A.CallTo(() => clock.GetUtcNow()).Returns(now);
         A.CallTo(() => confirmation.ConfirmApproval(A<ExactBinaryCleanupPlan>._)).Returns(true);
@@ -44,7 +46,7 @@ public sealed class ExactBinaryCleanupPlanWorkspaceViewModelTests
             new(ids, clock), new(clock), new(clock),
             new(scanner, tools, workspaceStore),
             new(scanner, tools, commands, lease, workspaceStore, recordBackup, executionIds,
-                deletionConfirmation, clock),
+                deletionConfirmation, persistedSnapshots, clock),
             backupPicker,
             confirmation);
 

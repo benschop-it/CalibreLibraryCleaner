@@ -120,6 +120,20 @@ internal sealed class VersionedJsonLibrarySnapshotStore(LibrarySnapshotStorageOp
         }
     }
 
+    public Task DeleteAsync(string libraryRoot, CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        string canonicalRoot = CanonicalizeLibraryRoot(libraryRoot);
+        string storageRoot = GetStorageRoot(mustExist: false);
+        if (!Directory.Exists(storageRoot)) return Task.CompletedTask;
+        string path = Path.Combine(storageRoot, GetFileName(canonicalRoot));
+        if (!File.Exists(path)) return Task.CompletedTask;
+        if (!ExecutionPathGuard.TryRejectReparsePoints(path, true, out _))
+            throw new IOException("The persisted snapshot is not a physical file.");
+        File.Delete(path);
+        return Task.CompletedTask;
+    }
+
     private async Task<LibrarySnapshot?> TryReadFileAsync(string path, CancellationToken cancellationToken)
     {
         try

@@ -22,6 +22,8 @@ Milestone 6 records these expected states and backup requirements but performs n
 
 Exact-binary groups may independently produce a marked-record plan after the user selects a keeper and checks records to delete. Generation captures complete keeper and marked-record state. Before deletion, the executor copies and rehashes every involved format, exports each complete record through Calibre, verifies OPF/cover/format coverage, and seals an external manifest. It then uses non-permanent `calibredb remove` only for checked IDs and performs a complete scan after every command. The bundle or the user's full library copy is the recovery source; automatic recovery is not required for this workflow.
 
+The stored analysis snapshot is deleted after final confirmation and before the first record removal. Failure to invalidate it blocks mutation. Verification scans do not replace it because they are not guaranteed to include every normal analysis phase; the user runs a fresh normal scan to create the next persisted snapshot.
+
 Cleanup-plan import/export is explicit and restricted to `.cleanup-plan.json` files outside the physically resolved selected library. Export uses an external temporary sibling and publication step; import is bounded and read-only. Neither operation creates a plan, temporary file, cache, lock, or backup inside the library.
 
 ## Backup
