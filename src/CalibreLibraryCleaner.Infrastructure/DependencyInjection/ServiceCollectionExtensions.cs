@@ -19,6 +19,12 @@ public static class ServiceCollectionExtensions
     public static IServiceCollection AddCalibreLibraryInfrastructure(this IServiceCollection services)
     {
         ArgumentNullException.ThrowIfNull(services);
+
+        // Enable legacy single-byte code pages (e.g. windows-1252) so EPUB XML
+        // documents that declare a non-Unicode encoding decode accurately. This
+        // provider is process-global and registering it more than once is safe.
+        System.Text.Encoding.RegisterProvider(System.Text.CodePagesEncodingProvider.Instance);
+
         services.AddSingleton<IClock, SystemClock>();
         services.AddSingleton<ILibraryPathResolver, LibraryPathResolver>();
         services.AddSingleton<ICalibreMetadataReader, SqliteCalibreMetadataReader>();

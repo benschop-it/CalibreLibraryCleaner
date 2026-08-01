@@ -271,7 +271,7 @@
                 <DataGridTextColumn Width="110" Header="Confidence" Binding="{Binding Confidence}" />
                 <DataGridTextColumn Width="90" Header="Freshness" Binding="{Binding Freshness}" />
                 <DataGridTextColumn Width="80" Header="Warnings" Binding="{Binding WarningCount}" />
-                <DataGridCheckBoxColumn Width="85" Header="Overridden" Binding="{Binding IsOverridden}" />
+                <DataGridCheckBoxColumn Width="85" Header="Overridden" IsReadOnly="True" Binding="{Binding IsOverridden, Mode=OneWay}" />
                 <DataGridTextColumn Width="2*" Header="Category" Binding="{Binding Category}" />
                 <DataGridTextColumn Width="3*" Header="Match reason" Binding="{Binding Reason}" />
               </DataGrid.Columns>
@@ -412,7 +412,7 @@
                   <DataGridTextColumn Width="2*" Header="Reviewed classification" Binding="{Binding Reason}" />
                   <DataGridTextColumn Width="2*" Header="Retained destination" Binding="{Binding RetainedInstruction}" />
                   <DataGridTextColumn Width="2*" Header="Required backup" Binding="{Binding BackupRequirement}" />
-                  <DataGridCheckBoxColumn Width="100" Header="Byte-identical" Binding="{Binding ByteIdentical}" />
+                  <DataGridCheckBoxColumn Width="100" Header="Byte-identical" IsReadOnly="True" Binding="{Binding ByteIdentical, Mode=OneWay}" />
                 </DataGrid.Columns>
               </DataGrid>
             </TabItem>
@@ -524,7 +524,7 @@
           <StackPanel Grid.Row="1" Margin="0,8,0,4">
             <WrapPanel>
               <Button Margin="0,0,6,0" Padding="8,4" Content="Choose _backup folder" Command="{Binding ChooseBackupCommand}" />
-              <TextBox Width="420" Margin="0,0,6,0" IsReadOnly="True" Text="{Binding BackupDestination}" AutomationProperties.Name="External verified backup location" />
+              <TextBox Width="420" Margin="0,0,6,0" IsReadOnly="True" Text="{Binding BackupDestination, Mode=OneWay}" AutomationProperties.Name="External verified backup location" />
               <Button Margin="0,0,6,0" Padding="8,4" Content="_Prepare and preflight" Command="{Binding PrepareCommand}" />
               <Button Margin="0,0,6,0" Padding="8,4" Content="_Execute one plan" Command="{Binding ExecuteCommand}" />
               <Button Padding="8,4" Content="{Binding CancelActionText}" Command="{Binding CancelOrSafeStopCommand}" />
@@ -533,7 +533,7 @@
                       Content="I confirm that Calibre and every other library-mutating tool are closed." />
             <CheckBox Margin="0,3,0,0" IsChecked="{Binding RecoveryLimitationsAccepted}"
                       Content="I understand that cancellation is delayed after mutation begins and Milestone 7 cannot automatically roll back or resume." />
-            <ProgressBar Height="16" Margin="0,6,0,0" Minimum="0" Maximum="100" Value="{Binding ProgressPercentage}" />
+            <ProgressBar Height="16" Margin="0,6,0,0" Minimum="0" Maximum="100" Value="{Binding ProgressPercentage, Mode=OneWay}" />
             <TextBlock Margin="0,3,0,0" Text="{Binding ProgressMessage}" TextWrapping="Wrap" />
             <TextBlock Margin="0,3,0,0" Text="{Binding Status}" FontWeight="Bold" TextWrapping="Wrap" />
             <TextBlock Margin="0,3,0,0" Text="{Binding ResultSummary}" FontWeight="Bold" TextWrapping="Wrap" AutomationProperties.Name="Execution terminal result" />
@@ -588,7 +588,7 @@
                   <DataGridTextColumn Width="130" Header="Disposition" Binding="{Binding Disposition}" />
                   <DataGridTextColumn Width="150" Header="Failure" Binding="{Binding Failure}" />
                   <DataGridTextColumn Width="160" Header="Finished UTC" Binding="{Binding FinishedAtUtc}" />
-                  <DataGridCheckBoxColumn Width="100" Header="Mutation began" Binding="{Binding MutationStarted}" />
+                  <DataGridCheckBoxColumn Width="100" Header="Mutation began" IsReadOnly="True" Binding="{Binding MutationStarted, Mode=OneWay}" />
                   <DataGridTextColumn Width="3*" Header="Recovery bundle" Binding="{Binding BundlePath}" />
                 </DataGrid.Columns>
               </DataGrid>
@@ -618,7 +618,7 @@
           <StackPanel Grid.Row="1" Margin="0,8,0,5">
             <WrapPanel>
               <Button Margin="0,0,6,0" Padding="8,4" Content="Select _execution bundle" Command="{Binding SelectSourceCommand}" />
-              <TextBox Width="330" Margin="0,0,6,0" IsReadOnly="True" Text="{Binding SourceBundle}"
+              <TextBox Width="330" Margin="0,0,6,0" IsReadOnly="True" Text="{Binding SourceBundle, Mode=OneWay}"
                        AutomationProperties.Name="Selected Milestone 7 execution bundle" />
               <Button Margin="0,0,6,0" Padding="8,4" Content="_Reconcile and plan" Command="{Binding ReconcileAndPlanCommand}" />
               <Button Margin="0,0,6,0" Padding="8,4" Content="_Approve exact plan" Command="{Binding ApprovePlanCommand}" />
@@ -626,7 +626,7 @@
             </WrapPanel>
             <WrapPanel Margin="0,5,0,0">
               <Button Margin="0,0,6,0" Padding="8,4" Content="Choose current-state _backup folder" Command="{Binding ChooseBackupCommand}" />
-              <TextBox Width="330" Margin="0,0,6,0" IsReadOnly="True" Text="{Binding BackupDestination}"
+              <TextBox Width="330" Margin="0,0,6,0" IsReadOnly="True" Text="{Binding BackupDestination, Mode=OneWay}"
                        AutomationProperties.Name="Recovery current-state backup location" />
               <Button Margin="0,0,6,0" Padding="8,4" Content="_Prepare recovery" Command="{Binding PrepareCommand}" />
               <Button Margin="0,0,6,0" Padding="8,4" Content="Begin _recovery" Command="{Binding ExecuteCommand}" />
@@ -636,7 +636,7 @@
                       Content="I confirm that Calibre and all other cleanup or recovery mutators are closed." />
             <CheckBox Margin="0,3,0,0" IsChecked="{Binding SafeBoundaryUnderstood}"
                       Content="I understand that an active Calibre process is never terminated and cancellation after mutation waits for the next verified safe boundary." />
-            <ProgressBar Height="16" Margin="0,5,0,0" Minimum="0" Maximum="100" Value="{Binding ProgressPercent}" />
+            <ProgressBar Height="16" Margin="0,5,0,0" Minimum="0" Maximum="100" Value="{Binding ProgressPercent, Mode=OneWay}" />
             <TextBlock Margin="0,2,0,0" Text="{Binding ProgressMessage}" TextWrapping="Wrap" />
             <TextBlock Margin="0,2,0,0" Text="{Binding Status}" FontWeight="Bold" TextWrapping="Wrap" />
             <TextBlock Margin="0,2,0,0" Text="{Binding ResultSummary}" FontWeight="Bold" TextWrapping="Wrap"

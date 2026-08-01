@@ -71,7 +71,18 @@ public sealed class AssessEpubFormatsUseCase(IEpubInspector inspector, EpubAsses
                         targets.Length,
                         SafePath(target),
                         value.Stage)));
-                inspection = await inspector.InspectAsync(request, inspectionProgress, token).ConfigureAwait(false);
+                try
+                {
+                    inspection = await inspector.InspectAsync(request, inspectionProgress, token).ConfigureAwait(false);
+                }
+                catch (OperationCanceledException)
+                {
+                    throw;
+                }
+                catch (Exception exception)
+                {
+                    throw new EpubTargetAssessmentException(SafePath(target), exception);
+                }
             }
 
             token.ThrowIfCancellationRequested();
@@ -131,4 +142,12 @@ public sealed class AssessEpubFormatsUseCase(IEpubInspector inspector, EpubAsses
     {
         public void Report(EpubInspectionProgress value) => report(value);
     }
+}
+
+internal sealed class EpubTargetAssessmentException(string relativePath, Exception innerException)
+    : Exception("An EPUB inspector failed unexpectedly.", innerException)
+{
+    public string RelativePath { get; } = relativePath;
+
+    public string FailureType { get; } = innerException.GetType().Name;
 }

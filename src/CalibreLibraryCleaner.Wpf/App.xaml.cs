@@ -21,6 +21,11 @@ public partial class App : System.Windows.Application
 
     public App()
     {
+        // Enable legacy single-byte code pages (e.g. windows-1252) so documents that
+        // declare a non-Unicode encoding decode accurately. Registration is process
+        // global and idempotent; the infrastructure layer registers it too.
+        System.Text.Encoding.RegisterProvider(System.Text.CodePagesEncodingProvider.Instance);
+
         HostApplicationBuilder builder = Host.CreateApplicationBuilder();
         builder.Services.AddCalibreLibraryInfrastructure();
         builder.Services.AddSingleton<ValidateLibraryUseCase>();

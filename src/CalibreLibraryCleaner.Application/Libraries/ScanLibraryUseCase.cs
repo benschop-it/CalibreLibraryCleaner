@@ -155,12 +155,19 @@ public sealed class ScanLibraryUseCase(
             {
                 throw;
             }
-            catch
+            catch (EpubTargetAssessmentException exception)
             {
                 return LibraryScanOutcome.Failure(new(
                     LibraryErrorCode.EpubAssessmentFailed,
-                    "The EPUB files could not be assessed reliably.",
-                    "Close tools changing the library and retry the scan."));
+                    $"EPUB assessment stopped at '{exception.RelativePath}' because of an unexpected {exception.FailureType}.",
+                    "This does not show that another tool changed the library. Retry the scan; if the same EPUB fails again, report the file and technical reason."));
+            }
+            catch (Exception exception)
+            {
+                return LibraryScanOutcome.Failure(new(
+                    LibraryErrorCode.EpubAssessmentFailed,
+                    $"EPUB assessment stopped because of an unexpected {exception.GetType().Name}.",
+                    "This does not show that another tool changed the library. Retry the scan; if it fails again, report the technical reason."));
             }
         }
 

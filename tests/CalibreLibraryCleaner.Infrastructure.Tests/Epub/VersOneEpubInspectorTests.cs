@@ -1,14 +1,19 @@
+using System.Buffers.Binary;
 using System.IO.Compression;
 using System.Net;
 using System.Net.Sockets;
+using System.Runtime.ExceptionServices;
 using System.Security.Cryptography;
+using System.Xml;
 using CalibreLibraryCleaner.Application.Abstractions;
 using CalibreLibraryCleaner.Application.Assessments;
 using CalibreLibraryCleaner.Application.Libraries;
 using CalibreLibraryCleaner.Domain.Libraries;
+using CalibreLibraryCleaner.Infrastructure.Epub;
 using CalibreLibraryCleaner.Infrastructure.Tests.Fixtures;
 using FluentAssertions;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 using Xunit;
 
 namespace CalibreLibraryCleaner.Infrastructure.Tests.Epub;
@@ -134,6 +139,86 @@ public sealed class VersOneEpubInspectorTests
     }
 
     [Fact]
+    public async Task LegacyCodePageDeclaredXmlIsDecodedWithoutDecoderFailure()
+    {
+        using TemporaryDirectory directory = new();
+        string path = Path.Combine(directory.Path, "Legacy.epub");
+        // content.opf declares windows-1252 and carries a raw 0xA4 byte (the ¤ sign
+        // in that code page) that is invalid as UTF-8. The inspector must honor the
+        // declared encoding instead of failing with a DecoderFallbackException.
+        const string opfPrefix =
+            "<?xml version=\"1.0\" encoding=\"windows-1252\"?>" +
+            "<package xmlns=\"http://www.idpf.org/2007/opf\" version=\"3.0\" unique-identifier=\"book-id\">" +
+            "<metadata xmlns:dc=\"http://purl.org/dc/elements/1.1/\">" +
+            "<dc:identifier id=\"book-id\">9780306406157</dc:identifier><dc:title>Price ";
+        const string opfSuffix =
+            "</dc:title><dc:creator>Author</dc:creator><dc:language>en</dc:language><dc:date>2020-01-01</dc:date>" +
+            "</metadata>" +
+            "<manifest><item id=\"chapter\" href=\"chapter.xhtml\" media-type=\"application/xhtml+xml\"/></manifest>" +
+            "<spine><itemref idref=\"chapter\"/></spine></package>";
+        byte[] opf = [.. System.Text.Encoding.ASCII.GetBytes(opfPrefix), 0xA4, .. System.Text.Encoding.ASCII.GetBytes(opfSuffix)];
+        SyntheticEpubBuilder.CreateFromRawEntries(path,
+        [
+            ("mimetype", System.Text.Encoding.ASCII.GetBytes("application/epub+zip"), CompressionLevel.NoCompression),
+            ("META-INF/container.xml", System.Text.Encoding.ASCII.GetBytes(
+                "<container xmlns=\"urn:oasis:names:tc:opendocument:xmlns:container\" version=\"1.0\"><rootfiles><rootfile full-path=\"OEBPS/content.opf\" media-type=\"application/oebps-package+xml\"/></rootfiles></container>"),
+                CompressionLevel.Optimal),
+            ("OEBPS/content.opf", opf, CompressionLevel.Optimal),
+            ("OEBPS/chapter.xhtml", System.Text.Encoding.ASCII.GetBytes(
+                $"<html><body><p>{new string('a', 6_000)}</p></body></html>"), CompressionLevel.Optimal),
+        ]);
+        using ServiceProvider provider = TestServices.CreateProvider();
+
+        EpubInspectionResult result = await provider.GetRequiredService<IEpubInspector>()
+            .InspectAsync(await CreateRequestAsync(path), null, CancellationToken.None);
+
+        result.Problems.Should().BeEmpty();
+        result.PackageParsed.Should().BeTrue();
+        result.EmbeddedTitle.Should().Be("Price \u00A4");
+    }
+
+    [Fact]
+    public async Task MislabelledUtf8XmlWithInvalidBytesIsHandledGracefullyWithoutCrashing()
+    {
+        using TemporaryDirectory directory = new();
+        string path = Path.Combine(directory.Path, "Mislabelled.epub");
+        // Declares utf-8 but contains a stray 0xA4 byte that is not valid UTF-8. The
+        // inspector must degrade to a structured result instead of letting a raw
+        // DecoderFallbackException escape as an unhandled crash.
+        const string opfPrefix =
+            "<?xml version=\"1.0\" encoding=\"utf-8\"?>" +
+            "<package xmlns=\"http://www.idpf.org/2007/opf\" version=\"3.0\" unique-identifier=\"book-id\">" +
+            "<metadata xmlns:dc=\"http://purl.org/dc/elements/1.1/\">" +
+            "<dc:identifier id=\"book-id\">9780306406157</dc:identifier><dc:title>Price ";
+        const string opfSuffix =
+            "</dc:title><dc:creator>Author</dc:creator><dc:language>en</dc:language><dc:date>2020-01-01</dc:date>" +
+            "</metadata>" +
+            "<manifest><item id=\"chapter\" href=\"chapter.xhtml\" media-type=\"application/xhtml+xml\"/></manifest>" +
+            "<spine><itemref idref=\"chapter\"/></spine></package>";
+        byte[] opf = [.. System.Text.Encoding.ASCII.GetBytes(opfPrefix), 0xA4, .. System.Text.Encoding.ASCII.GetBytes(opfSuffix)];
+        SyntheticEpubBuilder.CreateFromRawEntries(path,
+        [
+            ("mimetype", System.Text.Encoding.ASCII.GetBytes("application/epub+zip"), CompressionLevel.NoCompression),
+            ("META-INF/container.xml", System.Text.Encoding.ASCII.GetBytes(
+                "<container xmlns=\"urn:oasis:names:tc:opendocument:xmlns:container\" version=\"1.0\"><rootfiles><rootfile full-path=\"OEBPS/content.opf\" media-type=\"application/oebps-package+xml\"/></rootfiles></container>"),
+                CompressionLevel.Optimal),
+            ("OEBPS/content.opf", opf, CompressionLevel.Optimal),
+            ("OEBPS/chapter.xhtml", System.Text.Encoding.ASCII.GetBytes(
+                $"<html><body><p>{new string('a', 6_000)}</p></body></html>"), CompressionLevel.Optimal),
+        ]);
+        EpubInspectionRequest request = await CreateRequestAsync(path);
+        using ServiceProvider provider = TestServices.CreateProvider();
+
+        // The stray byte must not surface as an unhandled decoder exception; the call
+        // completes and is either tolerated (parsed) or classified as a structured
+        // problem.
+        EpubInspectionResult result = await provider.GetRequiredService<IEpubInspector>()
+            .InspectAsync(request, null, CancellationToken.None);
+
+        (result.PackageParsed || result.Problems.Count > 0).Should().BeTrue();
+    }
+
+    [Fact]
     public async Task NavigationMustContainUsableTargetsAndReportsBrokenAndRepeatedTargets()
     {
         using TemporaryDirectory directory = new();
@@ -180,6 +265,188 @@ public sealed class VersOneEpubInspectorTests
         result.Problems.Select(problem => problem.Explanation).Should().NotContain(text => text.Contains("file:///forbidden", StringComparison.Ordinal));
     }
 
+    [Fact]
+    public async Task MalformedContainerXmlReportsDistinctExplanation()
+    {
+        using TemporaryDirectory directory = new();
+        string path = Path.Combine(directory.Path, "MalformedContainerXml.epub");
+        List<(string Name, string Content, CompressionLevel Compression)> entries = StandardEntries().ToList();
+        // Binary/non-XML payload so parsing fails at the root (line 1, position 1),
+        // mirroring the obfuscated toc.ncx that motivated the scoped XmlException.
+        Replace(entries, "META-INF/container.xml", "\u0001\u0002not xml at all");
+        SyntheticEpubBuilder.CreateFromEntries(path, entries);
+        using ServiceProvider provider = TestServices.CreateProvider();
+
+        EpubInspectionResult result = await provider.GetRequiredService<IEpubInspector>()
+            .InspectAsync(await CreateRequestAsync(path), null, CancellationToken.None);
+
+        result.Problems.Should().ContainSingle(problem =>
+            problem.Code == EpubInspectionProblemCode.PackageMalformed
+            && problem.Explanation == "The EPUB container document is not valid XML.");
+    }
+
+    [Fact]
+    public async Task MalformedPackageXmlReportsDistinctExplanation()
+    {
+        using TemporaryDirectory directory = new();
+        string path = Path.Combine(directory.Path, "MalformedPackageXml.epub");
+        List<(string Name, string Content, CompressionLevel Compression)> entries = StandardEntries().ToList();
+        Replace(entries, "OEBPS/content.opf", "\u0001\u0002not xml at all");
+        SyntheticEpubBuilder.CreateFromEntries(path, entries);
+        using ServiceProvider provider = TestServices.CreateProvider();
+
+        EpubInspectionResult result = await provider.GetRequiredService<IEpubInspector>()
+            .InspectAsync(await CreateRequestAsync(path), null, CancellationToken.None);
+
+        result.Problems.Should().ContainSingle(problem =>
+            problem.Code == EpubInspectionProblemCode.PackageMalformed
+            && problem.Explanation == "The EPUB package document is not valid XML.");
+    }
+
+    [Fact]
+    public async Task MalformedNavigationXmlReportsDistinctExplanation()
+    {
+        using TemporaryDirectory directory = new();
+        string path = Path.Combine(directory.Path, "MalformedNavXml.epub");
+        List<(string Name, string Content, CompressionLevel Compression)> entries = StandardEntries(
+            packageBody: "<manifest><item id=\"chapter\" href=\"chapter.xhtml\" media-type=\"application/xhtml+xml\"/><item id=\"ncx\" href=\"toc.ncx\" media-type=\"application/x-dtbncx+xml\"/></manifest><spine toc=\"ncx\"><itemref idref=\"chapter\"/></spine>").ToList();
+        // The NCX is an eager XML reference; supply non-XML bytes so the scoped
+        // XmlException classifies it as a malformed navigation document.
+        entries.Add(("OEBPS/toc.ncx", "\u0001\u0002not xml at all", CompressionLevel.Optimal));
+        SyntheticEpubBuilder.CreateFromEntries(path, entries);
+        using ServiceProvider provider = TestServices.CreateProvider();
+
+        EpubInspectionResult result = await provider.GetRequiredService<IEpubInspector>()
+            .InspectAsync(await CreateRequestAsync(path), null, CancellationToken.None);
+
+        result.Problems.Should().ContainSingle(problem =>
+            problem.Code == EpubInspectionProblemCode.PackageMalformed
+            && problem.Explanation == "An EPUB navigation document is not valid XML.");
+    }
+
+    [Fact]
+    public async Task MalformedEncryptionXmlReportsDistinctExplanation()
+    {
+        using TemporaryDirectory directory = new();
+        string path = Path.Combine(directory.Path, "MalformedEncryptionXml.epub");
+        List<(string Name, string Content, CompressionLevel Compression)> entries = StandardEntries().ToList();
+        entries.Add(("META-INF/encryption.xml", "\u0001\u0002not xml at all", CompressionLevel.Optimal));
+        SyntheticEpubBuilder.CreateFromEntries(path, entries);
+        using ServiceProvider provider = TestServices.CreateProvider();
+
+        EpubInspectionResult result = await provider.GetRequiredService<IEpubInspector>()
+            .InspectAsync(await CreateRequestAsync(path), null, CancellationToken.None);
+
+        result.Problems.Should().ContainSingle(problem =>
+            problem.Code == EpubInspectionProblemCode.PackageMalformed
+            && problem.Explanation == "The EPUB encryption document is not valid XML.");
+    }
+
+    [Fact]
+    public async Task MalformedPackageIsStructuredProblemWithoutWarningLog()
+    {
+        using TemporaryDirectory directory = new();
+        string path = Path.Combine(directory.Path, "MalformedPackage.epub");
+        List<(string Name, string Content, CompressionLevel Compression)> entries = StandardEntries().ToList();
+        Replace(entries, "OEBPS/content.opf", "<package>");
+        SyntheticEpubBuilder.CreateFromEntries(path, entries);
+        CapturingLogger<VersOneEpubInspector> logger = new();
+        VersOneEpubInspector inspector = new(logger);
+
+        EpubInspectionResult result = await inspector.InspectAsync(
+            await CreateRequestAsync(path), null, CancellationToken.None);
+
+        result.Problems.Should().ContainSingle(problem => problem.Code == EpubInspectionProblemCode.PackageMalformed);
+        logger.Levels.Should().Contain(LogLevel.Debug).And.NotContain(LogLevel.Warning);
+    }
+
+    [Fact]
+    public async Task EmptyManifestHrefIsRejectedBeforeVersOne()
+    {
+        using TemporaryDirectory directory = new();
+        string path = Path.Combine(directory.Path, "EmptyManifestHref.epub");
+        SyntheticEpubBuilder.CreateFromEntries(path, StandardEntries(
+            packageBody: "<manifest><item id=\"empty\" href=\"\" media-type=\"application/xhtml+xml\"/></manifest><spine/>"));
+        using ServiceProvider provider = TestServices.CreateProvider();
+        IEpubInspector inspector = provider.GetRequiredService<IEpubInspector>();
+        int emptyKeyExceptions = 0;
+        EventHandler<FirstChanceExceptionEventArgs> handler = (_, args) =>
+        {
+            if (args.Exception is ArgumentException exception
+                && string.Equals(exception.ParamName, "key", StringComparison.Ordinal)
+                && exception.Message.Contains("Content file name cannot be empty", StringComparison.Ordinal))
+            {
+                Interlocked.Increment(ref emptyKeyExceptions);
+            }
+        };
+        AppDomain.CurrentDomain.FirstChanceException += handler;
+        EpubInspectionResult result;
+        try
+        {
+            result = await inspector.InspectAsync(await CreateRequestAsync(path), null, CancellationToken.None);
+        }
+        finally
+        {
+            AppDomain.CurrentDomain.FirstChanceException -= handler;
+        }
+
+        result.Problems.Should().ContainSingle(problem => problem.Code == EpubInspectionProblemCode.PackageMalformed);
+        emptyKeyExceptions.Should().Be(0);
+    }
+
+    [Fact]
+    public async Task NcxWithoutNavMapIsRejectedBeforeVersOne()
+    {
+        using TemporaryDirectory directory = new();
+        string path = Path.Combine(directory.Path, "NcxWithoutNavMap.epub");
+        List<(string Name, string Content, CompressionLevel Compression)> entries = StandardEntries(
+            packageBody: "<manifest><item id=\"chapter\" href=\"chapter.xhtml\" media-type=\"application/xhtml+xml\"/><item id=\"ncx\" href=\"toc.ncx\" media-type=\"application/x-dtbncx+xml\"/></manifest><spine toc=\"ncx\"><itemref idref=\"chapter\"/></spine>").ToList();
+        entries.Add(("OEBPS/toc.ncx", "<ncx xmlns=\"http://www.daisy.org/z3986/2005/ncx/\"><head/></ncx>", CompressionLevel.Optimal));
+        SyntheticEpubBuilder.CreateFromEntries(path, entries);
+        using ServiceProvider provider = TestServices.CreateProvider();
+        IEpubInspector inspector = provider.GetRequiredService<IEpubInspector>();
+        int ncxExceptions = 0;
+        EventHandler<FirstChanceExceptionEventArgs> handler = (_, args) =>
+        {
+            if (string.Equals(args.Exception.GetType().FullName, "VersOne.Epub.Epub2NcxException", StringComparison.Ordinal)
+                && args.Exception.Message.Contains("does not contain navMap", StringComparison.Ordinal))
+            {
+                Interlocked.Increment(ref ncxExceptions);
+            }
+        };
+        AppDomain.CurrentDomain.FirstChanceException += handler;
+        EpubInspectionResult result;
+        try
+        {
+            result = await inspector.InspectAsync(await CreateRequestAsync(path), null, CancellationToken.None);
+        }
+        finally
+        {
+            AppDomain.CurrentDomain.FirstChanceException -= handler;
+        }
+
+        result.Problems.Should().ContainSingle(problem => problem.Code == EpubInspectionProblemCode.PackageMalformed);
+        ncxExceptions.Should().Be(0);
+    }
+
+    [Fact]
+    public async Task UnsupportedCompressionBecomesStructuredProblem()
+    {
+        using TemporaryDirectory directory = new();
+        string path = Path.Combine(directory.Path, "UnsupportedCompression.epub");
+        SyntheticEpubBuilder.CreateFromEntries(path, StandardEntries());
+        SetCompressionMethod(path, "OEBPS/content.opf", 99);
+        using ServiceProvider provider = TestServices.CreateProvider();
+
+        EpubInspectionResult result = await provider.GetRequiredService<IEpubInspector>()
+            .InspectAsync(await CreateRequestAsync(path), null, CancellationToken.None);
+
+        result.Problems.Should().ContainSingle();
+        result.Problems[0].Code.Should().BeOneOf(
+            EpubInspectionProblemCode.CannotOpen,
+            EpubInspectionProblemCode.Unsupported);
+    }
+
     [Theory]
     [InlineData("../outside.xhtml")]
     [InlineData("OEBPS/nested/../outside.xhtml")]
@@ -201,6 +468,71 @@ public sealed class VersOneEpubInspectorTests
 
         result.Problems.Should().ContainSingle(problem => problem.Code == EpubInspectionProblemCode.UnsafeArchive);
         File.Exists(Path.Combine(directory.Path, "outside.xhtml")).Should().BeFalse();
+    }
+
+    private sealed class CapturingLogger<T> : ILogger<T>
+    {
+        public List<LogLevel> Levels { get; } = [];
+
+        public IDisposable? BeginScope<TState>(TState state)
+            where TState : notnull => null;
+
+        public bool IsEnabled(LogLevel logLevel) => true;
+
+        public void Log<TState>(
+            LogLevel logLevel,
+            EventId eventId,
+            TState state,
+            Exception? exception,
+            Func<TState, Exception?, string> formatter) => Levels.Add(logLevel);
+    }
+
+    private static void SetCompressionMethod(string path, string entryName, ushort method)
+    {
+        byte[] archive = File.ReadAllBytes(path);
+        bool localHeaderChanged = false;
+        bool centralHeaderChanged = false;
+        for (int index = 0; index <= archive.Length - 30; index++)
+        {
+            uint signature = BinaryPrimitives.ReadUInt32LittleEndian(archive.AsSpan(index, 4));
+            int nameOffset;
+            int nameLengthOffset;
+            int methodOffset;
+            if (signature == 0x04034B50)
+            {
+                nameOffset = index + 30;
+                nameLengthOffset = index + 26;
+                methodOffset = index + 8;
+            }
+            else if (signature == 0x02014B50 && index <= archive.Length - 46)
+            {
+                nameOffset = index + 46;
+                nameLengthOffset = index + 28;
+                methodOffset = index + 10;
+            }
+            else
+            {
+                continue;
+            }
+
+            int nameLength = BinaryPrimitives.ReadUInt16LittleEndian(archive.AsSpan(nameLengthOffset, 2));
+            if (nameOffset + nameLength > archive.Length
+                || !System.Text.Encoding.UTF8.GetString(archive, nameOffset, nameLength).Equals(entryName, StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            BinaryPrimitives.WriteUInt16LittleEndian(archive.AsSpan(methodOffset, 2), method);
+            localHeaderChanged |= signature == 0x04034B50;
+            centralHeaderChanged |= signature == 0x02014B50;
+        }
+
+        if (!localHeaderChanged || !centralHeaderChanged)
+        {
+            throw new InvalidOperationException("The synthetic ZIP entry headers were not found.");
+        }
+
+        File.WriteAllBytes(path, archive);
     }
 
     [Fact]
@@ -450,10 +782,29 @@ public sealed class VersOneEpubInspectorTests
         EpubInspectionRequest oversizedRequest = await CreateRequestAsync(oversizedPath);
         EpubInspectionResult oversized = await inspector.InspectAsync(
             oversizedRequest with { Limits = EpubInspectionLimits.V1 with { MaximumXmlBytes = 1_024 } }, null, CancellationToken.None);
-        EpubInspectionResult dtd = await inspector.InspectAsync(await CreateRequestAsync(dtdPath), null, CancellationToken.None);
+        int dtdXmlExceptions = 0;
+        EventHandler<FirstChanceExceptionEventArgs> handler = (_, args) =>
+        {
+            if (args.Exception is XmlException exception
+                && exception.Message.Contains("DTD is prohibited", StringComparison.Ordinal))
+            {
+                Interlocked.Increment(ref dtdXmlExceptions);
+            }
+        };
+        AppDomain.CurrentDomain.FirstChanceException += handler;
+        EpubInspectionResult dtd;
+        try
+        {
+            dtd = await inspector.InspectAsync(await CreateRequestAsync(dtdPath), null, CancellationToken.None);
+        }
+        finally
+        {
+            AppDomain.CurrentDomain.FirstChanceException -= handler;
+        }
 
         oversized.Problems.Should().ContainSingle(problem => problem.Code == EpubInspectionProblemCode.LimitExceeded);
         dtd.Problems.Should().ContainSingle(problem => problem.Code == EpubInspectionProblemCode.PackageMalformed);
+        dtdXmlExceptions.Should().Be(0);
     }
 
     [Fact]

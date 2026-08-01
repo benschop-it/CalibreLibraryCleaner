@@ -1,4 +1,5 @@
 using CalibreLibraryCleaner.Application.Abstractions;
+using CalibreLibraryCleaner.Application.Assessments;
 using CalibreLibraryCleaner.Application.Assessments.Pdf;
 using CalibreLibraryCleaner.Application.Executions;
 using CalibreLibraryCleaner.Application.Libraries;
@@ -369,6 +370,51 @@ public sealed class ScanLibraryUseCaseTests
 
         outcome.IsSuccess.Should().BeFalse();
         outcome.Error!.Code.Should().Be(LibraryErrorCode.HashingFailed);
+    }
+
+    [Fact]
+    public async Task UnexpectedEpubInspectorFailureIdentifiesFileWithoutBlamingOtherTools()
+    {
+        ILibraryPathResolver resolver = A.Fake<ILibraryPathResolver>();
+        ICalibreMetadataReader reader = A.Fake<ICalibreMetadataReader>();
+        IFormatFileHasher hasher = A.Fake<IFormatFileHasher>();
+        IClock clock = A.Fake<IClock>();
+        IEpubInspector inspector = A.Fake<IEpubInspector>();
+        ValidatedLibraryLocation location = new("C:/Library", "C:/Library/metadata.db");
+        FormatFileFingerprint fingerprint = new(4, new(new string('a', 64)));
+        FormatFileObservation observation = new(4, DateTimeOffset.UnixEpoch, DateTimeOffset.UnixEpoch, 0);
+        A.CallTo(() => resolver.ValidateAsync("C:/Library", A<CancellationToken>._))
+            .Returns(LibraryValidationOutcome.Success(location));
+        A.CallTo(() => reader.ReadAsync(location, A<IProgress<LibraryScanProgress>?>._, A<CancellationToken>._))
+            .Returns(CalibreCatalogReadOutcome.Success(CreateCatalog(1)));
+        A.CallTo(() => resolver.ResolveFormat(location, A<string>._, "Book", "EPUB"))
+            .Returns(ResolvedFormatPathOutcome.Success(new(
+                "C:/Library", "C:/Library/Author/Book (1)/Book.epub", "Author/Book (1)/Book.epub")));
+        A.CallTo(() => hasher.HashAsync(
+                A<IReadOnlyList<FormatHashRequest>>._,
+                A<int>._,
+                A<IProgress<FormatHashProgress>?>._,
+                A<CancellationToken>._))
+            .Returns([FormatHashResult.Success(0, fingerprint, observation)]);
+        A.CallTo(() => inspector.InspectAsync(
+                A<EpubInspectionRequest>._,
+                A<IProgress<EpubInspectionProgress>?>._,
+                A<CancellationToken>._))
+            .ThrowsAsync(new InvalidOperationException("Unsafe provider detail."));
+        ScanLibraryUseCase useCase = new(
+            resolver,
+            reader,
+            hasher,
+            clock,
+            new(),
+            new AssessEpubFormatsUseCase(inspector, new()));
+
+        LibraryScanOutcome outcome = await useCase.ExecuteAsync("C:/Library", null, CancellationToken.None);
+
+        outcome.Error!.Code.Should().Be(LibraryErrorCode.EpubAssessmentFailed);
+        outcome.Error.Message.Should().Contain("Author/Book (1)/Book.epub").And.Contain(nameof(InvalidOperationException));
+        outcome.Error.Message.Should().NotContain("Unsafe provider detail");
+        outcome.Error.SuggestedAction.Should().NotContain("Close tools");
     }
 
     private static TestContext CreateContext(int bookCount = 1) => CreateContext(CreateCatalog(bookCount));

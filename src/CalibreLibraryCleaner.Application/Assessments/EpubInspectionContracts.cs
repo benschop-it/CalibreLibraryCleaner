@@ -19,7 +19,7 @@ public sealed record EpubInspectionLimits(
     int MaximumReadableCharacters = 20_000_000,
     int MaximumCompressionRatio = 200,
     int MaximumAggregateCompressionRatio = 100,
-    int MaximumHtmlNodes = 25_000,
+    int MaximumHtmlNodes = 200_000,
     int MaximumHtmlDepth = 256)
 {
     public static EpubInspectionLimits V1 { get; } = new();

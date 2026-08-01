@@ -18,6 +18,21 @@ internal static class SyntheticEpubBuilder
         }
     }
 
+    public static void CreateFromRawEntries(
+        string path,
+        IEnumerable<(string Name, byte[] Content, CompressionLevel Compression)> entries)
+    {
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        using FileStream stream = new(path, FileMode.CreateNew, FileAccess.Write, FileShare.None);
+        using ZipArchive archive = new(stream, ZipArchiveMode.Create);
+        foreach ((string name, byte[] content, CompressionLevel compression) in entries)
+        {
+            ZipArchiveEntry entry = archive.CreateEntry(name, compression);
+            using Stream entryStream = entry.Open();
+            entryStream.Write(content);
+        }
+    }
+
     public static void CreateValid(string path)
     {
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);

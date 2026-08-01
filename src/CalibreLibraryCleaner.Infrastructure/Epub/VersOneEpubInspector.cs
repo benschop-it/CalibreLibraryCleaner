@@ -2,6 +2,7 @@ using System.Buffers.Binary;
 using System.Globalization;
 using System.IO.Compression;
 using System.Security;
+using System.Text;
 using System.Xml;
 using System.Xml.Linq;
 using CalibreLibraryCleaner.Application.Abstractions;
@@ -22,8 +23,16 @@ internal sealed class VersOneEpubInspector(ILogger<VersOneEpubInspector> logger)
     private const uint CentralDirectoryFileHeaderSignature = 0x02014B50;
     private const uint Zip64EndOfCentralDirectorySignature = 0x06064B50;
     private const uint Zip64EndOfCentralDirectoryLocatorSignature = 0x07064B50;
+    private static readonly byte[][] EncodedDtdDeclarations =
+    [
+        "<!DOCTYPE"u8.ToArray(),
+        Encoding.Unicode.GetBytes("<!DOCTYPE"),
+        Encoding.BigEndianUnicode.GetBytes("<!DOCTYPE"),
+        Encoding.UTF32.GetBytes("<!DOCTYPE"),
+        new UTF32Encoding(bigEndian: true, byteOrderMark: false).GetBytes("<!DOCTYPE"),
+    ];
     private static readonly Action<ILogger, string, Exception?> InspectionFailed = LoggerMessage.Define<string>(
-        LogLevel.Warning,
+        LogLevel.Debug,
         new EventId(1, nameof(InspectionFailed)),
         "EPUB inspection returned a structured failure with code {ReasonCode}");
 
@@ -65,7 +74,15 @@ internal sealed class VersOneEpubInspector(ILogger<VersOneEpubInspector> logger)
 
             cancellationToken.ThrowIfCancellationRequested();
             progress?.Report(new("Package", 0, null));
-            await ValidateWithVersOneAsync(request, cancellationToken).ConfigureAwait(false);
+            try
+            {
+                await ValidateWithVersOneAsync(request, cancellationToken).ConfigureAwait(false);
+            }
+            catch (Exception exception) when (IsUnclassifiedParserFailure(exception))
+            {
+                InspectionFailed(logger, "UnsupportedParserFailure", null);
+                return Fail(request, EpubInspectionProblemCode.Unsupported, "The EPUB parser could not safely interpret this package.");
+            }
             EpubInspectionResult result = await ReadFactsAsync(request, progress, cancellationToken).ConfigureAwait(false);
             EnsureCurrentFile(request);
             return result;
@@ -88,6 +105,11 @@ internal sealed class VersOneEpubInspector(ILogger<VersOneEpubInspector> logger)
             InspectionFailed(logger, "Malformed", null);
             return Fail(request, EpubInspectionProblemCode.PackageMalformed, "The EPUB container or package is malformed or unsupported.");
         }
+        catch (NotSupportedException)
+        {
+            InspectionFailed(logger, "Unsupported", null);
+            return Fail(request, EpubInspectionProblemCode.Unsupported, "The EPUB uses a container or package feature that is not supported.");
+        }
         catch (OverflowException)
         {
             InspectionFailed(logger, "LimitExceeded", null);
@@ -100,6 +122,21 @@ internal sealed class VersOneEpubInspector(ILogger<VersOneEpubInspector> logger)
         }
     }
 
+    private static bool IsUnclassifiedParserFailure(Exception exception) => exception is not (
+        OperationCanceledException or
+        FileChangedException or
+        FileNotFoundException or
+        DirectoryNotFoundException or
+        UnauthorizedAccessException or
+        SecurityException or
+        IOException or
+        InvalidDataException or
+        XmlException or
+        EpubReaderException or
+        OverflowException or
+        InspectionLimitException or
+        OutOfMemoryException);
+
     private static async Task<PreflightResult> PreflightAsync(EpubInspectionRequest request, CancellationToken token)
     {
         await using FileStream file = OpenRead(request.FullPath);
@@ -111,7 +148,21 @@ internal sealed class VersOneEpubInspector(ILogger<VersOneEpubInspector> logger)
         file.Position = 0;
         using CancellationCheckingStream guarded = new(file, token);
         using ZipArchive archive = new(guarded, ZipArchiveMode.Read, leaveOpen: true);
-        if (archive.Entries.Count > request.Limits.MaximumArchiveEntries)
+        System.Collections.ObjectModel.ReadOnlyCollection<ZipArchiveEntry> archiveEntries;
+        try
+        {
+            archiveEntries = archive.Entries;
+        }
+        catch (InvalidDataException)
+        {
+            return PreflightResult.Fail(EpubInspectionProblemCode.PackageMalformed, "The EPUB archive central directory is corrupt or contains invalid metadata.");
+        }
+        catch (ArgumentOutOfRangeException)
+        {
+            return PreflightResult.Fail(EpubInspectionProblemCode.PackageMalformed, "The EPUB archive central directory is corrupt or contains invalid metadata.");
+        }
+
+        if (archiveEntries.Count > request.Limits.MaximumArchiveEntries)
         {
             return PreflightResult.Fail(EpubInspectionProblemCode.LimitExceeded, "The EPUB contains too many archive entries.");
         }
@@ -120,7 +171,7 @@ internal sealed class VersOneEpubInspector(ILogger<VersOneEpubInspector> logger)
         Dictionary<string, ZipArchiveEntry> entries = new(StringComparer.Ordinal);
         long totalLength = 0;
         long totalCompressed = 0;
-        foreach (ZipArchiveEntry entry in archive.Entries)
+        foreach (ZipArchiveEntry entry in archiveEntries)
         {
             token.ThrowIfCancellationRequested();
             if (!EpubArchivePathResolver.TryNormalizeEntryName(entry.FullName, out string name) || !names.Add(name))
@@ -167,7 +218,21 @@ internal sealed class VersOneEpubInspector(ILogger<VersOneEpubInspector> logger)
             return PreflightResult.Fail(EpubInspectionProblemCode.LimitExceeded, "The EPUB container document exceeds its configured limit.");
         }
 
-        XDocument container = await ReadXmlAsync(containerEntry, request.Limits.MaximumXmlBytes, null, token).ConfigureAwait(false);
+        if (await ContainsDtdDeclarationAsync(containerEntry, request.Limits.MaximumXmlBytes, token).ConfigureAwait(false))
+        {
+            return PreflightResult.Fail(EpubInspectionProblemCode.PackageMalformed, "DTD declarations are prohibited in EPUB XML documents.");
+        }
+
+        XDocument container;
+        try
+        {
+            container = await ReadXmlAsync(containerEntry, request.Limits.MaximumXmlBytes, null, token).ConfigureAwait(false);
+        }
+        catch (XmlException)
+        {
+            return PreflightResult.Fail(EpubInspectionProblemCode.PackageMalformed, "The EPUB container document is not valid XML.");
+        }
+
         string? packageReference = container.Descendants().FirstOrDefault(element => element.Name.LocalName == "rootfile")?.Attribute("full-path")?.Value;
         if (!EpubArchivePathResolver.TryNormalizeEntryName(packageReference, out string packagePath)
             || !entries.TryGetValue(packagePath, out ZipArchiveEntry? packageEntry))
@@ -180,9 +245,58 @@ internal sealed class VersOneEpubInspector(ILogger<VersOneEpubInspector> logger)
             return PreflightResult.Fail(EpubInspectionProblemCode.LimitExceeded, "The EPUB package document exceeds its configured limit.");
         }
 
-        XDocument package = await ReadXmlAsync(packageEntry, request.Limits.MaximumXmlBytes, null, token).ConfigureAwait(false);
+        if (await ContainsDtdDeclarationAsync(packageEntry, request.Limits.MaximumXmlBytes, token).ConfigureAwait(false))
+        {
+            return PreflightResult.Fail(EpubInspectionProblemCode.PackageMalformed, "DTD declarations are prohibited in EPUB XML documents.");
+        }
+
+        XDocument package;
+        try
+        {
+            package = await ReadXmlAsync(packageEntry, request.Limits.MaximumXmlBytes, null, token).ConfigureAwait(false);
+        }
+        catch (XmlException)
+        {
+            return PreflightResult.Fail(EpubInspectionProblemCode.PackageMalformed, "The EPUB package document is not valid XML.");
+        }
+
+        foreach (XElement item in package.Descendants().Where(element => element.Name.LocalName == "item"))
+        {
+            token.ThrowIfCancellationRequested();
+            string? href = item.Attribute("href")?.Value;
+            if (string.IsNullOrWhiteSpace(href))
+            {
+                return PreflightResult.Fail(EpubInspectionProblemCode.PackageMalformed, "An EPUB manifest item has no content file path.");
+            }
+
+            if (EpubArchivePathResolver.IsRemote(href))
+            {
+                continue;
+            }
+
+            string contentPath = href.Split('#', 2)[0].Split('?', 2)[0];
+            string contentFileName = contentPath[(contentPath.LastIndexOf('/') + 1)..];
+            if (string.IsNullOrWhiteSpace(contentFileName) || contentFileName is "." or "..")
+            {
+                return PreflightResult.Fail(EpubInspectionProblemCode.PackageMalformed, "An EPUB manifest item has no content file name.");
+            }
+
+            if (!EpubArchivePathResolver.TryResolve(packagePath, href, out _))
+            {
+                return PreflightResult.Fail(EpubInspectionProblemCode.UnsafeArchive, "An EPUB manifest item has an unsafe content path.");
+            }
+        }
 
         string? tocId = package.Descendants().FirstOrDefault(element => element.Name.LocalName == "spine")?.Attribute("toc")?.Value;
+        HashSet<string> ncxReferences = package.Descendants()
+            .Where(element => element.Name.LocalName == "item")
+            .Where(element =>
+                string.Equals(element.Attribute("media-type")?.Value, "application/x-dtbncx+xml", StringComparison.OrdinalIgnoreCase)
+                || tocId is not null && string.Equals(element.Attribute("id")?.Value, tocId, StringComparison.Ordinal))
+            .Select(element => element.Attribute("href")?.Value)
+            .Where(value => !string.IsNullOrWhiteSpace(value))
+            .Select(value => value!)
+            .ToHashSet(StringComparer.Ordinal);
         string[] eagerXmlReferences = package.Descendants()
             .Where(element => element.Name.LocalName == "item")
             .Where(element =>
@@ -213,7 +327,26 @@ internal sealed class VersOneEpubInspector(ILogger<VersOneEpubInspector> logger)
                 return PreflightResult.Fail(EpubInspectionProblemCode.LimitExceeded, "An EPUB navigation document exceeds its configured limit.");
             }
 
-            _ = await ReadXmlAsync(eagerXmlEntry, request.Limits.MaximumXmlBytes, null, token).ConfigureAwait(false);
+            if (await ContainsDtdDeclarationAsync(eagerXmlEntry, request.Limits.MaximumXmlBytes, token).ConfigureAwait(false))
+            {
+                return PreflightResult.Fail(EpubInspectionProblemCode.PackageMalformed, "DTD declarations are prohibited in EPUB XML documents.");
+            }
+
+            XDocument eagerXml;
+            try
+            {
+                eagerXml = await ReadXmlAsync(eagerXmlEntry, request.Limits.MaximumXmlBytes, null, token).ConfigureAwait(false);
+            }
+            catch (XmlException)
+            {
+                return PreflightResult.Fail(EpubInspectionProblemCode.PackageMalformed, "An EPUB navigation document is not valid XML.");
+            }
+
+            if (ncxReferences.Contains(eagerXmlReference)
+                && !eagerXml.Descendants().Any(element => element.Name.LocalName == "navMap"))
+            {
+                return PreflightResult.Fail(EpubInspectionProblemCode.PackageMalformed, "The EPUB 2 NCX document does not contain a navMap element.");
+            }
         }
 
         if (entries.TryGetValue("META-INF/encryption.xml", out ZipArchiveEntry? encryptionEntry))
@@ -223,7 +356,21 @@ internal sealed class VersOneEpubInspector(ILogger<VersOneEpubInspector> logger)
                 return PreflightResult.Fail(EpubInspectionProblemCode.LimitExceeded, "The EPUB encryption document exceeds its configured limit.");
             }
 
-            XDocument encryption = await ReadXmlAsync(encryptionEntry, request.Limits.MaximumXmlBytes, null, token).ConfigureAwait(false);
+            if (await ContainsDtdDeclarationAsync(encryptionEntry, request.Limits.MaximumXmlBytes, token).ConfigureAwait(false))
+            {
+                return PreflightResult.Fail(EpubInspectionProblemCode.PackageMalformed, "DTD declarations are prohibited in EPUB XML documents.");
+            }
+
+            XDocument encryption;
+            try
+            {
+                encryption = await ReadXmlAsync(encryptionEntry, request.Limits.MaximumXmlBytes, null, token).ConfigureAwait(false);
+            }
+            catch (XmlException)
+            {
+                return PreflightResult.Fail(EpubInspectionProblemCode.PackageMalformed, "The EPUB encryption document is not valid XML.");
+            }
+
             string[] algorithms = EncryptionAlgorithms(encryption);
             if (algorithms.Length == 0 || !algorithms.All(IsRecognizedFontObfuscation))
             {
@@ -380,10 +527,25 @@ internal sealed class VersOneEpubInspector(ILogger<VersOneEpubInspector> logger)
         EnsureCurrentFile(request);
         using CancellationCheckingStream guarded = new(file, token);
         EpubReaderOptions options = new(EpubReaderOptionsPreset.RELAXED);
+        // Tolerate non-conformant OPF packages whose root <package> element is not in
+        // the expected OPF namespace (or is missing), so a malformed package node does
+        // not abort inspection. OpenBookAsync then yields a null package reference and
+        // the null-check below surfaces it as a controlled malformed-package failure.
+        options.PackageReaderOptions.IgnoreMissingPackageNode = true;
         options.Epub3NavDocumentReaderOptions.IgnoreMissingNavManifestItemError = true;
         options.Epub3NavDocumentReaderOptions.IgnoreMissingNavFileError = true;
+        // Tolerate non-conformant EPUB 2 NCX navigation points that omit required
+        // content/label elements so a malformed toc.ncx does not abort inspection.
+        options.Epub2NcxReaderOptions.IgnoreMissingContentForNavigationPoints = true;
+        options.Epub2NcxReaderOptions.AllowNavigationPointsWithoutLabels = true;
         options.SpineReaderOptions.IgnoreMissingManifestItems = true;
         options.SpineReaderOptions.IgnoreMissingContentFiles = true;
+        // Tolerate non-conformant EPUB 2 cover metadata that points at a manifest
+        // item whose content file is missing or is not an image (e.g. a cover.xml
+        // page) so a malformed cover reference does not abort inspection.
+        options.BookCoverReaderOptions.Epub2MetadataIgnoreMissingManifestItem = true;
+        options.BookCoverReaderOptions.Epub2MetadataIgnoreMissingContent = true;
+        options.BookCoverReaderOptions.Epub2MetadataIgnoreMissingContentFile = true;
         options.ContentDownloaderOptions.DownloadContent = false;
         options.ContentDownloaderOptions.CustomContentDownloader = FailClosedContentDownloader.Instance;
         using EpubBookRef book = await EpubReader.OpenBookAsync(guarded, options).ConfigureAwait(false)
@@ -668,11 +830,117 @@ internal sealed class VersOneEpubInspector(ILogger<VersOneEpubInspector> logger)
         ReadBudget? readBudget,
         CancellationToken token)
     {
-        await using Stream stream = entry.Open();
-        using LimitedReadStream limited = new(stream, maximumBytes, token, readBudget);
+        byte[] bytes;
+        await using (Stream stream = entry.Open())
+        {
+            using LimitedReadStream limited = new(stream, maximumBytes, token, readBudget);
+            using MemoryStream buffer = new();
+            await limited.CopyToAsync(buffer, token).ConfigureAwait(false);
+            bytes = buffer.GetBuffer();
+            // Decode only the bytes actually read; GetBuffer may be oversized.
+            bytes = bytes.AsSpan(0, (int)buffer.Length).ToArray();
+        }
+
+        // Decode with a replacement fallback so stray non-UTF-8 (or mislabelled)
+        // bytes become U+FFFD instead of throwing; genuinely corrupt structure
+        // still surfaces as an XmlException while parsing the resulting text.
+        Encoding encoding = ResolveXmlEncoding(bytes);
+        using MemoryStream source = new(bytes, writable: false);
+        using StreamReader textReader = new(source, encoding, detectEncodingFromByteOrderMarks: true);
         XmlReaderSettings settings = new() { DtdProcessing = DtdProcessing.Prohibit, XmlResolver = null, MaxCharactersInDocument = maximumBytes, Async = true };
-        using XmlReader reader = XmlReader.Create(limited, settings);
+        using XmlReader reader = XmlReader.Create(textReader, settings);
         return await XDocument.LoadAsync(reader, LoadOptions.None, token).ConfigureAwait(false);
+    }
+
+    private static Encoding ResolveXmlEncoding(ReadOnlySpan<byte> bytes)
+    {
+        // The XML declaration (if any) is ASCII up to '?>'; scan a bounded prefix
+        // for an encoding="..." attribute so a declared legacy encoding is honored.
+        // A byte-order mark, when present, overrides this via the StreamReader.
+        Encoding resolved = Encoding.UTF8;
+        int limit = Math.Min(bytes.Length, 256);
+        string prolog = Encoding.ASCII.GetString(bytes[..limit]);
+        int declEnd = prolog.IndexOf("?>", StringComparison.Ordinal);
+        if (prolog.StartsWith("<?xml", StringComparison.Ordinal) && declEnd > 0)
+        {
+            string? name = TryReadEncodingName(prolog.AsSpan(0, declEnd));
+            if (name is not null)
+            {
+                try
+                {
+                    resolved = Encoding.GetEncoding(name);
+                }
+                catch (Exception exception) when (exception is ArgumentException or NotSupportedException)
+                {
+                    // Unknown name, or a recognized code page that is unavailable (e.g. the
+                    // CodePages provider is not registered): fall back to UTF-8 rather than fail.
+                    resolved = Encoding.UTF8;
+                }
+            }
+        }
+
+        Encoding tolerant = (Encoding)resolved.Clone();
+        tolerant.DecoderFallback = DecoderFallback.ReplacementFallback;
+        return tolerant;
+    }
+
+    private static string? TryReadEncodingName(ReadOnlySpan<char> declaration)
+    {
+        int encodingIndex = declaration.IndexOf("encoding", StringComparison.OrdinalIgnoreCase);
+        if (encodingIndex < 0)
+        {
+            return null;
+        }
+
+        int cursor = encodingIndex + "encoding".Length;
+        while (cursor < declaration.Length && char.IsWhiteSpace(declaration[cursor]))
+        {
+            cursor++;
+        }
+
+        if (cursor >= declaration.Length || declaration[cursor] != '=')
+        {
+            return null;
+        }
+
+        cursor++;
+        while (cursor < declaration.Length && char.IsWhiteSpace(declaration[cursor]))
+        {
+            cursor++;
+        }
+
+        if (cursor >= declaration.Length || (declaration[cursor] != '"' && declaration[cursor] != '\''))
+        {
+            return null;
+        }
+
+        char quote = declaration[cursor];
+        int start = cursor + 1;
+        int end = declaration[start..].IndexOf(quote);
+        if (end <= 0)
+        {
+            return null;
+        }
+
+        string name = declaration.Slice(start, end).Trim().ToString();
+        return name.Length > 0 ? name : null;
+    }
+
+    private static async Task<bool> ContainsDtdDeclarationAsync(
+        ZipArchiveEntry entry,
+        long maximumBytes,
+        CancellationToken token)
+    {
+        if (entry.Length > maximumBytes || entry.Length > int.MaxValue)
+        {
+            throw new InspectionLimitException();
+        }
+
+        byte[] content = new byte[(int)entry.Length];
+        await using Stream stream = entry.Open();
+        using LimitedReadStream limited = new(stream, maximumBytes, token);
+        await limited.ReadExactlyAsync(content, token).ConfigureAwait(false);
+        return EncodedDtdDeclarations.Any(declaration => content.AsSpan().IndexOf(declaration) >= 0);
     }
 
     private static async Task<string> ReadTextAsync(
@@ -772,7 +1040,7 @@ internal sealed class VersOneEpubInspector(ILogger<VersOneEpubInspector> logger)
         while (nodes.TryPop(out HtmlNode? node))
         {
             token.ThrowIfCancellationRequested();
-            if (++nodeCount > limits.MaximumHtmlNodes)
+            if (node.NodeType == HtmlAgilityPack.HtmlNodeType.Element && ++nodeCount > limits.MaximumHtmlNodes)
             {
                 throw new InspectionLimitException();
             }
