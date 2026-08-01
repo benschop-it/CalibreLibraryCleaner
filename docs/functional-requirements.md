@@ -22,6 +22,8 @@ Support progressively:
 
 Every group must expose confidence and reasons. Exact title/author matches are candidates, not proof of identical content.
 
+For a byte-identical file group, the user can select one keeper record and explicitly mark other group records for deletion. This decision is independent of metadata equality. Only checked records may be removed, and their complete metadata, covers, formats, and managed state must first be backed up externally.
+
 ## EPUB analysis
 
 Inspect readability, package metadata, identifiers, language, cover, navigation, spine, resources, internal references, text presence, chapter structure, and encryption indicators. Malformed files become findings rather than application crashes.
@@ -60,6 +62,8 @@ The user can navigate groups, compare records, inspect findings and covers, open
 ## Cleanup plan and execution
 
 Generate an immutable JSON plan containing record IDs, chosen metadata source, chosen format sources, removals, expected hashes, backup requirements, warnings, and approval details.
+
+Exact-binary record cleanup uses a separate plan body containing the retained exact-file association, explicitly marked record IDs, exact-binary evidence for every marked record, complete keeper/marked-record state, backup requirements, and explicit approval.
 
 Execution must revalidate the plan, back up content and metadata, use supported Calibre tooling, capture command output, reload the library, verify results, and retain audit history.
 

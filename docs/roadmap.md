@@ -52,9 +52,9 @@ executable/backup substitution, and persists an application-local recovery
 guard. Cover-bearing plans are blocked until cover bytes are modeled and can be
 verified exactly.
 
-The exact 9.11.0 runtime profile remains disabled by default until its opt-in
-real-Calibre compatibility suite passes against a caller-marked disposable
-test root.
+The exact 9.11.0 cleanup runtime profile is enabled by default and still requires
+exact executable identity, version, command probes, fresh scans, and typed command
+mapping. Recovery capabilities remain independently disabled unless qualified.
 
 ## Milestone 8 — Rollback
 
@@ -85,6 +85,10 @@ Implemented with analyzer `pdf-inspector/1.0.0`, scoring model
 policy `pdf-sampling/1.0.0`, resource profile `pdf-limits/1.0.0`, and worker
 protocol `pdf-worker-protocol/1.0`. Automated verification is complete. The
 manual WPF acceptance plan remains the final acceptance activity.
+
+## Exact-binary record cleanup
+
+Exact file groups support an explicit keeper and checked duplicate-record deletions even when metadata differs. Execution creates and verifies complete external record backups, obtains final confirmation, calls non-permanent `calibredb remove` for checked IDs only, and performs a full verification scan after every deletion.
 
 ## Milestone 10 — Content fingerprints and comparisons
 

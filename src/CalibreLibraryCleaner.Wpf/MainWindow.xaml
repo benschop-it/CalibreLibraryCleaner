@@ -154,8 +154,41 @@
             <RowDefinition Height="*" />
           </Grid.RowDefinitions>
           <StackPanel Grid.Row="0" Margin="0,0,0,8">
-            <TextBlock Text="These groups contain byte-identical files. They do not by themselves identify duplicate book records."
+            <TextBlock Text="These groups contain byte-identical files. Choose the keeper record, then explicitly mark duplicate book records to delete."
                        TextWrapping="Wrap" />
+            <TextBlock Margin="0,4,0,0"
+                       Text="Only checked records are deleted. Any additional formats and metadata on a checked record are included in its backup and deletion."
+                       TextWrapping="Wrap" />
+            <StackPanel Margin="0,8,0,0" DataContext="{Binding ExactBinaryCleanupPlans}">
+              <WrapPanel>
+                <Button Margin="0,0,6,0" Padding="8,4" Content="_Keep selected record"
+                        Command="{Binding DataContext.KeepSelectedExactDuplicateMemberCommand, RelativeSource={RelativeSource AncestorType=Window}}" />
+                <Button Margin="0,0,6,0" Padding="8,4" Content="_Create cleanup plan" Command="{Binding GenerateCommand}" />
+                <Button Margin="0,0,6,0" Padding="8,4" Content="_Validate plan" Command="{Binding ValidateCommand}" />
+                <Button Padding="8,4" Content="_Approve removals" Command="{Binding ApproveCommand}" />
+              </WrapPanel>
+              <TextBlock Margin="0,5,0,0" Text="{Binding Status}" FontWeight="Bold" TextWrapping="Wrap" />
+              <TextBlock Margin="0,3,0,0" Text="{Binding PlanSummary}" TextWrapping="Wrap" />
+              <TextBlock Margin="0,3,0,0"
+                         Text="Execution uses non-permanent Calibre record removal after external backup and fresh validation."
+                         TextWrapping="Wrap" />
+              <TextBlock Margin="0,3,0,0" Text="{Binding PlanDigest}" TextWrapping="Wrap"
+                         AutomationProperties.Name="Duplicate-record cleanup plan canonical SHA-256" />
+              <TextBlock Margin="0,3,0,0" Text="{Binding IssueSummary}" TextWrapping="Wrap" />
+              <WrapPanel Margin="0,6,0,0">
+                <Button Margin="0,0,6,0" Padding="8,4" Content="Choose _backup folder" Command="{Binding ChooseBackupCommand}" />
+                <TextBox Width="360" Margin="0,0,6,0" IsReadOnly="True" Text="{Binding BackupDestination, Mode=OneWay}" />
+                <Button Margin="0,0,6,0" Padding="8,4" Content="_Prepare" Command="{Binding PrepareCommand}" />
+                <Button Padding="8,4" Content="_Delete marked books" Command="{Binding ExecuteCommand}" />
+              </WrapPanel>
+              <CheckBox Margin="0,5,0,0" IsChecked="{Binding OtherMutatorsClosed}"
+                        Content="I confirm that Calibre and other library-writing tools are closed." />
+              <CheckBox Margin="0,3,0,0" IsChecked="{Binding FullLibraryCopyAcknowledged}"
+                        Content="I have a full library copy or accept the verified per-record backup bundle as recovery." />
+              <ProgressBar Height="14" Margin="0,5,0,0" Minimum="0" Maximum="100" Value="{Binding ProgressPercentage, Mode=OneWay}" />
+              <TextBlock Margin="0,3,0,0" Text="{Binding ProgressMessage}" TextWrapping="Wrap" />
+              <TextBlock Margin="0,3,0,0" Text="{Binding ResultSummary}" FontWeight="Bold" TextWrapping="Wrap" />
+            </StackPanel>
             <TextBlock Margin="0,4,0,0"
                        Text="{Binding ExactDuplicateSummary}"
                        TextWrapping="Wrap" />
@@ -175,17 +208,21 @@
               </DataGrid.Columns>
             </DataGrid>
           </GroupBox>
-          <GroupBox Grid.Row="2" Margin="0,8,0,0" Header="Records and formats in selected file group">
+          <GroupBox Grid.Row="2" Margin="0,8,0,0" Header="Choose the keeper and mark duplicate records for deletion">
             <DataGrid ItemsSource="{Binding SelectedExactDuplicateMembers}"
+                      SelectedItem="{Binding SelectedExactDuplicateMember}"
                       AutoGenerateColumns="False"
-                      IsReadOnly="True"
+                      SelectionMode="Single"
+                      SelectionUnit="FullRow"
                       AutomationProperties.Name="Records and formats in selected exact file group">
               <DataGrid.Columns>
-                <DataGridTextColumn Width="80" Header="Record ID" Binding="{Binding BookId}" />
-                <DataGridTextColumn Width="2*" Header="Title" Binding="{Binding Title}" />
-                <DataGridTextColumn Width="2*" Header="Authors" Binding="{Binding Authors}" />
-                <DataGridTextColumn Width="90" Header="Format" Binding="{Binding Format}" />
-                <DataGridTextColumn Width="3*" Header="Relative path" Binding="{Binding ExpectedRelativePath}" />
+                <DataGridCheckBoxColumn Width="60" Header="Keep" IsReadOnly="True" Binding="{Binding IsRetained, Mode=OneWay}" />
+                <DataGridCheckBoxColumn Width="90" Header="Delete book" Binding="{Binding IsMarkedForDeletion, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+                <DataGridTextColumn IsReadOnly="True" Width="80" Header="Record ID" Binding="{Binding BookId}" />
+                <DataGridTextColumn IsReadOnly="True" Width="2*" Header="Title" Binding="{Binding Title}" />
+                <DataGridTextColumn IsReadOnly="True" Width="2*" Header="Authors" Binding="{Binding Authors}" />
+                <DataGridTextColumn IsReadOnly="True" Width="90" Header="Format" Binding="{Binding Format}" />
+                <DataGridTextColumn IsReadOnly="True" Width="3*" Header="Relative path" Binding="{Binding ExpectedRelativePath}" />
               </DataGrid.Columns>
             </DataGrid>
           </GroupBox>

@@ -67,6 +67,8 @@ Domain owns immutable cleanup-plan bodies, expected library/record/format state,
 
 Cleanup plans are non-executable data. Milestone 6 introduces no Calibre process, command, backup creator, lock, mutation, simulation, or rollback boundary.
 
+Exact-binary record cleanup uses a separate plan and compact executor because metadata-consolidation plans choose metadata and format sources for an entire candidate group. WPF owns keeper selection, per-record deletion checks, approval, backup destination, and final confirmation. Application performs fresh scans before every typed non-permanent `calibredb remove` and verifies each record absence plus keeper/unrelated-state preservation afterward. Infrastructure creates a complete external bundle of raw formats and Calibre exports, seals a hash manifest, and appends the execution audit.
+
 ## Safe execution boundary
 
 Milestone 7 keeps cleanup plans immutable and introduces a separate execution

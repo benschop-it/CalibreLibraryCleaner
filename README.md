@@ -17,6 +17,12 @@ Calibre profile has passed the caller-gated disposable-library qualification.
 Milestone 9 PDF assessment is analysis-only and does not affect retained-format
 selection, cleanup, execution, or recovery.
 
+Exact-binary groups can be cleaned independently of metadata candidates: choose
+the keeper, check duplicate book records to delete, approve the plan, choose an
+external backup folder, prepare, and execute. The application backs up complete
+involved records and uses typed non-permanent Calibre record removal only for
+the checked IDs.
+
 The next planned roadmap milestone is Milestone 10 content fingerprints and
 comparisons, after completion of the outstanding Milestone 9 manual WPF
 acceptance.

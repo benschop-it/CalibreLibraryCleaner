@@ -47,6 +47,7 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
     private bool _isProgressIndeterminate;
     private BookRowViewModel? _selectedBook;
     private ExactDuplicateGroupRowViewModel? _selectedExactDuplicateGroup;
+    private ExactDuplicateMemberRowViewModel? _selectedExactDuplicateMember;
     private MetadataDuplicateGroupRowViewModel? _selectedMetadataDuplicateGroup;
     private EpubAssessmentRowViewModel? _selectedEpubAssessment;
     private EpubFindingFilterMode _epubFindingFilterMode;
@@ -64,6 +65,7 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
         IRecommendationExportFilePicker? exportFilePicker = null,
         IClock? clock = null,
         CleanupPlanWorkspaceViewModel? cleanupPlans = null,
+        ExactBinaryCleanupPlanWorkspaceViewModel? exactBinaryCleanupPlans = null,
         CleanupExecutionWorkspaceViewModel? cleanupExecutions = null,
         RecoveryWorkspaceViewModel? recoveries = null,
         PersistedLibrarySnapshotsUseCase? persistedSnapshots = null)
@@ -76,6 +78,7 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
         _clock = clock;
         _persistedSnapshots = persistedSnapshots;
         CleanupPlans = cleanupPlans;
+        ExactBinaryCleanupPlans = exactBinaryCleanupPlans;
         CleanupExecutions = cleanupExecutions;
         Recoveries = recoveries;
         Books = new ReadOnlyObservableCollection<BookRowViewModel>(_books);
@@ -93,6 +96,9 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
         CancelCommand = new RelayCommand(
             CancelScan,
             () => IsBusy && _scanCancellation is { IsCancellationRequested: false });
+        KeepSelectedExactDuplicateMemberCommand = new RelayCommand(
+            KeepSelectedExactDuplicateMember,
+            () => !IsBusy && SelectedExactDuplicateGroup is not null && SelectedExactDuplicateMember is not null);
         NextMetadataDuplicateGroupCommand = new RelayCommand(
             () => MoveMetadataSelection(1),
             () => !IsBusy && _metadataDuplicateGroups.Count > 0);
@@ -207,6 +213,8 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
 
     public CleanupPlanWorkspaceViewModel? CleanupPlans { get; }
 
+    public ExactBinaryCleanupPlanWorkspaceViewModel? ExactBinaryCleanupPlans { get; }
+
     public CleanupExecutionWorkspaceViewModel? CleanupExecutions { get; }
 
     public RecoveryWorkspaceViewModel? Recoveries { get; }
@@ -276,12 +284,43 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
             if (SetProperty(ref _selectedExactDuplicateGroup, value))
             {
                 OnPropertyChanged(nameof(SelectedExactDuplicateMembers));
+                OnPropertyChanged(nameof(RetainedExactDuplicateMember));
+                SelectedExactDuplicateMember = value is { Members.Count: > 0 } ? value.Members[0] : null;
+                ExactBinaryCleanupPlans?.UpdateContext(
+                    _isCurrentSnapshotFresh ? _currentSnapshot : null,
+                    value,
+                    value?.RetainedMember);
             }
         }
     }
 
     public IReadOnlyList<ExactDuplicateMemberRowViewModel> SelectedExactDuplicateMembers =>
         SelectedExactDuplicateGroup?.Members ?? [];
+
+    public ExactDuplicateMemberRowViewModel? SelectedExactDuplicateMember
+    {
+        get => _selectedExactDuplicateMember;
+        set
+        {
+            if (SetProperty(ref _selectedExactDuplicateMember, value))
+                KeepSelectedExactDuplicateMemberCommand.NotifyCanExecuteChanged();
+        }
+    }
+
+    public ExactDuplicateMemberRowViewModel? RetainedExactDuplicateMember
+    {
+        get => SelectedExactDuplicateGroup?.RetainedMember;
+        set
+        {
+            if (SelectedExactDuplicateGroup is null) return;
+            SelectedExactDuplicateGroup.RetainedMember = value;
+            OnPropertyChanged();
+            ExactBinaryCleanupPlans?.UpdateContext(
+                _isCurrentSnapshotFresh ? _currentSnapshot : null,
+                SelectedExactDuplicateGroup,
+                value);
+        }
+    }
 
     public MetadataDuplicateGroupRowViewModel? SelectedMetadataDuplicateGroup
     {
@@ -406,6 +445,8 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
     public IAsyncRelayCommand LoadPersistedSnapshotCommand { get; }
 
     public IRelayCommand CancelCommand { get; }
+
+    public IRelayCommand KeepSelectedExactDuplicateMemberCommand { get; }
 
     public IRelayCommand NextMetadataDuplicateGroupCommand { get; }
 
@@ -574,6 +615,12 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
         StatusMessage = "Scan canceled. Waiting for the current read to stop...";
     }
 
+    private void KeepSelectedExactDuplicateMember()
+    {
+        if (SelectedExactDuplicateMember is null) return;
+        RetainedExactDuplicateMember = SelectedExactDuplicateMember;
+    }
+
     private void UpdateProgress(LibraryScanProgress progress)
     {
         StatusMessage = progress.Message;
@@ -686,12 +733,17 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
         if (isFreshScan)
         {
             CleanupPlans?.ReconcileAfterSuccessfulScan(snapshot);
+            ExactBinaryCleanupPlans?.ReconcileAfterSuccessfulScan(snapshot);
+            ExactBinaryCleanupPlans?.UpdateContext(snapshot, SelectedExactDuplicateGroup,
+                SelectedExactDuplicateGroup?.RetainedMember);
             CleanupExecutions?.UpdateSnapshot(snapshot);
             Recoveries?.UpdateSnapshot(snapshot);
         }
         else
         {
             CleanupPlans?.UpdateContext(null, null);
+            ExactBinaryCleanupPlans?.UpdateContext(null, SelectedExactDuplicateGroup,
+                SelectedExactDuplicateGroup?.RetainedMember);
             CleanupExecutions?.UpdateSnapshot(null);
             Recoveries?.UpdateSnapshot(null);
         }

@@ -45,6 +45,8 @@ Milestone 5 adds stored `BookPublicationMetadata` (publisher, publication date, 
 
 Milestone 6 adds `FormatFileObservation` to present `BookFormat` values and immutable cleanup-plan values under `Domain.Plans`. A cleanup plan has a frozen semantic definition containing expected state, one target/metadata source, final-format retentions, reviewed format removals, non-target record removals, complete declarative backup requirements, and recommendation/review/override provenance. Its canonical SHA-256 covers only that deterministic semantic definition. Lifecycle revisions (`Draft`, `Valid`, `Blocked`, `Approved`, `Stale`, `Revoked`) reuse the same body and digest; operational-content changes require a new plan ID.
 
+`ExactBinaryCleanupPlan` is a separate aggregate. Its body binds one retained exact-group member, explicitly marked record IDs, exact-group evidence for every marked record, the shared length/SHA-256 fingerprint, complete expected state for the keeper and marked records, full backup requirements, and review time. Metadata does not participate in exact identity or keeper eligibility. The keeper, unchecked records, and unrelated records are preservation expectations.
+
 Milestone 7 adds a separate immutable execution model under `Domain.Executions`.
 It records a plan/digest-bound confirmation, a deterministic dependency-ordered
 operation graph, verified backup-manifest identity, lifecycle transitions,
@@ -77,6 +79,7 @@ finalized event.
 - Record-duplicate groups contain at least two distinct records. Exact binary file groups contain at least two distinct managed files and may occur within one record or across records.
 - Exact metadata groups never fall back to title-only matching. Records with no usable normalized title, no authors, any unusable normalized author, or a missing/invalid catalog author reference are ineligible.
 - Exact binary file groups and exact metadata record groups are independent evidence collections. Neither implies the other or authorizes a merge or deletion.
+- An exact-binary cleanup plan requires one current retained member and at least one explicitly marked different record with current matching-fingerprint evidence; the keeper can never be marked.
 - Scores are derivable from findings.
 - Assessment evidence is bounded and contains no retained book prose, absolute external paths, raw exceptions, parser objects, or mutable collections.
 - Analyzer and scoring-model versions are recorded independently; fact/limit changes bump the analyzer version and weight/formula/disqualification changes bump the scoring-model version.

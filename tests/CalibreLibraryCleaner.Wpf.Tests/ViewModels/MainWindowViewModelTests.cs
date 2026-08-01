@@ -277,6 +277,19 @@ public sealed class MainWindowViewModelTests
         viewModel.SelectedExactDuplicateMembers.Should().HaveCount(2);
         viewModel.ExactDuplicateGroups[0].RecordCount.Should().Be(2);
         viewModel.ExactDuplicateSummary.Should().Contain("1 exact file duplicate group");
+
+        viewModel.RetainedExactDuplicateMember.Should().BeNull();
+        ExactDuplicateMemberRowViewModel retained = viewModel.SelectedExactDuplicateMembers[1];
+        viewModel.RetainedExactDuplicateMember = retained;
+
+        viewModel.RetainedExactDuplicateMember.Should().BeSameAs(retained);
+        viewModel.SelectedExactDuplicateMembers.Should().ContainSingle(member => member.IsRetained);
+        retained.IsRetained.Should().BeTrue();
+
+        retained.IsMarkedForDeletion = true;
+        retained.IsMarkedForDeletion.Should().BeFalse();
+        viewModel.SelectedExactDuplicateMembers[0].IsMarkedForDeletion = true;
+        viewModel.ExactDuplicateGroups[0].MarkedRecordIds.Should().Equal(new CalibreBookId(1));
     }
 
     [Fact]

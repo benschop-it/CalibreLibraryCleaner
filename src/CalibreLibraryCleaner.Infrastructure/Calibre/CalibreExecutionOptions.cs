@@ -14,7 +14,7 @@ public sealed record CalibreExecutionOptions
 
     public string SupportedVersion { get; init; } = InitialSupportedVersion;
     public string CapabilityProfile { get; init; } = InitialCapabilityProfile;
-    public bool IsValidatedCompatibilityProfileEnabled { get; init; }
+    public bool IsValidatedCompatibilityProfileEnabled { get; init; } = true;
     public bool IsValidatedRecoveryProfileEnabled { get; init; }
     public IReadOnlySet<RecoveryCapability> EnabledRecoveryCapabilities { get; init; } =
         new HashSet<RecoveryCapability>();

@@ -1,4 +1,5 @@
 using CalibreLibraryCleaner.Application.Abstractions;
+using CalibreLibraryCleaner.Application.Executions;
 using CalibreLibraryCleaner.Infrastructure.Calibre;
 using CalibreLibraryCleaner.Infrastructure.Epub;
 using CalibreLibraryCleaner.Infrastructure.Execution;
@@ -50,6 +51,7 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<ICalibreExecutionProfileProvider, CalibreRecoveryExecutionProfileProvider>();
         services.AddSingleton<ILibraryMutationLease, FileLibraryMutationLease>();
         services.AddSingleton<IExecutionBackupStore, FileExecutionBackupStore>();
+        services.AddSingleton<IExactBinaryRecordBackupStore, FileExactBinaryRecordBackupStore>();
         services.AddSingleton<IExecutionJournalStore, JsonLinesExecutionJournalStore>();
         services.AddSingleton<IExecutionHistoryStore, FileExecutionHistoryStore>();
         services.AddSingleton<ICleanupExecutionIdGenerator, SystemCleanupExecutionIdGenerator>();

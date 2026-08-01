@@ -20,6 +20,8 @@ Before execution verify library identity, record existence, paths, file hashes, 
 
 Milestone 6 records these expected states and backup requirements but performs no execution-time verification or backup. Cleanup plans are generated only from a current accepted or manually adjusted recommendation, remain non-executable, and may be approved or revoked only as immutable data. Imported plans are untrusted: schema, bounds, paths, graph coverage, lifecycle, and canonical hashes are validated, and current snapshot mismatch makes a plan stale. A readable future policy is retained only as blocked.
 
+Exact-binary groups may independently produce a marked-record plan after the user selects a keeper and checks records to delete. Generation captures complete keeper and marked-record state. Before deletion, the executor copies and rehashes every involved format, exports each complete record through Calibre, verifies OPF/cover/format coverage, and seals an external manifest. It then uses non-permanent `calibredb remove` only for checked IDs and performs a complete scan after every command. The bundle or the user's full library copy is the recovery source; automatic recovery is not required for this workflow.
+
 Cleanup-plan import/export is explicit and restricted to `.cleanup-plan.json` files outside the physically resolved selected library. Export uses an external temporary sibling and publication step; import is bounded and read-only. Neither operation creates a plan, temporary file, cache, lock, or backup inside the library.
 
 ## Backup

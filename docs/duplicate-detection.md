@@ -52,10 +52,12 @@ use.
 
 ## Automation policy
 
-Only provably redundant byte-identical content is eligible for automatic action in early releases. All other matches require review.
+Only records contributing provably byte-identical content are eligible for this cleanup path without metadata equality. The user must explicitly choose the keeper and check every record to delete. All non-identical matches require separate review.
 
 ## Exact binary file groups
 
 Milestone 2 hashes every safely readable declared format with streaming SHA-256. File size is a comparison pre-filter, not a reason to skip hashing. A group requires both equal byte length and equal SHA-256 and at least two distinct managed file references.
 
 Group identity is derived from the length and digest. Groups are ordered by size descending and digest; members are ordered by record ID, format, and managed relative path. These are file-level groups: even when identical files span records, the result does not assert that the book records are metadata duplicates, equivalent editions, or safe to merge or delete.
+
+An exact-binary cleanup decision may remove checked Calibre records through non-permanent `calibredb remove`. Unchecked group records and the keeper survive. Additional formats and metadata on a checked record are displayed, backed up, and removed with that record.
