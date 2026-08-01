@@ -7,6 +7,8 @@
 - Load book IDs, titles, authors, author-sort values, identifiers, series, languages, formats, and managed paths.
 - Resolve referenced format files and report missing or anomalous paths.
 - Calculate SHA-256 using streaming I/O, cancellation, progress, and bounded concurrency.
+- Persist the latest complete successful scan per canonical library folder outside the Calibre library.
+- List persisted library folders and explicitly load a prior result instead of rescanning, while identifying it as potentially stale.
 
 ## Duplicate detection
 

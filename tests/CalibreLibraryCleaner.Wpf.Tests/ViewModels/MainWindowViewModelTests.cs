@@ -19,6 +19,67 @@ namespace CalibreLibraryCleaner.Wpf.Tests.ViewModels;
 public sealed class MainWindowViewModelTests
 {
     [Fact]
+    public async Task PersistedLibrarySelectionLoadsPreviousSnapshot()
+    {
+        const string libraryRoot = "C:\\Books";
+        ILibrarySnapshotStore store = A.Fake<ILibrarySnapshotStore>();
+        LibrarySnapshot snapshot = Snapshot(libraryRoot);
+        A.CallTo(() => store.ListAsync(A<CancellationToken>._))
+            .Returns([new(libraryRoot, snapshot.ScannedAt)]);
+        A.CallTo(() => store.ReadAsync(libraryRoot, A<CancellationToken>._)).Returns(snapshot);
+        MainWindowViewModel viewModel = CreateViewModel(
+            A.Fake<ILibraryFolderPicker>(), out _, out _, out _, new(store));
+
+        await viewModel.InitializeAsync();
+        viewModel.SelectedPersistedLibraryPath = libraryRoot;
+        await viewModel.LoadPersistedSnapshotCommand.ExecuteAsync(null);
+
+        viewModel.PersistedLibraryPaths.Should().Equal(libraryRoot);
+        viewModel.SelectedLibraryPath.Should().Be(libraryRoot);
+        viewModel.Books.Should().ContainSingle(book => book.Title == "Persisted Book");
+        viewModel.StatusMessage.Should().Contain("Loaded persisted scan").And.Contain("may be stale");
+    }
+
+    [Fact]
+    public async Task SuccessfulScanPersistsLatestSnapshot()
+    {
+        ILibraryFolderPicker picker = A.Fake<ILibraryFolderPicker>();
+        ILibrarySnapshotStore store = A.Fake<ILibrarySnapshotStore>();
+        A.CallTo(() => store.ListAsync(A<CancellationToken>._)).Returns([]);
+        A.CallTo(() => picker.PickFolder(A<string?>._)).Returns("library");
+        MainWindowViewModel viewModel = CreateViewModel(
+            picker,
+            out ILibraryPathResolver resolver,
+            out ICalibreMetadataReader reader,
+            out IFormatFileHasher hasher,
+            new(store));
+        ValidatedLibraryLocation location = new("library", "database");
+        A.CallTo(() => resolver.ValidateAsync("library", A<CancellationToken>._))
+            .Returns(LibraryValidationOutcome.Success(location));
+        A.CallTo(() => reader.ReadAsync(location, A<IProgress<LibraryScanProgress>?>._, A<CancellationToken>._))
+            .Returns(CalibreCatalogReadOutcome.Success(CreateCatalog()));
+        A.CallTo(() => resolver.ResolveFormat(
+            location,
+            A<string>.That.IsNotNull(),
+            A<string>.That.IsNotNull(),
+            A<string>.That.IsNotNull()))
+            .Returns(ResolvedFormatPathOutcome.Success(new("library", "full", "Book/Book.epub")));
+        A.CallTo(() => hasher.HashAsync(
+                A<IReadOnlyList<FormatHashRequest>>._,
+                A<int>._,
+                A<IProgress<FormatHashProgress>?>._,
+                A<CancellationToken>._))
+            .Returns([FormatHashResult.Failure(0, FormatHashResultStatus.Missing, "missing")]);
+
+        await viewModel.SelectLibraryCommand.ExecuteAsync(null);
+        await viewModel.ScanCommand.ExecuteAsync(null);
+
+        A.CallTo(() => store.WriteAsync(
+            A<LibrarySnapshot>.That.Matches(value => value.Identity.LibraryRoot == "library"),
+            A<CancellationToken>._)).MustHaveHappenedOnceExactly();
+    }
+
+    [Fact]
     public async Task PickerCancellationLeavesSelectionUnchanged()
     {
         ILibraryFolderPicker picker = A.Fake<ILibraryFolderPicker>();
@@ -352,7 +413,8 @@ public sealed class MainWindowViewModelTests
         ILibraryFolderPicker picker,
         out ILibraryPathResolver resolver,
         out ICalibreMetadataReader reader,
-        out IFormatFileHasher hasher)
+        out IFormatFileHasher hasher,
+        PersistedLibrarySnapshotsUseCase? persistedSnapshots = null)
     {
         resolver = A.Fake<ILibraryPathResolver>();
         reader = A.Fake<ICalibreMetadataReader>();
@@ -361,8 +423,15 @@ public sealed class MainWindowViewModelTests
         return new(
             new ValidateLibraryUseCase(resolver),
             new ScanLibraryUseCase(resolver, reader, hasher, clock, new()),
-            picker);
+            picker,
+            persistedSnapshots: persistedSnapshots);
     }
+
+    private static LibrarySnapshot Snapshot(string libraryRoot) => new(
+        new("87f7ed1f-59a8-45a6-975a-7e06fd84780d", 27, libraryRoot),
+        new DateTimeOffset(2026, 8, 1, 12, 0, 0, TimeSpan.Zero),
+        [new(new(1), "Persisted Book", "Author", [new(new(1), "Author", "Author")], [], [], "Author/Persisted Book (1)")],
+        []);
 
     private static FormatHashResult Successful(int sequence, FormatFileFingerprint fingerprint) => FormatHashResult.Success(
         sequence,

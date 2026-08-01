@@ -116,9 +116,17 @@ public sealed record FormatSourceSelection
             throw new ArgumentException("A format selection requires candidates for one canonical format.", nameof(candidates));
         }
 
-        if (proposedSource is not null && !ordered.Contains(proposedSource))
+        if (proposedSource is not null)
         {
-            throw new ArgumentException("The proposed source must be one of the format candidates.", nameof(proposedSource));
+            RecommendationFormatCandidate? matchingCandidate = ordered.SingleOrDefault(candidate =>
+                candidate.BookId == proposedSource.BookId
+                && string.Equals(candidate.ExpectedRelativePath, proposedSource.ExpectedRelativePath, StringComparison.Ordinal));
+            if (matchingCandidate is null)
+            {
+                throw new ArgumentException("The proposed source must be one of the format candidates.", nameof(proposedSource));
+            }
+
+            proposedSource = matchingCandidate;
         }
 
         string[] reasons = reasonCodes.Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal).ToArray();

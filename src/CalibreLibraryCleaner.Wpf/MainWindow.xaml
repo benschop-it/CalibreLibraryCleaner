@@ -27,17 +27,21 @@
         <ColumnDefinition Width="Auto" />
         <ColumnDefinition Width="Auto" />
         <ColumnDefinition Width="Auto" />
+        <ColumnDefinition Width="Auto" />
       </Grid.ColumnDefinitions>
       <Label Grid.Column="0"
              Target="{Binding ElementName=LibraryPathBox}"
              Content="_Library folder:" />
-      <TextBox x:Name="LibraryPathBox"
-               Grid.Column="1"
-               Margin="4,0,8,0"
-               Padding="4"
-               IsReadOnly="True"
-               Text="{Binding SelectedLibraryPath, Mode=OneWay}"
-               AutomationProperties.Name="Selected Calibre library folder" />
+      <ComboBox x:Name="LibraryPathBox"
+            Grid.Column="1"
+            Margin="4,0,8,0"
+            Padding="4"
+            IsEditable="True"
+            IsReadOnly="True"
+            ItemsSource="{Binding PersistedLibraryPaths}"
+            SelectedItem="{Binding SelectedPersistedLibraryPath}"
+            Text="{Binding SelectedLibraryPath, Mode=OneWay}"
+            AutomationProperties.Name="Selected or persisted Calibre library folder" />
       <Button Grid.Column="2"
               MinWidth="80"
               Margin="0,0,8,0"
@@ -49,9 +53,16 @@
               MinWidth="80"
               Margin="0,0,8,0"
               Padding="8,4"
+              Content="_Load"
+              Command="{Binding LoadPersistedSnapshotCommand}"
+              AutomationProperties.Name="Load the persisted scan for the selected library" />
+            <Button Grid.Column="4"
+              MinWidth="80"
+              Margin="0,0,8,0"
+              Padding="8,4"
               Content="_Scan"
               Command="{Binding ScanCommand}" />
-      <Button Grid.Column="4"
+            <Button Grid.Column="5"
               MinWidth="80"
               Padding="8,4"
               Content="_Cancel"

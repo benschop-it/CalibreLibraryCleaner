@@ -38,6 +38,7 @@ public partial class App : System.Windows.Application
         builder.Services.AddSingleton<ConsolidationRecommendationPolicy>();
         builder.Services.AddSingleton<GenerateConsolidationRecommendationsUseCase>();
         builder.Services.AddSingleton<ScanLibraryUseCase>();
+        builder.Services.AddSingleton<PersistedLibrarySnapshotsUseCase>();
         builder.Services.AddSingleton<IExecutionLibraryScanner, FullExecutionLibraryScanner>();
         builder.Services.AddSingleton<ExportRecommendationsUseCase>();
         builder.Services.AddSingleton<GenerateCleanupPlanUseCase>();
@@ -102,6 +103,9 @@ public partial class App : System.Windows.Application
     {
         base.OnStartup(e);
         await _host.StartAsync().ConfigureAwait(true);
+        await _host.Services.GetRequiredService<MainWindowViewModel>()
+            .InitializeAsync(CancellationToken.None)
+            .ConfigureAwait(true);
         _host.Services.GetRequiredService<MainWindow>().Show();
     }
 

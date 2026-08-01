@@ -21,7 +21,9 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
     private readonly ExportRecommendationsUseCase? _exportRecommendations;
     private readonly IRecommendationExportFilePicker? _exportFilePicker;
     private readonly IClock? _clock;
+    private readonly PersistedLibrarySnapshotsUseCase? _persistedSnapshots;
     private readonly BulkObservableCollection<BookRowViewModel> _books = [];
+    private readonly BulkObservableCollection<string> _persistedLibraryPaths = [];
     private readonly BulkObservableCollection<ExactDuplicateGroupRowViewModel> _exactDuplicateGroups = [];
     private readonly BulkObservableCollection<MetadataDuplicateGroupRowViewModel> _metadataDuplicateGroups = [];
     private readonly BulkObservableCollection<EpubAssessmentRowViewModel> _epubAssessments = [];
@@ -32,6 +34,7 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
     private IReadOnlyList<MetadataDuplicateGroupRowViewModel> _allMetadataDuplicateGroups = [];
     private CancellationTokenSource? _scanCancellation;
     private string _selectedLibraryPath = string.Empty;
+    private string? _selectedPersistedLibraryPath;
     private string _statusMessage = "Choose a Calibre library folder.";
     private string _errorMessage = string.Empty;
     private string _errorAction = string.Empty;
@@ -51,6 +54,7 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
     private EpubFindingFilterMode _pdfFindingFilterMode;
     private string? _currentLibraryUuid;
     private LibrarySnapshot? _currentSnapshot;
+    private bool _isCurrentSnapshotFresh;
 
     public MainWindowViewModel(
         ValidateLibraryUseCase validateLibrary,
@@ -61,7 +65,8 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
         IClock? clock = null,
         CleanupPlanWorkspaceViewModel? cleanupPlans = null,
         CleanupExecutionWorkspaceViewModel? cleanupExecutions = null,
-        RecoveryWorkspaceViewModel? recoveries = null)
+        RecoveryWorkspaceViewModel? recoveries = null,
+        PersistedLibrarySnapshotsUseCase? persistedSnapshots = null)
     {
         _validateLibrary = validateLibrary;
         _scanLibrary = scanLibrary;
@@ -69,10 +74,12 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
         _exportRecommendations = exportRecommendations;
         _exportFilePicker = exportFilePicker;
         _clock = clock;
+        _persistedSnapshots = persistedSnapshots;
         CleanupPlans = cleanupPlans;
         CleanupExecutions = cleanupExecutions;
         Recoveries = recoveries;
         Books = new ReadOnlyObservableCollection<BookRowViewModel>(_books);
+        PersistedLibraryPaths = new ReadOnlyObservableCollection<string>(_persistedLibraryPaths);
         ExactDuplicateGroups = new ReadOnlyObservableCollection<ExactDuplicateGroupRowViewModel>(_exactDuplicateGroups);
         MetadataDuplicateGroups = new ReadOnlyObservableCollection<MetadataDuplicateGroupRowViewModel>(
             _metadataDuplicateGroups);
@@ -82,6 +89,7 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
         PdfFindings = new ReadOnlyObservableCollection<PdfAssessmentFindingRowViewModel>(_pdfFindings);
         SelectLibraryCommand = new AsyncRelayCommand(SelectLibraryAsync, () => !IsBusy);
         ScanCommand = new AsyncRelayCommand(ScanAsync, () => !IsBusy && !string.IsNullOrWhiteSpace(SelectedLibraryPath));
+        LoadPersistedSnapshotCommand = new AsyncRelayCommand(LoadPersistedSnapshotAsync, CanLoadPersistedSnapshot);
         CancelCommand = new RelayCommand(
             CancelScan,
             () => IsBusy && _scanCancellation is { IsCancellationRequested: false });
@@ -110,6 +118,24 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
             if (SetProperty(ref _selectedLibraryPath, value))
             {
                 ScanCommand.NotifyCanExecuteChanged();
+                LoadPersistedSnapshotCommand.NotifyCanExecuteChanged();
+            }
+        }
+    }
+
+    public string? SelectedPersistedLibraryPath
+    {
+        get => _selectedPersistedLibraryPath;
+        set
+        {
+            if (SetProperty(ref _selectedPersistedLibraryPath, value))
+            {
+                if (!string.IsNullOrWhiteSpace(value))
+                {
+                    SelectedLibraryPath = value;
+                }
+
+                LoadPersistedSnapshotCommand.NotifyCanExecuteChanged();
             }
         }
     }
@@ -141,6 +167,7 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
             {
                 SelectLibraryCommand.NotifyCanExecuteChanged();
                 ScanCommand.NotifyCanExecuteChanged();
+                LoadPersistedSnapshotCommand.NotifyCanExecuteChanged();
                 CancelCommand.NotifyCanExecuteChanged();
                 NextMetadataDuplicateGroupCommand.NotifyCanExecuteChanged();
                 PreviousMetadataDuplicateGroupCommand.NotifyCanExecuteChanged();
@@ -163,6 +190,8 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
     }
 
     public ReadOnlyObservableCollection<BookRowViewModel> Books { get; }
+
+    public ReadOnlyObservableCollection<string> PersistedLibraryPaths { get; }
 
     public ReadOnlyObservableCollection<ExactDuplicateGroupRowViewModel> ExactDuplicateGroups { get; }
 
@@ -271,7 +300,8 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
                 OnPropertyChanged(nameof(StaleOverrideSummary));
                 ToggleMetadataDuplicateDeferredCommand.NotifyCanExecuteChanged();
                 NotifyRecommendationCommands();
-                CleanupPlans?.UpdateContext(_currentSnapshot, value?.Reviewed);
+                CleanupPlans?.UpdateContext(_isCurrentSnapshotFresh ? _currentSnapshot : null,
+                    _isCurrentSnapshotFresh ? value?.Reviewed : null);
             }
         }
     }
@@ -373,6 +403,8 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
 
     public IAsyncRelayCommand ScanCommand { get; }
 
+    public IAsyncRelayCommand LoadPersistedSnapshotCommand { get; }
+
     public IRelayCommand CancelCommand { get; }
 
     public IRelayCommand NextMetadataDuplicateGroupCommand { get; }
@@ -393,6 +425,11 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
 
     public IAsyncRelayCommand ExportRecommendationsCommand { get; }
 
+    public async Task InitializeAsync(CancellationToken cancellationToken = default)
+    {
+        await RefreshPersistedLibraryPathsAsync(cancellationToken).ConfigureAwait(true);
+    }
+
     public void Dispose()
     {
         _scanCancellation?.Cancel();
@@ -409,6 +446,7 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
         }
 
         SelectedLibraryPath = selected;
+        SelectedPersistedLibraryPath = _persistedLibraryPaths.FirstOrDefault(path => PathsEqual(path, selected));
         ClearError();
         LibraryValidationOutcome outcome = await _validateLibrary
             .ExecuteAsync(selected, CancellationToken.None)
@@ -447,6 +485,31 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
                         _scanCancellation.Token)
                     .ConfigureAwait(true);
                 ApplySnapshot(outcome.Snapshot!, presentation);
+                if (_persistedSnapshots is not null)
+                {
+                    try
+                    {
+                        PersistedLibrarySnapshotSaveResult save = await _persistedSnapshots
+                            .SaveAsync(outcome.Snapshot!, _scanCancellation.Token)
+                            .ConfigureAwait(true);
+                        if (save.IsSuccess)
+                        {
+                            await RefreshPersistedLibraryPathsAsync(_scanCancellation.Token).ConfigureAwait(true);
+                            SelectedPersistedLibraryPath = _persistedLibraryPaths
+                                .FirstOrDefault(path => PathsEqual(path, outcome.Snapshot!.Identity.LibraryRoot));
+                        }
+                        else
+                        {
+                            ErrorMessage = save.Error ?? "The scan result could not be persisted.";
+                            ErrorAction = "The current scan remains available. Retry the scan to attempt persistence again.";
+                        }
+                    }
+                    catch (OperationCanceledException)
+                    {
+                        ErrorMessage = "The scan completed, but persisting its result was canceled.";
+                        ErrorAction = "The current scan remains available. Run a fresh scan later to persist a result.";
+                    }
+                }
             }
             else
             {
@@ -466,6 +529,41 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
             _scanCancellation.Dispose();
             _scanCancellation = null;
             CancelCommand.NotifyCanExecuteChanged();
+        }
+    }
+
+    private async Task LoadPersistedSnapshotAsync()
+    {
+        if (_persistedSnapshots is null || string.IsNullOrWhiteSpace(SelectedLibraryPath))
+        {
+            return;
+        }
+
+        IsBusy = true;
+        ClearError();
+        try
+        {
+            PersistedLibrarySnapshotLoadResult load = await _persistedSnapshots
+                .LoadAsync(SelectedLibraryPath, CancellationToken.None)
+                .ConfigureAwait(true);
+            if (!load.IsSuccess)
+            {
+                ErrorMessage = load.Error ?? "The persisted scan result could not be loaded.";
+                ErrorAction = "Select another persisted library or run a fresh scan.";
+                StatusMessage = "Persisted scan loading failed. Current results were not replaced.";
+                return;
+            }
+
+            LibrarySnapshot snapshot = load.Snapshot!;
+            SnapshotPresentation presentation = await Task.Run(
+                () => CreatePresentation(snapshot, CancellationToken.None)).ConfigureAwait(true);
+            SelectedLibraryPath = snapshot.Identity.LibraryRoot;
+            ApplySnapshot(snapshot, presentation, isFreshScan: false);
+            StatusMessage = $"Loaded persisted scan from {snapshot.ScannedAt:u}. Results may be stale; select Scan before cleanup or recovery work.";
+        }
+        finally
+        {
+            IsBusy = false;
         }
     }
 
@@ -550,7 +648,10 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
         return new(books, groups, metadataGroups, epubAssessments, pdfAssessments, missingCount);
     }
 
-    private void ApplySnapshot(LibrarySnapshot snapshot, SnapshotPresentation presentation)
+    private void ApplySnapshot(
+        LibrarySnapshot snapshot,
+        SnapshotPresentation presentation,
+        bool isFreshScan = true)
     {
         _books.ReplaceAll(presentation.Books);
         SelectedBook = _books.FirstOrDefault();
@@ -581,9 +682,19 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
         }
 
         _currentSnapshot = snapshot;
-        CleanupPlans?.ReconcileAfterSuccessfulScan(snapshot);
-        CleanupExecutions?.UpdateSnapshot(snapshot);
-        Recoveries?.UpdateSnapshot(snapshot);
+        _isCurrentSnapshotFresh = isFreshScan;
+        if (isFreshScan)
+        {
+            CleanupPlans?.ReconcileAfterSuccessfulScan(snapshot);
+            CleanupExecutions?.UpdateSnapshot(snapshot);
+            Recoveries?.UpdateSnapshot(snapshot);
+        }
+        else
+        {
+            CleanupPlans?.UpdateContext(null, null);
+            CleanupExecutions?.UpdateSnapshot(null);
+            Recoveries?.UpdateSnapshot(null);
+        }
         _allMetadataDuplicateGroups = presentation.MetadataGroups;
         ApplyMetadataDuplicateFilter();
         _epubAssessments.ReplaceAll(presentation.EpubAssessments);
@@ -597,6 +708,42 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
         ProgressPercentage = 100;
         ExportRecommendationsCommand.NotifyCanExecuteChanged();
     }
+
+    private bool CanLoadPersistedSnapshot() => !IsBusy
+        && _persistedSnapshots is not null
+        && !string.IsNullOrWhiteSpace(SelectedLibraryPath)
+        && _persistedLibraryPaths.Any(path => PathsEqual(path, SelectedLibraryPath));
+
+    private async Task RefreshPersistedLibraryPathsAsync(CancellationToken cancellationToken)
+    {
+        if (_persistedSnapshots is null)
+        {
+            return;
+        }
+
+        PersistedLibrarySnapshotListResult result = await _persistedSnapshots
+            .ListAsync(cancellationToken)
+            .ConfigureAwait(true);
+        _persistedLibraryPaths.ReplaceAll(result.Snapshots.Select(snapshot => snapshot.LibraryRoot));
+        if (SelectedPersistedLibraryPath is not null
+            && !_persistedLibraryPaths.Any(path => PathsEqual(path, SelectedPersistedLibraryPath)))
+        {
+            SelectedPersistedLibraryPath = null;
+        }
+
+        if (result.Error is not null)
+        {
+            ErrorMessage = result.Error;
+            ErrorAction = "Fresh library scans remain available.";
+        }
+
+        LoadPersistedSnapshotCommand.NotifyCanExecuteChanged();
+    }
+
+    private static bool PathsEqual(string first, string second) => string.Equals(
+        first.TrimEnd('\\', '/'),
+        second.TrimEnd('\\', '/'),
+        OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal);
 
     private void ClearError()
     {
@@ -760,7 +907,8 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
         ClearError();
         ReviewedConsolidationRecommendation reviewed = outcome.Reviewed!;
         SelectedMetadataDuplicateGroup.SetReviewed(reviewed);
-        CleanupPlans?.UpdateContext(_currentSnapshot, reviewed);
+        CleanupPlans?.UpdateContext(_isCurrentSnapshotFresh ? _currentSnapshot : null,
+            _isCurrentSnapshotFresh ? reviewed : null);
         _recommendationReviews[new(_currentLibraryUuid!, SelectedMetadataDuplicateGroup.GroupId)] = reviewed;
         RefreshSelectedRecommendationBindings();
         ApplyMetadataDuplicateFilter();
@@ -776,7 +924,8 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
         ReviewedConsolidationRecommendation reviewed = ApplyRecommendationOverrideUseCase.Reset(SelectedMetadataDuplicateGroup.Recommendation);
         _recommendationReviews.Remove(new(_currentLibraryUuid, SelectedMetadataDuplicateGroup.GroupId));
         SelectedMetadataDuplicateGroup.SetReviewed(reviewed);
-        CleanupPlans?.UpdateContext(_currentSnapshot, reviewed);
+        CleanupPlans?.UpdateContext(_isCurrentSnapshotFresh ? _currentSnapshot : null,
+            _isCurrentSnapshotFresh ? reviewed : null);
         ClearError();
         RefreshSelectedRecommendationBindings();
         ApplyMetadataDuplicateFilter();

@@ -273,7 +273,10 @@ public sealed class EpubAssessmentTests
         Func<Task> act = async () => await useCase.ExecuteAsync(
             [target], 1, EpubInspectionLimits.V1, new InlineProgress(updates.Add), CancellationToken.None);
 
-        await act.Should().ThrowAsync<InvalidOperationException>().WithMessage("Synthetic inspector defect");
+        Exception exception = (await act.Should().ThrowAsync<Exception>()).Which;
+        exception.GetType().Name.Should().Be("EpubTargetAssessmentException");
+        exception.InnerException.Should().BeOfType<InvalidOperationException>()
+            .Which.Message.Should().Be("Synthetic inspector defect");
         updates.Should().Contain(update => update.Stage == "Package" && update.CurrentRelativePath == "Book.epub");
     }
 

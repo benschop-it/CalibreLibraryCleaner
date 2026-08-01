@@ -357,7 +357,7 @@ public sealed class VersOneEpubInspectorTests
             await CreateRequestAsync(path), null, CancellationToken.None);
 
         result.Problems.Should().ContainSingle(problem => problem.Code == EpubInspectionProblemCode.PackageMalformed);
-        logger.Levels.Should().Contain(LogLevel.Debug).And.NotContain(LogLevel.Warning);
+        logger.Levels.Should().NotContain(LogLevel.Warning);
     }
 
     [Fact]

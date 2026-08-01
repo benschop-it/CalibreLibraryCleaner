@@ -39,6 +39,12 @@ Domain <- Application <- Infrastructure
 
 Must be asynchronous, cancellable, progress-reporting, bounded in parallelism, and non-blocking to the UI.
 
+## Persisted analysis snapshot boundary
+
+Application owns the `ILibrarySnapshotStore` port and list/load/save outcomes. Infrastructure owns the versioned, bounded JSON representation and atomic latest-only storage under the user's local application-data directory. Canonical library folder paths are keys; their SHA-256 digests are filenames, and the embedded path is revalidated on read. Snapshot artifacts are never written inside a Calibre library.
+
+WPF lists persisted library paths at startup, loads only after an explicit user command, and automatically replaces the cached result after a complete successful scan. Loaded snapshots are historical review evidence: cleanup-plan, execution, and recovery contexts remain cleared until a fresh scan supplies live state. Existing execution and recovery preflight rules always perform fresh scans before mutation.
+
 ## EPUB inspection boundary
 
 Application owns the provider-neutral `IEpubInspector` contract, inspection limits/results, deterministic scoring engine, and bounded orchestration. Infrastructure alone owns ZIP, XML, HTML, image-header, filesystem, and VersOne/Html Agility Pack types. EPUB files are preflighted and opened read-only, content is never extracted or fetched, expected untrusted-input failures become structured inspection problems, and the final snapshot is published only after all assessments complete.
