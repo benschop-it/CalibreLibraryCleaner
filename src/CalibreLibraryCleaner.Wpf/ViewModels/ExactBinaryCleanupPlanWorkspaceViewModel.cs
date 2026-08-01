@@ -88,7 +88,7 @@ public sealed class ExactBinaryCleanupPlanWorkspaceViewModel : ObservableObject
     public string PlanSummary => Plan is null
         ? "No duplicate-record cleanup plan exists for this group."
         : $"Plan {Plan.Id} / {Plan.State}: keep record {Plan.Definition.RetainedFormat.RecordId.Value} " +
-                    $"and delete {Plan.Definition.RecordIdsToRemove.Count} explicitly marked duplicate record(s).";
+                    $"and delete the other {Plan.Definition.RecordIdsToRemove.Count} duplicate record(s).";
 
     public string PlanDigest => Plan?.ContentDigest.Value ?? string.Empty;
 
@@ -172,9 +172,9 @@ public sealed class ExactBinaryCleanupPlanWorkspaceViewModel : ObservableObject
                     && Plan.Definition.RetainedFormat.Format == retained.Member.Format
                     && Plan.Definition.RetainedFormat.RelativePath == retained.Member.ExpectedRelativePath.Replace('\\', '/')
                     ? $"Current {Plan.State} plan matches the selected keeper."
-                    : group?.MarkedRecordIds.Count > 0
-                        ? "Keeper and deletion records selected. Create a cleanup plan."
-                        : "Select at least one duplicate record for deletion.";
+                    : group?.RecordIdsToDelete.Count > 0
+                        ? "Keeper selected. Create a cleanup plan to delete every other record."
+                        : "This group does not span multiple Calibre records.";
         NotifyCommands();
     }
 
@@ -193,11 +193,11 @@ public sealed class ExactBinaryCleanupPlanWorkspaceViewModel : ObservableObject
 
     private void OnGroupPropertyChanged(object? sender, PropertyChangedEventArgs eventArgs)
     {
-        if (eventArgs.PropertyName != nameof(ExactDuplicateGroupRowViewModel.MarkedRecordIds)) return;
+        if (eventArgs.PropertyName != nameof(ExactDuplicateGroupRowViewModel.RecordIdsToDelete)) return;
         InvalidatePreparation();
-        Status = _group?.MarkedRecordIds.Count > 0
-            ? "Deletion selection changed. Create a new cleanup plan."
-            : "Select at least one duplicate record for deletion.";
+        Status = _group?.RecordIdsToDelete.Count > 0
+            ? "Keeper changed. Create a new cleanup plan for the other records."
+            : "This group does not span multiple Calibre records.";
         NotifyCommands();
     }
 
@@ -205,7 +205,7 @@ public sealed class ExactBinaryCleanupPlanWorkspaceViewModel : ObservableObject
     {
         if (_snapshot is null || _group is null || _retained is null) return;
         ExactBinaryCleanupPlanGenerationOutcome outcome = _generate.Execute(
-            _snapshot, _group.GroupId, _retained.Member, _group.MarkedRecordIds);
+            _snapshot, _group.GroupId, _retained.Member);
         if (outcome.Plan is null)
         {
             Status = string.Join(" ", outcome.Validation.BlockingErrors.Select(value => value.Explanation));
@@ -234,7 +234,7 @@ public sealed class ExactBinaryCleanupPlanWorkspaceViewModel : ObservableObject
             _preparation = await _prepare.ExecuteAsync(new(Plan, _snapshot.Identity.LibraryRoot, BackupDestination),
                 null, CancellationToken.None).ConfigureAwait(true);
             Status = _preparation.IsReady
-                ? "Preflight passed. Confirm the two acknowledgements, then execute the marked deletions."
+                ? "Preflight passed. Confirm the two acknowledgements, then consolidate the group."
                 : string.Join(" ", _preparation.Issues.Select(value => $"{value.Code}: {value.Explanation}"));
         }
         finally
@@ -262,10 +262,10 @@ public sealed class ExactBinaryCleanupPlanWorkspaceViewModel : ObservableObject
             ExactBinaryRecordDeletionResult result = await _execute.ExecuteAsync(new(
                 Plan, _snapshot.Identity.LibraryRoot, BackupDestination, version,
                 OtherMutatorsClosed, FullLibraryCopyAcknowledged), progress, CancellationToken.None).ConfigureAwait(true);
-            ResultSummary = $"{result.State}: removed {result.RemovedRecordCount} marked record(s). " +
+            ResultSummary = $"{result.State}: removed {result.RemovedRecordCount} non-keeper record(s). " +
                 $"Backup bundle: {result.BundlePath ?? "not created"}.";
             Status = result.IsCompleted
-                ? "Deletion completed and verified. Run a fresh library scan to refresh all duplicate groups."
+                ? "Consolidation completed and verified. Run a fresh library scan to refresh all duplicate groups."
                 : string.Join(" ", result.Issues.Select(value => $"{value.Code}: {value.Explanation}"));
         }
         finally
@@ -302,12 +302,12 @@ public sealed class ExactBinaryCleanupPlanWorkspaceViewModel : ObservableObject
         }
         Plan = outcome.Plan;
         _plans[outcome.Plan.Definition.GroupId.Value] = outcome.Plan;
-        Status = "Marked duplicate-record removals approved. No Calibre change or backup occurred.";
+        Status = "Single-keeper consolidation approved. No Calibre change or backup occurred.";
         NotifyCommands();
     }
 
     private bool CanGenerate() => _snapshot is not null && _group is not null && _retained is not null
-        && _group.MarkedRecordIds.Count > 0;
+        && _group.RecordIdsToDelete.Count > 0;
 
     private bool CanPrepare() => !IsBusy && _snapshot is not null
         && Plan is { State: CleanupPlanState.Approved }
@@ -322,7 +322,7 @@ public sealed class ExactBinaryCleanupPlanWorkspaceViewModel : ObservableObject
         && Plan.Definition.RetainedFormat.RecordId == _retained.Member.BookId
         && Plan.Definition.RetainedFormat.Format == _retained.Member.Format
         && Plan.Definition.RetainedFormat.RelativePath == _retained.Member.ExpectedRelativePath.Replace('\\', '/')
-        && Plan.Definition.RecordIdsToRemove.SequenceEqual(_group.MarkedRecordIds);
+        && Plan.Definition.RecordIdsToRemove.SequenceEqual(_group.RecordIdsToDelete);
 
     private void NotifyCommands()
     {

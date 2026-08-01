@@ -55,12 +55,13 @@ public sealed record ExactBinaryCleanupPlanDefinition
         Dictionary<(CalibreBookId, string, string), ExpectedFormatState> expected = records
             .SelectMany(value => value.Formats)
             .ToDictionary(Association);
+        CalibreBookId[] groupRecordIds = groupMembers.Select(value => value.RecordId)
+            .Distinct().OrderBy(value => value.Value).ToArray();
         if (groupMembers.Any(value => !expected.TryGetValue(Association(value), out ExpectedFormatState? current) || current != value)
             || removals.Contains(retainedFormat.RecordId)
-            || !removals.All(recordId => evidence.Any(value => value.RecordId == recordId))
-            || !removals.Append(retainedFormat.RecordId).Distinct().OrderBy(value => value.Value)
-                .SequenceEqual(records.Select(value => value.RecordId)))
-            throw new ArgumentException("Expected records must be exactly the keeper and explicitly marked duplicate records.", nameof(expectedRecords));
+            || !removals.SequenceEqual(groupRecordIds.Where(value => value != retainedFormat.RecordId))
+            || !groupRecordIds.SequenceEqual(records.Select(value => value.RecordId)))
+            throw new ArgumentException("The cleanup plan must delete every group record except the one keeper.", nameof(expectedRecords));
 
         LibraryUuid = libraryUuid.Trim();
         LibrarySchemaVersion = librarySchemaVersion;
@@ -371,7 +372,7 @@ public static class ExactBinaryCleanupPlanLifecyclePolicy
         CleanupPlanApproval approval = new(atUtc.ToUniversalTime(), CleanupPlanApprovalMethod.ExplicitLocalUser,
             plan.ArtifactRevision, plan.ContentDigest);
         return Transition(plan, revision, CleanupPlanState.Approved, atUtc,
-            "Explicit approval of marked duplicate-record removals.", validation, approval, null);
+            "Explicit approval of single-keeper exact-binary consolidation.", validation, approval, null);
     }
 
     public static ExactBinaryCleanupPlan MarkStale(

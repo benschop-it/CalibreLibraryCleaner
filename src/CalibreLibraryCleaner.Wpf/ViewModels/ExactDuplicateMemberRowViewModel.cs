@@ -10,7 +10,6 @@ public sealed class ExactDuplicateMemberRowViewModel(
     string format) : ObservableObject
 {
     private bool _isRetained;
-    private bool _isMarkedForDeletion;
 
     public ExactBinaryDuplicateMember Member { get; } = member;
     public long BookId { get; } = member.BookId.Value;
@@ -22,12 +21,11 @@ public sealed class ExactDuplicateMemberRowViewModel(
     public bool IsRetained
     {
         get => _isRetained;
-        internal set => SetProperty(ref _isRetained, value);
+        internal set
+        {
+            if (SetProperty(ref _isRetained, value)) OnPropertyChanged(nameof(CleanupAction));
+        }
     }
 
-    public bool IsMarkedForDeletion
-    {
-        get => _isMarkedForDeletion;
-        set => SetProperty(ref _isMarkedForDeletion, value);
-    }
+    public string CleanupAction => IsRetained ? "Keep" : "Delete book";
 }

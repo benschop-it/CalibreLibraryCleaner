@@ -1,5 +1,4 @@
 using System.Collections.ObjectModel;
-using System.ComponentModel;
 using CalibreLibraryCleaner.Domain.Duplicates;
 using CalibreLibraryCleaner.Domain.Libraries;
 using CommunityToolkit.Mvvm.ComponentModel;
@@ -9,7 +8,6 @@ namespace CalibreLibraryCleaner.Wpf.ViewModels;
 public sealed class ExactDuplicateGroupRowViewModel : ObservableObject
 {
     private ExactDuplicateMemberRowViewModel? _retainedMember;
-    private bool _updatingDeletionMarks;
 
     public ExactDuplicateGroupRowViewModel(
         ExactBinaryDuplicateGroup group,
@@ -32,8 +30,7 @@ public sealed class ExactDuplicateGroupRowViewModel : ObservableObject
                     member.Format);
             })
             .ToArray());
-        foreach (ExactDuplicateMemberRowViewModel member in Members)
-            member.PropertyChanged += OnMemberPropertyChanged;
+        RetainedMember = Members[0];
     }
 
     public ExactBinaryDuplicateGroupId GroupId { get; }
@@ -50,12 +47,13 @@ public sealed class ExactDuplicateGroupRowViewModel : ObservableObject
 
     public IReadOnlyList<ExactDuplicateMemberRowViewModel> Members { get; }
 
-    public ExactDuplicateMemberRowViewModel? RetainedMember
+    public ExactDuplicateMemberRowViewModel RetainedMember
     {
-        get => _retainedMember;
+        get => _retainedMember!;
         set
         {
-            if (value is not null && !Members.Contains(value))
+            ArgumentNullException.ThrowIfNull(value);
+            if (!Members.Contains(value))
             {
                 throw new ArgumentException("The retained file must belong to this exact duplicate group.", nameof(value));
             }
@@ -63,40 +61,16 @@ public sealed class ExactDuplicateGroupRowViewModel : ObservableObject
             if (!SetProperty(ref _retainedMember, value)) return;
             foreach (ExactDuplicateMemberRowViewModel member in Members)
             {
-                member.IsRetained = ReferenceEquals(member, value);
+                member.IsRetained = member.BookId == value.BookId;
             }
-            if (value is not null) SetRecordDeletionMark(value.BookId, false);
-            OnPropertyChanged(nameof(MarkedRecordIds));
+            OnPropertyChanged(nameof(RecordIdsToDelete));
         }
     }
 
-    public IReadOnlyList<CalibreBookId> MarkedRecordIds => Members
-        .Where(value => value.IsMarkedForDeletion)
+    public IReadOnlyList<CalibreBookId> RecordIdsToDelete => Members
+        .Where(value => value.BookId != RetainedMember.BookId)
         .Select(value => value.Member.BookId)
         .Distinct()
         .OrderBy(value => value.Value)
         .ToArray();
-
-    private void OnMemberPropertyChanged(object? sender, PropertyChangedEventArgs eventArgs)
-    {
-        if (_updatingDeletionMarks || eventArgs.PropertyName != nameof(ExactDuplicateMemberRowViewModel.IsMarkedForDeletion)
-            || sender is not ExactDuplicateMemberRowViewModel member) return;
-        bool marked = member.IsMarkedForDeletion && member.BookId != RetainedMember?.BookId;
-        SetRecordDeletionMark(member.BookId, marked);
-        OnPropertyChanged(nameof(MarkedRecordIds));
-    }
-
-    private void SetRecordDeletionMark(long bookId, bool marked)
-    {
-        _updatingDeletionMarks = true;
-        try
-        {
-            foreach (ExactDuplicateMemberRowViewModel member in Members.Where(value => value.BookId == bookId))
-                member.IsMarkedForDeletion = marked;
-        }
-        finally
-        {
-            _updatingDeletionMarks = false;
-        }
-    }
 }

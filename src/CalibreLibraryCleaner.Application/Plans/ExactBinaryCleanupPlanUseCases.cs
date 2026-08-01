@@ -33,11 +33,9 @@ public sealed class GenerateExactBinaryCleanupPlanUseCase(
         LibrarySnapshot snapshot,
         ExactBinaryDuplicateGroupId groupId,
         ExactBinaryDuplicateMember retainedMember,
-        IEnumerable<CalibreBookId> recordIdsToRemove,
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(snapshot);
-        ArgumentNullException.ThrowIfNull(recordIdsToRemove);
         cancellationToken.ThrowIfCancellationRequested();
         DateTimeOffset now = clock.GetUtcNow().ToUniversalTime();
         List<CleanupPlanIssue> issues = [];
@@ -54,25 +52,21 @@ public sealed class GenerateExactBinaryCleanupPlanUseCase(
             return Failure(issues, now);
         }
 
-        CalibreBookId[] removals = recordIdsToRemove.Distinct().OrderBy(value => value.Value).ToArray();
+        CalibreBookId[] removals = group.Members
+            .Select(value => value.BookId)
+            .Where(value => value != retainedMember.BookId)
+            .Distinct()
+            .OrderBy(value => value.Value)
+            .ToArray();
         if (removals.Length == 0)
-            issues.Add(Block("BINARY_PLAN.RECORD_SELECTION_REQUIRED", "Mark at least one duplicate Calibre record for deletion."));
-        if (removals.Contains(retainedMember.BookId))
-            issues.Add(Block("BINARY_PLAN.KEEPER_MARKED_FOR_DELETION", "The keeper record cannot be marked for deletion."));
-        foreach (CalibreBookId recordId in removals.Where(recordId =>
-                     !group.Members.Any(member => member.BookId == recordId)))
-        {
-            issues.Add(new("BINARY_PLAN.RECORD_NOT_GROUP_MEMBER", CleanupPlanIssueSeverity.BlockingError,
-                CleanupPlanIssueSubjectKind.Record,
-                "A marked record does not contribute a current member to this exact-binary group.", recordId));
-        }
+            issues.Add(Block("BINARY_PLAN.MULTIPLE_RECORDS_REQUIRED",
+                "This exact-file group occurs within one Calibre record and cannot be consolidated by record deletion."));
         if (issues.Count > 0) return Failure(issues, now);
 
         Dictionary<CalibreBookId, CalibreBook> books = snapshot.Books
             .Where(value => value.Id == retainedMember.BookId || removals.Contains(value.Id))
             .ToDictionary(value => value.Id);
-        ExactBinaryDuplicateMember[] plannedMembers = group.Members.Where(member =>
-            member == retainedMember || removals.Contains(member.BookId)).ToArray();
+        ExactBinaryDuplicateMember[] plannedMembers = group.Members.ToArray();
         foreach (ExactBinaryDuplicateMember member in plannedMembers)
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -120,9 +114,9 @@ public sealed class GenerateExactBinaryCleanupPlanUseCase(
             backups,
             now);
         issues.AddRange(ExactBinaryCleanupPlanSafetyPolicy.Validate(definition));
-        issues.Add(new("BINARY_PLAN.EXPLICIT_RECORD_REMOVAL", CleanupPlanIssueSeverity.Information,
+        issues.Add(new("BINARY_PLAN.SINGLE_KEEPER_CONSOLIDATION", CleanupPlanIssueSeverity.Information,
             CleanupPlanIssueSubjectKind.Record,
-            "This plan removes only the explicitly marked Calibre records after complete external backup."));
+            "This plan keeps the selected Calibre record and removes every other record in the exact-binary group after complete external backup."));
         CleanupPlanContentDigest digest = ExactBinaryCleanupPlanContentDigestPolicy.Compute(definition);
         ExactBinaryCleanupPlanInputIdentity identity = new(
             definition.LibraryUuid,

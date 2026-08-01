@@ -231,7 +231,7 @@ public sealed class ExecuteExactBinaryRecordDeletionUseCase(
                 await backupStore.AppendAuditAsync(workspace, new(clock.GetUtcNow(), "RecordRemovalStarting",
                     "Typed non-permanent Calibre record removal starting.", recordId, "remove"),
                     CancellationToken.None).ConfigureAwait(false);
-                progress?.Report(new($"Removing marked duplicate record {recordId.Value} through Calibre.",
+                progress?.Report(new($"Removing non-keeper duplicate record {recordId.Value} through Calibre.",
                     removedCount, request.Plan.Definition.RecordIdsToRemove.Count, true));
                 CalibreCommandResult command = await commandGateway.RemoveRecordAsync(new(
                     currentTool, request.LibraryRoot, recordId), CancellationToken.None).ConfigureAwait(false);
@@ -242,7 +242,7 @@ public sealed class ExecuteExactBinaryRecordDeletionUseCase(
                 if (!command.IsSuccess)
                 {
                     issues.Add(Block("BINARY_EXECUTION.REMOVE_FAILED",
-                        "Calibre failed to remove the marked duplicate record.", recordId));
+                        "Calibre failed to remove the non-keeper duplicate record.", recordId));
                     return Result(ExactBinaryRecordDeletionState.PartiallyApplied);
                 }
 
@@ -264,9 +264,9 @@ public sealed class ExecuteExactBinaryRecordDeletionUseCase(
             }
 
             await backupStore.AppendAuditAsync(workspace, new(clock.GetUtcNow(), "Completed",
-                "All marked duplicate records were removed and the final state verified."),
+                "All non-keeper duplicate records were removed and the final state verified."),
                 CancellationToken.None).ConfigureAwait(false);
-            progress?.Report(new("Marked duplicate-record cleanup completed.", removedCount,
+            progress?.Report(new("Single-keeper duplicate consolidation completed.", removedCount,
                 request.Plan.Definition.RecordIdsToRemove.Count, true));
             return Result(ExactBinaryRecordDeletionState.Completed);
         }

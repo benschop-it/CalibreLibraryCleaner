@@ -24,8 +24,6 @@ public sealed class ExactBinaryCleanupPlanWorkspaceViewModelTests
         Dictionary<CalibreBookId, CalibreBook> books = snapshot.Books.ToDictionary(value => value.Id);
         ExactDuplicateGroupRowViewModel groupRow = new(group, books);
         ExactDuplicateMemberRowViewModel retained = groupRow.Members[0];
-        groupRow.RetainedMember = retained;
-        groupRow.Members[1].IsMarkedForDeletion = true;
         ICleanupPlanIdGenerator ids = A.Fake<ICleanupPlanIdGenerator>();
         IClock clock = A.Fake<IClock>();
         IExactBinaryCleanupPlanConfirmationService confirmation = A.Fake<IExactBinaryCleanupPlanConfirmationService>();
@@ -58,7 +56,7 @@ public sealed class ExactBinaryCleanupPlanWorkspaceViewModelTests
         viewModel.Plan!.State.Should().Be(CleanupPlanState.Approved);
         viewModel.Plan.Definition.RetainedFormat.RecordId.Should().Be(retained.Member.BookId);
         viewModel.Plan.Definition.RecordIdsToRemove.Should().Equal(new CalibreBookId(2));
-        viewModel.PlanSummary.Should().Contain("explicitly marked duplicate record");
+        viewModel.PlanSummary.Should().Contain("other 1 duplicate record");
     }
 
     private static LibrarySnapshot Snapshot(DateTimeOffset now)

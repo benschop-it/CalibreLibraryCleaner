@@ -9,11 +9,11 @@ internal sealed class MessageBoxExactBinaryCleanupPlanConfirmationService :
     IExactBinaryRecordDeletionConfirmation
 {
     public bool ConfirmApproval(ExactBinaryCleanupPlan plan) => MessageBox.Show(
-        $"Approve deletion of {plan.Definition.RecordIdsToRemove.Count} marked duplicate book record(s)?\n\n" +
+        $"Approve keeping one record and deleting the other {plan.Definition.RecordIdsToRemove.Count} duplicate record(s)?\n\n" +
         $"Keep record {plan.Definition.RetainedFormat.RecordId.Value}.\n" +
         $"Delete records: {string.Join(", ", plan.Definition.RecordIdsToRemove.Select(value => value.Value))}.\n" +
         $"Approval binds only to digest {plan.ContentDigest}. No Calibre change or backup will occur yet.",
-        "Approve duplicate-record cleanup plan",
+        "Approve exact duplicate consolidation",
         MessageBoxButton.YesNo,
         MessageBoxImage.Warning,
         MessageBoxResult.No) == MessageBoxResult.Yes;
@@ -30,7 +30,7 @@ internal sealed class MessageBoxExactBinaryCleanupPlanConfirmationService :
             $"Keeper: {plan.Definition.RetainedFormat.RecordId.Value}\n" +
             $"Verified backup: {manifest.ManifestDigest.Value}\n\n" +
             "Calibre will perform non-permanent record removal.",
-            "Delete marked duplicate books",
+            "Consolidate exact duplicate books",
             MessageBoxButton.YesNo,
             MessageBoxImage.Warning,
             MessageBoxResult.No) == MessageBoxResult.Yes;

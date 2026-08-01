@@ -217,7 +217,7 @@ public sealed class ExecuteExactBinaryRecordDeletionUseCaseTests
         IClock clock = A.Fake<IClock>();
         A.CallTo(() => clock.GetUtcNow()).Returns(Now);
         ExactBinaryCleanupPlan valid = new GenerateExactBinaryCleanupPlanUseCase(planIds, clock).Execute(
-            before, group.Id, group.Members.Single(value => value.BookId == keeper.Id), [duplicate.Id]).Plan!;
+            before, group.Id, group.Members.Single(value => value.BookId == keeper.Id)).Plan!;
         ExactBinaryCleanupPlan approved = new ApproveExactBinaryCleanupPlanUseCase(clock).Execute(valid, before).Plan!;
         return (approved, before, after);
     }

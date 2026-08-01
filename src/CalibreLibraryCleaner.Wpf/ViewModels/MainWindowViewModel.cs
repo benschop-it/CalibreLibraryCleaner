@@ -96,9 +96,6 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
         CancelCommand = new RelayCommand(
             CancelScan,
             () => IsBusy && _scanCancellation is { IsCancellationRequested: false });
-        KeepSelectedExactDuplicateMemberCommand = new RelayCommand(
-            KeepSelectedExactDuplicateMember,
-            () => !IsBusy && SelectedExactDuplicateGroup is not null && SelectedExactDuplicateMember is not null);
         NextMetadataDuplicateGroupCommand = new RelayCommand(
             () => MoveMetadataSelection(1),
             () => !IsBusy && _metadataDuplicateGroups.Count > 0);
@@ -302,8 +299,8 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
         get => _selectedExactDuplicateMember;
         set
         {
-            if (SetProperty(ref _selectedExactDuplicateMember, value))
-                KeepSelectedExactDuplicateMemberCommand.NotifyCanExecuteChanged();
+            if (SetProperty(ref _selectedExactDuplicateMember, value) && value is not null)
+                RetainedExactDuplicateMember = value;
         }
     }
 
@@ -312,7 +309,7 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
         get => SelectedExactDuplicateGroup?.RetainedMember;
         set
         {
-            if (SelectedExactDuplicateGroup is null) return;
+            if (SelectedExactDuplicateGroup is null || value is null) return;
             SelectedExactDuplicateGroup.RetainedMember = value;
             OnPropertyChanged();
             ExactBinaryCleanupPlans?.UpdateContext(
@@ -445,8 +442,6 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
     public IAsyncRelayCommand LoadPersistedSnapshotCommand { get; }
 
     public IRelayCommand CancelCommand { get; }
-
-    public IRelayCommand KeepSelectedExactDuplicateMemberCommand { get; }
 
     public IRelayCommand NextMetadataDuplicateGroupCommand { get; }
 
@@ -613,12 +608,6 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
         _scanCancellation?.Cancel();
         CancelCommand.NotifyCanExecuteChanged();
         StatusMessage = "Scan canceled. Waiting for the current read to stop...";
-    }
-
-    private void KeepSelectedExactDuplicateMember()
-    {
-        if (SelectedExactDuplicateMember is null) return;
-        RetainedExactDuplicateMember = SelectedExactDuplicateMember;
     }
 
     private void UpdateProgress(LibraryScanProgress progress)

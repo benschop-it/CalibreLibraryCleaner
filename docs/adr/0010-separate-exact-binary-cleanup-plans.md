@@ -1,17 +1,17 @@
-# ADR 0010: Use Separate Plans for Explicit Exact-Binary Record Deletion
+# ADR 0010: Use Separate Plans for Single-Keeper Exact-Binary Consolidation
 
 - Status: Accepted
 - Date: 2026-08-01
 
 ## Context
 
-Exact-binary groups are valid cleanup candidates even when their Calibre records have different metadata. Users may intentionally delete a duplicate record, including its additional metadata and formats, when they explicitly check it and have a full library copy or verified per-record backup.
+Exact-binary groups are valid cleanup candidates even when their Calibre records have different metadata. The workflow must consolidate a multi-record group to exactly one user-selected keeper, never zero and never an ambiguous subset.
 
 ## Decision
 
-Use a separate `exact-binary-cleanup-plan/1.0` aggregate. The user selects one current exact-group member as keeper and checks record IDs to delete. Unchecked records are never inferred. The body records library/group identity, shared fingerprint, retained association, exact evidence for every checked record, complete expected keeper/checked-record state, backup requirements, and review time.
+Use a separate `exact-binary-cleanup-plan/1.0` aggregate. The user selects one current exact-group member as keeper. Every other distinct record ID in the group is derived as a deletion target. The body records library/group identity, shared fingerprint, retained association, complete exact evidence, complete involved-record state, backup requirements, and review time.
 
-Metadata equality is not an eligibility condition. Metadata and additional formats on a checked record are included in its backup and removed with that record. The keeper, unchecked records, and unrelated records are preservation expectations.
+Metadata equality is not an eligibility condition. Metadata and additional formats on non-keeper records are included in backup and removed with those records. The keeper and unrelated records are preservation expectations.
 
 The plan follows valid, approved, stale, and revoked lifecycle concepts, with approval bound to its canonical SHA-256 body digest. Relevant state changes invalidate the plan.
 
@@ -20,12 +20,12 @@ Use a separate compact executor. It creates raw-format copies and complete Calib
 ## Guardrails
 
 - Exactly one current exact-group member is retained.
-- At least one different group record is explicitly checked.
-- Every checked record has current exact-binary evidence matching the keeper fingerprint.
-- The keeper cannot be checked, and unchecked records cannot enter the deletion set.
+- The group must span at least two distinct records.
+- Exactly one record is the keeper.
+- Every non-keeper record has current exact-binary evidence matching the keeper fingerprint and must be in the deletion set.
 - Every involved record and format has complete expected state and backup coverage.
 - The exact Calibre cleanup profile remains version-, identity-, and probe-gated.
 
 ## Consequences
 
-Users can delete checked duplicate books independently from metadata candidates. The separate aggregate and executor keep this explicit record-level authority distinct from recommendation-driven consolidation.
+Users can consolidate exact duplicate books independently from metadata candidates. The separate aggregate and executor keep this single-keeper authority distinct from recommendation-driven consolidation.

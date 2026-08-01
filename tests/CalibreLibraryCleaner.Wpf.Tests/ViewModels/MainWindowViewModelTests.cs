@@ -278,18 +278,22 @@ public sealed class MainWindowViewModelTests
         viewModel.ExactDuplicateGroups[0].RecordCount.Should().Be(2);
         viewModel.ExactDuplicateSummary.Should().Contain("1 exact file duplicate group");
 
-        viewModel.RetainedExactDuplicateMember.Should().BeNull();
-        ExactDuplicateMemberRowViewModel retained = viewModel.SelectedExactDuplicateMembers[1];
-        viewModel.RetainedExactDuplicateMember = retained;
+        ExactDuplicateMemberRowViewModel first = viewModel.SelectedExactDuplicateMembers[0];
+        ExactDuplicateMemberRowViewModel second = viewModel.SelectedExactDuplicateMembers[1];
+        viewModel.RetainedExactDuplicateMember.Should().BeSameAs(first);
+        first.CleanupAction.Should().Be("Keep");
+        second.CleanupAction.Should().Be("Delete book");
+        viewModel.ExactDuplicateGroups[0].RecordIdsToDelete.Should().Equal(new CalibreBookId(2));
 
-        viewModel.RetainedExactDuplicateMember.Should().BeSameAs(retained);
-        viewModel.SelectedExactDuplicateMembers.Should().ContainSingle(member => member.IsRetained);
-        retained.IsRetained.Should().BeTrue();
+        viewModel.SelectedExactDuplicateMember = second;
 
-        retained.IsMarkedForDeletion = true;
-        retained.IsMarkedForDeletion.Should().BeFalse();
-        viewModel.SelectedExactDuplicateMembers[0].IsMarkedForDeletion = true;
-        viewModel.ExactDuplicateGroups[0].MarkedRecordIds.Should().Equal(new CalibreBookId(1));
+        viewModel.RetainedExactDuplicateMember.Should().BeSameAs(second);
+        first.CleanupAction.Should().Be("Delete book");
+        second.CleanupAction.Should().Be("Keep");
+        viewModel.ExactDuplicateGroups[0].RecordIdsToDelete.Should().Equal(new CalibreBookId(1));
+        viewModel.ExactDuplicateGroups[0].RecordIdsToDelete.Should().NotContain(second.Member.BookId);
+        Action clearKeeper = () => viewModel.ExactDuplicateGroups[0].RetainedMember = null!;
+        clearKeeper.Should().Throw<ArgumentNullException>();
     }
 
     [Fact]

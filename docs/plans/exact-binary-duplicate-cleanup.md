@@ -2,15 +2,15 @@
 
 ## Objective
 
-Let a user select one keeper in an exact-binary duplicate group, explicitly mark other Calibre book records for deletion, and remove those marked records through `calibredb` after a verified external backup.
+Let a user select one keeper in an exact-binary duplicate group and remove every other Calibre record in that group through `calibredb` after a verified external backup.
 
 ## Scope
 
-- Add an explicit keeper selection and record-deletion checkboxes to the Exact file duplicates tab.
+- Use row selection as the single keeper control; show every other record as a derived deletion.
 - Model exact-binary cleanup independently from metadata consolidation.
-- Preserve the keeper, unmarked records, and all unrelated records.
-- Back up complete marked records, including metadata, covers, unique formats, and managed state.
-- Generate, validate, approve, back up, execute, journal, and verify marked record removals.
+- Preserve the keeper and all unrelated records.
+- Back up complete non-keeper records, including metadata, covers, unique formats, and managed state.
+- Generate, validate, approve, back up, execute, journal, and verify every non-keeper record removal.
 - Revalidate group membership, file identity, hashes, paths, library identity, and approval immediately before mutation.
 - Invalidate the persisted library snapshot before mutation so the next application run requires a fresh scan.
 - Use only the typed non-permanent `calibredb remove` boundary for removal.
@@ -19,7 +19,7 @@ Let a user select one keeper in an exact-binary duplicate group, explicitly mark
 
 - Inferring that records with different metadata are duplicate books.
 - Choosing or merging metadata for exact-binary groups.
-- Removing any record that was not explicitly marked.
+- Keeping multiple records from the selected exact-binary group.
 - Automatically selecting a retained file.
 - Enabling an unqualified real-Calibre compatibility profile.
 - Bulk execution of multiple groups in one approval.
@@ -42,13 +42,13 @@ Let a user select one keeper in an exact-binary duplicate group, explicitly mark
 
 ## Proposed design
 
-Introduce an exact-binary cleanup aggregate rather than weakening metadata-consolidation invariants. Its immutable body contains the library and exact-group identity, the retained exact-file association, explicitly marked record IDs, complete expected states for the keeper and marked records, exact shared fingerprint evidence, backup requirements, and explicit review provenance.
+Introduce an exact-binary cleanup aggregate rather than weakening metadata-consolidation invariants. Its immutable body contains the library and exact-group identity, the retained exact-file association, every non-keeper record ID, complete expected states for all involved records, exact shared fingerprint evidence, backup requirements, and explicit review provenance.
 
 The plan lifecycle follows the existing immutable draft/valid/approved/stale/revoked pattern. Approval binds to a canonical digest. A fresh snapshot makes a plan stale when the keeper, any removal, path, format, fingerprint, record, library identity, or group membership changes.
 
-Execution uses a separate compact operation graph whose only mutations are marked-record removals. Before mutation it exports and verifies every marked record and copies every managed format to an external bundle. Each operation invokes typed non-permanent `calibredb remove`, then performs a complete read-only scan proving that the marked record disappeared, the keeper remains unchanged, unmarked group records remain, and unrelated records are unchanged.
+Execution uses a separate compact operation graph whose only mutations are non-keeper record removals. Before mutation it exports and verifies every involved record and copies every managed format to an external bundle. Each operation invokes typed non-permanent `calibredb remove`, then performs a complete read-only scan proving that the deleted record disappeared, the keeper remains unchanged, and unrelated records are unchanged.
 
-The Exact file duplicates tab separates row selection, keeper choice, and synchronized per-record deletion checks. Its plan and execution controls name record-level consequences explicitly.
+The Exact file duplicates tab uses row selection as the keeper choice and displays a read-only `Keep` or `Delete book` action for every row.
 
 ## Files expected to change
 
@@ -61,9 +61,9 @@ The Exact file duplicates tab separates row selection, keeper choice, and synchr
 
 ## Safety considerations
 
-- Remove only explicitly marked records that currently contribute a member to the selected exact-binary group.
-- Preserve the keeper record and never allow it to be marked.
-- Back up every format, metadata export, cover, and managed state for every marked record before mutation.
+- Remove every distinct non-keeper record that currently contributes a member to the selected exact-binary group.
+- Require one non-null keeper record at all times.
+- Back up every format, metadata export, cover, and managed state for every involved record before mutation.
 - Fail closed on missing files, stale hashes, path changes, covers that cannot be preserved by the backup contract, unsupported Calibre versions/capabilities, concurrent mutation, or incomplete verification.
 - Keep exact executable/version/capability checks at every command gate.
 - Never invoke `remove` through a shell or arbitrary argument path.
@@ -82,10 +82,10 @@ The Exact file duplicates tab separates row selection, keeper choice, and synchr
 ## Tests
 
 - Keeper must be one current member of the exact-binary group.
-- At least one other current member must be selected for removal.
-- Every marked record must contribute current exact-file evidence matching the keeper fingerprint.
-- Metadata differences do not block explicitly marked record cleanup.
-- Unique formats, metadata, and covers on checked records are complete backup expectations; unchecked and unrelated records are preservation expectations.
+- The group must span at least two distinct records.
+- Every non-keeper record must contribute current exact-file evidence matching the keeper fingerprint.
+- Metadata differences do not block single-keeper consolidation.
+- Unique formats, metadata, and covers on non-keeper records are complete backup expectations; unrelated records are preservation expectations.
 - Changed/missing/inaccessible files and stale scans block approval/execution.
 - Tampered plan bodies, approvals, backup manifests, and journals are rejected.
 - `remove` arguments are closed, direct, and exact-version gated.
@@ -105,7 +105,7 @@ dotnet format --verify-no-changes
 ## Risks
 
 - Adding a second immutable plan shape can increase UI and persistence complexity; keep its types separate rather than adding nullable consolidation fields.
-- A checked record may contain additional unique formats; the UI states this and the executor backs them up before deleting the record.
+- A non-keeper record may contain additional unique formats; the UI states this and the executor backs them up before deleting the record.
 - Recovery can use the complete exported/raw record bundle; automated restore remains optional because users may restore their full library copy.
 - The real-Calibre profile must probe and qualify non-permanent `remove` for this exact operation.
 
@@ -116,8 +116,8 @@ dotnet format --verify-no-changes
 ## Progress
 
 - [x] Inspected current exact-duplicate UI, cleanup-plan invariants, execution boundary, and governing ADRs.
-- [x] Implement keeper and explicit record-deletion review.
-- [x] Adapt the plan lifecycle, validation, and approval to marked records.
+- [x] Implement row-selected keeper and derived all-other-record deletion.
+- [x] Adapt the plan lifecycle, validation, and approval to exactly one survivor.
 - [x] Persist the approved plan in the verified execution bundle.
 - [x] Implement backed-up typed execution and verification.
 - [x] Complete review/approval UI wiring and current-scope documentation.
