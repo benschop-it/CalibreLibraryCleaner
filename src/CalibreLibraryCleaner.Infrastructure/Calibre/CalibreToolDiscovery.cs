@@ -18,13 +18,12 @@ internal sealed partial class CalibreToolDiscovery(
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(libraryRoot);
         List<ExecutionIssue> issues = [];
-        if (!string.Equals(options.SupportedVersion, CalibreExecutionOptions.InitialSupportedVersion, StringComparison.Ordinal)
-            || !string.Equals(options.CapabilityProfile, CalibreExecutionOptions.InitialCapabilityProfile, StringComparison.Ordinal))
+        if (!CalibreCompatibilityPolicy.IsBuiltInConfiguration(options))
             return Failure("EXECUTION.CALIBRE_PROFILE_CONFIGURATION_UNSUPPORTED",
-                "Only the built-in exact Calibre 9.11.0 compatibility profile can be enabled.");
+                "Only the built-in Calibre 9.x compatibility profile can be enabled.");
         if (!options.IsValidatedCompatibilityProfileEnabled)
             return Failure("EXECUTION.CALIBRE_PROFILE_NOT_VALIDATED",
-                "The exact Calibre 9.11.0 profile remains disabled until its opt-in disposable-library compatibility suite passes.");
+                "The Calibre 9.x profile is disabled by configuration.");
         string executable;
         try { executable = Path.GetFullPath(options.TrustedExecutablePath); }
         catch (Exception exception) when (exception is ArgumentException or NotSupportedException or PathTooLongException)
@@ -59,6 +58,7 @@ internal sealed partial class CalibreToolDiscovery(
             return Failure("EXECUTION.CALIBRE_HASH_FAILED", "The trusted Calibre executable could not be hashed reliably.");
         }
 
+        string productVersion;
         await using (executableLock.ConfigureAwait(false))
         {
             CalibreCommandResult versionResult = await processRunner.RunAsync(executable, libraryRoot, "version-probe", ["--version"],
@@ -66,8 +66,11 @@ internal sealed partial class CalibreToolDiscovery(
             if (!versionResult.IsSuccess)
                 return Failure("EXECUTION.CALIBRE_VERSION_PROBE_FAILED", "The trusted Calibre executable did not return a valid version result.");
             Match versionMatch = VersionPattern().Match(versionResult.SanitizedStandardOutput + "\n" + versionResult.SanitizedStandardError);
-            if (!versionMatch.Success || !string.Equals(versionMatch.Groups[1].Value, options.SupportedVersion, StringComparison.Ordinal))
-                return Failure("EXECUTION.CALIBRE_VERSION_UNSUPPORTED", $"Only exact Calibre version {options.SupportedVersion} is supported by this capability profile.");
+            string actualVersion = versionMatch.Success ? versionMatch.Groups[1].Value : string.Empty;
+            if (!versionMatch.Success || !CalibreCompatibilityPolicy.IsSupportedVersion(actualVersion, options))
+                return Failure("EXECUTION.CALIBRE_VERSION_UNSUPPORTED",
+                    $"Supported Calibre versions are {options.MinimumSupportedVersion} or newer, but below {options.MaximumExclusiveVersion}.");
+            productVersion = actualVersion;
 
             Dictionary<string, string[]> probes = new(StringComparer.Ordinal)
             {
@@ -110,7 +113,7 @@ internal sealed partial class CalibreToolDiscovery(
         }
 
         if (issues.Any(value => value.Severity == ExecutionIssueSeverity.BlockingError)) return new(null, issues);
-        ExecutionToolIdentity identity = new(executable, options.SupportedVersion, digest, options.CapabilityProfile);
+        ExecutionToolIdentity identity = new(executable, productVersion, digest, options.CapabilityProfile);
         CalibreToolDescriptor descriptor = new(executable, identity, Enum.GetValues<CalibreExecutionCapability>());
         return new(descriptor, Array.AsReadOnly(issues.ToArray()));
     }

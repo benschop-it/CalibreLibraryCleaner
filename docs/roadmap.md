@@ -35,7 +35,7 @@ Implemented as a separate `cleanup-plan/1.0` artifact with immutable semantic bo
 Calibre CLI discovery, verified backups, command execution, post-operation verification, and audit history.
 
 Implemented as a single-plan, serial, fail-closed execution workflow for the
-exact Calibre 9.11.0 Windows compatibility profile. The supported mutation
+capability-probed Calibre 9.x Windows compatibility profile. The supported mutation
 mapping is limited to `add_format` additions/replacements and non-permanent
 `remove` of redundant source records, after an exclusive application lease,
 authoritative-revision plan validation, and a complete independently hash-verified external
@@ -51,8 +51,8 @@ executable/backup substitution, and persists an application-local recovery
 guard. Cover-bearing plans are blocked until cover bytes are modeled and can be
 verified exactly.
 
-The exact 9.11.0 cleanup runtime profile is enabled by default and still requires
-exact executable identity, version, command probes, authoritative state, and typed command
+The 9.11-or-newer Calibre 9.x cleanup runtime profile is enabled by default and still requires
+executable identity, a compatible version, command probes, authoritative state, and typed command
 mapping. Recovery capabilities remain independently disabled unless qualified.
 
 ## Milestone 8 — Rollback
@@ -70,7 +70,7 @@ record-ID mappings. Cleanup and recovery share one lease domain. No direct
 database or managed-library filesystem mutation, shell invocation, automatic
 retry, resume, bulk recovery, or rollback-of-rollback is included.
 
-The exact Calibre 9.11.0 recovery mutation capabilities remain disabled by
+Calibre 9.x recovery mutation capabilities remain disabled by
 default until the opt-in disposable-library qualification passes per
 capability. Unsupported cover restoration and ambiguous or data-losing cases
 remain manual-intervention blockers.

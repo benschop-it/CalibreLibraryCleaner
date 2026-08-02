@@ -71,6 +71,8 @@ Cleanup plans are non-executable data. Milestone 6 introduces no Calibre process
 
 Exact-binary cleanup uses a separate plan and compact executor because metadata-consolidation plans choose metadata and format sources for candidate books. Domain generates deterministic retained-copy decisions from the authoritative state; WPF presents those decisions but row selection does not change them. Application applies typed remove-format and empty-record deltas after successful commands without rescanning. Infrastructure creates a complete external bundle of raw formats and Calibre exports, seals a hash manifest, and appends the execution audit.
 
+The normal Exact file duplicates workflow bypasses visible plan orchestration. WPF owns generated/editable keeper selections and one bulk command. Application builds one operation list, transfers complementary formats only to an unambiguous non-conflicting target, removes duplicate/source formats, and removes empty records. Infrastructure automatically stages transfer bytes outside the library and verifies their fingerprints. Technical plan/execution/recovery views are hidden from normal use.
+
 ## Safe execution boundary
 
 Milestone 7 keeps cleanup plans immutable and introduces a separate execution
@@ -92,6 +94,8 @@ recovery guard precedes the first mutation marker, and reconciliation requires
 the terminal journal and immutable summary to agree. Plans with cover-bearing
 records fail closed because V1 does not model cover bytes. Milestone 7 does not
 implement rollback or resume.
+
+The Calibre command boundary accepts capability-compatible releases from 9.11.0 up to, but not including, 10.0.0. Discovery probes every required command and option; command invocation revalidates the actual version, executable hash, path, and `calibredb/windows/9.x` profile.
 
 ## Verified recovery boundary
 
@@ -119,7 +123,7 @@ confirmed destructive phase; every command is followed by a complete fresh
 read-only scan. Changed Calibre numeric IDs are accepted only through a unique
 semantic scan delta and durable mapping. Unexpected current content is retained
 and backed up, restored into a separate record where safe, or blocks automation.
-The exact 9.11.0 recovery capability profile remains disabled by default until
+The compatible Calibre 9.x recovery capability profile remains disabled by default until
 its opt-in disposable-library qualification passes per capability.
 
 ## Errors

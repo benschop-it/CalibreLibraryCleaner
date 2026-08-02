@@ -4,15 +4,17 @@ namespace CalibreLibraryCleaner.Infrastructure.Calibre;
 
 public sealed record CalibreExecutionOptions
 {
-    public const string InitialSupportedVersion = "9.11.0";
-    public const string InitialCapabilityProfile = "calibredb/windows/9.11.0";
+    public const string InitialMinimumSupportedVersion = "9.11.0";
+    public const string InitialMaximumExclusiveVersion = "10.0.0";
+    public const string InitialCapabilityProfile = "calibredb/windows/9.x";
 
     public string TrustedExecutablePath { get; init; } = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles),
         "Calibre2",
         "calibredb.exe");
 
-    public string SupportedVersion { get; init; } = InitialSupportedVersion;
+    public string MinimumSupportedVersion { get; init; } = InitialMinimumSupportedVersion;
+    public string MaximumExclusiveVersion { get; init; } = InitialMaximumExclusiveVersion;
     public string CapabilityProfile { get; init; } = InitialCapabilityProfile;
     public bool IsValidatedCompatibilityProfileEnabled { get; init; } = true;
     public bool IsValidatedRecoveryProfileEnabled { get; init; }
@@ -25,7 +27,7 @@ public sealed record CalibreExecutionOptions
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
         "CalibreLibraryCleaner",
         "calibre-config",
-        InitialSupportedVersion);
+        "9.x");
 }
 
 public sealed record ExecutionStorageOptions
@@ -39,4 +41,9 @@ public sealed record ExecutionStorageOptions
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
         "CalibreLibraryCleaner",
         "execution-history");
+
+    public string TransferStagingRoot { get; init; } = Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+        "CalibreLibraryCleaner",
+        "transfer-staging");
 }

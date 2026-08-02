@@ -44,11 +44,7 @@ public partial class App : System.Windows.Application
         builder.Services.AddSingleton<GenerateCleanupPlanUseCase>();
         builder.Services.AddSingleton<ValidateCleanupPlanUseCase>();
         builder.Services.AddSingleton<ApproveCleanupPlanUseCase>();
-        builder.Services.AddSingleton<GenerateExactBinaryCleanupPlanUseCase>();
-        builder.Services.AddSingleton<ValidateExactBinaryCleanupPlanUseCase>();
-        builder.Services.AddSingleton<ApproveExactBinaryCleanupPlanUseCase>();
-        builder.Services.AddSingleton<PrepareExactBinaryRecordDeletionUseCase>();
-        builder.Services.AddSingleton<ExecuteExactBinaryRecordDeletionUseCase>();
+        builder.Services.AddSingleton<ExecuteBulkExactDuplicateCleanupUseCase>();
         builder.Services.AddSingleton<RevokeCleanupPlanUseCase>();
         builder.Services.AddSingleton<ExportCleanupPlanUseCase>();
         builder.Services.AddSingleton<ImportCleanupPlanUseCase>();
@@ -83,11 +79,6 @@ public partial class App : System.Windows.Application
         builder.Services.AddSingleton<IRecommendationExportFilePicker, SaveFileDialogRecommendationExportFilePicker>();
         builder.Services.AddSingleton<ICleanupPlanFilePicker, OpenSaveCleanupPlanFilePicker>();
         builder.Services.AddSingleton<ICleanupPlanConfirmationService, MessageBoxCleanupPlanConfirmationService>();
-        builder.Services.AddSingleton<MessageBoxExactBinaryCleanupPlanConfirmationService>();
-        builder.Services.AddSingleton<IExactBinaryCleanupPlanConfirmationService>(provider =>
-            provider.GetRequiredService<MessageBoxExactBinaryCleanupPlanConfirmationService>());
-        builder.Services.AddSingleton<IExactBinaryRecordDeletionConfirmation>(provider =>
-            provider.GetRequiredService<MessageBoxExactBinaryCleanupPlanConfirmationService>());
         builder.Services.AddSingleton<IExecutionBackupFolderPicker, OpenFolderDialogExecutionBackupFolderPicker>();
         builder.Services.AddSingleton<MessageBoxCleanupExecutionConfirmationService>();
         builder.Services.AddSingleton<ICleanupExecutionConfirmationService>(provider =>

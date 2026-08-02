@@ -10,14 +10,14 @@ internal sealed class CalibreRecoveryExecutionProfileProvider(
     public RecoveryCapabilityProfile EvaluateRecoveryProfile(CalibreToolDescriptor tool)
     {
         ArgumentNullException.ThrowIfNull(tool);
-        bool exactTool = options.IsValidatedCompatibilityProfileEnabled
-            && tool.Identity.ProductVersion == options.SupportedVersion
+        bool compatibleTool = options.IsValidatedCompatibilityProfileEnabled
+            && CalibreCompatibilityPolicy.IsSupportedVersion(tool.Identity.ProductVersion, options)
             && tool.Identity.CapabilityProfile == options.CapabilityProfile;
         RecoveryCapabilityStatus[] statuses = Enum.GetValues<RecoveryCapability>()
             .Select(capability =>
             {
                 bool documented = Documented(capability);
-                bool enabled = documented && exactTool && options.IsValidatedRecoveryProfileEnabled
+                bool enabled = documented && compatibleTool && options.IsValidatedRecoveryProfileEnabled
                     && options.EnabledRecoveryCapabilities.Contains(capability);
                 return new RecoveryCapabilityStatus(
                     capability,
@@ -26,7 +26,7 @@ internal sealed class CalibreRecoveryExecutionProfileProvider(
                     enabled,
                     enabled,
                     enabled
-                        ? "Exact-version recovery capability is enabled by the validated profile."
+                        ? "Compatible Calibre 9.x recovery capability is enabled by the validated profile."
                         : "Capability is disabled until its closed mapping and opt-in real-Calibre qualification pass.");
             }).ToArray();
         return new($"{options.CapabilityProfile}/recovery/1.0", tool.Identity, statuses);

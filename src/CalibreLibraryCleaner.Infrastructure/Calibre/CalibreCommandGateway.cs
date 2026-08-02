@@ -248,7 +248,7 @@ internal sealed class CalibreCommandGateway(
         }
         if (!options.IsValidatedCompatibilityProfileEnabled
             || !tool.Capabilities.Contains(requiredCapability)
-            || tool.Identity.ProductVersion != options.SupportedVersion
+            || !CalibreCompatibilityPolicy.IsSupportedVersion(tool.Identity.ProductVersion, options)
             || tool.Identity.CapabilityProfile != options.CapabilityProfile
             || !string.Equals(toolPath, trustedPath, StringComparison.OrdinalIgnoreCase)
             || !File.Exists(tool.CanonicalExecutablePath)

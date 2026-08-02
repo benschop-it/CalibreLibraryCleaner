@@ -53,6 +53,7 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<ILibraryMutationLease, FileLibraryMutationLease>();
         services.AddSingleton<IExecutionBackupStore, FileExecutionBackupStore>();
         services.AddSingleton<IExactBinaryRecordBackupStore, FileExactBinaryRecordBackupStore>();
+        services.AddSingleton<IExactDuplicateFormatStaging, FileExactDuplicateFormatStaging>();
         services.AddSingleton<IExecutionJournalStore, JsonLinesExecutionJournalStore>();
         services.AddSingleton<IExecutionHistoryStore, FileExecutionHistoryStore>();
         services.AddSingleton<ICleanupExecutionIdGenerator, SystemCleanupExecutionIdGenerator>();

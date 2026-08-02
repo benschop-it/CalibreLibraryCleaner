@@ -1,11 +1,9 @@
 using CalibreLibraryCleaner.Application.Abstractions;
 using CalibreLibraryCleaner.Application.Executions;
 using CalibreLibraryCleaner.Application.Libraries;
-using CalibreLibraryCleaner.Application.Plans;
 using CalibreLibraryCleaner.Domain.Duplicates;
+using CalibreLibraryCleaner.Domain.Executions;
 using CalibreLibraryCleaner.Domain.Libraries;
-using CalibreLibraryCleaner.Domain.Plans;
-using CalibreLibraryCleaner.Wpf.Services;
 using CalibreLibraryCleaner.Wpf.ViewModels;
 using FakeItEasy;
 using FluentAssertions;
@@ -16,76 +14,68 @@ namespace CalibreLibraryCleaner.Wpf.Tests.ViewModels;
 public sealed class ExactBinaryCleanupPlanWorkspaceViewModelTests
 {
     [Fact]
-    public async Task GeneratedRetainedCopyCanBePlannedValidatedAndApprovedWithoutMetadataMatch()
+    public async Task RemoveDuplicatesHonorsUserKeeperOverride()
     {
-        DateTimeOffset now = new(2026, 8, 1, 12, 0, 0, TimeSpan.Zero);
-        LibrarySnapshot snapshot = Snapshot(now);
-        ExactBinaryDuplicateGroup group = snapshot.ExactBinaryDuplicateGroups.Single();
-        Dictionary<CalibreBookId, CalibreBook> books = snapshot.Books.ToDictionary(value => value.Id);
-        ExactDuplicateGroupRowViewModel groupRow = new(group, books);
-        ExactDuplicateMemberRowViewModel retained = groupRow.RetainedMember!;
-        ICleanupPlanIdGenerator ids = A.Fake<ICleanupPlanIdGenerator>();
-        IClock clock = A.Fake<IClock>();
-        IExactBinaryCleanupPlanConfirmationService confirmation = A.Fake<IExactBinaryCleanupPlanConfirmationService>();
-        LibraryStateSession stateSession = new();
+        DateTimeOffset now = new(2026, 8, 2, 12, 0, 0, TimeSpan.Zero);
+        FormatFileFingerprint fingerprint = new(4, new(new string('d', 64)));
+        CalibreBook[] books = [Book(1, fingerprint, now), Book(2, fingerprint, now)];
+        LibrarySnapshot snapshot = new(
+            new("87f7ed1f-59a8-45a6-975a-7e06fd84780d", 27, "C:\\library"),
+            now, books, [], ExactBinaryDuplicateDetector.Detect(books));
+        using LibraryStateSession stateSession = new();
         await stateSession.StartFromScanAsync(snapshot, CancellationToken.None);
+        ExactBinaryDuplicateGroup group = snapshot.ExactBinaryDuplicateGroups.Single();
+        ExactDuplicateGroupRowViewModel row = new(group, books.ToDictionary(value => value.Id));
+        row.RetainedMember = row.Members.Single(value => value.BookId == 2);
+
         ICalibreToolDiscovery tools = A.Fake<ICalibreToolDiscovery>();
-        IExecutionBackupStore workspaceStore = A.Fake<IExecutionBackupStore>();
+        CalibreToolDescriptor tool = new("C:\\Calibre2\\calibredb.exe",
+            new("C:\\Calibre2\\calibredb.exe", "9.11.0", new(new string('f', 64)),
+                "calibredb/windows/9.11.0"), Enum.GetValues<CalibreExecutionCapability>());
+        A.CallTo(() => tools.DiscoverAndProbeAsync(A<string>._, A<CancellationToken>._))
+            .Returns(new CalibreToolDiscoveryResult(tool, []));
         ICalibreCommandGateway commands = A.Fake<ICalibreCommandGateway>();
+        A.CallTo(() => commands.RemoveFormatAsync(A<RemoveCalibreFormatRequest>._, A<CancellationToken>._))
+            .Returns(Command("remove_format"));
+        A.CallTo(() => commands.RemoveRecordAsync(A<RemoveCalibreRecordRequest>._, A<CancellationToken>._))
+            .Returns(Command("remove"));
         ILibraryMutationLease lease = A.Fake<ILibraryMutationLease>();
-        IExactBinaryRecordBackupStore recordBackup = A.Fake<IExactBinaryRecordBackupStore>();
-        ICleanupExecutionIdGenerator executionIds = A.Fake<ICleanupExecutionIdGenerator>();
-        IExactBinaryRecordDeletionConfirmation deletionConfirmation = A.Fake<IExactBinaryRecordDeletionConfirmation>();
-        IExecutionBackupFolderPicker backupPicker = A.Fake<IExecutionBackupFolderPicker>();
-        A.CallTo(() => ids.Create()).Returns(new CleanupPlanId(Guid.Parse("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee")));
-        A.CallTo(() => clock.GetUtcNow()).Returns(now);
-        A.CallTo(() => confirmation.ConfirmApproval(A<ExactBinaryCleanupPlan>._)).Returns(true);
-        ExactBinaryCleanupPlanWorkspaceViewModel viewModel = new(
-            new(ids, clock), new(clock), new(clock),
-            new(stateSession, tools, workspaceStore),
-            new(stateSession, tools, commands, lease, workspaceStore, recordBackup, executionIds,
-                deletionConfirmation, clock),
-            backupPicker,
-            confirmation);
+        ILibraryMutationLeaseHandle handle = A.Fake<ILibraryMutationLeaseHandle>();
+        A.CallTo(() => handle.IsHeld).Returns(true);
+        A.CallTo(() => lease.TryAcquireAsync(A<LibraryMutationLeaseRequest>._, A<CancellationToken>._))
+            .Returns(new LibraryMutationLeaseAcquisition(handle, []));
+        ICleanupExecutionIdGenerator ids = A.Fake<ICleanupExecutionIdGenerator>();
+        A.CallTo(() => ids.Create()).Returns(new CleanupExecutionId(
+            Guid.Parse("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee")));
+        IClock clock = A.Fake<IClock>();
+        A.CallTo(() => clock.GetUtcNow()).Returns(now.AddSeconds(1));
+        ExecuteBulkExactDuplicateCleanupUseCase useCase = new(stateSession, tools, commands,
+            A.Fake<IExactDuplicateFormatStaging>(), lease, ids, clock);
+        ExactBinaryCleanupPlanWorkspaceViewModel viewModel = new(useCase);
+        viewModel.UpdateContext(snapshot, [row]);
 
-        viewModel.UpdateContext(snapshot, groupRow, retained);
-        viewModel.GenerateCommand.Execute(null);
-        viewModel.ValidateCommand.Execute(null);
-        viewModel.ApproveCommand.Execute(null);
+        await viewModel.RemoveDuplicatesCommand.ExecuteAsync(null);
 
-        viewModel.Plan!.State.Should().Be(CleanupPlanState.Approved);
-        viewModel.Plan.Definition.RetainedFormat.RecordId.Should().Be(retained.Member.BookId);
-        viewModel.Plan.Definition.FormatRemovals.Should().ContainSingle();
-        viewModel.Plan.Definition.RecordIdsToRemove.Should().Equal(new CalibreBookId(2));
-        viewModel.PlanSummary.Should().Contain("remove 1 duplicate format");
-    }
-
-    private static LibrarySnapshot Snapshot(DateTimeOffset now)
-    {
-        FormatFileFingerprint fingerprint = new(4, new Sha256Digest(new string('d', 64)));
-        CalibreBook[] books =
-        [
-            Book(1, "First title", "Alice", fingerprint, now),
-            Book(2, "Different title", "Bob", fingerprint, now),
-        ];
-        return new(
-            new("87f7ed1f-59a8-45a6-975a-7e06fd84780d", 27, "C:\\synthetic\\library"),
-            now,
-            books,
-            [],
-            ExactBinaryDuplicateDetector.Detect(books));
+        viewModel.ResultSummary.Should().Contain("Removed 1 duplicate format")
+            .And.Contain("deleted 1 empty record");
+        stateSession.GetCurrent(snapshot.Identity.LibraryRoot)!.Snapshot.Books
+            .Select(value => value.Id).Should().Equal(new CalibreBookId(2));
+        A.CallTo(() => commands.RemoveFormatAsync(
+            A<RemoveCalibreFormatRequest>.That.Matches(value => value.RecordId == new CalibreBookId(1)),
+            A<CancellationToken>._)).MustHaveHappenedOnceExactly();
     }
 
     private static CalibreBook Book(
         long id,
-        string title,
-        string author,
         FormatFileFingerprint fingerprint,
         DateTimeOffset now)
     {
-        string directory = $"{author}/{title} ({id})";
-        BookFormat format = new("EPUB", "book", $"{directory}/book.epub", FormatFileStatus.Present,
-            fingerprint, new(fingerprint.SizeInBytes, now, now, 0));
-        return new(new(id), title, author, [new(new(id), author, author)], [], [format], directory);
+        string directory = $"Author/Book ({id})";
+        return new(new(id), "Book", "Author", [new(new(id), "Author", "Author")], [],
+            [new("EPUB", "book", $"{directory}/book.epub", FormatFileStatus.Present,
+                fingerprint, new(fingerprint.SizeInBytes, now, now, 0))], directory);
     }
+
+    private static CalibreCommandResult Command(string kind) => new(
+        kind, true, 0, [], string.Empty, string.Empty, TimeSpan.FromMilliseconds(1));
 }

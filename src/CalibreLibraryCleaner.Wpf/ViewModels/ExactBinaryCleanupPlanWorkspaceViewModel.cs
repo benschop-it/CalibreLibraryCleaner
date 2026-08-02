@@ -1,9 +1,5 @@
 using CalibreLibraryCleaner.Application.Executions;
-using CalibreLibraryCleaner.Application.Plans;
-using CalibreLibraryCleaner.Domain.Executions;
 using CalibreLibraryCleaner.Domain.Libraries;
-using CalibreLibraryCleaner.Domain.Plans;
-using CalibreLibraryCleaner.Wpf.Services;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 
@@ -11,129 +7,28 @@ namespace CalibreLibraryCleaner.Wpf.ViewModels;
 
 public sealed class ExactBinaryCleanupPlanWorkspaceViewModel : ObservableObject
 {
-    private readonly GenerateExactBinaryCleanupPlanUseCase _generate;
-    private readonly ValidateExactBinaryCleanupPlanUseCase _validate;
-    private readonly ApproveExactBinaryCleanupPlanUseCase _approve;
-    private readonly PrepareExactBinaryRecordDeletionUseCase _prepare;
-    private readonly ExecuteExactBinaryRecordDeletionUseCase _execute;
-    private readonly IExecutionBackupFolderPicker _backupFolderPicker;
-    private readonly IExactBinaryCleanupPlanConfirmationService _confirmation;
-    private readonly Dictionary<string, ExactBinaryCleanupPlan> _plans = new(StringComparer.Ordinal);
+    private readonly ExecuteBulkExactDuplicateCleanupUseCase _execute;
     private LibrarySnapshot? _snapshot;
-    private ExactDuplicateGroupRowViewModel? _group;
-    private ExactDuplicateMemberRowViewModel? _retained;
-    private ExactBinaryCleanupPlan? _plan;
-    private string _status = "Run a fresh scan to generate exact duplicate format actions.";
-    private string _backupDestination = string.Empty;
-    private ExactBinaryRecordDeletionPreparation? _preparation;
-    private bool _otherMutatorsClosed;
-    private bool _fullLibraryCopyAcknowledged;
-    private bool _isBusy;
-    private double _progressPercentage;
+    private IReadOnlyList<ExactDuplicateGroupRowViewModel> _groups = [];
+    private string _status = "Run a scan to find exact file duplicates.";
     private string _progressMessage = string.Empty;
     private string _resultSummary = string.Empty;
+    private double _progressPercentage;
+    private bool _isBusy;
 
     public ExactBinaryCleanupPlanWorkspaceViewModel(
-        GenerateExactBinaryCleanupPlanUseCase generate,
-        ValidateExactBinaryCleanupPlanUseCase validate,
-        ApproveExactBinaryCleanupPlanUseCase approve,
-        PrepareExactBinaryRecordDeletionUseCase prepare,
-        ExecuteExactBinaryRecordDeletionUseCase execute,
-        IExecutionBackupFolderPicker backupFolderPicker,
-        IExactBinaryCleanupPlanConfirmationService confirmation)
+        ExecuteBulkExactDuplicateCleanupUseCase execute)
     {
-        _generate = generate;
-        _validate = validate;
-        _approve = approve;
-        _prepare = prepare;
         _execute = execute;
-        _backupFolderPicker = backupFolderPicker;
-        _confirmation = confirmation;
-        GenerateCommand = new RelayCommand(Generate, CanGenerate);
-        ValidateCommand = new RelayCommand(Validate, () => _snapshot is not null && Plan is not null);
-        ApproveCommand = new RelayCommand(Approve,
-            () => _snapshot is not null && Plan is { State: CleanupPlanState.Valid } && CurrentSelectionsMatchPlan());
-        ChooseBackupCommand = new RelayCommand(ChooseBackup, () => !IsBusy);
-        PrepareCommand = new AsyncRelayCommand(PrepareAsync, CanPrepare);
-        ExecuteCommand = new AsyncRelayCommand(ExecuteAsync, CanExecute);
+        RemoveDuplicatesCommand = new AsyncRelayCommand(RemoveDuplicatesAsync, CanRemoveDuplicates);
     }
 
-    public IRelayCommand GenerateCommand { get; }
-    public IRelayCommand ValidateCommand { get; }
-    public IRelayCommand ApproveCommand { get; }
-    public IRelayCommand ChooseBackupCommand { get; }
-    public IAsyncRelayCommand PrepareCommand { get; }
-    public IAsyncRelayCommand ExecuteCommand { get; }
-
-    public ExactBinaryCleanupPlan? Plan
-    {
-        get => _plan;
-        private set
-        {
-            if (SetProperty(ref _plan, value))
-            {
-                InvalidatePreparation();
-                RefreshPlanProperties();
-            }
-        }
-    }
+    public IAsyncRelayCommand RemoveDuplicatesCommand { get; }
 
     public string Status
     {
         get => _status;
         private set => SetProperty(ref _status, value);
-    }
-
-    public string PlanSummary => Plan is null
-                ? "No exact duplicate format cleanup plan exists for this group."
-                : $"Plan {Plan.Id} / {Plan.State}: retain record {Plan.Definition.RetainedFormat.RecordId.Value}'s " +
-                    $"{Plan.Definition.RetainedFormat.Format}, remove {Plan.Definition.FormatRemovals.Count} duplicate format(s), " +
-                    $"then remove {Plan.Definition.RecordIdsToRemove.Count} empty record(s).";
-
-    public string PlanDigest => Plan?.ContentDigest.Value ?? string.Empty;
-
-    public string IssueSummary => Plan is null
-        ? string.Empty
-        : string.Join(" ", Plan.Validation.Issues.Select(value => $"{value.Code}: {value.Explanation}"));
-
-    public string BackupDestination
-    {
-        get => _backupDestination;
-        private set
-        {
-            if (SetProperty(ref _backupDestination, value))
-            {
-                InvalidatePreparation();
-                NotifyCommands();
-            }
-        }
-    }
-
-    public bool OtherMutatorsClosed
-    {
-        get => _otherMutatorsClosed;
-        set { if (SetProperty(ref _otherMutatorsClosed, value)) ExecuteCommand.NotifyCanExecuteChanged(); }
-    }
-
-    public bool FullLibraryCopyAcknowledged
-    {
-        get => _fullLibraryCopyAcknowledged;
-        set { if (SetProperty(ref _fullLibraryCopyAcknowledged, value)) ExecuteCommand.NotifyCanExecuteChanged(); }
-    }
-
-    public bool IsBusy
-    {
-        get => _isBusy;
-        private set
-        {
-            if (SetProperty(ref _isBusy, value)) NotifyCommands();
-        }
-    }
-
-    public double ProgressPercentage
-    {
-        get => _progressPercentage;
-        private set => SetProperty(ref _progressPercentage, value);
     }
 
     public string ProgressMessage
@@ -148,191 +43,73 @@ public sealed class ExactBinaryCleanupPlanWorkspaceViewModel : ObservableObject
         private set => SetProperty(ref _resultSummary, value);
     }
 
+    public double ProgressPercentage
+    {
+        get => _progressPercentage;
+        private set => SetProperty(ref _progressPercentage, value);
+    }
+
+    public bool IsBusy
+    {
+        get => _isBusy;
+        private set
+        {
+            if (SetProperty(ref _isBusy, value)) RemoveDuplicatesCommand.NotifyCanExecuteChanged();
+        }
+    }
+
     public void UpdateContext(
         LibrarySnapshot? snapshot,
-        ExactDuplicateGroupRowViewModel? group,
-        ExactDuplicateMemberRowViewModel? retained)
+        IReadOnlyList<ExactDuplicateGroupRowViewModel> groups)
     {
         _snapshot = snapshot;
-        _group = group;
-        _retained = retained;
-        Plan = group is not null && _plans.TryGetValue(group.Id, out ExactBinaryCleanupPlan? existing)
-            ? existing
-            : null;
+        _groups = groups;
+        int eligible = groups.Count(value => value.IsCleanupEligible && value.RetainedMember is not null);
         Status = snapshot is null
-            ? "Run a fresh scan before creating an exact duplicate format cleanup plan."
-            : retained is null
-                ? group?.SkipReason ?? "This exact-file group is not eligible for automatic cleanup."
-                : Plan is not null && Plan.Definition.RetainedFormat.RecordId == retained.Member.BookId
-                    && Plan.Definition.RetainedFormat.Format == retained.Member.Format
-                    && Plan.Definition.RetainedFormat.RelativePath == retained.Member.ExpectedRelativePath.Replace('\\', '/')
-                    ? $"Current {Plan.State} plan matches the generated retained copy."
-                    : group?.IsCleanupEligible == true
-                        ? "Retained copy selected automatically. Create the format cleanup plan."
-                        : "This group does not span multiple Calibre records.";
-        NotifyCommands();
+            ? "Run or load an authoritative scan before removing duplicates."
+            : eligible == 0
+                ? "No removable exact duplicate groups are available."
+                : $"{eligible:N0} exact duplicate group(s) are ready. Select another row to change any keeper, then remove duplicates.";
+        RemoveDuplicatesCommand.NotifyCanExecuteChanged();
     }
 
-    public void ReconcileAfterSuccessfulScan(LibrarySnapshot snapshot)
-    {
-        _snapshot = snapshot;
-        foreach ((string groupId, ExactBinaryCleanupPlan plan) in _plans.ToArray())
-        {
-            ExactBinaryCleanupPlanOperationOutcome outcome = _validate.Execute(plan, snapshot);
-            if (outcome.Plan is not null) _plans[groupId] = outcome.Plan;
-        }
-        if (_group is not null && _plans.TryGetValue(_group.Id, out ExactBinaryCleanupPlan? selected))
-            Plan = selected;
-        NotifyCommands();
-    }
+    private bool CanRemoveDuplicates() => !IsBusy && _snapshot is not null
+        && _groups.Any(value => value.IsCleanupEligible && value.RetainedMember is not null);
 
-    private void Generate()
+    private async Task RemoveDuplicatesAsync()
     {
-        if (_snapshot is null || _group is null || _retained is null) return;
-        ExactBinaryCleanupPlanGenerationOutcome outcome = _generate.Execute(
-            _snapshot, _group.GroupId);
-        if (outcome.Plan is null)
-        {
-            Status = string.Join(" ", outcome.Validation.BlockingErrors.Select(value => value.Explanation));
-            return;
-        }
-        _plans[_group.Id] = outcome.Plan;
-        Plan = outcome.Plan;
-        Status = "Valid exact duplicate format cleanup plan created in memory. No Calibre change or backup occurred.";
-        NotifyCommands();
-    }
-
-    private void ChooseBackup()
-    {
-        string? selected = _backupFolderPicker.PickBackupFolder(BackupDestination);
-        if (selected is not null) BackupDestination = selected;
-    }
-
-    private async Task PrepareAsync()
-    {
-        if (_snapshot is null || Plan is null) return;
-        IsBusy = true;
-        ResultSummary = string.Empty;
-        try
-        {
-            Status = "Running a fresh scan, checking Calibre, and validating the external backup destination.";
-            _preparation = await _prepare.ExecuteAsync(new(Plan, _snapshot.Identity.LibraryRoot, BackupDestination),
-                null, CancellationToken.None).ConfigureAwait(true);
-            Status = _preparation.IsReady
-                ? "Preflight passed. Confirm the two acknowledgements, then remove the duplicate formats."
-                : string.Join(" ", _preparation.Issues.Select(value => $"{value.Code}: {value.Explanation}"));
-        }
-        finally
-        {
-            IsBusy = false;
-            NotifyCommands();
-        }
-    }
-
-    private async Task ExecuteAsync()
-    {
-        if (_snapshot is null || Plan is null || _preparation is not { IsReady: true }) return;
+        if (_snapshot is null) return;
+        ExactDuplicateKeeperSelection[] selections = _groups
+            .Where(value => value.IsCleanupEligible && value.RetainedMember is not null)
+            .Select(value => new ExactDuplicateKeeperSelection(value.GroupId, value.RetainedMember!.Member))
+            .ToArray();
         IsBusy = true;
         ProgressPercentage = 0;
+        ProgressMessage = string.Empty;
         ResultSummary = string.Empty;
         try
         {
-            Progress<ExactBinaryRecordDeletionProgress> progress = new(value =>
+            Progress<BulkExactDuplicateCleanupProgress> progress = new(value =>
             {
                 ProgressMessage = value.Message;
                 ProgressPercentage = value.TotalOperations == 0 ? 0
                     : 100d * value.CompletedOperations / value.TotalOperations;
             });
-            string version = typeof(ExactBinaryCleanupPlanWorkspaceViewModel).Assembly.GetName().Version?.ToString() ?? "unknown";
-            ExactBinaryRecordDeletionResult result = await _execute.ExecuteAsync(new(
-                Plan, _snapshot.Identity.LibraryRoot, BackupDestination, version,
-                OtherMutatorsClosed, FullLibraryCopyAcknowledged), progress, CancellationToken.None).ConfigureAwait(true);
-            ResultSummary = $"{result.State}: removed {result.RemovedFormatCount} duplicate format(s) and " +
-                $"{result.RemovedRecordCount} empty record(s). " +
-                $"Backup bundle: {result.BundlePath ?? "not created"}.";
+            BulkExactDuplicateCleanupResult result = await _execute.ExecuteAsync(new(
+                _snapshot.Identity.LibraryRoot, selections), progress, CancellationToken.None).ConfigureAwait(true);
+            ResultSummary = $"Removed {result.RemovedFormatCount:N0} duplicate format(s), merged "
+                + $"{result.MergedRecordCount:N0} record(s), and deleted {result.RemovedRecordCount:N0} empty record(s)."
+                + (result.SkippedRecordCount > 0
+                    ? $" {result.SkippedRecordCount:N0} ambiguous or conflicting record(s) were left unchanged."
+                    : string.Empty);
             Status = result.IsCompleted
-                ? "Consolidation completed and verified. Run a fresh library scan to refresh all duplicate groups."
+                ? "Duplicate cleanup completed."
                 : string.Join(" ", result.Issues.Select(value => $"{value.Code}: {value.Explanation}"));
         }
         finally
         {
             IsBusy = false;
-            InvalidatePreparation();
-            NotifyCommands();
+            RemoveDuplicatesCommand.NotifyCanExecuteChanged();
         }
-    }
-
-    private void Validate()
-    {
-        if (_snapshot is null || Plan is null) return;
-        ExactBinaryCleanupPlanOperationOutcome outcome = _validate.Execute(Plan, _snapshot);
-        if (outcome.Plan is not null)
-        {
-            Plan = outcome.Plan;
-            _plans[outcome.Plan.Definition.GroupId.Value] = outcome.Plan;
-        }
-        Status = Plan?.State == CleanupPlanState.Stale
-            ? "The exact duplicate format cleanup plan is stale. Create a new plan from a fresh scan."
-            : "Exact duplicate format cleanup plan validated against the current scan.";
-        NotifyCommands();
-    }
-
-    private void Approve()
-    {
-        if (_snapshot is null || Plan is null || !_confirmation.ConfirmApproval(Plan)) return;
-        ExactBinaryCleanupPlanOperationOutcome outcome = _approve.Execute(Plan, _snapshot);
-        if (outcome.Plan is null)
-        {
-            Status = "Approval was blocked because the plan is no longer current and valid.";
-            return;
-        }
-        Plan = outcome.Plan;
-        _plans[outcome.Plan.Definition.GroupId.Value] = outcome.Plan;
-        Status = "Exact duplicate format cleanup approved. No Calibre change or backup occurred.";
-        NotifyCommands();
-    }
-
-    private bool CanGenerate() => _snapshot is not null && _group is not null && _retained is not null
-        && _group.IsCleanupEligible;
-
-    private bool CanPrepare() => !IsBusy && _snapshot is not null
-        && Plan is { State: CleanupPlanState.Approved }
-        && CurrentSelectionsMatchPlan()
-        && !string.IsNullOrWhiteSpace(BackupDestination);
-
-    private bool CanExecute() => !IsBusy && _preparation is { IsReady: true }
-        && Plan is { State: CleanupPlanState.Approved }
-        && OtherMutatorsClosed && FullLibraryCopyAcknowledged;
-
-    private bool CurrentSelectionsMatchPlan() => Plan is not null && _group is not null && _retained is not null
-        && Plan.Definition.RetainedFormat.RecordId == _retained.Member.BookId
-        && Plan.Definition.RetainedFormat.Format == _retained.Member.Format
-        && Plan.Definition.RetainedFormat.RelativePath == _retained.Member.ExpectedRelativePath.Replace('\\', '/')
-        && Plan.Definition.FormatRemovals.Select(value => (value.RecordId, value.Format, value.RelativePath))
-            .SequenceEqual(_group.Members.Where(value => value != _retained)
-                .Select(value => (value.Member.BookId, value.Member.Format,
-                    value.Member.ExpectedRelativePath.Replace('\\', '/')))
-                .OrderBy(value => value.BookId.Value)
-                .ThenBy(value => value.Format, StringComparer.Ordinal)
-                .ThenBy(value => value.Item3, StringComparer.Ordinal))
-        && Plan.Definition.RecordIdsToRemove.SequenceEqual(_group.RecordIdsToDelete);
-
-    private void NotifyCommands()
-    {
-        GenerateCommand.NotifyCanExecuteChanged();
-        ValidateCommand.NotifyCanExecuteChanged();
-        ApproveCommand.NotifyCanExecuteChanged();
-        ChooseBackupCommand.NotifyCanExecuteChanged();
-        PrepareCommand.NotifyCanExecuteChanged();
-        ExecuteCommand.NotifyCanExecuteChanged();
-    }
-
-    private void InvalidatePreparation() => _preparation = null;
-
-    private void RefreshPlanProperties()
-    {
-        OnPropertyChanged(nameof(PlanSummary));
-        OnPropertyChanged(nameof(PlanDigest));
-        OnPropertyChanged(nameof(IssueSummary));
     }
 }

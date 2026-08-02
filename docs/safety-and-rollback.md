@@ -108,7 +108,7 @@ constructive partial results report `PartiallyRecovered`, final mismatch reports
 `ManualInterventionRequired`.
 
 Cover restoration and every exact Calibre mutation capability remain disabled
-unless separately qualified. The production 9.11.0 recovery profile is
+unless separately qualified. The production Calibre 9.x recovery profile is
 therefore fail-closed by default.
 
 ## Concurrency

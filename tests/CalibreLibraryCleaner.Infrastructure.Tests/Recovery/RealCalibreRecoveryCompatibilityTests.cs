@@ -23,7 +23,7 @@ namespace CalibreLibraryCleaner.Infrastructure.Tests.Recovery;
 public sealed class RealCalibreRecoveryCompatibilityTests
 {
     [RealCalibreRecoveryFact]
-    public async Task ExactProfileQualifiesEachClosedRecoveryCommandAgainstADisposableLibrary()
+    public async Task CompatibleProfileQualifiesEachClosedRecoveryCommandAgainstADisposableLibrary()
     {
         string? executable = Environment.GetEnvironmentVariable("CALIBRE_TEST_EXE");
         string? parent = Environment.GetEnvironmentVariable("CALIBRE_TEST_ROOT");
@@ -78,7 +78,7 @@ public sealed class RealCalibreRecoveryCompatibilityTests
                 .GetRequiredService<ICalibreToolDiscovery>()
                 .DiscoverAndProbeAsync(library, CancellationToken.None);
             discovery.IsSuccess.Should().BeTrue(
-                "the supplied executable must be the exact supported Calibre 9.11.0 profile");
+                "the supplied executable must be a capability-compatible Calibre 9.x release");
             CalibreToolDescriptor tool = discovery.Tool!;
             RecoveryCapabilityProfile profile = provider
                 .GetRequiredService<ICalibreExecutionProfileProvider>()
@@ -356,7 +356,7 @@ public sealed class RealCalibreRecoveryCompatibilityTests
                     Environment.GetEnvironmentVariable("CALIBRE_TEST_EXE"))
                 && string.IsNullOrWhiteSpace(
                     Environment.GetEnvironmentVariable("CALIBRE_TEST_ROOT")))
-                Skip = "Set CALIBRE_TEST_EXE and CALIBRE_TEST_ROOT to run the opt-in exact-version recovery qualification.";
+                Skip = "Set CALIBRE_TEST_EXE and CALIBRE_TEST_ROOT to run the opt-in compatible Calibre 9.x recovery qualification.";
         }
     }
 }

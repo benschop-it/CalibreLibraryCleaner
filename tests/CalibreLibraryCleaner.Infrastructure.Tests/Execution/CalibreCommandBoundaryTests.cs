@@ -19,7 +19,7 @@ public sealed class CalibreCommandBoundaryTests : IDisposable
     public void Dispose() => ClearEnvironment();
 
     [Fact]
-    public async Task ExactProfileDiscoveryProbesRequiredDocumentedCapabilities()
+    public async Task CompatibleProfileDiscoveryProbesRequiredDocumentedCapabilities()
     {
         using ControlledCalibreExecutable executable = new();
         using ServiceProvider provider = Provider(executable);
@@ -29,7 +29,28 @@ public sealed class CalibreCommandBoundaryTests : IDisposable
 
         result.IsSuccess.Should().BeTrue();
         result.Tool!.Identity.ProductVersion.Should().Be("9.11.0");
+        result.Tool.Identity.CapabilityProfile.Should().Be("calibredb/windows/9.x");
         result.Tool.Capabilities.Should().BeEquivalentTo(Enum.GetValues<CalibreExecutionCapability>());
+    }
+
+    [Fact]
+    public async Task Calibre912IsAcceptedWhenRequiredCapabilitiesArePresent()
+    {
+        using ControlledCalibreExecutable executable = new();
+        executable.SetVersion("9.12.0");
+        using ServiceProvider provider = Provider(executable);
+        Directory.CreateDirectory(DiscoveryRoot(executable));
+        File.WriteAllBytes(Path.Combine(DiscoveryRoot(executable), "metadata.db"), [0x00]);
+
+        CalibreToolDiscoveryResult result = await provider.GetRequiredService<ICalibreToolDiscovery>()
+            .DiscoverAndProbeAsync(DiscoveryRoot(executable), CancellationToken.None);
+
+        result.IsSuccess.Should().BeTrue();
+        result.Tool!.Identity.ProductVersion.Should().Be("9.12.0");
+        result.Tool.Identity.CapabilityProfile.Should().Be("calibredb/windows/9.x");
+        CalibreCommandResult command = await provider.GetRequiredService<ICalibreCommandGateway>()
+            .RemoveRecordAsync(new(result.Tool, DiscoveryRoot(executable), new(2)), CancellationToken.None);
+        command.IsSuccess.Should().BeTrue(command.FailureCode);
     }
 
     [Fact]
@@ -46,11 +67,13 @@ public sealed class CalibreCommandBoundaryTests : IDisposable
         result.Issues.Should().Contain(value => value.Code == "EXECUTION.CALIBRE_PROFILE_NOT_VALIDATED");
     }
 
-    [Fact]
-    public async Task UnknownVersionFailsClosedBeforeAnyMutationCapabilityIsReturned()
+    [Theory]
+    [InlineData("9.10.0")]
+    [InlineData("10.0.0")]
+    public async Task VersionOutsideCompatibleRangeFailsClosed(string version)
     {
         using ControlledCalibreExecutable executable = new();
-        executable.SetVersion("9.12.0");
+        executable.SetVersion(version);
         using ServiceProvider provider = Provider(executable);
 
         CalibreToolDiscoveryResult result = await provider.GetRequiredService<ICalibreToolDiscovery>()
@@ -67,7 +90,7 @@ public sealed class CalibreCommandBoundaryTests : IDisposable
         using ControlledCalibreExecutable executable = new();
         CalibreExecutionOptions options = Options(executable) with
         {
-            SupportedVersion = "9.12.0",
+            MinimumSupportedVersion = "9.12.0",
             CapabilityProfile = "calibredb/windows/9.12.0",
         };
         using ServiceProvider provider = Provider(executable, options);

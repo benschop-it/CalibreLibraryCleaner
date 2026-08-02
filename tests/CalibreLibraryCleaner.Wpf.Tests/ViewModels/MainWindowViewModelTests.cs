@@ -329,11 +329,10 @@ public sealed class MainWindowViewModelTests
 
         viewModel.SelectedExactDuplicateMember = first;
 
-        viewModel.RetainedExactDuplicateMember.Should().BeSameAs(second);
-        first.CleanupAction.Should().Be("Remove format");
-        second.CleanupAction.Should().Be("Keep");
-        viewModel.ExactDuplicateGroups[0].RecordIdsToDelete.Should().Equal(new CalibreBookId(1));
-        viewModel.ExactDuplicateGroups[0].RecordIdsToDelete.Should().NotContain(second.Member.BookId);
+        viewModel.RetainedExactDuplicateMember.Should().BeSameAs(first);
+        first.CleanupAction.Should().Be("Keep");
+        second.CleanupAction.Should().Be("Remove format");
+        viewModel.ExactDuplicateGroups[0].RecordIdsToDelete.Should().BeEmpty();
     }
 
     [Fact]

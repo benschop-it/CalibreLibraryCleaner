@@ -1,6 +1,6 @@
 # ADR 0007: Execute Cleanup Plans Through a Typed, Verified Calibre Boundary
 
-- Status: Accepted, amended by ADRs 0011 and 0012
+- Status: Accepted, amended by ADRs 0011, 0012, and 0014
 - Date: 2026-07-19
 
 ## Context
@@ -15,10 +15,10 @@ would bypass Calibre's consistency rules and is prohibited by ADRs 0001 and
 ## Decision
 
 Execute exactly one current, approved `cleanup-plan/1.0` artifact at a time
-through a closed Application-owned command contract implemented by
-Infrastructure with `calibredb`. The initial compatibility profile accepts
-exactly Calibre 9.11.0. Other versions fail closed until a reviewed profile and
-opt-in disposable-library compatibility tests are added.
+Through a closed Application-owned command contract implemented by
+Infrastructure with `calibredb`. ADR 0014 replaces the initial exact 9.11.0
+profile with a capability-probed range from 9.11.0 up to, but not including,
+10.0.0.
 
 The V1 mutation allow-list is:
 
@@ -37,8 +37,8 @@ plans involving a present target or source cover fail closed. Cross-record
 metadata or cover transfer, standalone target format removal, extra-data
 mutation, unknown plan shapes, and arbitrary commands are unsupported.
 
-The profile is disabled by default until the opt-in disposable-library
-compatibility suite passes with an explicitly supplied Calibre 9.11.0
+The profile remains capability-probed at runtime. Opt-in disposable-library
+tests can additionally qualify an explicitly supplied compatible Calibre
 executable and test root. Controlled executable tests validate boundary
 mechanics but cannot qualify real Calibre behavior.
 

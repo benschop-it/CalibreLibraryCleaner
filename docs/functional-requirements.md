@@ -23,7 +23,9 @@ Support progressively:
 
 Every group must expose confidence and reasons. Exact title/author matches are candidates, not proof of identical content.
 
-For each byte-identical same-format file group, automatically retain the copy on the record with the most formats, then the best metadata/validated identifiers/cover evidence, using the lowest Calibre ID only as a tie-breaker. Remove the other format copies, not their records. A record becomes a deletion target only when no formats remain after deduplication. Mixed-format-label groups are anomalous and skipped. Complete affected-record metadata, covers, formats, and managed state must first be backed up externally.
+For each byte-identical same-format file group, automatically retain the copy on the record with the most formats, then the best metadata/validated identifiers/cover evidence, using the lowest Calibre ID only as a tie-breaker. Remove the other format copies, not their records. A record becomes a deletion target only when no formats remain after deduplication. Mixed-format-label groups are anomalous and skipped. The user is responsible for a complete library backup; complementary formats are fingerprint-verified in automatic temporary staging before transfer and source removal.
+
+The Exact file duplicates UI lets the user override each generated keeper and provides one `Remove duplicates` command for all eligible groups. It transfers complementary formats to one unambiguous keeper record, removes duplicate and transferred source formats, and deletes empty records. Non-identical same-format conflicts and multi-target sources remain unchanged.
 
 ## EPUB analysis
 
@@ -67,6 +69,8 @@ Generate an immutable JSON plan containing record IDs, chosen metadata source, c
 Exact-binary cleanup uses a separate plan body containing the automatically retained exact-file association, every duplicate-format removal, only the record IDs derived to become empty, exact-binary evidence, complete involved-record state, backup requirements, and explicit approval.
 
 Execution must revalidate the plan against the current authoritative revision, back up content and metadata, use supported Calibre tooling, capture command output, durably apply the corresponding typed state delta, and retain audit history. Cleanup and recovery never scan or reload the library; only explicit Scan replaces projected state with observed state.
+
+Supported Calibre tooling includes capability-probed Calibre releases from 9.11.0 up to, but not including, 10.0.0. Required `calibredb` commands and options must be confirmed at runtime before mutation.
 
 ## AI
 

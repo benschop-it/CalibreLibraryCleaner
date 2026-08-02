@@ -291,10 +291,6 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
                 OnPropertyChanged(nameof(RetainedExactDuplicateMember));
                 SelectedExactDuplicateMember = value?.RetainedMember
                     ?? (value is { Members.Count: > 0 } ? value.Members[0] : null);
-                ExactBinaryCleanupPlans?.UpdateContext(
-                    _isCurrentSnapshotFresh ? _currentSnapshot : null,
-                    value,
-                    value?.RetainedMember);
             }
         }
     }
@@ -307,7 +303,10 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
         get => _selectedExactDuplicateMember;
         set
         {
-            SetProperty(ref _selectedExactDuplicateMember, value);
+            if (!SetProperty(ref _selectedExactDuplicateMember, value) || value is null
+                || SelectedExactDuplicateGroup is null) return;
+            SelectedExactDuplicateGroup.RetainedMember = value;
+            OnPropertyChanged(nameof(RetainedExactDuplicateMember));
         }
     }
 
@@ -779,17 +778,14 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
         if (isFreshScan)
         {
             CleanupPlans?.ReconcileAfterSuccessfulScan(snapshot);
-            ExactBinaryCleanupPlans?.ReconcileAfterSuccessfulScan(snapshot);
-            ExactBinaryCleanupPlans?.UpdateContext(snapshot, SelectedExactDuplicateGroup,
-                SelectedExactDuplicateGroup?.RetainedMember);
+            ExactBinaryCleanupPlans?.UpdateContext(snapshot, _exactDuplicateGroups);
             CleanupExecutions?.UpdateSnapshot(snapshot);
             Recoveries?.UpdateSnapshot(snapshot);
         }
         else
         {
             CleanupPlans?.UpdateContext(null, null);
-            ExactBinaryCleanupPlans?.UpdateContext(null, SelectedExactDuplicateGroup,
-                SelectedExactDuplicateGroup?.RetainedMember);
+            ExactBinaryCleanupPlans?.UpdateContext(null, _exactDuplicateGroups);
             CleanupExecutions?.UpdateSnapshot(null);
             Recoveries?.UpdateSnapshot(null);
         }

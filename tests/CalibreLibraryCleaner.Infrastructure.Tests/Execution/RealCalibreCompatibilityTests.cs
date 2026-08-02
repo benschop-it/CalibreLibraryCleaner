@@ -19,7 +19,7 @@ namespace CalibreLibraryCleaner.Infrastructure.Tests.Execution;
 public sealed class RealCalibreCompatibilityTests
 {
     [RealCalibreFact]
-    public async Task ExactCalibreProfileMutatesOnlyCallerMarkedDisposableLibrary()
+    public async Task CompatibleCalibre9ProfileMutatesOnlyCallerMarkedDisposableLibrary()
     {
         string? executable = Environment.GetEnvironmentVariable("CALIBRE_TEST_EXE");
         string? parent = Environment.GetEnvironmentVariable("CALIBRE_TEST_ROOT");
@@ -70,7 +70,7 @@ public sealed class RealCalibreCompatibilityTests
             using ServiceProvider provider = Provider(canonicalExecutable, config);
             CalibreToolDiscoveryResult discovery = await provider.GetRequiredService<ICalibreToolDiscovery>()
                 .DiscoverAndProbeAsync(library, CancellationToken.None);
-            discovery.IsSuccess.Should().BeTrue("the opt-in executable must be exact supported Calibre 9.11.0");
+            discovery.IsSuccess.Should().BeTrue("the opt-in executable must be a capability-compatible Calibre 9.x release");
             CalibreToolDescriptor tool = discovery.Tool!;
             ICalibreCommandGateway gateway = provider.GetRequiredService<ICalibreCommandGateway>();
             string export = Path.Combine(external, "export-1");
