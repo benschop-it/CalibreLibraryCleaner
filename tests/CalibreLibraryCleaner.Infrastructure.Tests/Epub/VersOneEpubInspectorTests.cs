@@ -350,9 +350,12 @@ public sealed class VersOneEpubInspectorTests
         EpubInspectionResult result = await provider.GetRequiredService<IEpubInspector>()
             .InspectAsync(await CreateRequestAsync(path), null, CancellationToken.None);
 
-        result.Problems.Should().ContainSingle(problem =>
+        result.Problems.Should().BeEmpty();
+        result.RecoverableProblems.Should().ContainSingle(problem =>
             problem.Code == EpubInspectionProblemCode.PackageMalformed
             && problem.Explanation == "An EPUB navigation document is not valid XML.");
+        result.PackageParsed.Should().BeTrue();
+        result.ReadableCharacterCount.Should().Be(6_000);
     }
 
     [Fact]
@@ -392,7 +395,7 @@ public sealed class VersOneEpubInspectorTests
     }
 
     [Fact]
-    public async Task EmptyManifestHrefIsRejectedBeforeVersOne()
+    public async Task EmptyManifestHrefIsSkippedAndReportedAsRecoverable()
     {
         using TemporaryDirectory directory = new();
         string path = Path.Combine(directory.Path, "EmptyManifestHref.epub");
@@ -421,12 +424,16 @@ public sealed class VersOneEpubInspectorTests
             AppDomain.CurrentDomain.FirstChanceException -= handler;
         }
 
-        result.Problems.Should().ContainSingle(problem => problem.Code == EpubInspectionProblemCode.PackageMalformed);
+        result.Problems.Should().BeEmpty();
+        result.RecoverableProblems.Should().ContainSingle(problem =>
+            problem.Code == EpubInspectionProblemCode.PackageMalformed
+            && problem.Explanation == "An EPUB manifest item has no content file path.");
+        result.PackageParsed.Should().BeTrue();
         emptyKeyExceptions.Should().Be(0);
     }
 
     [Fact]
-    public async Task NcxWithoutNavMapIsRejectedBeforeVersOne()
+    public async Task NcxWithoutNavMapIsRecoverableWithoutVersOneExceptions()
     {
         using TemporaryDirectory directory = new();
         string path = Path.Combine(directory.Path, "NcxWithoutNavMap.epub");
@@ -456,7 +463,12 @@ public sealed class VersOneEpubInspectorTests
             AppDomain.CurrentDomain.FirstChanceException -= handler;
         }
 
-        result.Problems.Should().ContainSingle(problem => problem.Code == EpubInspectionProblemCode.PackageMalformed);
+        result.Problems.Should().BeEmpty();
+        result.RecoverableProblems.Should().ContainSingle(problem =>
+            problem.Code == EpubInspectionProblemCode.PackageMalformed
+            && problem.Explanation == "The EPUB 2 NCX document does not contain a navMap element.");
+        result.PackageParsed.Should().BeTrue();
+        result.NavigationPresent.Should().BeFalse();
         ncxExceptions.Should().Be(0);
     }
 

@@ -167,8 +167,8 @@ public sealed class ConsolidationRecommendationPolicyTests
             failedFormat.Fingerprint,
             AssessmentStatus.Disqualified,
             null,
-            new("epub-inspector/1.0.2"),
-            new("epub-quality/1.0.0"),
+            new("epub-inspector/1.0.3"),
+            new("epub-quality/1.0.2"),
             new(false, false),
             [new AssessmentFinding("EPUB.OPEN", FindingSeverity.Disqualifying, 0, "Synthetic open failure.")]);
 
@@ -176,6 +176,32 @@ public sealed class ConsolidationRecommendationPolicyTests
 
         recommendation.FormatSelections.Single().ProposedSource!.BookId.Should().Be(first.Id);
         recommendation.Reasons.Should().Contain(value => value.Code == "EPUB.VALID_OVER_DISQUALIFIED");
+    }
+
+    [Fact]
+    public void SoleUnassessedEpubIsRetainedWithManualReviewWarning()
+    {
+        CalibreBook first = Book(1, [Format("EPUB", 10, "01")]);
+        CalibreBook second = Book(2, [Format("PDF", 20, "02")]);
+        BookFormat format = first.Formats.Single();
+        EpubAssessment unassessed = new(
+            first.Id,
+            "EPUB",
+            format.ExpectedRelativePath,
+            format.Fingerprint,
+            AssessmentStatus.Unassessed,
+            null,
+            new("epub-inspector/1.0.3"),
+            new("epub-quality/1.0.2"),
+            new(false, false),
+            [new AssessmentFinding("EPUB.PACKAGE", FindingSeverity.Warning, 0, "Synthetic incomplete inspection.")]);
+
+        ConsolidationRecommendation recommendation = Generate([first, second], [unassessed]);
+
+        FormatSourceSelection selection = recommendation.FormatSelections.Single(value => value.Format == "EPUB");
+        selection.ProposedSource!.BookId.Should().Be(first.Id);
+        recommendation.Warnings.Should().Contain(value => value.Code == "EPUB.ONLY_SOURCE_UNASSESSED");
+        recommendation.Confidence.Should().Be(RecommendationConfidence.ManualReviewRequired);
     }
 
     [Fact]
@@ -217,7 +243,7 @@ public sealed class ConsolidationRecommendationPolicyTests
     }
 
     [Fact]
-    public void NonDecisiveEpubDisqualificationDoesNotSelectWinner()
+    public void UnassessedEpubAlternativeDoesNotSelectWinner()
     {
         CalibreBook first = Book(1, [Format("EPUB", 10, "01")]);
         CalibreBook second = Book(2, [Format("EPUB", 20, "02")]);
@@ -228,12 +254,12 @@ public sealed class ConsolidationRecommendationPolicyTests
             "EPUB",
             failedFormat.ExpectedRelativePath,
             failedFormat.Fingerprint,
-            AssessmentStatus.Disqualified,
+            AssessmentStatus.Unassessed,
             null,
-            new("epub-inspector/1.0.2"),
-            new("epub-quality/1.0.0"),
+            new("epub-inspector/1.0.3"),
+            new("epub-quality/1.0.2"),
             new(false, false),
-            [new AssessmentFinding("EPUB.ENCRYPTION", FindingSeverity.Disqualifying, 0, "Synthetic encryption finding.")]);
+            [new AssessmentFinding("EPUB.ENCRYPTION", FindingSeverity.Warning, 0, "Synthetic encryption finding.")]);
 
         ConsolidationRecommendation recommendation = Generate([first, second], [completed, failed]);
 
@@ -456,8 +482,8 @@ public sealed class ConsolidationRecommendationPolicyTests
             format.Fingerprint,
             AssessmentStatus.Completed,
             new QualityScore(score),
-            new("epub-inspector/1.0.2"),
-            new("epub-quality/1.0.0"),
+            new("epub-inspector/1.0.3"),
+            new("epub-quality/1.0.2"),
             new(true, true),
             [new AssessmentFinding(ruleId, FindingSeverity.Positive, decisiveAdjustment, "Synthetic assessment evidence.")]);
     }

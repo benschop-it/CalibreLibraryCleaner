@@ -229,6 +229,7 @@ public sealed class ScanLibraryUseCaseTests
     public async Task InvalidPathIsNotSentToHasher()
     {
         TestContext context = CreateContext();
+        IEpubInspector inspector = A.Fake<IEpubInspector>();
         A.CallTo(() => context.Resolver.ResolveFormat(
                 A<ValidatedLibraryLocation>._,
                 A<string>._,
@@ -241,14 +242,27 @@ public sealed class ScanLibraryUseCaseTests
                 A<IProgress<FormatHashProgress>?>._,
                 A<CancellationToken>._))
             .Returns(Task.FromResult<IReadOnlyList<FormatHashResult>>([]));
+        ScanLibraryUseCase useCase = new(
+            context.Resolver,
+            context.Reader,
+            context.Hasher,
+            context.Clock,
+            new(),
+            new AssessEpubFormatsUseCase(inspector, new()));
 
-        LibraryScanOutcome outcome = await context.UseCase.ExecuteAsync("C:/Library", null, CancellationToken.None);
+        LibraryScanOutcome outcome = await useCase.ExecuteAsync("C:/Library", null, CancellationToken.None);
 
         outcome.Snapshot!.Findings.Should().ContainSingle(finding => finding.Code == "MANAGED_PATH_INVALID");
+        outcome.Snapshot.EpubAssessments.Should().BeEmpty();
         A.CallTo(() => context.Hasher.HashAsync(
                 A<IReadOnlyList<FormatHashRequest>>.That.Matches(requests => requests.Count != 0),
                 A<int>._,
                 A<IProgress<FormatHashProgress>?>._,
+                A<CancellationToken>._))
+            .MustNotHaveHappened();
+        A.CallTo(() => inspector.InspectAsync(
+                A<EpubInspectionRequest>._,
+                A<IProgress<EpubInspectionProgress>?>._,
                 A<CancellationToken>._))
             .MustNotHaveHappened();
     }
@@ -447,7 +461,9 @@ public sealed class ScanLibraryUseCaseTests
         A.CallTo(() => clock.GetUtcNow()).Returns(DateTimeOffset.UnixEpoch);
         return new(
             resolver,
+            reader,
             hasher,
+            clock,
             new ScanLibraryUseCase(resolver, reader, hasher, clock, new()));
     }
 
@@ -465,7 +481,9 @@ public sealed class ScanLibraryUseCaseTests
 
     private sealed record TestContext(
         ILibraryPathResolver Resolver,
+        ICalibreMetadataReader Reader,
         IFormatFileHasher Hasher,
+        IClock Clock,
         ScanLibraryUseCase UseCase);
 
     private sealed class InlineProgress(Action<LibraryScanProgress> report) : IProgress<LibraryScanProgress>

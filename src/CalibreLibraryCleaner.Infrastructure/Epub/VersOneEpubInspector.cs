@@ -66,16 +66,19 @@ internal sealed class VersOneEpubInspector(ILogger<VersOneEpubInspector> logger)
 
             cancellationToken.ThrowIfCancellationRequested();
             progress?.Report(new("Package", 0, null));
-            try
+            if (!HasRecoverablePackageDefect(preflight.RecoverableProblems))
             {
-                await ValidateWithVersOneAsync(request, cancellationToken).ConfigureAwait(false);
+                try
+                {
+                    await ValidateWithVersOneAsync(request, cancellationToken).ConfigureAwait(false);
+                }
+                catch (Exception exception) when (IsUnclassifiedParserFailure(exception))
+                {
+                    InspectionFailed(logger, "UnsupportedParserFailure", null);
+                    return Fail(request, EpubInspectionProblemCode.Unsupported, "The EPUB parser could not safely interpret this package.");
+                }
             }
-            catch (Exception exception) when (IsUnclassifiedParserFailure(exception))
-            {
-                InspectionFailed(logger, "UnsupportedParserFailure", null);
-                return Fail(request, EpubInspectionProblemCode.Unsupported, "The EPUB parser could not safely interpret this package.");
-            }
-            EpubInspectionResult result = await ReadFactsAsync(request, progress, cancellationToken).ConfigureAwait(false);
+            EpubInspectionResult result = await ReadFactsAsync(request, preflight.RecoverableProblems, progress, cancellationToken).ConfigureAwait(false);
             EnsureCurrentFile(request);
             return result;
         }
@@ -129,8 +132,12 @@ internal sealed class VersOneEpubInspector(ILogger<VersOneEpubInspector> logger)
         InspectionLimitException or
         OutOfMemoryException);
 
+    private static bool HasRecoverablePackageDefect(IReadOnlyList<EpubInspectionProblem> problems) =>
+        problems.Any(problem => problem.Code == EpubInspectionProblemCode.PackageMalformed);
+
     private static async Task<PreflightResult> PreflightAsync(EpubInspectionRequest request, CancellationToken token)
     {
+        List<EpubInspectionProblem> recoverableProblems = [];
         await using FileStream file = OpenRead(request.FullPath);
         EnsureCurrentFile(request);
         if (await ValidateCentralDirectoryAsync(file, request.Limits.MaximumArchiveEntries, token).ConfigureAwait(false))
@@ -248,7 +255,8 @@ internal sealed class VersOneEpubInspector(ILogger<VersOneEpubInspector> logger)
             string? href = item.Attribute("href")?.Value;
             if (string.IsNullOrWhiteSpace(href))
             {
-                return PreflightResult.Fail(EpubInspectionProblemCode.PackageMalformed, "An EPUB manifest item has no content file path.");
+                AddRecoverableProblem(recoverableProblems, EpubInspectionProblemCode.PackageMalformed, "An EPUB manifest item has no content file path.");
+                continue;
             }
 
             if (EpubArchivePathResolver.IsRemote(href))
@@ -260,7 +268,8 @@ internal sealed class VersOneEpubInspector(ILogger<VersOneEpubInspector> logger)
             string contentFileName = contentPath[(contentPath.LastIndexOf('/') + 1)..];
             if (string.IsNullOrWhiteSpace(contentFileName) || contentFileName is "." or "..")
             {
-                return PreflightResult.Fail(EpubInspectionProblemCode.PackageMalformed, "An EPUB manifest item has no content file name.");
+                AddRecoverableProblem(recoverableProblems, EpubInspectionProblemCode.PackageMalformed, "An EPUB manifest item has no content file name.");
+                continue;
             }
 
             if (!EpubArchivePathResolver.TryResolve(packagePath, href, out _))
@@ -316,13 +325,14 @@ internal sealed class VersOneEpubInspector(ILogger<VersOneEpubInspector> logger)
             }
             catch (XmlException)
             {
-                return PreflightResult.Fail(EpubInspectionProblemCode.PackageMalformed, "An EPUB navigation document is not valid XML.");
+                AddRecoverableProblem(recoverableProblems, EpubInspectionProblemCode.PackageMalformed, "An EPUB navigation document is not valid XML.");
+                continue;
             }
 
             if (ncxReferences.Contains(eagerXmlReference)
                 && !eagerXml.Descendants().Any(element => element.Name.LocalName == "navMap"))
             {
-                return PreflightResult.Fail(EpubInspectionProblemCode.PackageMalformed, "The EPUB 2 NCX document does not contain a navMap element.");
+                AddRecoverableProblem(recoverableProblems, EpubInspectionProblemCode.PackageMalformed, "The EPUB 2 NCX document does not contain a navMap element.");
             }
         }
 
@@ -350,7 +360,7 @@ internal sealed class VersOneEpubInspector(ILogger<VersOneEpubInspector> logger)
             }
         }
 
-        return new(entries.Keys.Order(StringComparer.Ordinal).ToArray(), null);
+        return new(entries.Keys.Order(StringComparer.Ordinal).ToArray(), null, recoverableProblems);
     }
 
     private static async Task<bool> ValidateCentralDirectoryAsync(FileStream file, int maximumEntries, CancellationToken token)
@@ -504,12 +514,16 @@ internal sealed class VersOneEpubInspector(ILogger<VersOneEpubInspector> logger)
         // not abort inspection. OpenBookAsync then yields a null package reference and
         // the null-check below surfaces it as a controlled malformed-package failure.
         options.PackageReaderOptions.IgnoreMissingPackageNode = true;
+        options.PackageReaderOptions.SkipInvalidManifestItems = true;
         options.Epub3NavDocumentReaderOptions.IgnoreMissingNavManifestItemError = true;
         options.Epub3NavDocumentReaderOptions.IgnoreMissingNavFileError = true;
+        options.Epub3NavDocumentReaderOptions.IgnoreNavFileIsNotValidXmlError = true;
         // Tolerate non-conformant EPUB 2 NCX navigation points that omit required
         // content/label elements so a malformed toc.ncx does not abort inspection.
         options.Epub2NcxReaderOptions.IgnoreMissingContentForNavigationPoints = true;
         options.Epub2NcxReaderOptions.AllowNavigationPointsWithoutLabels = true;
+        options.Epub2NcxReaderOptions.IgnoreTocFileIsNotValidXmlError = true;
+        options.Epub2NcxReaderOptions.IgnoreMissingNavMapElementError = true;
         options.SpineReaderOptions.IgnoreMissingManifestItems = true;
         options.SpineReaderOptions.IgnoreMissingContentFiles = true;
         // Tolerate non-conformant EPUB 2 cover metadata that points at a manifest
@@ -528,6 +542,7 @@ internal sealed class VersOneEpubInspector(ILogger<VersOneEpubInspector> logger)
 
     private static async Task<EpubInspectionResult> ReadFactsAsync(
         EpubInspectionRequest request,
+        IReadOnlyList<EpubInspectionProblem> recoverableProblems,
         IProgress<EpubInspectionProgress>? progress,
         CancellationToken token)
     {
@@ -699,30 +714,41 @@ internal sealed class VersOneEpubInspector(ILogger<VersOneEpubInspector> logger)
         if (tocId is not null && manifest.TryGetValue(tocId, out ManifestItem? tocItem) && entries.TryGetValue(tocItem.Path, out ZipArchiveEntry? tocEntry))
         {
             if (tocEntry.Length > request.Limits.MaximumXmlBytes) return Fail(request, EpubInspectionProblemCode.LimitExceeded, "The EPUB navigation document exceeds its configured limit.");
-            XDocument toc = await ReadXmlAsync(tocEntry, request.Limits.MaximumXmlBytes, readBudget, token).ConfigureAwait(false);
-            foreach (string reference in toc.Descendants()
-                         .Where(element => element.Name.LocalName == "content")
-                         .Select(element => element.Attribute("src")?.Value)
-                         .Where(value => !string.IsNullOrWhiteSpace(value))
-                         .Select(value => value!))
+            XDocument? toc = null;
+            try
             {
-                token.ThrowIfCancellationRequested();
-                if (EpubArchivePathResolver.IsRemote(reference))
-                {
-                    remote.Add(SanitizeExternalReference(reference));
-                    continue;
-                }
+                toc = await ReadXmlAsync(tocEntry, request.Limits.MaximumXmlBytes, readBudget, token).ConfigureAwait(false);
+            }
+            catch (XmlException)
+            {
+            }
 
-                localReferenceCount++;
-                if (localReferenceCount > request.Limits.MaximumLocalReferences) return Fail(request, EpubInspectionProblemCode.LimitExceeded, "EPUB local-reference analysis exceeded its configured limit.");
-                if (!EpubArchivePathResolver.TryResolve(tocItem.Path, reference, out string local) || !entries.ContainsKey(local))
+            if (toc is not null)
+            {
+                foreach (string reference in toc.Descendants()
+                             .Where(element => element.Name.LocalName == "content")
+                             .Select(element => element.Attribute("src")?.Value)
+                             .Where(value => !string.IsNullOrWhiteSpace(value))
+                             .Select(value => value!))
                 {
-                    broken.Add(Bound(reference)!);
-                    continue;
-                }
+                    token.ThrowIfCancellationRequested();
+                    if (EpubArchivePathResolver.IsRemote(reference))
+                    {
+                        remote.Add(SanitizeExternalReference(reference));
+                        continue;
+                    }
 
-                navigation = true;
-                AddDuplicateOccurrence(navigationTargetOccurrences, local, "navigation", repeated);
+                    localReferenceCount++;
+                    if (localReferenceCount > request.Limits.MaximumLocalReferences) return Fail(request, EpubInspectionProblemCode.LimitExceeded, "EPUB local-reference analysis exceeded its configured limit.");
+                    if (!EpubArchivePathResolver.TryResolve(tocItem.Path, reference, out string local) || !entries.ContainsKey(local))
+                    {
+                        broken.Add(Bound(reference)!);
+                        continue;
+                    }
+
+                    navigation = true;
+                    AddDuplicateOccurrence(navigationTargetOccurrences, local, "navigation", repeated);
+                }
             }
         }
 
@@ -752,7 +778,8 @@ internal sealed class VersOneEpubInspector(ILogger<VersOneEpubInspector> logger)
             coverPresent, width, height, navigation, manifest.Count, spineIds.Length, chapterCount, manifest.Count,
             missingSpine.OrderedItems(), broken.OrderedItems(), emptyChapters.OrderedItems(),
             repeated.OrderedItems(), remote.OrderedItems(), readable, encryptionState, optionalTruncations.TotalCount > 0, [], coverHeaderMalformed,
-            optionalTruncations.OrderedItems(), missingSpine.TotalCount, broken.TotalCount, emptyChapters.TotalCount, repeated.TotalCount, remote.TotalCount);
+            optionalTruncations.OrderedItems(), missingSpine.TotalCount, broken.TotalCount, emptyChapters.TotalCount, repeated.TotalCount, remote.TotalCount,
+            recoverableProblems);
     }
 
     private static FileStream OpenRead(string path) => new(path, new FileStreamOptions
@@ -1074,6 +1101,13 @@ internal sealed class VersOneEpubInspector(ILogger<VersOneEpubInspector> logger)
     private static string NormalizeRequired(string value) => EpubArchivePathResolver.TryNormalizeEntryName(value, out string normalized) ? normalized : throw new InvalidDataException("Unsafe archive path.");
     private static string[] Values(XElement? metadata, string localName) => (metadata?.Descendants().Where(element => element.Name.LocalName == localName).Select(element => Bound(element.Value)).Where(value => value is not null).Select(value => value!).Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal).Take(100).ToArray()) ?? [];
     private static string? Bound(string? value) { string? result = string.IsNullOrWhiteSpace(value) ? null : value.Trim(); return result is null ? null : result[..Math.Min(result.Length, 512)]; }
+    private static void AddRecoverableProblem(List<EpubInspectionProblem> problems, EpubInspectionProblemCode code, string explanation)
+    {
+        if (!problems.Any(problem => problem.Code == code && string.Equals(problem.Explanation, explanation, StringComparison.Ordinal)))
+        {
+            problems.Add(new(code, explanation));
+        }
+    }
     private static void AddDuplicateOccurrence(
         Dictionary<string, int> occurrences,
         string value,
@@ -1128,9 +1162,12 @@ internal sealed class VersOneEpubInspector(ILogger<VersOneEpubInspector> logger)
     private static EpubInspectionResult Fail(EpubInspectionRequest request, EpubInspectionProblemCode code, string explanation) => EpubInspectionResult.Failed(request.BookId, request.ExpectedRelativePath, code, explanation);
 
     private sealed record ManifestItem(string Path, string MediaType, string Properties);
-    private sealed record PreflightResult(IReadOnlyList<string> EntryNames, EpubInspectionProblem? Problem)
+    private sealed record PreflightResult(
+        IReadOnlyList<string> EntryNames,
+        EpubInspectionProblem? Problem,
+        IReadOnlyList<EpubInspectionProblem> RecoverableProblems)
     {
-        public static PreflightResult Fail(EpubInspectionProblemCode code, string explanation) => new([], new(code, explanation));
+        public static PreflightResult Fail(EpubInspectionProblemCode code, string explanation) => new([], new(code, explanation), []);
     }
     private sealed class FileChangedException : Exception;
     private sealed class InspectionLimitException : Exception;

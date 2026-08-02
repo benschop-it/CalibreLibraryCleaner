@@ -381,7 +381,7 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
             {
                 ApplyEpubFindingFilter();
                 OnPropertyChanged(nameof(SelectedEpubFeatureSummary));
-                OnPropertyChanged(nameof(EpubDisqualificationMessage));
+                OnPropertyChanged(nameof(EpubAssessmentStatusMessage));
             }
         }
     }
@@ -394,9 +394,12 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
 
     public string SelectedEpubFeatureSummary => SelectedEpubAssessment?.FeatureSummary ?? "Select an EPUB assessment to view bounded format facts.";
 
-    public string EpubDisqualificationMessage => SelectedEpubAssessment?.Status == "Disqualified"
-        ? "Not scored — disqualified. See the disqualifying finding below."
-        : string.Empty;
+    public string EpubAssessmentStatusMessage => SelectedEpubAssessment?.Status switch
+    {
+        "Unassessed" => "Not scored — unassessed. The file may still open in Calibre; this analyzer could not safely produce comparable quality facts.",
+        "Disqualified" => "Not scored — disqualified because the file could not be opened or read.",
+        _ => string.Empty,
+    };
 
     public PdfAssessmentRowViewModel? SelectedPdfAssessment
     {

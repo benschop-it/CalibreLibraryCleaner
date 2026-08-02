@@ -9,7 +9,7 @@ Add a safe, explainable vertical slice that finds EPUB formats already present i
 For every discovered EPUB format, the resulting snapshot must preserve its Calibre book identifier, format, expected relative path, and observed file identity, and report:
 
 - whether the file could be opened and its package parsed;
-- a numeric score from 0 through 100, or an explicit disqualified/not-scored state;
+- a numeric score from 0 through 100, an explicit unassessed/not-scored state, or a definitive disqualified/not-scored state;
 - every positive, informational, warning, error, and disqualifying finding;
 - embedded EPUB metadata and a bounded structural summary;
 - the analyzer and scoring-model versions used.
@@ -102,7 +102,7 @@ Add immutable Domain types under an `Assessments` feature folder:
 
 - `FormatAssessment`: Calibre book ID, format, expected relative path, observed fingerprint when available, status, nullable score, analyzer version, scoring-model version, `EpubFeatureSummary`, and ordered findings.
 - `AssessmentFinding`: stable rule ID, severity, signed applied score adjustment, explanation, and bounded evidence. Evidence is presentation-safe data such as a normalized archive-relative path, count, dimension, or threshold; it must not contain book content.
-- `AssessmentStatus`: `Completed` or `Disqualified`. A completed assessment has a `QualityScore`; a disqualified assessment has no score.
+- `AssessmentStatus`: `Completed`, `Unassessed`, or `Disqualified`. Completed has a `QualityScore`; Unassessed has zero-point non-disqualifying evidence and no score; Disqualified has a definitive open/read disqualifier and no score.
 - `FindingSeverity`: extend the existing shared enum with `Positive` and `Disqualifying`, retaining `Information`, `Warning`, and `Error`. `LibraryFinding` may use only its existing severities, while `AssessmentFinding` can use the full set.
 - `QualityScore`: a validated integer value object in the inclusive range 0 through 100.
 - `AnalyzerVersion`: a nonblank validated value object, initially `epub-inspector/1.0.0`.
@@ -113,7 +113,7 @@ Domain invariants:
 
 - `FormatAssessment.Format` must be `EPUB` using ordinal case-insensitive validation and is stored canonically as `EPUB`.
 - The stable association is `(CalibreBookId, Format, ExpectedRelativePath, ObservedFingerprint)`. The path must remain relative and presentation-safe; Domain does not resolve it.
-- `Completed` requires a score and no disqualifying finding. `Disqualified` requires at least one disqualifying finding and requires a null score.
+- `Completed` requires a score and no disqualifying finding. `Unassessed` requires a null score, no disqualifier, and only zero-point findings. `Disqualified` requires at least one disqualifying finding and a null score.
 - A score cannot exist without a non-empty findings collection. The collection includes the baseline finding and all scored or zero-adjustment findings.
 - The score must equal the scoring algorithm applied to the findings for the recorded scoring-model version.
 - Evidence collections and string lengths are bounded before Domain construction.
@@ -131,13 +131,13 @@ Add these provider-neutral Application concepts:
 - `EpubInspectionResult`: safe facts and provider-neutral problem codes produced by Infrastructure. It contains no weighted score and no third-party exceptions or objects.
 - `IFormatAssessmentRule`: stable rule ID and an evaluation method that maps an immutable inspection result to unweighted finding candidates. Each initial finding type has a separate rule class and can be unit tested without opening an EPUB.
 - `EpubAssessmentEngine`: runs a frozen ordered rule catalog, normalizes and caps contributions, applies the versioned scoring model, and constructs a valid `FormatAssessment`.
-- `AssessEpubFormatsUseCase`: selects all EPUB formats, creates structured disqualified assessments directly for path/file statuses that cannot be inspected, runs inspectable files with bounded concurrency, preserves output slots, reports progress, and returns the ordered assessment list.
+- `AssessEpubFormatsUseCase`: selects EPUB formats with resolvable managed paths, creates structured disqualified assessments for definitive missing/inaccessible failures and unassessed results for changed identities, runs inspectable files with bounded concurrency, preserves output slots, reports progress, and returns the ordered assessment list.
 
 `ScanLibraryUseCase` will invoke `AssessEpubFormatsUseCase` after resolution and hashing have established file identity. It will then construct duplicate groups as it does today and publish the snapshot. EPUB assessment does not influence either duplicate group.
 
 Expected orchestration rules:
 
-1. Derive one target for every discovered EPUB format. Invalid path, missing, inaccessible, zero-byte, or hashing-time changed entries remain targets and receive explicit disqualifying findings without invoking the parser.
+1. Derive targets for discovered EPUB formats whose managed paths resolve safely. Invalid paths retain the library-level `MANAGED_PATH_INVALID` warning and have no quality assessment because no verified file identity exists. Missing, inaccessible, or zero-byte entries receive definitive disqualifying open/read findings; hashing-time changed entries are unassessed without invoking the parser.
 2. For a present hashed EPUB, require the post-hash observation and fingerprint in the request.
 3. Allocate result slots in canonical target order and fill each slot once. Concurrency completion order never determines result order.
 4. Translate expected inspector problem results into findings and continue with other EPUBs. Infrastructure must catch expected I/O/parser failures, log only safe identifiers, and return stable problem codes. Cancellation is never translated and propagates promptly; any other exception violates the inspector contract and fails the atomic scan rather than publishing a partial result.
@@ -198,11 +198,11 @@ Rules consume only `EpubInspectionResult`; they do not do I/O, mutate shared sta
 The engine performs these deterministic stages:
 
 1. Validate the inspection association and analyzer version.
-2. Evaluate every applicable rule once. A rule that cannot apply because an earlier disqualifying condition removed the necessary facts emits a zero-point informational or disqualifying finding as defined by its contract; it is never silently omitted if it explains the absent score.
+2. Evaluate every applicable rule once. A rule that cannot apply because inspection stopped emits the zero-point warning or definitive open/read disqualifier defined by its contract; it is never silently omitted if it explains the absent score.
 3. Normalize candidate evidence and order candidates by rule ID and evidence key.
 4. Apply per-rule penalty caps in that order. Findings beyond a cap remain visible with an applied adjustment of zero and an explanation that the cap was reached.
 5. Order findings for display using the Domain ordering rule.
-6. If any disqualifying finding exists, create a `Disqualified` assessment with no numeric score.
+6. If a definitive open/read disqualifier exists, create `Disqualified` with no score. If technical inspection is incomplete without such proof, create `Unassessed` with no score. Otherwise create `Completed` with the derived score.
 7. Otherwise sum every applied adjustment, clamp to 0 through 100, and create a `Completed` assessment.
 
 Unexpected rule exceptions represent programming defects and fail the operation rather than mislabeling a book. Rule implementations must be pure and extensively unit tested.
@@ -216,9 +216,9 @@ The initial thresholds and weights are proposals to be accepted in the ADR/docum
 | Rule ID | Independently tested finding | Positive result | Negative result | Cap / notes |
 | --- | --- | ---: | ---: | --- |
 | `EPUB.SCORE.BASELINE` | Visible scoring baseline | +50 | n/a | Exactly once; proves the score is findings-derived. |
-| `EPUB.OPEN` | File and ZIP can be opened | +4 | disqualifying | Missing, inaccessible, zero-byte, invalid ZIP, unsupported ZIP encryption/compression, or changed file has no valid score. |
-| `EPUB.ARCHIVE_SAFETY` | Archive passes safety preflight | 0 information | disqualifying | Unsafe paths, duplicate canonical entries, or any configured resource/archive limit breach invalidates scoring. |
-| `EPUB.PACKAGE` | Container and package metadata can be parsed | +4 | disqualifying | Missing/malformed container or package document prevents reliable structural assessment. |
+| `EPUB.OPEN` | File and ZIP can be opened | +4 | disqualifying only for definitive cannot-open/unreadable outcomes | Missing, inaccessible, zero-byte, or invalid ZIP files have no valid score. |
+| `EPUB.ARCHIVE_SAFETY` | Archive passes safety preflight | 0 information | 0 warning and Unassessed when safety policy stops inspection | Unsafe paths, duplicate canonical entries, suspicious compression, or limits stop parsing but do not prove Calibre cannot open the book. |
+| `EPUB.PACKAGE` | Container and package metadata can be parsed | +4 | 0 warning and Unassessed for mandatory failure; 0 warning with continued scoring for skipped invalid items or malformed optional navigation | Package failures remain visible without being labeled unreadable. |
 | `EPUB.METADATA.TITLE` | Nonblank embedded title exists | +3 | -4 warning | Embedded EPUB metadata only; never the Calibre title. |
 | `EPUB.METADATA.AUTHOR` | At least one nonblank creator/author exists | +3 | -4 warning | Multiple authors do not add more points. |
 | `EPUB.METADATA.LANGUAGE` | At least one usable language tag exists | +2 | -2 warning | Preserve raw bounded values as evidence; do not network-validate. |
@@ -233,15 +233,15 @@ The initial thresholds and weights are proposals to be accepted in the ADR/docum
 | `EPUB.TEXT.SUBSTANTIAL` | Substantial normalized readable text exists | +5 | -8 for 500–4,999 characters; -15 below 500 | Count Unicode letters/digits after excluding markup, scripts, styles, nav, and the cover. Thresholds are model-versioned. |
 | `EPUB.CHAPTER.EMPTY` | No content chapter is empty or near-empty | +2 once | -2 per chapter below 100 normalized letters/digits | Repeated negative cap -10; cover/nav pages are excluded. |
 | `EPUB.STRUCTURE.REPEATED_REFERENCE` | No obvious repeated chapter/reference structure | +2 once | -4 per duplicate spine `idref`, resolved spine href, or repeated navigation target | Repeated negative cap -12. Reusing the same resolved content resource is the V1 “obviously repeated content” signal; V1 does not compare or fingerprint chapter text. |
-| `EPUB.ENCRYPTION` | Encryption state does not prevent assessment | 0 information | disqualifying when DRM/encryption blocks package, navigation, spine, or readable-content inspection | Recognized font obfuscation alone is informational if analysis remains possible. |
+| `EPUB.ENCRYPTION` | Encryption state does not prevent assessment | 0 information | 0 warning and Unassessed when DRM/encryption blocks inspection | Recognized font obfuscation alone is informational if analysis remains possible; unsupported protection does not prove reader failure. |
 
 Maximum positive adjustments are 50, so baseline plus all positive checks equals 100. The larger V1 penalties focus on an absent/nonfunctional spine, missing content, and insufficient text. Cover and navigation remain important but cannot outweigh core readability. Optional date and identifier absence do not materially penalize older or hand-produced EPUBs. This is a deliberate adjustment from treating every metadata gap as equally important.
 
 Rules can emit multiple findings to preserve evidence, but only the explicitly stated contribution earns or loses points. For example, `EPUB.SPINE.RESOURCE_EXISTS` emits a single +4 finding only when all resources exist; otherwise it emits one negative finding per missing canonical path and no positive finding. This prevents contradictory contributions.
 
-### Scoring and disqualification algorithm
+### Scoring and status algorithm
 
-For scoring model `epub-quality/1.0.0`:
+For scoring model `epub-quality/1.0.2`:
 
 ```text
 orderedCandidates = order(rule findings by RuleId, EvidenceKey)
@@ -250,50 +250,54 @@ appliedFindings = apply each rule's positive/negative cap to orderedCandidates
 if appliedFindings contains FindingSeverity.Disqualifying:
     status = Disqualified
     score = null
+else if mandatory inspection did not complete:
+    status = Unassessed
+    score = null
 else:
     status = Completed
     score = clamp(sum(appliedFindings.ScoreAdjustment), 0, 100)
 ```
 
-Every non-disqualified assessment includes the +50 baseline finding, so the numeric result is derived entirely from stored findings. Recomputing the sum and clamp must reproduce the stored `QualityScore`. A domain test rejects a score that does not match its findings/model. A disqualifying finding overrides every contribution and invalidates rather than forcing a misleading zero. WPF renders `Not scored — disqualified`, never `0`, in that case.
+Every completed assessment includes the +50 baseline finding, so the numeric result is derived entirely from stored findings. Recomputing the sum and clamp must reproduce the stored `QualityScore`. An unassessed result contains only zero-point non-disqualifying evidence and renders `Not scored — unassessed`; it is not a zero score or a readability claim. A disqualifying finding overrides every contribution and renders `Not scored — disqualified` only for definitive open/read failure.
 
 Cap application uses normalized evidence ordering, not discovery or task completion order. Negative contributions are capped independently per rule. All suppressed repeated findings remain explainable and display an applied `0` adjustment plus the cap explanation. Positive rules are naturally capped at one success finding unless the table states otherwise.
 
 The initial versions are:
 
-- Analyzer: `epub-inspector/1.0.2` after the 2026-08-01 doctype compatibility amendment (`1.0.0` was the initial implementation and `1.0.1` the 2026-07-18 security hardening pass).
-- Scoring model: `epub-quality/1.0.0`.
+- Analyzer: `epub-inspector/1.0.3` after the 2026-08-01 recoverable package-defect amendment (`1.0.2` added doctype compatibility).
+- Scoring model: `epub-quality/1.0.2` after incomplete technical inspections became Unassessed instead of Disqualified (`1.0.1` introduced recoverable package warnings).
 
 Changes to archive parsing, content extraction, reference resolution, image support, security limits, or dependency behavior that can change facts require a new analyzer version. Changes to baseline, weights, caps, thresholds, formula, rule applicability, or disqualification behavior require a new scoring-model version. Persisted or later cached assessments must key by file fingerprint plus both versions. The UI and future recommendation code must not compare or rank scores whose scoring-model versions differ without explicit migration/reassessment. Caching and cross-score ranking are not implemented in Milestone 4.
 
-## Security limits and disqualification algorithm
+## Security limits and status algorithm
 
 Centralize immutable defaults in `EpubInspectionLimits` and record the analyzer version that owns them. Proposed V1 limits are deliberately conservative and must be exercised at boundary values:
 
 | Limit | Proposed V1 value | Outcome when exceeded |
 | --- | ---: | --- |
-| EPUB file length | 1 GiB | Disqualify before parser invocation. |
-| ZIP entry count | 10,000 | Disqualify. |
-| Sum of declared uncompressed entry lengths | 512 MiB | Disqualify. |
-| One ordinary entry | 64 MiB | Disqualify, except no higher override is permitted. |
-| Container/package/navigation/encryption XML document | 4 MiB each | Disqualify if required for analysis; otherwise emit an error and omit that optional feature. |
-| One XHTML/HTML chapter | 8 MiB | Disqualify because readable-content analysis is no longer trustworthy within bounds. |
+| EPUB file length | 1 GiB | Stop and mark Unassessed before parser invocation. |
+| ZIP entry count | 10,000 | Stop and mark Unassessed. |
+| Sum of declared uncompressed entry lengths | 512 MiB | Stop and mark Unassessed. |
+| One ordinary entry | 64 MiB | Stop and mark Unassessed, except no higher override is permitted. |
+| Container/package/navigation/encryption XML document | 4 MiB each | Mark Unassessed if required for analysis; otherwise emit an error and omit that optional feature. |
+| One XHTML/HTML chapter | 8 MiB | Mark Unassessed because comparable readable-content analysis cannot complete within bounds. |
 | One CSS resource | 2 MiB | Stop optional CSS reference inspection and emit an error; do not allocate beyond limit. |
-| One cover resource read | 32 MiB declared, 64 KiB header actually read | Disqualify on declared limit breach; malformed/unsupported bounded header becomes a scored finding. |
-| Spine item count | 10,000 | Disqualify. |
-| Resolved local reference count | 50,000 | Disqualify. |
+| One cover resource read | 32 MiB declared, 64 KiB header actually read | Mark Unassessed on declared limit breach; malformed/unsupported bounded header becomes a scored finding. |
+| Spine item count | 10,000 | Stop and mark Unassessed. |
+| Resolved local reference count | 50,000 | Stop and mark Unassessed. |
 | Retained evidence examples per rule | 100, with an additional omitted count | Continue safely; scoring counts all occurrences subject to caps. |
-| Aggregate readable characters counted | 20 million | Stop content processing, record truncation, and disqualify because the full rule result is not comparable. |
-| HTML nodes / nested levels | 25,000 nodes / 256 levels | Disqualify before or during DOM construction. |
-| Per-entry compression ratio | greater than 200:1 for entries over 1 MiB | Disqualify as suspicious. |
-| Aggregate compression ratio | greater than 100:1 after 10 MiB uncompressed | Disqualify as suspicious. |
+| Aggregate readable characters counted | 20 million | Stop content processing and mark Unassessed because the full result is not comparable. |
+| HTML nodes / nested levels | 25,000 nodes / 256 levels | Stop and mark Unassessed before or during DOM construction. |
+| Per-entry compression ratio | greater than 200:1 for entries over 1 MiB | Stop and mark Unassessed as suspicious. |
+| Aggregate compression ratio | greater than 100:1 after 10 MiB uncompressed | Stop and mark Unassessed as suspicious. |
 
-Zero-compressed-length entries with substantial declared output, negative/overflowing lengths, inconsistent central-directory data, or arithmetic overflow are disqualifying. All sums use checked 64-bit arithmetic. Limits apply before allocation and again during actual reads because declared ZIP metadata is untrusted.
+Zero-compressed-length entries with substantial declared output, negative/overflowing lengths, inconsistent central-directory data, or arithmetic overflow stop inspection and produce Unassessed results. All sums use checked 64-bit arithmetic. Limits apply before allocation and again during actual reads because declared ZIP metadata is untrusted.
 
-Disqualify, without a numeric score, when any of these prevents safe and comparable inspection:
+Disqualify, without a numeric score, only when the file definitively cannot be opened or read: missing, inaccessible, zero-byte, invalid ZIP, or an equivalent `CannotOpen`/`Unreadable` outcome. Invalid managed paths are reported at library level and are not quality-assessed.
 
-- missing, inaccessible, non-regular, zero-byte, path-invalid, changed, or unreadable file;
-- invalid/unsupported ZIP container or encrypted ZIP entry required for analysis;
+Mark Unassessed, without a numeric score or disqualifying finding, when any of these prevents safe and comparable inspection:
+
+- unsupported ZIP features or encrypted ZIP entries required for analysis (a definitively invalid/unopenable ZIP is instead disqualified as CannotOpen);
 - unsafe entry path, canonical duplicate, archive bomb signal, count/size/ratio breach, or observed bytes beyond a declared/configured bound;
 - missing or malformed `META-INF/container.xml` or package document;
 - entity use that depends on an ignored DTD, malformed DTD syntax, or XML processing that cannot be completed with external resolution disabled;
@@ -302,7 +306,7 @@ Disqualify, without a numeric score, when any of these prevents safe and compara
 - mandatory analysis truncated by a security limit;
 - an unexpected parser failure that cannot be safely classified into a more specific condition.
 
-Do not disqualify merely for missing title/author/language/date/identifier/cover/navigation, an empty spine, missing resources, too little text, near-empty chapters, or repeated references when the bounded inspection completed. Those are quality findings whose penalties make the result useful and comparable.
+Do not disqualify merely for missing title/author/language/date/identifier/cover/navigation, an invalid manifest item that can be skipped, malformed optional navigation, an empty spine, missing resources, too little text, near-empty chapters, or repeated references when bounded inspection completed. Those are quality findings whose penalties and warnings make the result useful and comparable.
 
 ## Security safeguards
 
@@ -358,7 +362,7 @@ Add an `EPUB assessments` tab without adding a recommendation or retention decis
 - Summary grid columns: Calibre book ID, Calibre display title (context only), expected EPUB path, assessment status, score or `Not scored`, opened, package parsed, EPUB/package version, analyzer version, and scoring-model version.
 - Selecting one assessment shows a bounded feature summary: embedded EPUB title/authors/languages/dates/identifiers, cover state/dimensions, navigation state, spine/chapter/resource counts, readable character band/count, encryption state, and any analysis truncation.
 - A findings grid shows severity, rule ID, signed applied adjustment, explanation, and evidence. It supports `All`, `Positive`, `Information`, `Warning`, `Error`, and `Disqualifying` filters while retaining deterministic source ordering.
-- A prominent disqualification banner explains why no score exists. It must not display a disqualified assessment as zero.
+- A prominent neutral status message distinguishes `Not scored — unassessed` from definitive `Not scored — disqualified`; neither is displayed as zero.
 - Existing Library format rows may add assessment status and EPUB score columns by joining on the stable association. Non-EPUB rows display an em dash.
 - Progress text includes EPUB completed/total and current substage; the existing Cancel command stays enabled through assessment.
 - Build presentation rows off the UI thread, publish collections in bulk, preserve selection/filtering behavior, and provide automation names/keyboard access for the new tab and controls.
@@ -573,8 +577,8 @@ Platform-sensitive inaccessible-file tests should use existing repository conven
 
 ### WPF tests
 
-- Display score, completed/disqualified status, safe path, versions, and structural summary for the correct record/format.
-- Display `Not scored — disqualified` and the disqualifying explanation, never a zero score.
+- Display score, completed/unassessed/disqualified status, safe path, versions, and structural summary for the correct record/format.
+- Display `Not scored — unassessed` for incomplete technical inspection and `Not scored — disqualified` only for definitive open/read failure, never a zero score.
 - Display every finding and filter correctly across Positive, Information, Warning, Error, and Disqualifying without changing source order.
 - Preserve selection and reset behavior across scans; clear stale results after failure/cancellation.
 - Progress remains coalesced, cancellation stays responsive, and collection publication occurs on the UI dispatcher in bulk.
@@ -652,10 +656,10 @@ These are proposed defaults, not permission to silently choose a materially diff
 1. Confirm whether extending shared `FindingSeverity` is preferable to a dedicated `AssessmentFindingSeverity`. The plan prefers extension for one UI vocabulary, subject to an exhaustive switch audit.
 2. Confirm the V1 archive/resource limits against representative non-personal synthetic large EPUBs. Raising a limit changes analyzer behavior and must be recorded before code is merged.
 3. Confirm the cover usefulness threshold of 600 by 800 pixels and readable-text thresholds of 500/5,000 normalized letters/digits. Any change requires a scoring-model version decision.
-4. Confirm that a parsed package with an empty spine remains numerically scored with a severe penalty, while inability to parse the package is disqualifying. The plan favors this distinction because it preserves explainable structural assessment.
+4. Confirm that a parsed package with an empty spine remains numerically scored with a severe penalty, while inability to parse the package is Unassessed. This preserves explainable structural assessment without asserting unreadability.
 5. Confirm whether syntactically plausible ISBN validation should include check-digit validation in V1. The plan proposes check digits with normalization and no external lookup.
 6. Characterize exactly which VersOne relaxed-reader callbacks/options are necessary for malformed-but-assessable real-world EPUBs. The accepted option set belongs in ADR 0004 and tests, not in undocumented defaults.
-7. Confirm recognized font-obfuscation schemes that remain assessable. Anything beyond known font-only obfuscation stays disqualifying when it blocks required content analysis.
+7. Confirm recognized font-obfuscation schemes that remain assessable. Anything beyond known font-only obfuscation becomes Unassessed when it blocks required content analysis.
 
 ## Milestone boundary review
 
@@ -691,6 +695,8 @@ It deliberately excludes Milestone 5 and later functionality: no format recommen
 - [x] Add focused regressions for navigation limits/DTDs, embedded traversal, root reparse points, HTML structure/cancellation, evidence bounds/redaction, scoring-contract disqualification, monotonic progress, lazy WPF details, and complete selected-feature display.
 - [x] Re-run restore, build, all tests, format verification, safety tests, and complete diff review after remediation.
 - [x] Permit ignored document type declarations while retaining no-resolution and no-entity-expansion safeguards; harden invalid IDN host evidence; record analyzer `epub-inspector/1.0.2`; and add HTML/NCX/no-network/entity/Unicode-host regressions.
+- [x] Continue scoring through skipped invalid manifest items and malformed optional navigation; omit unverified invalid managed paths from quality assessments; record analyzer `epub-inspector/1.0.3` and scoring model `epub-quality/1.0.1`.
+- [x] Add `Unassessed` for incomplete technical inspection, reserve EPUB disqualification for definitive open/read failures, and advance scoring model to `epub-quality/1.0.2`.
 
 ## Final outcome
 
@@ -719,5 +725,9 @@ Implementation-shape deviations do not change the approved behavior or milestone
 Post-completion remediation on 2026-07-18 hardened archive central-directory preflight, eager navigation XML validation, archive and managed-root path handling, HTML structure limits, evidence retention/redaction, score derivation, progress serialization, and selected-row WPF materialization. The behavior change is recorded as analyzer `epub-inspector/1.0.1`; the unchanged scoring catalog remains `epub-quality/1.0.0`. The remediation verification succeeded with zero build warnings or errors and 195 passing tests: Domain 59, Application 35, Infrastructure 78, Architecture 14, and WPF 9. The focused EPUB/safety filter passed 71 tests across Application, Infrastructure, Architecture, and WPF; `dotnet format --verify-no-changes` and `git diff --check` also succeeded.
 
 The 2026-08-01 compatibility amendment advances the analyzer to `epub-inspector/1.0.2` while retaining `epub-quality/1.0.0`. It accepts document type declarations without processing DTD grammars or resolving external identifiers; entity-dependent XML remains disqualifying. URI evidence removes Unicode line separators before host canonicalization, while other invalid IDN hosts produce bounded `host:invalid` evidence rather than aborting assessment. Final verification for this amendment is recorded in `docs/plans/epub-doctype-compatibility.md`.
+
+The later 2026-08-01 recoverability amendment advances the analyzer to `epub-inspector/1.0.3` and scoring model to `epub-quality/1.0.1`. Skippable invalid manifest entries and malformed optional navigation now produce warnings while assessment continues. Invalid managed paths remain library warnings and no longer appear as disqualified/corrupt EPUB assessments. Final verification is recorded in `docs/plans/epub-recoverable-package-defects.md`.
+
+The 2026-08-02 status amendment retains analyzer `epub-inspector/1.0.3` and advances scoring model to `epub-quality/1.0.2`. Only definitive cannot-open/unreadable EPUB outcomes are disqualified. Other incomplete technical inspections are Unassessed, warning-only, scoreless, and incomparable for recommendations. WPF explicitly notes that such a book may still open in Calibre. Final verification is recorded in `docs/plans/epub-unassessed-technical-failures.md`.
 
 Remaining risks are the documented non-transactional same-size/same-timestamp hostile replacement race, parser rejection of malformed-but-potentially-salvageable publications outside the four explicitly tolerated conditions, simple bounded HTML/CSS/image-header heuristics, and the policy nature of the initial scoring weights. Interactive high-DPI/screen-reader review remains manual; automated WPF construction and behavior tests pass.

@@ -39,6 +39,26 @@ public sealed class AssessmentValueTests
         assessment.Score.Should().BeNull();
     }
 
+    [Fact]
+    public void UnassessedAssessmentHasNoScoreOrDisqualifyingFinding()
+    {
+        AssessmentFinding finding = new("EPUB.PACKAGE", FindingSeverity.Warning, 0, "Package could not be safely assessed.");
+
+        FormatAssessment assessment = new(
+            new CalibreBookId(1), "EPUB", "Book.epub", null, AssessmentStatus.Unassessed, null,
+            new AnalyzerVersion("epub-inspector/1.0.3"), new ScoringModelVersion("epub-quality/1.0.2"), [finding]);
+
+        assessment.Status.Should().Be(AssessmentStatus.Unassessed);
+        assessment.Score.Should().BeNull();
+        assessment.Findings.Should().ContainSingle().Which.Severity.Should().Be(FindingSeverity.Warning);
+
+        FluentActions.Invoking(() => new FormatAssessment(
+                new CalibreBookId(1), "EPUB", "Book.epub", null, AssessmentStatus.Unassessed, null,
+                new AnalyzerVersion("epub-inspector/1.0.3"), new ScoringModelVersion("epub-quality/1.0.2"),
+                [new AssessmentFinding("EPUB.PACKAGE", FindingSeverity.Warning, -1, "Hidden penalty.")]))
+            .Should().Throw<ArgumentException>();
+    }
+
     [Theory]
     [InlineData("/absolute.epub")]
     [InlineData("../escape.epub")]

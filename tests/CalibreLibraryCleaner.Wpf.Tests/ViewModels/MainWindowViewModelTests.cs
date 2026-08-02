@@ -178,8 +178,8 @@ public sealed class MainWindowViewModelTests
 
         viewModel.EpubAssessments.Should().ContainSingle();
         viewModel.SelectedEpubAssessment!.Score.Should().Be("100");
-        viewModel.SelectedEpubAssessment.AnalyzerVersion.Should().Be("epub-inspector/1.0.2");
-        viewModel.SelectedEpubAssessment.ScoringModelVersion.Should().Be("epub-quality/1.0.0");
+        viewModel.SelectedEpubAssessment.AnalyzerVersion.Should().Be("epub-inspector/1.0.3");
+        viewModel.SelectedEpubAssessment.ScoringModelVersion.Should().Be("epub-quality/1.0.2");
         viewModel.SelectedEpubFeatureSummary.Should().Contain("Readable characters: 6000");
         viewModel.SelectedEpubFeatureSummary.Should().Contain("Dates: 2020-01-01");
         viewModel.SelectedEpubFeatureSummary.Should().Contain("Strong identifiers: 9780306406157");
@@ -200,9 +200,10 @@ public sealed class MainWindowViewModelTests
 
         await viewModel.ScanCommand.ExecuteAsync(null);
 
-        viewModel.SelectedEpubAssessment!.Score.Should().Contain("Not scored");
-        viewModel.EpubDisqualificationMessage.Should().Contain("disqualified");
-        viewModel.EpubFindingFilterMode = EpubFindingFilterMode.Disqualifying;
+        viewModel.SelectedEpubAssessment!.Status.Should().Be("Unassessed");
+        viewModel.SelectedEpubAssessment.Score.Should().Be("Not scored — unassessed");
+        viewModel.EpubAssessmentStatusMessage.Should().Contain("may still open in Calibre").And.NotContain("disqualified");
+        viewModel.EpubFindingFilterMode = EpubFindingFilterMode.Warning;
         viewModel.EpubFindings.Should().ContainSingle(finding => finding.RuleId == "EPUB.ENCRYPTION");
     }
 

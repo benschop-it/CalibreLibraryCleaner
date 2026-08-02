@@ -460,7 +460,6 @@ public sealed class ScanLibraryUseCase(
                 CalibreBookId bookId = new(book.Record.Id);
                 if (format.Sequence is null)
                 {
-                    targets.Add(new(bookId, "EPUB", string.Empty, null, null, FormatFileStatus.InvalidPath, null, null));
                     continue;
                 }
 

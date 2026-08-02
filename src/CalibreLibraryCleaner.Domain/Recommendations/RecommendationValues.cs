@@ -8,7 +8,7 @@ public sealed record RecommendationModelVersion
         Value = value.Trim();
     }
 
-    public static RecommendationModelVersion V1 { get; } = new("consolidation-recommendation/1.0.2");
+    public static RecommendationModelVersion V1 { get; } = new("consolidation-recommendation/1.0.3");
 
     public string Value { get; }
 

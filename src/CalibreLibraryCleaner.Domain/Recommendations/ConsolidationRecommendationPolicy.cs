@@ -648,6 +648,10 @@ public sealed class ConsolidationRecommendationPolicy
             {
                 warnings.Add(new("EPUB.ONLY_SOURCE_DISQUALIFIED", RecommendationWarningSeverity.ManualReview, RecommendationSubjectKind.Assessment, "The sole EPUB is retained because it is the only available copy, but its assessment is disqualified.", source.BookId, format));
             }
+            else if (format == "EPUB" && source.Assessment?.Status == AssessmentStatus.Unassessed)
+            {
+                warnings.Add(new("EPUB.ONLY_SOURCE_UNASSESSED", RecommendationWarningSeverity.ManualReview, RecommendationSubjectKind.Assessment, "The sole EPUB is retained because it is the only available copy, but no comparable quality score could be produced.", source.BookId, format));
+            }
 
             return new(format, candidates, source, FormatResolutionStatus.Selected, [], RecommendationDecisionStrength.Strong, [code], unavailable.Length > 0 ? ["FORMAT.FILE_UNAVAILABLE"] : []);
         }

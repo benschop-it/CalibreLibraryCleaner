@@ -8,8 +8,8 @@ public sealed class EpubAssessmentEngine
 {
     private readonly int _baseline = 50;
 
-    public static AnalyzerVersion AnalyzerVersion { get; } = new("epub-inspector/1.0.2");
-    public static ScoringModelVersion ScoringModelVersion { get; } = new("epub-quality/1.0.0");
+    public static AnalyzerVersion AnalyzerVersion { get; } = new("epub-inspector/1.0.3");
+    public static ScoringModelVersion ScoringModelVersion { get; } = new("epub-quality/1.0.2");
 
     public EpubAssessment Assess(
         CalibreBookId bookId,
@@ -24,15 +24,28 @@ public sealed class EpubAssessmentEngine
             throw new InvalidOperationException("The EPUB inspector returned a mismatched association.");
         }
 
-        List<AssessmentFinding> findings = [Finding("EPUB.SCORE.BASELINE", FindingSeverity.Positive, _baseline, "Visible scoring baseline.")];
+        List<AssessmentFinding> findings = [];
         foreach (EpubInspectionProblem problem in result.Problems.OrderBy(problem => problem.Code).ThenBy(problem => problem.Evidence, StringComparer.Ordinal))
         {
             cancellationToken.ThrowIfCancellationRequested();
-            findings.Add(Finding(ProblemRule(problem.Code), FindingSeverity.Disqualifying, 0, problem.Explanation, problem.Evidence));
+            findings.Add(Finding(
+                ProblemRule(problem.Code),
+                IsDefinitiveOpenFailure(problem.Code) ? FindingSeverity.Disqualifying : FindingSeverity.Warning,
+                0,
+                problem.Explanation,
+                problem.Evidence));
         }
 
-        if (result.Problems.Count == 0)
+        foreach (EpubInspectionProblem problem in (result.RecoverableProblems ?? []).OrderBy(problem => problem.Code).ThenBy(problem => problem.Evidence, StringComparer.Ordinal))
         {
+            cancellationToken.ThrowIfCancellationRequested();
+            findings.Add(Finding(ProblemRule(problem.Code), FindingSeverity.Warning, 0, problem.Explanation, problem.Evidence));
+        }
+
+        bool inspectionComplete = result.Problems.Count == 0 && result.Opened && result.ArchiveSafe && result.PackageParsed;
+        if (inspectionComplete)
+        {
+            findings.Add(Finding("EPUB.SCORE.BASELINE", FindingSeverity.Positive, _baseline, "Visible scoring baseline."));
             AddBinary(findings, "EPUB.OPEN", result.Opened, 4, -0, "The EPUB container opened successfully.", "The EPUB container could not be opened.", FindingSeverity.Disqualifying);
             AddBinary(findings, "EPUB.ARCHIVE_SAFETY", result.ArchiveSafe, 0, 0, "Archive safety preflight completed within configured limits.", "Archive safety preflight did not complete successfully.", FindingSeverity.Disqualifying);
             AddBinary(findings, "EPUB.PACKAGE", result.PackageParsed, 4, 0, "The EPUB package parsed successfully.", "The EPUB package could not be parsed.", FindingSeverity.Disqualifying);
@@ -83,9 +96,31 @@ public sealed class EpubAssessmentEngine
                 findings.Add(Finding("EPUB.ANALYSIS.TRUNCATED", FindingSeverity.Information, 0, "Optional EPUB analysis was truncated within configured safety limits."));
             }
         }
+        else if (result.Problems.Count == 0)
+        {
+            if (!result.Opened)
+            {
+                findings.Add(Finding("EPUB.OPEN", FindingSeverity.Disqualifying, 0, "The EPUB container could not be opened."));
+            }
+            else if (!result.ArchiveSafe)
+            {
+                findings.Add(Finding("EPUB.ARCHIVE_SAFETY", FindingSeverity.Warning, 0, "Archive safety preflight did not complete successfully."));
+            }
+            else if (!result.PackageParsed)
+            {
+                findings.Add(Finding("EPUB.PACKAGE", FindingSeverity.Warning, 0, "The EPUB package could not be parsed."));
+            }
+        }
 
         bool disqualified = findings.Any(finding => finding.Severity == FindingSeverity.Disqualifying);
-        QualityScore? score = disqualified ? null : new(Math.Clamp(findings.Sum(finding => finding.ScoreAdjustment), 0, 100));
+        AssessmentStatus status = disqualified
+            ? AssessmentStatus.Disqualified
+            : !inspectionComplete
+                ? AssessmentStatus.Unassessed
+                : AssessmentStatus.Completed;
+        QualityScore? score = status == AssessmentStatus.Completed
+            ? new(Math.Clamp(findings.Sum(finding => finding.ScoreAdjustment), 0, 100))
+            : null;
         EpubFeatureSummary summary = new(
             result.Opened,
             result.PackageParsed,
@@ -107,8 +142,11 @@ public sealed class EpubAssessmentEngine
             result.ReadableCharacterCount,
             result.EncryptionState,
             result.AnalysisTruncated);
-        return new(bookId, "EPUB", expectedRelativePath, fingerprint, disqualified ? AssessmentStatus.Disqualified : AssessmentStatus.Completed, score, AnalyzerVersion, ScoringModelVersion, summary, findings);
+        return new(bookId, "EPUB", expectedRelativePath, fingerprint, status, score, AnalyzerVersion, ScoringModelVersion, summary, findings);
     }
+
+    private static bool IsDefinitiveOpenFailure(EpubInspectionProblemCode code) => code is
+        EpubInspectionProblemCode.CannotOpen or EpubInspectionProblemCode.Unreadable;
 
     private static void AddBinary(List<AssessmentFinding> findings, string id, bool success, int positive, int negative, string positiveText, string negativeText, FindingSeverity negativeSeverity = FindingSeverity.Warning) =>
         findings.Add(success ? Finding(id, FindingSeverity.Positive, positive, positiveText) : Finding(id, negativeSeverity, negative, negativeText));

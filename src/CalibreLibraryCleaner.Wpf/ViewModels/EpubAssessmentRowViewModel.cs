@@ -15,7 +15,12 @@ public sealed class EpubAssessmentRowViewModel
         BookTitle = book?.Title ?? string.Empty;
         ExpectedRelativePath = assessment.ExpectedRelativePath;
         Status = assessment.Status.ToString();
-        Score = assessment.Score is null ? "Not scored — disqualified" : assessment.Score.Value.Value.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        Score = assessment.Status switch
+        {
+            AssessmentStatus.Unassessed => "Not scored — unassessed",
+            AssessmentStatus.Disqualified => "Not scored — disqualified",
+            _ => assessment.Score!.Value.Value.ToString(System.Globalization.CultureInfo.InvariantCulture),
+        };
         Opened = assessment.Features.Opened ? "Yes" : "No";
         PackageParsed = assessment.Features.PackageParsed ? "Yes" : "No";
         PackageVersion = assessment.Features.PackageVersion ?? "Unknown";

@@ -85,7 +85,8 @@ public sealed record EpubInspectionResult(
     int? TotalBrokenInternalReferences = null,
     int? TotalEmptyChapters = null,
     int? TotalRepeatedReferences = null,
-    int? TotalRemoteReferences = null)
+    int? TotalRemoteReferences = null,
+    IReadOnlyList<EpubInspectionProblem>? RecoverableProblems = null)
 {
     public static EpubInspectionResult Failed(
         CalibreBookId bookId,

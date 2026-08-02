@@ -87,6 +87,13 @@ public sealed record FormatAssessment
                 throw new ArgumentException("A disqualified assessment requires a disqualifier and no score.", nameof(status));
             }
         }
+        else if (status == AssessmentStatus.Unassessed)
+        {
+            if (hasDisqualifier || score is not null || orderedFindings.Any(finding => finding.ScoreAdjustment != 0))
+            {
+                throw new ArgumentException("An unassessed result requires zero-point non-disqualifying findings and no score.", nameof(status));
+            }
+        }
         else
         {
             int expectedScore = componentResults.Sum(component => component.Score);

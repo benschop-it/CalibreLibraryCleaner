@@ -787,7 +787,7 @@
               <DataGridTextColumn Width="140" Header="Scoring model" Binding="{Binding ScoringModelVersion}" />
             </DataGrid.Columns>
           </DataGrid>
-          <TextBlock Grid.Row="1" Margin="0,8,0,4" TextWrapping="Wrap" Text="{Binding EpubDisqualificationMessage}" FontWeight="Bold" AutomationProperties.Name="EPUB disqualification status" />
+          <TextBlock Grid.Row="1" Margin="0,8,0,4" TextWrapping="Wrap" Text="{Binding EpubAssessmentStatusMessage}" FontWeight="Bold" AutomationProperties.Name="EPUB assessment status" />
           <TextBlock Grid.Row="2" Margin="0,4,0,8" TextWrapping="Wrap" Text="{Binding SelectedEpubFeatureSummary}" AutomationProperties.Name="Selected EPUB bounded feature summary" />
           <Grid Grid.Row="3">
             <Grid.RowDefinitions>

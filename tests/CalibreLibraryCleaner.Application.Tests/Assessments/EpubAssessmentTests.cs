@@ -24,8 +24,8 @@ public sealed class EpubAssessmentTests
 
         assessment.Score!.Value.Value.Should().Be(100);
         assessment.Findings.Sum(finding => finding.ScoreAdjustment).Should().Be(100);
-        assessment.AnalyzerVersion.Value.Should().Be("epub-inspector/1.0.2");
-        assessment.ScoringModelVersion.Value.Should().Be("epub-quality/1.0.0");
+        assessment.AnalyzerVersion.Value.Should().Be("epub-inspector/1.0.3");
+        assessment.ScoringModelVersion.Value.Should().Be("epub-quality/1.0.2");
     }
 
     [Fact]
@@ -83,6 +83,25 @@ public sealed class EpubAssessmentTests
     }
 
     [Fact]
+    public void RecoverablePackageProblemRemainsScoredAsAWarning()
+    {
+        EpubInspectionResult result = Healthy(new CalibreBookId(1), "Book.epub") with
+        {
+            RecoverableProblems = [new(EpubInspectionProblemCode.PackageMalformed, "An EPUB manifest item has no content file path.")],
+        };
+
+        EpubAssessment assessment = new EpubAssessmentEngine().Assess(new CalibreBookId(1), "Book.epub", Fingerprint, result);
+
+        assessment.Status.Should().Be(AssessmentStatus.Completed);
+        assessment.Score.Should().NotBeNull();
+        assessment.Findings.Should().ContainSingle(finding =>
+            finding.RuleId == "EPUB.PACKAGE"
+            && finding.Severity == CalibreLibraryCleaner.Domain.Findings.FindingSeverity.Warning
+            && finding.ScoreAdjustment == 0
+            && finding.Explanation == "An EPUB manifest item has no content file path.");
+    }
+
+    [Fact]
     public void UnsafeArchiveAndOptionalTruncationAreRepresentedByFindings()
     {
         EpubAssessmentEngine engine = new();
@@ -96,9 +115,9 @@ public sealed class EpubAssessmentTests
         EpubAssessment unsafeAssessment = engine.Assess(new CalibreBookId(1), "Unsafe.epub", Fingerprint, unsafeResult);
         EpubAssessment truncatedAssessment = engine.Assess(new CalibreBookId(2), "Truncated.epub", Fingerprint, truncatedResult);
 
-        unsafeAssessment.Status.Should().Be(AssessmentStatus.Disqualified);
+        unsafeAssessment.Status.Should().Be(AssessmentStatus.Unassessed);
         unsafeAssessment.Score.Should().BeNull();
-        unsafeAssessment.Findings.Should().Contain(finding => finding.RuleId == "EPUB.ARCHIVE_SAFETY" && finding.Severity == CalibreLibraryCleaner.Domain.Findings.FindingSeverity.Disqualifying);
+        unsafeAssessment.Findings.Should().Contain(finding => finding.RuleId == "EPUB.ARCHIVE_SAFETY" && finding.Severity == CalibreLibraryCleaner.Domain.Findings.FindingSeverity.Warning);
         truncatedAssessment.Status.Should().Be(AssessmentStatus.Completed);
         truncatedAssessment.Findings.Should().Contain(finding => finding.RuleId == "EPUB.ANALYSIS.TRUNCATED" && finding.ScoreAdjustment == 0);
     }
@@ -122,14 +141,9 @@ public sealed class EpubAssessmentTests
     }
 
     [Theory]
-    [InlineData(EpubInspectionProblemCode.CannotOpen, "EPUB.OPEN")]
-    [InlineData(EpubInspectionProblemCode.Unreadable, "EPUB.OPEN")]
-    [InlineData(EpubInspectionProblemCode.UnsafeArchive, "EPUB.ARCHIVE_SAFETY")]
-    [InlineData(EpubInspectionProblemCode.PackageMalformed, "EPUB.PACKAGE")]
-    [InlineData(EpubInspectionProblemCode.Encrypted, "EPUB.ENCRYPTION")]
-    [InlineData(EpubInspectionProblemCode.ChangedDuringInspection, "EPUB.FILE_CHANGED")]
-    [InlineData(EpubInspectionProblemCode.Unsupported, "EPUB.UNSUPPORTED")]
-    public void InspectionProblemsDisqualifyWithoutNumericScore(EpubInspectionProblemCode code, string ruleId)
+    [InlineData(EpubInspectionProblemCode.CannotOpen)]
+    [InlineData(EpubInspectionProblemCode.Unreadable)]
+    public void DefinitiveOpenFailuresDisqualifyWithoutNumericScore(EpubInspectionProblemCode code)
     {
         EpubInspectionResult result = EpubInspectionResult.Failed(new CalibreBookId(1), "Book.epub", code, "Safe explanation");
 
@@ -138,8 +152,29 @@ public sealed class EpubAssessmentTests
         assessment.Status.Should().Be(AssessmentStatus.Disqualified);
         assessment.Score.Should().BeNull();
         assessment.Findings.Should().Contain(finding =>
-            finding.RuleId == ruleId
+            finding.RuleId == "EPUB.OPEN"
             && finding.Severity == CalibreLibraryCleaner.Domain.Findings.FindingSeverity.Disqualifying);
+    }
+
+    [Theory]
+    [InlineData(EpubInspectionProblemCode.UnsafeArchive, "EPUB.ARCHIVE_SAFETY")]
+    [InlineData(EpubInspectionProblemCode.PackageMalformed, "EPUB.PACKAGE")]
+    [InlineData(EpubInspectionProblemCode.Encrypted, "EPUB.ENCRYPTION")]
+    [InlineData(EpubInspectionProblemCode.ChangedDuringInspection, "EPUB.FILE_CHANGED")]
+    [InlineData(EpubInspectionProblemCode.Unsupported, "EPUB.UNSUPPORTED")]
+    [InlineData(EpubInspectionProblemCode.LimitExceeded, "EPUB.ARCHIVE_SAFETY")]
+    public void IncompleteTechnicalInspectionIsUnassessedWithoutDisqualification(EpubInspectionProblemCode code, string ruleId)
+    {
+        EpubInspectionResult result = EpubInspectionResult.Failed(new CalibreBookId(1), "Book.epub", code, "Safe explanation");
+
+        EpubAssessment assessment = new EpubAssessmentEngine().Assess(new CalibreBookId(1), "Book.epub", Fingerprint, result);
+
+        assessment.Status.Should().Be(AssessmentStatus.Unassessed);
+        assessment.Score.Should().BeNull();
+        assessment.Findings.Should().ContainSingle(finding =>
+            finding.RuleId == ruleId
+            && finding.Severity == CalibreLibraryCleaner.Domain.Findings.FindingSeverity.Warning);
+        assessment.Findings.Should().NotContain(finding => finding.Severity == CalibreLibraryCleaner.Domain.Findings.FindingSeverity.Disqualifying);
     }
 
     [Fact]

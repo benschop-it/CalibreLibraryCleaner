@@ -21,8 +21,8 @@ public sealed class EpubAssessmentRowViewModelTests
             null,
             AssessmentStatus.Completed,
             new QualityScore(50),
-            new AnalyzerVersion("epub-inspector/1.0.2"),
-            new ScoringModelVersion("epub-quality/1.0.0"),
+            new AnalyzerVersion("epub-inspector/1.0.3"),
+            new ScoringModelVersion("epub-quality/1.0.2"),
             new EpubFeatureSummary(true, true),
             [finding]);
         EpubAssessmentRowViewModel row = new(assessment, null);
@@ -36,5 +36,20 @@ public sealed class EpubAssessmentRowViewModelTests
 
         row.Findings.Should().ContainSingle();
         lazyFindings.IsValueCreated.Should().BeTrue();
+    }
+
+    [Fact]
+    public void UnassessedRowDoesNotCallTheBookDisqualified()
+    {
+        AssessmentFinding finding = new("EPUB.PACKAGE", FindingSeverity.Warning, 0, "Package could not be safely assessed.");
+        EpubAssessment assessment = new(
+            new CalibreBookId(1), "EPUB", "Book.epub", null, AssessmentStatus.Unassessed, null,
+            new AnalyzerVersion("epub-inspector/1.0.3"), new ScoringModelVersion("epub-quality/1.0.2"),
+            new EpubFeatureSummary(false, false), [finding]);
+
+        EpubAssessmentRowViewModel row = new(assessment, null);
+
+        row.Status.Should().Be("Unassessed");
+        row.Score.Should().Be("Not scored — unassessed");
     }
 }

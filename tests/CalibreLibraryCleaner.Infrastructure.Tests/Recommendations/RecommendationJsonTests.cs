@@ -26,7 +26,7 @@ public sealed class RecommendationJsonTests
         first.Should().Equal(second);
         first.Take(3).Should().NotEqual([0xEF, 0xBB, 0xBF]);
         string json = Encoding.UTF8.GetString(first);
-        json.Should().StartWith("{\n  \"schemaVersion\": \"recommendation-review/1.0\",\n  \"recommendationModelVersion\": \"consolidation-recommendation/1.0.2\"");
+        json.Should().StartWith("{\n  \"schemaVersion\": \"recommendation-review/1.0\",\n  \"recommendationModelVersion\": \"consolidation-recommendation/1.0.3\"");
         json.Should().Contain("\"metadataDecision\"").And.Contain("\"recordDecisions\"");
         json.Should().NotContain("C:\\secret\\library");
         json.Should().NotContain("cleanupPlan").And.NotContain("commandArguments").And.NotContain("removals");

@@ -9,7 +9,7 @@ public sealed class RecommendationReviewValueTests
     [Fact]
     public void VersionsConfidenceAndScoresRemainDifferentTypes()
     {
-        RecommendationModelVersion.V1.Value.Should().Be("consolidation-recommendation/1.0.2");
+        RecommendationModelVersion.V1.Value.Should().Be("consolidation-recommendation/1.0.3");
         Enum.GetNames<RecommendationConfidence>().Should().Contain(["ManualReviewRequired", "Unsupported"]);
         typeof(RecommendationConfidence).Should().NotBe<Domain.Assessments.QualityScore>();
     }
