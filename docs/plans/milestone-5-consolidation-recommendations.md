@@ -105,7 +105,7 @@ The implementation and tests were inspected before this plan was drafted.
 - `ExactBinaryDuplicateGroup` proves matching length and SHA-256 for managed file references. Its evidence is file-level and does not classify entire records.
 - `ExactMetadataDuplicateGroup` has a deterministic identity derived from normalized title and author set, ordered record IDs, and reason `EXACT_NORMALIZED_TITLE_AUTHOR_SET`. It remains a candidate grouping, not content or edition proof.
 - `FormatAssessment` records a canonical EPUB association, observed fingerprint, `Completed`, `Unassessed`, or `Disqualified` status, nullable score, analyzer version, scoring-model version, bounded features, and deterministically ordered findings.
-- Current EPUB analyzer/scoring versions are `epub-inspector/1.0.3` and `epub-quality/1.0.2`.
+- Current EPUB analyzer/scoring versions are `epub-inspector/1.0.4` and `epub-quality/1.0.3`.
 - `LibraryAnalysisOptions` bounds hashing and EPUB-assessment concurrency. There is no recommendation policy or progress phase.
 - WPF currently exposes Library, Exact file duplicates, Metadata candidates, and EPUB assessments tabs. Metadata candidates already have text filtering, previous/next navigation, original record context, and session-only defer state.
 - `MainWindowViewModel` builds presentation data off the dispatcher, publishes collections with a single reset, coalesces progress, retains the prior successful snapshot after failure/cancellation, and keeps Infrastructure references out of ViewModels.
@@ -144,7 +144,7 @@ Use immutable records/value objects, defensive collection copies, strongly typed
 
 ### Version and status values
 
-- `RecommendationModelVersion`: nonblank version value, initially `consolidation-recommendation/1.0.0`, advanced through `1.0.2` by completed-implementation remediations, and advanced to `consolidation-recommendation/1.0.3` for Unassessed EPUB candidate behavior. Any change to metadata ranking, edition blockers, EPUB threshold/decisive rules, format-selection behavior, record-disposition rules, confidence classification, or input identity requires a version bump.
+- `RecommendationModelVersion`: nonblank version value, initially `consolidation-recommendation/1.0.0`, advanced through `1.0.3` by completed-implementation remediations and Unassessed EPUB behavior, and advanced to `consolidation-recommendation/1.0.4` for capped fallback-readable candidates. Any change to metadata ranking, edition blockers, EPUB threshold/decisive rules, format-selection behavior, record-disposition rules, confidence classification, or input identity requires a version bump.
 - `RecommendationInputVersion`: a versioned, canonical structured identity of every relevant input. Equality, not scan time, determines staleness.
 - `RecommendationConfidence`: `Deterministic`, `High`, `Medium`, `Low`, `ManualReviewRequired`, `Unsupported`.
 - `RecommendationDecisionStrength`: `Safe`, `Strong`, `Ambiguous`, `Unsupported`. This applies to individual metadata, format, and record decisions and is not the overall confidence.
@@ -339,6 +339,7 @@ A conflict exists when two records have non-empty, valid, disjoint values for th
 - Missing, inaccessible, changed, or invalid-path files block redundant-record classification and lower confidence.
 - A disqualified EPUB is still an existing candidate. It can lose a supported quality comparison to a completed EPUB, but it is never evidence that the containing record as a whole is redundant.
 - An unassessed EPUB has no comparable score and cannot win or lose a quality comparison. Non-identical alternatives remain unresolved; a sole unassessed EPUB is retained with a manual-review warning.
+- A capped fallback-readable EPUB can be retained as a sole copy or selected among exact-binary equivalents, but any non-identical comparison involving it remains unresolved and requires manual review.
 
 ### Conservative cohort rule
 
@@ -419,7 +420,8 @@ Rules:
 6. Cover and embedded metadata findings can explain a result but cannot by themselves authorize a clearly-preferred non-identical EPUB.
 7. A score gap below 10, equal scores, different strengths across decisive rules, incompatible versions, stale assessments, or absent assessments produces an unresolved conflict and manual review.
 8. Equal/close EPUB alternatives are ordered by record ID/path for display only. The fallback never selects a winner.
-9. The reason exposes both scores, status, versions, score difference, and decisive rule IDs/explanations without asserting equal text or edition.
+9. The reason exposes scores, uncapped scores, ceilings, status, versions, score difference, and decisive rule IDs/explanations without asserting equal text or edition.
+10. Any non-identical comparison containing a capped assessment is unresolved regardless of numeric gap or decisive findings.
 
 ### Formats without a quality analyzer
 
@@ -589,7 +591,7 @@ Do not add interfaces for pure metadata/format/confidence helper functions. Keep
 Initial versions:
 
 - schema version: `recommendation-review/1.0`;
-- recommendation-model version: `consolidation-recommendation/1.0.3` (`1.0.2` was the second completed-implementation remediation; `1.0.3` adds Unassessed EPUB behavior).
+- recommendation-model version: `consolidation-recommendation/1.0.4` (`1.0.3` added Unassessed EPUB behavior; `1.0.4` adds capped fallback-readable comparison safeguards).
 
 The root contains properties in this fixed order:
 

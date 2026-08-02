@@ -10,6 +10,15 @@ public sealed record EpubAssessment
         {
             throw new ArgumentException("An EPUB assessment requires an EPUB result.", nameof(result));
         }
+        if (features.Coverage == EpubAssessmentCoverage.FallbackReadable
+            && (result.Status != AssessmentStatus.Completed || result.ScoreCap != 70))
+        {
+            throw new ArgumentException("A fallback-readable EPUB requires a completed assessment with a score ceiling of 70.", nameof(result));
+        }
+        if (features.Coverage != EpubAssessmentCoverage.FallbackReadable && result.ScoreCap is not null)
+        {
+            throw new ArgumentException("An EPUB score ceiling is valid only for fallback-readable coverage.", nameof(result));
+        }
 
         Result = result;
         Features = features;
@@ -25,7 +34,8 @@ public sealed record EpubAssessment
         AnalyzerVersion analyzerVersion,
         ScoringModelVersion scoringModelVersion,
         EpubFeatureSummary features,
-        IEnumerable<AssessmentFinding> findings)
+        IEnumerable<AssessmentFinding> findings,
+        int? scoreCap = null)
         : this(new FormatAssessment(
             calibreBookId,
             format,
@@ -35,7 +45,8 @@ public sealed record EpubAssessment
             score,
             analyzerVersion,
             scoringModelVersion,
-            findings), features)
+            findings,
+            scoreCap: scoreCap), features)
     {
     }
 
@@ -47,6 +58,8 @@ public sealed record EpubAssessment
     public Libraries.FormatFileFingerprint? ObservedFingerprint => Result.ObservedFingerprint;
     public AssessmentStatus Status => Result.Status;
     public QualityScore? Score => Result.Score;
+    public QualityScore? UncappedScore => Result.UncappedScore;
+    public int? ScoreCap => Result.ScoreCap;
     public AnalyzerVersion AnalyzerVersion => Result.AnalyzerVersion;
     public ScoringModelVersion ScoringModelVersion => Result.ScoringModelVersion;
     public IReadOnlyList<AssessmentFinding> Findings => Result.Findings;

@@ -241,7 +241,7 @@ Rules can emit multiple findings to preserve evidence, but only the explicitly s
 
 ### Scoring and status algorithm
 
-For scoring model `epub-quality/1.0.2`:
+For scoring model `epub-quality/1.0.3`:
 
 ```text
 orderedCandidates = order(rule findings by RuleId, EvidenceKey)
@@ -250,22 +250,27 @@ appliedFindings = apply each rule's positive/negative cap to orderedCandidates
 if appliedFindings contains FindingSeverity.Disqualifying:
     status = Disqualified
     score = null
-else if mandatory inspection did not complete:
-    status = Unassessed
-    score = null
-else:
+else if full inspection completed:
     status = Completed
     score = clamp(sum(appliedFindings.ScoreAdjustment), 0, 100)
+else if safe fallback inspection established local renderable content:
+    status = Completed
+    uncappedScore = clamp(sum(appliedFindings.ScoreAdjustment), 0, 100)
+    scoreCap = 70
+    score = min(uncappedScore, scoreCap)
+else:
+    status = Unassessed
+    score = null
 ```
 
 Every completed assessment includes the +50 baseline finding, so the numeric result is derived entirely from stored findings. Recomputing the sum and clamp must reproduce the stored `QualityScore`. An unassessed result contains only zero-point non-disqualifying evidence and renders `Not scored — unassessed`; it is not a zero score or a readability claim. A disqualifying finding overrides every contribution and renders `Not scored — disqualified` only for definitive open/read failure.
 
 Cap application uses normalized evidence ordering, not discovery or task completion order. Negative contributions are capped independently per rule. All suppressed repeated findings remain explainable and display an applied `0` adjustment plus the cap explanation. Positive rules are naturally capped at one success finding unless the table states otherwise.
 
-The initial versions are:
+The current versions are:
 
-- Analyzer: `epub-inspector/1.0.3` after the 2026-08-01 recoverable package-defect amendment (`1.0.2` added doctype compatibility).
-- Scoring model: `epub-quality/1.0.2` after incomplete technical inspections became Unassessed instead of Disqualified (`1.0.1` introduced recoverable package warnings).
+- Analyzer: `epub-inspector/1.0.4` after bounded safe-subset fallback-readable evidence was added (`1.0.3` added recoverable package defects).
+- Scoring model: `epub-quality/1.0.3` after fallback warning penalties and the explicit ceiling of 70 were added (`1.0.2` introduced Unassessed status).
 
 Changes to archive parsing, content extraction, reference resolution, image support, security limits, or dependency behavior that can change facts require a new analyzer version. Changes to baseline, weights, caps, thresholds, formula, rule applicability, or disqualification behavior require a new scoring-model version. Persisted or later cached assessments must key by file fingerprint plus both versions. The UI and future recommendation code must not compare or rank scores whose scoring-model versions differ without explicit migration/reassessment. Caching and cross-score ranking are not implemented in Milestone 4.
 
@@ -697,6 +702,7 @@ It deliberately excludes Milestone 5 and later functionality: no format recommen
 - [x] Permit ignored document type declarations while retaining no-resolution and no-entity-expansion safeguards; harden invalid IDN host evidence; record analyzer `epub-inspector/1.0.2`; and add HTML/NCX/no-network/entity/Unicode-host regressions.
 - [x] Continue scoring through skipped invalid manifest items and malformed optional navigation; omit unverified invalid managed paths from quality assessments; record analyzer `epub-inspector/1.0.3` and scoring model `epub-quality/1.0.1`.
 - [x] Add `Unassessed` for incomplete technical inspection, reserve EPUB disqualification for definitive open/read failures, and advance scoring model to `epub-quality/1.0.2`.
+- [x] Add safe-subset fallback-readable inspection, structured issue/facet evidence, warning penalties, and explicit score ceiling 70; advance analyzer to `epub-inspector/1.0.4` and scoring model to `epub-quality/1.0.3`.
 
 ## Final outcome
 

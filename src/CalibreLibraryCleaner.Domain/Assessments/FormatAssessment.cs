@@ -17,7 +17,8 @@ public sealed record FormatAssessment
         ScoringModelVersion scoringModelVersion,
         IEnumerable<AssessmentFinding> findings,
         IEnumerable<AssessmentScoreComponent>? scoreComponents = null,
-        FormatFileObservation? observedObservation = null)
+        FormatFileObservation? observedObservation = null,
+        int? scoreCap = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(format);
         string canonicalFormat = format.Trim().ToUpperInvariant();
@@ -38,6 +39,10 @@ public sealed record FormatAssessment
         ArgumentNullException.ThrowIfNull(analyzerVersion);
         ArgumentNullException.ThrowIfNull(scoringModelVersion);
         ArgumentNullException.ThrowIfNull(findings);
+        if (scoreCap is < 0 or > 100)
+        {
+            throw new ArgumentOutOfRangeException(nameof(scoreCap), "The score ceiling must be between 0 and 100.");
+        }
         if (observedFingerprint is not null && observedObservation is not null
             && observedFingerprint.SizeInBytes != observedObservation.Length)
         {
@@ -82,24 +87,25 @@ public sealed record FormatAssessment
         bool hasDisqualifier = orderedFindings.Any(finding => finding.Severity == FindingSeverity.Disqualifying);
         if (status == AssessmentStatus.Disqualified)
         {
-            if (!hasDisqualifier || score is not null)
+            if (!hasDisqualifier || score is not null || scoreCap is not null)
             {
-                throw new ArgumentException("A disqualified assessment requires a disqualifier and no score.", nameof(status));
+                throw new ArgumentException("A disqualified assessment requires a disqualifier and no score or ceiling.", nameof(status));
             }
         }
         else if (status == AssessmentStatus.Unassessed)
         {
-            if (hasDisqualifier || score is not null || orderedFindings.Any(finding => finding.ScoreAdjustment != 0))
+            if (hasDisqualifier || score is not null || scoreCap is not null || orderedFindings.Any(finding => finding.ScoreAdjustment != 0))
             {
-                throw new ArgumentException("An unassessed result requires zero-point non-disqualifying findings and no score.", nameof(status));
+                throw new ArgumentException("An unassessed result requires zero-point non-disqualifying findings and no score or ceiling.", nameof(status));
             }
         }
         else
         {
-            int expectedScore = componentResults.Sum(component => component.Score);
+            int uncappedScore = componentResults.Sum(component => component.Score);
+            int expectedScore = Math.Min(uncappedScore, scoreCap ?? 100);
             if (hasDisqualifier || score is null || score.Value.Value != expectedScore)
             {
-                throw new ArgumentException("A completed score must be derived entirely from its findings and components.", nameof(score));
+                throw new ArgumentException("A completed score must be derived from its findings, components, and optional ceiling.", nameof(score));
             }
         }
 
@@ -110,6 +116,10 @@ public sealed record FormatAssessment
         ObservedObservation = observedObservation;
         Status = status;
         Score = score;
+        UncappedScore = status == AssessmentStatus.Completed
+            ? new QualityScore(componentResults.Sum(component => component.Score))
+            : null;
+        ScoreCap = scoreCap;
         AnalyzerVersion = analyzerVersion;
         ScoringModelVersion = scoringModelVersion;
         Findings = new ReadOnlyCollection<AssessmentFinding>(orderedFindings);
@@ -123,6 +133,8 @@ public sealed record FormatAssessment
     public FormatFileObservation? ObservedObservation { get; }
     public AssessmentStatus Status { get; }
     public QualityScore? Score { get; }
+    public QualityScore? UncappedScore { get; }
+    public int? ScoreCap { get; }
     public AnalyzerVersion AnalyzerVersion { get; }
     public ScoringModelVersion ScoringModelVersion { get; }
     public IReadOnlyList<AssessmentFinding> Findings { get; }

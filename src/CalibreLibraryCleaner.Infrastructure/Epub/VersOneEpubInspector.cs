@@ -8,6 +8,7 @@ using System.Xml.Linq;
 using CalibreLibraryCleaner.Application.Abstractions;
 using CalibreLibraryCleaner.Application.Assessments;
 using CalibreLibraryCleaner.Application.Libraries;
+using CalibreLibraryCleaner.Domain.Assessments;
 using CalibreLibraryCleaner.Domain.Libraries;
 using HtmlAgilityPack;
 using Microsoft.Extensions.Logging;
@@ -56,11 +57,36 @@ internal sealed class VersOneEpubInspector(ILogger<VersOneEpubInspector> logger)
             }
             catch (InvalidDataException)
             {
+                EpubInspectionResult? fallback = await TryInspectFallbackAsync(
+                    request,
+                    new(
+                        EpubInspectionProblemCode.Unsupported,
+                        "The EPUB uses an entry that the primary parser does not support.",
+                        IssueCode: EpubInspectionIssueCode.UnsupportedParser),
+                    progress,
+                    cancellationToken).ConfigureAwait(false);
+                if (fallback is not null && fallback.Coverage == EpubAssessmentCoverage.FallbackReadable)
+                {
+                    EnsureCurrentFile(request);
+                    return fallback;
+                }
+
                 return Fail(request, EpubInspectionProblemCode.CannotOpen, "The EPUB ZIP container is invalid or unreadable.");
             }
 
             if (preflight.Problem is not null)
             {
+                EpubInspectionResult? fallback = await TryInspectFallbackAsync(
+                    request,
+                    preflight.Problem,
+                    progress,
+                    cancellationToken).ConfigureAwait(false);
+                if (fallback is not null)
+                {
+                    EnsureCurrentFile(request);
+                    return fallback;
+                }
+
                 return Fail(request, preflight.Problem.Code, preflight.Problem.Explanation);
             }
 
@@ -75,10 +101,31 @@ internal sealed class VersOneEpubInspector(ILogger<VersOneEpubInspector> logger)
                 catch (Exception exception) when (IsUnclassifiedParserFailure(exception))
                 {
                     InspectionFailed(logger, "UnsupportedParserFailure", null);
-                    return Fail(request, EpubInspectionProblemCode.Unsupported, "The EPUB parser could not safely interpret this package.");
+                    EpubInspectionResult? fallback = await TryInspectFallbackAsync(
+                        request,
+                        new(
+                            EpubInspectionProblemCode.Unsupported,
+                            "The EPUB parser could not safely interpret this package.",
+                            IssueCode: EpubInspectionIssueCode.UnsupportedParser),
+                        progress,
+                        cancellationToken).ConfigureAwait(false);
+                    return fallback ?? Fail(request, EpubInspectionProblemCode.Unsupported, "The EPUB parser could not safely interpret this package.");
                 }
             }
             EpubInspectionResult result = await ReadFactsAsync(request, preflight.RecoverableProblems, progress, cancellationToken).ConfigureAwait(false);
+            if (result.Problems.Count == 1)
+            {
+                EpubInspectionResult? fallback = await TryInspectFallbackAsync(
+                    request,
+                    result.Problems[0],
+                    progress,
+                    cancellationToken).ConfigureAwait(false);
+                if (fallback is not null)
+                {
+                    result = fallback;
+                }
+            }
+
             EnsureCurrentFile(request);
             return result;
         }
@@ -140,7 +187,8 @@ internal sealed class VersOneEpubInspector(ILogger<VersOneEpubInspector> logger)
         List<EpubInspectionProblem> recoverableProblems = [];
         await using FileStream file = OpenRead(request.FullPath);
         EnsureCurrentFile(request);
-        if (await ValidateCentralDirectoryAsync(file, request.Limits.MaximumArchiveEntries, token).ConfigureAwait(false))
+        CentralDirectoryInspection centralDirectory = await ValidateCentralDirectoryAsync(file, request.Limits.MaximumArchiveEntries, token).ConfigureAwait(false);
+        if (centralDirectory.Entries.Any(entry => entry.Encrypted))
         {
             return PreflightResult.Fail(EpubInspectionProblemCode.Encrypted, "Encrypted ZIP entries are not supported for EPUB inspection.");
         }
@@ -209,7 +257,10 @@ internal sealed class VersOneEpubInspector(ILogger<VersOneEpubInspector> logger)
 
         if (!entries.TryGetValue("META-INF/container.xml", out ZipArchiveEntry? containerEntry))
         {
-            return PreflightResult.Fail(EpubInspectionProblemCode.PackageMalformed, "The EPUB container document is missing.");
+            return PreflightResult.Fail(
+                EpubInspectionProblemCode.PackageMalformed,
+                "The EPUB container document is missing.",
+                EpubInspectionIssueCode.MissingContainer);
         }
 
         if (containerEntry.Length > request.Limits.MaximumXmlBytes)
@@ -224,14 +275,20 @@ internal sealed class VersOneEpubInspector(ILogger<VersOneEpubInspector> logger)
         }
         catch (XmlException)
         {
-            return PreflightResult.Fail(EpubInspectionProblemCode.PackageMalformed, "The EPUB container document is not valid XML.");
+            return PreflightResult.Fail(
+                EpubInspectionProblemCode.PackageMalformed,
+                "The EPUB container document is not valid XML.",
+                EpubInspectionIssueCode.MalformedContainer);
         }
 
         string? packageReference = container.Descendants().FirstOrDefault(element => element.Name.LocalName == "rootfile")?.Attribute("full-path")?.Value;
         if (!EpubArchivePathResolver.TryNormalizeEntryName(packageReference, out string packagePath)
             || !entries.TryGetValue(packagePath, out ZipArchiveEntry? packageEntry))
         {
-            return PreflightResult.Fail(EpubInspectionProblemCode.PackageMalformed, "The EPUB package document is missing or has an unsafe path.");
+            return PreflightResult.Fail(
+                EpubInspectionProblemCode.PackageMalformed,
+                "The EPUB package document is missing or has an unsafe path.",
+                EpubInspectionIssueCode.MissingPackage);
         }
 
         if (packageEntry.Length > request.Limits.MaximumXmlBytes)
@@ -246,7 +303,10 @@ internal sealed class VersOneEpubInspector(ILogger<VersOneEpubInspector> logger)
         }
         catch (XmlException)
         {
-            return PreflightResult.Fail(EpubInspectionProblemCode.PackageMalformed, "The EPUB package document is not valid XML.");
+            return PreflightResult.Fail(
+                EpubInspectionProblemCode.PackageMalformed,
+                "The EPUB package document is not valid XML.",
+                EpubInspectionIssueCode.MalformedPackage);
         }
 
         foreach (XElement item in package.Descendants().Where(element => element.Name.LocalName == "item"))
@@ -255,7 +315,7 @@ internal sealed class VersOneEpubInspector(ILogger<VersOneEpubInspector> logger)
             string? href = item.Attribute("href")?.Value;
             if (string.IsNullOrWhiteSpace(href))
             {
-                AddRecoverableProblem(recoverableProblems, EpubInspectionProblemCode.PackageMalformed, "An EPUB manifest item has no content file path.");
+                AddRecoverableProblem(recoverableProblems, EpubInspectionProblemCode.PackageMalformed, "An EPUB manifest item has no content file path.", EpubInspectionIssueCode.InvalidManifestItemPath);
                 continue;
             }
 
@@ -268,13 +328,16 @@ internal sealed class VersOneEpubInspector(ILogger<VersOneEpubInspector> logger)
             string contentFileName = contentPath[(contentPath.LastIndexOf('/') + 1)..];
             if (string.IsNullOrWhiteSpace(contentFileName) || contentFileName is "." or "..")
             {
-                AddRecoverableProblem(recoverableProblems, EpubInspectionProblemCode.PackageMalformed, "An EPUB manifest item has no content file name.");
+                AddRecoverableProblem(recoverableProblems, EpubInspectionProblemCode.PackageMalformed, "An EPUB manifest item has no content file name.", EpubInspectionIssueCode.InvalidManifestItemName);
                 continue;
             }
 
             if (!EpubArchivePathResolver.TryResolve(packagePath, href, out _))
             {
-                return PreflightResult.Fail(EpubInspectionProblemCode.UnsafeArchive, "An EPUB manifest item has an unsafe content path.");
+                return PreflightResult.Fail(
+                    EpubInspectionProblemCode.UnsafeArchive,
+                    "An EPUB manifest item has an unsafe content path.",
+                    EpubInspectionIssueCode.InvalidManifestItemPath);
             }
         }
 
@@ -305,7 +368,10 @@ internal sealed class VersOneEpubInspector(ILogger<VersOneEpubInspector> logger)
             token.ThrowIfCancellationRequested();
             if (!EpubArchivePathResolver.TryResolve(packagePath, eagerXmlReference, out string eagerXmlPath))
             {
-                return PreflightResult.Fail(EpubInspectionProblemCode.UnsafeArchive, "The EPUB navigation document has an unsafe path.");
+                return PreflightResult.Fail(
+                    EpubInspectionProblemCode.UnsafeArchive,
+                    "The EPUB navigation document has an unsafe path.",
+                    EpubInspectionIssueCode.MalformedNavigation);
             }
 
             if (!entries.TryGetValue(eagerXmlPath, out ZipArchiveEntry? eagerXmlEntry))
@@ -325,14 +391,14 @@ internal sealed class VersOneEpubInspector(ILogger<VersOneEpubInspector> logger)
             }
             catch (XmlException)
             {
-                AddRecoverableProblem(recoverableProblems, EpubInspectionProblemCode.PackageMalformed, "An EPUB navigation document is not valid XML.");
+                AddRecoverableProblem(recoverableProblems, EpubInspectionProblemCode.PackageMalformed, "An EPUB navigation document is not valid XML.", EpubInspectionIssueCode.MalformedNavigation);
                 continue;
             }
 
             if (ncxReferences.Contains(eagerXmlReference)
                 && !eagerXml.Descendants().Any(element => element.Name.LocalName == "navMap"))
             {
-                AddRecoverableProblem(recoverableProblems, EpubInspectionProblemCode.PackageMalformed, "The EPUB 2 NCX document does not contain a navMap element.");
+                AddRecoverableProblem(recoverableProblems, EpubInspectionProblemCode.PackageMalformed, "The EPUB 2 NCX document does not contain a navMap element.", EpubInspectionIssueCode.MissingNavigationMap);
             }
         }
 
@@ -350,20 +416,26 @@ internal sealed class VersOneEpubInspector(ILogger<VersOneEpubInspector> logger)
             }
             catch (XmlException)
             {
-                return PreflightResult.Fail(EpubInspectionProblemCode.PackageMalformed, "The EPUB encryption document is not valid XML.");
+                return PreflightResult.Fail(
+                    EpubInspectionProblemCode.PackageMalformed,
+                    "The EPUB encryption document is not valid XML.",
+                    allowsFallbackInspection: false);
             }
 
             string[] algorithms = EncryptionAlgorithms(encryption);
             if (algorithms.Length == 0 || !algorithms.All(IsRecognizedFontObfuscation))
             {
-                return PreflightResult.Fail(EpubInspectionProblemCode.Encrypted, "Unsupported encryption or DRM prevents comparable EPUB inspection.");
+                return PreflightResult.Fail(
+                    EpubInspectionProblemCode.Encrypted,
+                    "Unsupported encryption or DRM prevents comparable EPUB inspection.",
+                    allowsFallbackInspection: false);
             }
         }
 
         return new(entries.Keys.Order(StringComparer.Ordinal).ToArray(), null, recoverableProblems);
     }
 
-    private static async Task<bool> ValidateCentralDirectoryAsync(FileStream file, int maximumEntries, CancellationToken token)
+    private static async Task<CentralDirectoryInspection> ValidateCentralDirectoryAsync(FileStream file, int maximumEntries, CancellationToken token)
     {
         const int endRecordLength = 22;
         const int maximumCommentLength = ushort.MaxValue;
@@ -474,6 +546,7 @@ internal sealed class VersOneEpubInspector(ILogger<VersOneEpubInspector> logger)
 
         file.Position = checked((long)centralDirectoryOffset);
         byte[] header = new byte[46];
+        List<CentralDirectoryEntry> entries = [];
         for (ulong index = 0; index < resolvedTotalEntries; index++)
         {
             token.ThrowIfCancellationRequested();
@@ -484,6 +557,7 @@ internal sealed class VersOneEpubInspector(ILogger<VersOneEpubInspector> logger)
             }
 
             ushort flags = BinaryPrimitives.ReadUInt16LittleEndian(header.AsSpan(8));
+            ushort compressionMethod = BinaryPrimitives.ReadUInt16LittleEndian(header.AsSpan(10));
             ushort fileNameLength = BinaryPrimitives.ReadUInt16LittleEndian(header.AsSpan(28));
             ushort extraLength = BinaryPrimitives.ReadUInt16LittleEndian(header.AsSpan(30));
             ushort commentLength = BinaryPrimitives.ReadUInt16LittleEndian(header.AsSpan(32));
@@ -493,14 +567,497 @@ internal sealed class VersOneEpubInspector(ILogger<VersOneEpubInspector> logger)
                 throw new InvalidDataException("The ZIP central directory entry exceeds its declared bounds.");
             }
 
+            entries.Add(new((flags & 0x0001) != 0, compressionMethod));
             file.Position = nextHeader;
-            if ((flags & 0x0001) != 0)
+        }
+
+        return new(entries);
+    }
+
+    private static async Task<EpubInspectionResult?> TryInspectFallbackAsync(
+        EpubInspectionRequest request,
+        EpubInspectionProblem trigger,
+        IProgress<EpubInspectionProgress>? progress,
+        CancellationToken token)
+    {
+        if (!trigger.AllowsFallbackInspection
+            || trigger.Code is EpubInspectionProblemCode.CannotOpen
+            or EpubInspectionProblemCode.Unreadable
+            or EpubInspectionProblemCode.ChangedDuringInspection)
+        {
+            return null;
+        }
+
+        await using FileStream file = OpenRead(request.FullPath);
+        EnsureCurrentFile(request);
+        CentralDirectoryInspection centralDirectory;
+        try
+        {
+            centralDirectory = await ValidateCentralDirectoryAsync(file, request.Limits.MaximumArchiveEntries, token).ConfigureAwait(false);
+        }
+        catch (Exception exception) when (exception is InvalidDataException or InspectionLimitException or OverflowException)
+        {
+            return null;
+        }
+
+        file.Position = 0;
+        using CancellationCheckingStream guarded = new(file, token);
+        using ZipArchive archive = new(guarded, ZipArchiveMode.Read, leaveOpen: true);
+        System.Collections.ObjectModel.ReadOnlyCollection<ZipArchiveEntry> archiveEntries;
+        try
+        {
+            archiveEntries = archive.Entries;
+        }
+        catch (Exception exception) when (exception is InvalidDataException or ArgumentOutOfRangeException)
+        {
+            return null;
+        }
+
+        if (archiveEntries.Count != centralDirectory.Entries.Count
+            || archiveEntries.Count > request.Limits.MaximumArchiveEntries)
+        {
+            return null;
+        }
+
+        long totalLength = 0;
+        long totalCompressed = 0;
+        List<FallbackEntry> candidates = [];
+        List<EpubInspectionIssue> issues = [];
+        Dictionary<string, List<FallbackEntry>> normalizedGroups = new(StringComparer.Ordinal);
+        for (int index = 0; index < archiveEntries.Count; index++)
+        {
+            token.ThrowIfCancellationRequested();
+            ZipArchiveEntry entry = archiveEntries[index];
+            CentralDirectoryEntry centralEntry = centralDirectory.Entries[index];
+            long length = entry.Length;
+            long compressed = entry.CompressedLength;
+            if (length < 0 || compressed < 0)
             {
-                return true;
+                return null;
+            }
+
+            totalLength = checked(totalLength + length);
+            totalCompressed = checked(totalCompressed + compressed);
+            if (totalLength > request.Limits.MaximumDeclaredUncompressedBytes)
+            {
+                return null;
+            }
+
+            if (!EpubArchivePathResolver.TryNormalizeEntryName(entry.FullName, out string normalized))
+            {
+                issues.Add(new(EpubInspectionIssueCode.UnsafeEntry, "Archive"));
+                continue;
+            }
+
+            FallbackEntry fallbackEntry = new(normalized, entry, centralEntry);
+            if (!normalizedGroups.TryGetValue(normalized, out List<FallbackEntry>? group))
+            {
+                group = [];
+                normalizedGroups.Add(normalized, group);
+            }
+
+            group.Add(fallbackEntry);
+        }
+
+        if (totalLength > 10L * 1024 * 1024
+            && (totalCompressed == 0 || totalLength > checked(totalCompressed * request.Limits.MaximumAggregateCompressionRatio)))
+        {
+            return null;
+        }
+
+        foreach ((string normalized, List<FallbackEntry> group) in normalizedGroups.OrderBy(pair => pair.Key, StringComparer.Ordinal))
+        {
+            token.ThrowIfCancellationRequested();
+            if (group.Count > 1)
+            {
+                issues.Add(new(EpubInspectionIssueCode.DuplicateEntry, "Archive", normalized, observed: group.Count));
+                continue;
+            }
+
+            FallbackEntry item = group[0];
+            if (item.Central.Encrypted)
+            {
+                issues.Add(new(EpubInspectionIssueCode.EncryptedEntry, "Archive", item.Name));
+                continue;
+            }
+
+            if (item.Central.CompressionMethod is not 0 and not 8)
+            {
+                issues.Add(new(EpubInspectionIssueCode.UnsupportedEntry, "Archive", item.Name, observed: item.Central.CompressionMethod));
+                continue;
+            }
+
+            if (item.Entry.Length > request.Limits.MaximumEntryBytes)
+            {
+                issues.Add(new(EpubInspectionIssueCode.OversizedEntry, "Archive", item.Name, item.Entry.Length, request.Limits.MaximumEntryBytes));
+                continue;
+            }
+
+            if (item.Entry.Length > 1024L * 1024
+                && (item.Entry.CompressedLength == 0
+                    || item.Entry.Length > checked(item.Entry.CompressedLength * request.Limits.MaximumCompressionRatio)))
+            {
+                issues.Add(new(EpubInspectionIssueCode.SuspiciousEntry, "Archive", item.Name));
+                continue;
+            }
+
+            candidates.Add(item);
+        }
+
+        ReadBudget readBudget = new(request.Limits.MaximumDeclaredUncompressedBytes);
+        bool encryptionMetadataDeclared = normalizedGroups.ContainsKey("META-INF/encryption.xml");
+        FallbackEntry? encryptionMetadata = candidates.SingleOrDefault(candidate =>
+            string.Equals(candidate.Name, "META-INF/encryption.xml", StringComparison.Ordinal));
+        if (encryptionMetadataDeclared && encryptionMetadata is null)
+        {
+            return null;
+        }
+
+        if (encryptionMetadata is not null)
+        {
+            if (encryptionMetadata.Entry.Length > request.Limits.MaximumXmlBytes)
+            {
+                return null;
+            }
+
+            XDocument encryption;
+            try
+            {
+                encryption = await ReadXmlAsync(
+                    encryptionMetadata.Entry,
+                    request.Limits.MaximumXmlBytes,
+                    readBudget,
+                    token).ConfigureAwait(false);
+            }
+            catch (Exception exception) when (exception is XmlException or InvalidDataException or IOException)
+            {
+                return null;
+            }
+
+            XElement[] encryptedData = encryption.Descendants()
+                .Where(element => element.Name.LocalName == "EncryptedData")
+                .ToArray();
+            if (encryptedData.Length == 0)
+            {
+                return null;
+            }
+
+            HashSet<string> protectedNames = new(StringComparer.Ordinal);
+            foreach (XElement encryptedItem in encryptedData)
+            {
+                token.ThrowIfCancellationRequested();
+                string? reference = encryptedItem.Descendants()
+                    .FirstOrDefault(element => element.Name.LocalName == "CipherReference")?
+                    .Attributes()
+                    .FirstOrDefault(attribute => attribute.Name.LocalName == "URI")?
+                    .Value;
+                if (!TryNormalizeEncryptedReferences(reference, out string[] protectedReferences))
+                {
+                    return null;
+                }
+
+                protectedNames.UnionWith(protectedReferences);
+            }
+
+            foreach (string protectedName in protectedNames.Order(StringComparer.Ordinal))
+            {
+                if (candidates.RemoveAll(candidate => candidate.Name == protectedName) > 0)
+                {
+                    issues.Add(new(EpubInspectionIssueCode.EncryptedEntry, "Encryption", protectedName));
+                }
             }
         }
 
-        return false;
+        AddTriggerIssue(issues, trigger);
+        issues.Add(new(EpubInspectionIssueCode.UnknownReadingOrder, "Fallback"));
+        HashSet<string> acceptedNames = candidates.Select(candidate => candidate.Name).ToHashSet(StringComparer.Ordinal);
+        FallbackEntry[] contentCandidates = candidates
+            .Where(candidate => IsFallbackContentCandidate(candidate.Name))
+            .OrderBy(candidate => candidate.Name, StringComparer.Ordinal)
+            .ToArray();
+        int readableCharacters = 0;
+        int renderableCount = 0;
+        EpubRenderableEvidence renderableEvidence = EpubRenderableEvidence.None;
+        int inspectedCandidates = 0;
+        int inspectedLocalReferences = 0;
+        progress?.Report(new("Fallback", 0, contentCandidates.Length));
+        foreach (FallbackEntry candidate in contentCandidates)
+        {
+            token.ThrowIfCancellationRequested();
+            if (candidate.Entry.Length > request.Limits.MaximumChapterBytes)
+            {
+                issues.Add(new(
+                    EpubInspectionIssueCode.OversizedEntry,
+                    "Fallback",
+                    candidate.Name,
+                    candidate.Entry.Length,
+                    request.Limits.MaximumChapterBytes));
+                continue;
+            }
+
+            inspectedCandidates++;
+            progress?.Report(new("Fallback", inspectedCandidates, contentCandidates.Length));
+            string content;
+            try
+            {
+                content = await ReadTextAsync(candidate.Entry, request.Limits.MaximumChapterBytes, readBudget, token).ConfigureAwait(false);
+            }
+            catch (Exception exception) when (exception is InvalidDataException or IOException or NotSupportedException)
+            {
+                issues.Add(new(EpubInspectionIssueCode.UnsupportedEntry, "Fallback", candidate.Name));
+                continue;
+            }
+
+            HtmlDocument document;
+            try
+            {
+                document = LoadBoundedHtml(content, request.Limits, token);
+            }
+            catch (InspectionLimitException)
+            {
+                issues.Add(new(EpubInspectionIssueCode.SuspiciousEntry, "Fallback", candidate.Name));
+                continue;
+            }
+
+            foreach (HtmlNode node in document.DocumentNode.SelectNodes("//script|//style") ?? Enumerable.Empty<HtmlNode>())
+            {
+                node.Remove();
+            }
+
+            int characters = document.DocumentNode.InnerText.Count(char.IsLetterOrDigit);
+            LocalMediaInspection localMedia = InspectAcceptedLocalMediaReferences(
+                document,
+                candidate.Name,
+                acceptedNames,
+                request.Limits.MaximumLocalReferences,
+                ref inspectedLocalReferences,
+                token);
+            if (localMedia.LimitExceeded)
+            {
+                issues.Add(new(
+                    EpubInspectionIssueCode.PartialCoverage,
+                    "FallbackReferences",
+                    candidate.Name,
+                    observed: localMedia.InspectedCount,
+                    limit: request.Limits.MaximumLocalReferences));
+            }
+            bool renderableSvg = Path.GetExtension(candidate.Name).Equals(".svg", StringComparison.OrdinalIgnoreCase)
+                && document.DocumentNode.SelectSingleNode("//*[local-name()='svg']") is not null
+                && document.DocumentNode.SelectNodes("//*[local-name()='path' or local-name()='rect' or local-name()='circle' or local-name()='ellipse' or local-name()='line' or local-name()='polyline' or local-name()='polygon' or local-name()='image' or local-name()='text']")?.Count > 0;
+            if (characters == 0 && !localMedia.Found && !renderableSvg)
+            {
+                continue;
+            }
+
+            renderableCount++;
+            readableCharacters = checked(readableCharacters + characters);
+            if (readableCharacters > request.Limits.MaximumReadableCharacters)
+            {
+                return null;
+            }
+
+            if (characters > 0) renderableEvidence |= EpubRenderableEvidence.Text;
+            if (localMedia.Found) renderableEvidence |= EpubRenderableEvidence.LocalMediaReference;
+            if (renderableSvg) renderableEvidence |= EpubRenderableEvidence.Svg;
+        }
+
+        if (renderableCount == 0)
+        {
+            EpubInspectionIssue[] boundedIssues = BoundIssues(issues, request.Limits.MaximumEvidencePerRule);
+            return EpubInspectionResult.Failed(request.BookId, request.ExpectedRelativePath, trigger.Code, trigger.Explanation) with
+            {
+                Coverage = EpubAssessmentCoverage.Incomplete,
+                AvailableFacets = EpubAssessmentFacet.Archive,
+                Issues = boundedIssues,
+                FallbackCandidateCount = inspectedCandidates,
+            };
+        }
+
+        EnsureCurrentFile(request);
+        EpubInspectionIssue[] successfulIssues = BoundIssues(issues, request.Limits.MaximumEvidencePerRule);
+        return new(
+            request.BookId,
+            request.ExpectedRelativePath,
+            true,
+            true,
+            false,
+            null,
+            null,
+            [],
+            [],
+            [],
+            [],
+            false,
+            null,
+            null,
+            false,
+            0,
+            0,
+            renderableCount,
+            candidates.Count,
+            [],
+            [],
+            [],
+            [],
+            [],
+            readableCharacters,
+            centralDirectory.Entries.Any(entry => entry.Encrypted) ? "Encrypted ZIP entries skipped" : "ZIP entry encryption checked",
+            false,
+            [],
+            Coverage: EpubAssessmentCoverage.FallbackReadable,
+            AvailableFacets: EpubAssessmentFacet.Archive | EpubAssessmentFacet.Content,
+            Issues: successfulIssues,
+            FallbackCandidateCount: inspectedCandidates,
+            FallbackRenderableCount: renderableCount,
+            RenderableEvidence: renderableEvidence);
+    }
+
+    private static bool IsFallbackContentCandidate(string name)
+    {
+        string extension = Path.GetExtension(name);
+        return extension.Equals(".xhtml", StringComparison.OrdinalIgnoreCase)
+            || extension.Equals(".html", StringComparison.OrdinalIgnoreCase)
+            || extension.Equals(".htm", StringComparison.OrdinalIgnoreCase)
+            || extension.Equals(".svg", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static LocalMediaInspection InspectAcceptedLocalMediaReferences(
+        HtmlDocument document,
+        string baseFile,
+        HashSet<string> acceptedNames,
+        int maximumReferences,
+        ref int inspectedReferences,
+        CancellationToken token)
+    {
+        foreach (HtmlNode node in document.DocumentNode.SelectNodes("//*[@src or @poster or @data]") ?? Enumerable.Empty<HtmlNode>())
+        {
+            foreach (string attributeName in new[] { "src", "poster", "data" })
+            {
+                token.ThrowIfCancellationRequested();
+                string? reference = node.Attributes[attributeName]?.Value;
+                if (string.IsNullOrWhiteSpace(reference)
+                    || !IsRenderableMediaAttribute(node, attributeName))
+                {
+                    continue;
+                }
+
+                inspectedReferences++;
+                if (inspectedReferences > maximumReferences)
+                {
+                    return new(false, true, inspectedReferences);
+                }
+
+                if (!EpubArchivePathResolver.IsRemote(reference)
+                    && EpubArchivePathResolver.TryResolve(baseFile, reference, out string normalized)
+                    && acceptedNames.Contains(normalized)
+                    && IsAcceptedFallbackMedia(normalized))
+                {
+                    return new(true, false, inspectedReferences);
+                }
+            }
+        }
+
+        return new(false, false, inspectedReferences);
+    }
+
+    private static bool IsRenderableMediaAttribute(HtmlNode node, string attributeName) =>
+        attributeName.Equals("src", StringComparison.OrdinalIgnoreCase)
+            && (node.Name.Equals("img", StringComparison.OrdinalIgnoreCase)
+                || node.Name.Equals("audio", StringComparison.OrdinalIgnoreCase)
+                || node.Name.Equals("video", StringComparison.OrdinalIgnoreCase)
+                || node.Name.Equals("embed", StringComparison.OrdinalIgnoreCase)
+                || node.Name.Equals("input", StringComparison.OrdinalIgnoreCase)
+                    && node.GetAttributeValue("type", string.Empty).Equals("image", StringComparison.OrdinalIgnoreCase))
+        || attributeName.Equals("poster", StringComparison.OrdinalIgnoreCase)
+            && node.Name.Equals("video", StringComparison.OrdinalIgnoreCase)
+        || attributeName.Equals("data", StringComparison.OrdinalIgnoreCase)
+            && node.Name.Equals("object", StringComparison.OrdinalIgnoreCase);
+
+    private static bool IsAcceptedFallbackMedia(string name) => Path.GetExtension(name).ToLowerInvariant() is
+        ".avif" or ".bmp" or ".gif" or ".jpeg" or ".jpg" or ".png" or ".svg" or ".webp"
+        or ".aac" or ".m4a" or ".mp3" or ".oga" or ".ogg" or ".wav"
+        or ".m4v" or ".mp4" or ".ogv" or ".webm";
+
+    private static bool TryNormalizeEncryptedReferences(string? reference, out string[] normalized)
+    {
+        normalized = [];
+        if (string.IsNullOrWhiteSpace(reference) || EpubArchivePathResolver.IsRemote(reference))
+        {
+            return false;
+        }
+
+        string path = reference.Split('#', '?')[0];
+        HashSet<string> candidates = new(StringComparer.Ordinal);
+        if (TryNormalizeEncryptedPath(path, out string encoded))
+        {
+            candidates.Add(encoded);
+        }
+
+        try
+        {
+            string decodedPath = Uri.UnescapeDataString(path);
+            if (TryNormalizeEncryptedPath(decodedPath, out string decoded))
+            {
+                candidates.Add(decoded);
+            }
+        }
+        catch (UriFormatException)
+        {
+            return false;
+        }
+
+        normalized = candidates.Order(StringComparer.Ordinal).ToArray();
+        return normalized.Length > 0;
+    }
+
+    private static bool TryNormalizeEncryptedPath(string path, out string normalized) =>
+        EpubArchivePathResolver.TryNormalizeEntryName(path, out normalized)
+        || EpubArchivePathResolver.TryResolve("META-INF/encryption.xml", path, out normalized);
+
+    private static void AddTriggerIssue(List<EpubInspectionIssue> issues, EpubInspectionProblem trigger)
+    {
+        EpubInspectionIssueCode code = trigger.IssueCode ?? EpubInspectionIssueCode.PartialCoverage;
+        if (code == EpubInspectionIssueCode.PartialCoverage
+            && issues.Any(issue => issue.Code is not EpubInspectionIssueCode.UnknownReadingOrder and not EpubInspectionIssueCode.PartialCoverage))
+        {
+            return;
+        }
+
+        if (!issues.Any(issue => issue.Code == code))
+        {
+            issues.Add(new(code, "Preflight"));
+        }
+    }
+
+    private static EpubInspectionIssue[] BoundIssues(List<EpubInspectionIssue> issues, int maximum)
+    {
+        return issues
+            .GroupBy(issue => issue.Code)
+            .OrderBy(group => group.Key)
+            .SelectMany(group =>
+            {
+                EpubInspectionIssue[] ordered = group
+                    .OrderBy(issue => issue.Stage, StringComparer.Ordinal)
+                    .ThenBy(issue => issue.Item, StringComparer.Ordinal)
+                    .ToArray();
+                if (ordered.Length <= maximum)
+                {
+                    return ordered;
+                }
+
+                EpubInspectionIssue[] retained = ordered.Take(maximum).ToArray();
+                EpubInspectionIssue last = retained[^1];
+                retained[^1] = new(
+                    last.Code,
+                    last.Stage,
+                    last.Item,
+                    last.Observed,
+                    last.Limit,
+                    last.OmittedCount + ordered.Skip(maximum).Sum(issue => issue.OmittedCount + 1),
+                    last.ExceptionType);
+                return retained;
+            })
+            .ToArray();
     }
 
     private static async Task ValidateWithVersOneAsync(EpubInspectionRequest request, CancellationToken token)
@@ -769,7 +1326,7 @@ internal sealed class VersOneEpubInspector(ILogger<VersOneEpubInspector> logger)
         {
             XDocument encryption = await ReadXmlAsync(encryptionEntry, request.Limits.MaximumXmlBytes, readBudget, token).ConfigureAwait(false);
             string[] algorithms = EncryptionAlgorithms(encryption);
-            if (algorithms.Length == 0 || !algorithms.All(IsRecognizedFontObfuscation)) return Fail(request, EpubInspectionProblemCode.Encrypted, "Unsupported encryption or DRM prevents comparable EPUB inspection.");
+            if (algorithms.Length == 0 || !algorithms.All(IsRecognizedFontObfuscation)) return Fail(request, EpubInspectionProblemCode.Encrypted, "Unsupported encryption or DRM prevents comparable EPUB inspection.", allowsFallbackInspection: false);
             encryptionState = "Recognized font obfuscation";
         }
 
@@ -779,7 +1336,11 @@ internal sealed class VersOneEpubInspector(ILogger<VersOneEpubInspector> logger)
             missingSpine.OrderedItems(), broken.OrderedItems(), emptyChapters.OrderedItems(),
             repeated.OrderedItems(), remote.OrderedItems(), readable, encryptionState, optionalTruncations.TotalCount > 0, [], coverHeaderMalformed,
             optionalTruncations.OrderedItems(), missingSpine.TotalCount, broken.TotalCount, emptyChapters.TotalCount, repeated.TotalCount, remote.TotalCount,
-            recoverableProblems);
+            recoverableProblems,
+            Issues: recoverableProblems
+                .Where(problem => problem.IssueCode is not null)
+                .Select(problem => new EpubInspectionIssue(problem.IssueCode!.Value, "Preflight"))
+                .ToArray());
     }
 
     private static FileStream OpenRead(string path) => new(path, new FileStreamOptions
@@ -1101,11 +1662,15 @@ internal sealed class VersOneEpubInspector(ILogger<VersOneEpubInspector> logger)
     private static string NormalizeRequired(string value) => EpubArchivePathResolver.TryNormalizeEntryName(value, out string normalized) ? normalized : throw new InvalidDataException("Unsafe archive path.");
     private static string[] Values(XElement? metadata, string localName) => (metadata?.Descendants().Where(element => element.Name.LocalName == localName).Select(element => Bound(element.Value)).Where(value => value is not null).Select(value => value!).Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal).Take(100).ToArray()) ?? [];
     private static string? Bound(string? value) { string? result = string.IsNullOrWhiteSpace(value) ? null : value.Trim(); return result is null ? null : result[..Math.Min(result.Length, 512)]; }
-    private static void AddRecoverableProblem(List<EpubInspectionProblem> problems, EpubInspectionProblemCode code, string explanation)
+    private static void AddRecoverableProblem(
+        List<EpubInspectionProblem> problems,
+        EpubInspectionProblemCode code,
+        string explanation,
+        EpubInspectionIssueCode issueCode)
     {
-        if (!problems.Any(problem => problem.Code == code && string.Equals(problem.Explanation, explanation, StringComparison.Ordinal)))
+        if (!problems.Any(problem => problem.Code == code && problem.IssueCode == issueCode))
         {
-            problems.Add(new(code, explanation));
+            problems.Add(new(code, explanation, IssueCode: issueCode));
         }
     }
     private static void AddDuplicateOccurrence(
@@ -1159,15 +1724,37 @@ internal sealed class VersOneEpubInspector(ILogger<VersOneEpubInspector> logger)
             return Bound($"scheme:{scheme};host:invalid")!;
         }
     }
-    private static EpubInspectionResult Fail(EpubInspectionRequest request, EpubInspectionProblemCode code, string explanation) => EpubInspectionResult.Failed(request.BookId, request.ExpectedRelativePath, code, explanation);
+    private static EpubInspectionResult Fail(
+        EpubInspectionRequest request,
+        EpubInspectionProblemCode code,
+        string explanation,
+        bool allowsFallbackInspection = true) => EpubInspectionResult.Failed(
+            request.BookId,
+            request.ExpectedRelativePath,
+            code,
+            explanation) with
+        {
+            Problems = [new(code, explanation, AllowsFallbackInspection: allowsFallbackInspection)],
+        };
 
+    private sealed record CentralDirectoryEntry(bool Encrypted, ushort CompressionMethod);
+    private sealed record CentralDirectoryInspection(IReadOnlyList<CentralDirectoryEntry> Entries);
+    private sealed record FallbackEntry(string Name, ZipArchiveEntry Entry, CentralDirectoryEntry Central);
+    private readonly record struct LocalMediaInspection(bool Found, bool LimitExceeded, int InspectedCount);
     private sealed record ManifestItem(string Path, string MediaType, string Properties);
     private sealed record PreflightResult(
         IReadOnlyList<string> EntryNames,
         EpubInspectionProblem? Problem,
         IReadOnlyList<EpubInspectionProblem> RecoverableProblems)
     {
-        public static PreflightResult Fail(EpubInspectionProblemCode code, string explanation) => new([], new(code, explanation), []);
+        public static PreflightResult Fail(
+            EpubInspectionProblemCode code,
+            string explanation,
+            EpubInspectionIssueCode? issueCode = null,
+            bool allowsFallbackInspection = true) => new(
+                [],
+                new(code, explanation, IssueCode: issueCode, AllowsFallbackInspection: allowsFallbackInspection),
+                []);
     }
     private sealed class FileChangedException : Exception;
     private sealed class InspectionLimitException : Exception;

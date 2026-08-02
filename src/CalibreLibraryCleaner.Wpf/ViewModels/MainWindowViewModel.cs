@@ -398,6 +398,7 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
     {
         "Unassessed" => "Not scored — unassessed. The file may still open in Calibre; this analyzer could not safely produce comparable quality facts.",
         "Disqualified" => "Not scored — disqualified because the file could not be opened or read.",
+        _ when SelectedEpubAssessment?.Coverage == "FallbackReadable" => "Fallback-readable score. Safe local renderable content was found, but incomplete technical coverage limits the score to 70 and requires manual review for non-identical EPUB comparisons.",
         _ => string.Empty,
     };
 

@@ -174,6 +174,7 @@ internal static class LibrarySnapshotJsonSerializer
             AssessmentStatus status = document["status"]?.ToObject<AssessmentStatus>(serializer)
                 ?? throw new JsonSerializationException("The assessment status is required.");
             QualityScore? score = document["score"]?.ToObject<QualityScore?>(serializer);
+            int? scoreCap = document.Value<int?>("scoreCap");
             AnalyzerVersion analyzerVersion = document["analyzerVersion"]?.ToObject<AnalyzerVersion>(serializer)
                 ?? throw new JsonSerializationException("The analyzer version is required.");
             ScoringModelVersion scoringModelVersion = document["scoringModelVersion"]?.ToObject<ScoringModelVersion>(serializer)
@@ -193,7 +194,8 @@ internal static class LibrarySnapshotJsonSerializer
                 scoringModelVersion,
                 findings,
                 components,
-                observation);
+                observation,
+                scoreCap);
         }
 
         public override void WriteJson(
@@ -215,6 +217,7 @@ internal static class LibrarySnapshotJsonSerializer
                     : JToken.FromObject(value.ObservedObservation, serializer),
                 ["status"] = JToken.FromObject(value.Status, serializer),
                 ["score"] = value.Score is null ? JValue.CreateNull() : JToken.FromObject(value.Score, serializer),
+                ["scoreCap"] = value.ScoreCap is null ? JValue.CreateNull() : JToken.FromObject(value.ScoreCap, serializer),
                 ["analyzerVersion"] = JToken.FromObject(value.AnalyzerVersion, serializer),
                 ["scoringModelVersion"] = JToken.FromObject(value.ScoringModelVersion, serializer),
                 ["findings"] = JArray.FromObject(value.Findings, serializer),

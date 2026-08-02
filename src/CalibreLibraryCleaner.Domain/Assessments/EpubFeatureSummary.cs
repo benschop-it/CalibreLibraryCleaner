@@ -2,6 +2,38 @@ using System.Collections.ObjectModel;
 
 namespace CalibreLibraryCleaner.Domain.Assessments;
 
+public enum EpubAssessmentCoverage
+{
+    Full,
+    FallbackReadable,
+    Incomplete,
+}
+
+[Flags]
+public enum EpubAssessmentFacet
+{
+    None = 0,
+    Archive = 1 << 0,
+    Package = 1 << 1,
+    Metadata = 1 << 2,
+    Navigation = 1 << 3,
+    Spine = 1 << 4,
+    Cover = 1 << 5,
+    Content = 1 << 6,
+    References = 1 << 7,
+    Encryption = 1 << 8,
+    All = Archive | Package | Metadata | Navigation | Spine | Cover | Content | References | Encryption,
+}
+
+[Flags]
+public enum EpubRenderableEvidence
+{
+    None = 0,
+    Text = 1 << 0,
+    LocalMediaReference = 1 << 1,
+    Svg = 1 << 2,
+}
+
 public sealed record EpubFeatureSummary
 {
     public EpubFeatureSummary(
@@ -24,7 +56,12 @@ public sealed record EpubFeatureSummary
         int brokenReferenceCount = 0,
         int readableCharacterCount = 0,
         string encryptionState = "None",
-        bool analysisTruncated = false)
+        bool analysisTruncated = false,
+        EpubAssessmentCoverage coverage = EpubAssessmentCoverage.Full,
+        EpubAssessmentFacet availableFacets = EpubAssessmentFacet.All,
+        int fallbackCandidateCount = 0,
+        int fallbackRenderableCount = 0,
+        EpubRenderableEvidence renderableEvidence = EpubRenderableEvidence.None)
     {
         ArgumentOutOfRangeException.ThrowIfNegative(manifestItemCount);
         ArgumentOutOfRangeException.ThrowIfNegative(spineItemCount);
@@ -32,10 +69,31 @@ public sealed record EpubFeatureSummary
         ArgumentOutOfRangeException.ThrowIfNegative(localResourceCount);
         ArgumentOutOfRangeException.ThrowIfNegative(brokenReferenceCount);
         ArgumentOutOfRangeException.ThrowIfNegative(readableCharacterCount);
+        ArgumentOutOfRangeException.ThrowIfNegative(fallbackCandidateCount);
+        ArgumentOutOfRangeException.ThrowIfNegative(fallbackRenderableCount);
         ArgumentException.ThrowIfNullOrWhiteSpace(encryptionState);
         if ((coverWidth is null) != (coverHeight is null) || coverWidth <= 0 || coverHeight <= 0)
         {
             throw new ArgumentException("Cover dimensions must be absent or a positive width-height pair.", nameof(coverWidth));
+        }
+
+        if (fallbackRenderableCount > fallbackCandidateCount)
+        {
+            throw new ArgumentException("Renderable fallback candidates cannot exceed inspected candidates.", nameof(fallbackRenderableCount));
+        }
+
+        if (coverage == EpubAssessmentCoverage.FallbackReadable
+            && (fallbackRenderableCount == 0
+                || renderableEvidence == EpubRenderableEvidence.None
+                || !availableFacets.HasFlag(EpubAssessmentFacet.Content)))
+        {
+            throw new ArgumentException("Fallback-readable coverage requires established local renderable content.", nameof(coverage));
+        }
+
+        if (coverage != EpubAssessmentCoverage.FallbackReadable
+            && (fallbackCandidateCount != 0 || fallbackRenderableCount != 0 || renderableEvidence != EpubRenderableEvidence.None))
+        {
+            throw new ArgumentException("Fallback evidence is valid only for fallback-readable coverage.", nameof(coverage));
         }
 
         Opened = opened;
@@ -58,6 +116,11 @@ public sealed record EpubFeatureSummary
         ReadableCharacterCount = readableCharacterCount;
         EncryptionState = encryptionState;
         AnalysisTruncated = analysisTruncated;
+        Coverage = coverage;
+        AvailableFacets = availableFacets;
+        FallbackCandidateCount = fallbackCandidateCount;
+        FallbackRenderableCount = fallbackRenderableCount;
+        RenderableEvidence = renderableEvidence;
     }
 
     public bool Opened { get; }
@@ -80,6 +143,11 @@ public sealed record EpubFeatureSummary
     public int ReadableCharacterCount { get; }
     public string EncryptionState { get; }
     public bool AnalysisTruncated { get; }
+    public EpubAssessmentCoverage Coverage { get; }
+    public EpubAssessmentFacet AvailableFacets { get; }
+    public int FallbackCandidateCount { get; }
+    public int FallbackRenderableCount { get; }
+    public EpubRenderableEvidence RenderableEvidence { get; }
 
     private static string? Bound(string? value) => string.IsNullOrWhiteSpace(value) ? null : value.Trim()[..Math.Min(value.Trim().Length, 512)];
 

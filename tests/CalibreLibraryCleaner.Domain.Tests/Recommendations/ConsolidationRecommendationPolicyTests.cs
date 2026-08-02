@@ -154,6 +154,41 @@ public sealed class ConsolidationRecommendationPolicyTests
     }
 
     [Fact]
+    public void CappedEpubCandidateForcesManualReviewForNonIdenticalComparison()
+    {
+        CalibreBook first = Book(1, [Format("EPUB", 10, "01")]);
+        CalibreBook second = Book(2, [Format("EPUB", 20, "02")]);
+        EpubAssessment capped = Assessment(first, 70, 90, scoreCap: 70);
+        EpubAssessment competitor = Assessment(second, 50, 50);
+
+        ConsolidationRecommendation recommendation = Generate([first, second], [capped, competitor]);
+
+        recommendation.FormatSelections.Single().ResolutionStatus.Should().Be(FormatResolutionStatus.UnresolvedConflict);
+        recommendation.FormatSelections.Single().ProposedSource.Should().BeNull();
+        recommendation.Warnings.Should().Contain(value =>
+            value.Code == "EPUB.CAPPED_ASSESSMENT_REQUIRES_REVIEW"
+            && value.Evidence["record.1.scoreCap"] == "70"
+            && value.Evidence["record.1.uncappedScore"] == "90");
+        recommendation.Confidence.Should().Be(RecommendationConfidence.ManualReviewRequired);
+    }
+
+    [Fact]
+    public void CappedEpubCandidatesStillAllowExactBinarySelection()
+    {
+        FormatFileFingerprint fingerprint = Fingerprint(10, "ab");
+        CalibreBook first = Book(1, [Format("EPUB", fingerprint, "one.epub")], new(hasCover: true));
+        CalibreBook second = Book(2, [Format("EPUB", fingerprint, "two.epub")]);
+        EpubAssessment firstAssessment = Assessment(first, 70, 90, scoreCap: 70);
+        EpubAssessment secondAssessment = Assessment(second, 70, 90, scoreCap: 70);
+
+        ConsolidationRecommendation recommendation = Generate([second, first], [secondAssessment, firstAssessment]);
+
+        recommendation.FormatSelections.Single().ResolutionStatus.Should().Be(FormatResolutionStatus.Selected);
+        recommendation.Reasons.Should().Contain(value => value.Code == "FORMAT.EXACT_BINARY_EQUIVALENT");
+        recommendation.Warnings.Should().NotContain(value => value.Code == "EPUB.CAPPED_ASSESSMENT_REQUIRES_REVIEW");
+    }
+
+    [Fact]
     public void CompletedEpubIsPreferredOverDecisivelyDisqualifiedAlternative()
     {
         CalibreBook first = Book(1, [Format("EPUB", 10, "01")]);
@@ -201,6 +236,21 @@ public sealed class ConsolidationRecommendationPolicyTests
         FormatSourceSelection selection = recommendation.FormatSelections.Single(value => value.Format == "EPUB");
         selection.ProposedSource!.BookId.Should().Be(first.Id);
         recommendation.Warnings.Should().Contain(value => value.Code == "EPUB.ONLY_SOURCE_UNASSESSED");
+        recommendation.Confidence.Should().Be(RecommendationConfidence.ManualReviewRequired);
+    }
+
+    [Fact]
+    public void SoleCappedEpubIsRetainedWithManualReviewWarning()
+    {
+        CalibreBook first = Book(1, [Format("EPUB", 10, "01")]);
+        CalibreBook second = Book(2, [Format("PDF", 20, "02")]);
+        EpubAssessment capped = Assessment(first, 70, 90, scoreCap: 70);
+
+        ConsolidationRecommendation recommendation = Generate([first, second], [capped]);
+
+        FormatSourceSelection selection = recommendation.FormatSelections.Single(value => value.Format == "EPUB");
+        selection.ProposedSource!.BookId.Should().Be(first.Id);
+        recommendation.Warnings.Should().Contain(value => value.Code == "EPUB.ONLY_SOURCE_CAPPED");
         recommendation.Confidence.Should().Be(RecommendationConfidence.ManualReviewRequired);
     }
 
@@ -472,7 +522,12 @@ public sealed class ConsolidationRecommendationPolicyTests
         [],
         $"Author/Book ({id})");
 
-    private static EpubAssessment Assessment(CalibreBook book, int score, int decisiveAdjustment, string ruleId = "EPUB.NAVIGATION")
+    private static EpubAssessment Assessment(
+        CalibreBook book,
+        int score,
+        int decisiveAdjustment,
+        string ruleId = "EPUB.NAVIGATION",
+        int? scoreCap = null)
     {
         BookFormat format = book.Formats.Single();
         return new(
@@ -484,7 +539,17 @@ public sealed class ConsolidationRecommendationPolicyTests
             new QualityScore(score),
             new("epub-inspector/1.0.3"),
             new("epub-quality/1.0.2"),
-            new(true, true),
-            [new AssessmentFinding(ruleId, FindingSeverity.Positive, decisiveAdjustment, "Synthetic assessment evidence.")]);
+            scoreCap is null
+                ? new(true, true)
+                : new(
+                    true,
+                    false,
+                    coverage: EpubAssessmentCoverage.FallbackReadable,
+                    availableFacets: EpubAssessmentFacet.Archive | EpubAssessmentFacet.Content,
+                    fallbackCandidateCount: 1,
+                    fallbackRenderableCount: 1,
+                    renderableEvidence: EpubRenderableEvidence.Text),
+            [new AssessmentFinding(ruleId, FindingSeverity.Positive, decisiveAdjustment, "Synthetic assessment evidence.")],
+            scoreCap);
     }
 }

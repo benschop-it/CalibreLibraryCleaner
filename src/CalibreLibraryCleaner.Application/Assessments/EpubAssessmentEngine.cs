@@ -8,8 +8,8 @@ public sealed class EpubAssessmentEngine
 {
     private readonly int _baseline = 50;
 
-    public static AnalyzerVersion AnalyzerVersion { get; } = new("epub-inspector/1.0.3");
-    public static ScoringModelVersion ScoringModelVersion { get; } = new("epub-quality/1.0.2");
+    public static AnalyzerVersion AnalyzerVersion { get; } = new("epub-inspector/1.0.4");
+    public static ScoringModelVersion ScoringModelVersion { get; } = new("epub-quality/1.0.3");
 
     public EpubAssessment Assess(
         CalibreBookId bookId,
@@ -42,50 +42,104 @@ public sealed class EpubAssessmentEngine
             findings.Add(Finding(ProblemRule(problem.Code), FindingSeverity.Warning, 0, problem.Explanation, problem.Evidence));
         }
 
-        bool inspectionComplete = result.Problems.Count == 0 && result.Opened && result.ArchiveSafe && result.PackageParsed;
-        if (inspectionComplete)
+        bool fullyAssessed = result.Coverage == EpubAssessmentCoverage.Full
+            && result.Problems.Count == 0
+            && result.Opened
+            && result.ArchiveSafe
+            && result.PackageParsed;
+        bool fallbackReadable = result.Coverage == EpubAssessmentCoverage.FallbackReadable
+            && result.Problems.Count == 0
+            && result.Opened
+            && result.FallbackRenderableCount > 0
+            && result.RenderableEvidence != EpubRenderableEvidence.None;
+        bool scoreEligible = fullyAssessed || fallbackReadable;
+        if (scoreEligible)
         {
             findings.Add(Finding("EPUB.SCORE.BASELINE", FindingSeverity.Positive, _baseline, "Visible scoring baseline."));
             AddBinary(findings, "EPUB.OPEN", result.Opened, 4, -0, "The EPUB container opened successfully.", "The EPUB container could not be opened.", FindingSeverity.Disqualifying);
-            AddBinary(findings, "EPUB.ARCHIVE_SAFETY", result.ArchiveSafe, 0, 0, "Archive safety preflight completed within configured limits.", "Archive safety preflight did not complete successfully.", FindingSeverity.Disqualifying);
-            AddBinary(findings, "EPUB.PACKAGE", result.PackageParsed, 4, 0, "The EPUB package parsed successfully.", "The EPUB package could not be parsed.", FindingSeverity.Disqualifying);
-            AddBinary(findings, "EPUB.METADATA.TITLE", !string.IsNullOrWhiteSpace(result.EmbeddedTitle), 3, -4, "Embedded title is present.", "Embedded title is missing.");
-            AddBinary(findings, "EPUB.METADATA.AUTHOR", result.Authors.Count > 0, 3, -4, "Embedded author metadata is present.", "Embedded author metadata is missing.");
-            AddBinary(findings, "EPUB.METADATA.LANGUAGE", result.Languages.Count > 0, 2, -2, "Embedded language metadata is present.", "Embedded language metadata is missing.");
-            bool hasDate = result.Dates.Any(value => DateTimeOffset.TryParse(
-                value,
-                System.Globalization.CultureInfo.InvariantCulture,
-                System.Globalization.DateTimeStyles.AllowWhiteSpaces,
-                out _));
-            findings.Add(hasDate
-                ? Finding("EPUB.METADATA.DATE", FindingSeverity.Positive, 1, "A parseable embedded publication date is present.")
-                : Finding("EPUB.METADATA.DATE", result.Dates.Count == 0 ? FindingSeverity.Information : FindingSeverity.Warning, result.Dates.Count == 0 ? 0 : -1, result.Dates.Count == 0 ? "No embedded publication date is declared." : "The declared publication date is malformed."));
-            AddBinary(findings, "EPUB.METADATA.STRONG_IDENTIFIER", result.StrongIdentifiers.Any(IsValidIsbn), 1, 0, "A valid embedded ISBN is present.", "No valid embedded ISBN is present.", FindingSeverity.Information);
-            AddBinary(findings, "EPUB.COVER.PRESENT", result.CoverPresent, 4, -6, "A local cover resource is present.", "A usable local cover resource is missing.");
-            bool dimensionsKnown = result.CoverWidth is not null && result.CoverHeight is not null;
-            bool usefulCover = dimensionsKnown && Math.Min(result.CoverWidth!.Value, result.CoverHeight!.Value) >= 600 && Math.Max(result.CoverWidth.Value, result.CoverHeight.Value) >= 800;
-            findings.Add(!dimensionsKnown
-                ? result.CoverHeaderMalformed
-                    ? Finding("EPUB.COVER.DIMENSIONS", FindingSeverity.Warning, -2, "The declared cover has a malformed supported image header.")
-                    : Finding("EPUB.COVER.DIMENSIONS", FindingSeverity.Information, 0, "Cover dimensions could not be safely determined.")
-                : usefulCover
-                    ? Finding("EPUB.COVER.DIMENSIONS", FindingSeverity.Positive, 2, "Cover dimensions meet the V1 usefulness threshold.")
-                    : Finding("EPUB.COVER.DIMENSIONS", FindingSeverity.Warning, -3, "Cover dimensions are below the V1 usefulness threshold."));
-            AddBinary(findings, "EPUB.NAVIGATION", result.NavigationPresent, 4, -6, "A usable navigation document is present.", "A usable navigation document is missing.");
-            AddBinary(findings, "EPUB.SPINE.NON_EMPTY", result.SpineItemCount > 0, 5, -20, "The reading spine is non-empty.", "The reading spine is empty.", FindingSeverity.Error);
-            AddRepeated(findings, "EPUB.SPINE.RESOURCE_EXISTS", result.MissingSpineResources, result.TotalMissingSpineResources, 4, -5, -20, "All spine resources resolve locally.", "A spine resource is missing.");
-            AddRepeated(findings, "EPUB.RESOURCE.INTERNAL_EXISTS", result.BrokenInternalReferences, result.TotalBrokenInternalReferences, 4, -2, -10, "All inspected internal references resolve locally.", "An internal resource reference is broken.");
-            foreach (string remoteReference in result.RemoteReferences.Order(StringComparer.Ordinal).Take(100))
+            AddFacetBinary(findings, result, EpubAssessmentFacet.Archive, "EPUB.ARCHIVE_SAFETY", result.ArchiveSafe, 0, 0, "Archive safety preflight completed within configured limits.", "Archive safety preflight did not complete successfully.");
+            AddFacetBinary(findings, result, EpubAssessmentFacet.Package, "EPUB.PACKAGE", result.PackageParsed, 4, 0, "The EPUB package parsed successfully.", "The EPUB package could not be parsed.");
+
+            if (HasFacet(result, EpubAssessmentFacet.Metadata))
             {
-                findings.Add(Finding("EPUB.RESOURCE.REMOTE_REFERENCE", FindingSeverity.Information, 0, "An external content reference was recorded but never fetched.", remoteReference));
+                AddBinary(findings, "EPUB.METADATA.TITLE", !string.IsNullOrWhiteSpace(result.EmbeddedTitle), 3, -4, "Embedded title is present.", "Embedded title is missing.");
+                AddBinary(findings, "EPUB.METADATA.AUTHOR", result.Authors.Count > 0, 3, -4, "Embedded author metadata is present.", "Embedded author metadata is missing.");
+                AddBinary(findings, "EPUB.METADATA.LANGUAGE", result.Languages.Count > 0, 2, -2, "Embedded language metadata is present.", "Embedded language metadata is missing.");
+                bool hasDate = result.Dates.Any(value => DateTimeOffset.TryParse(
+                    value,
+                    System.Globalization.CultureInfo.InvariantCulture,
+                    System.Globalization.DateTimeStyles.AllowWhiteSpaces,
+                    out _));
+                findings.Add(hasDate
+                    ? Finding("EPUB.METADATA.DATE", FindingSeverity.Positive, 1, "A parseable embedded publication date is present.")
+                    : Finding("EPUB.METADATA.DATE", result.Dates.Count == 0 ? FindingSeverity.Information : FindingSeverity.Warning, result.Dates.Count == 0 ? 0 : -1, result.Dates.Count == 0 ? "No embedded publication date is declared." : "The declared publication date is malformed."));
+                AddBinary(findings, "EPUB.METADATA.STRONG_IDENTIFIER", result.StrongIdentifiers.Any(IsValidIsbn), 1, 0, "A valid embedded ISBN is present.", "No valid embedded ISBN is present.", FindingSeverity.Information);
             }
-            AddOmittedEvidence(findings, "EPUB.RESOURCE.REMOTE_REFERENCE", result.RemoteReferences.Count, result.TotalRemoteReferences);
-            findings.Add(result.ReadableCharacterCount >= 5_000
-                ? Finding("EPUB.TEXT.SUBSTANTIAL", FindingSeverity.Positive, 5, "Substantial readable text is present.")
-                : Finding("EPUB.TEXT.SUBSTANTIAL", FindingSeverity.Error, result.ReadableCharacterCount >= 500 ? -8 : -15, result.ReadableCharacterCount >= 500 ? "Readable text is limited." : "Readable text is suspiciously small."));
-            AddRepeated(findings, "EPUB.CHAPTER.EMPTY", result.EmptyChapters, result.TotalEmptyChapters, 2, -2, -10, "No content chapter is empty or near-empty.", "A content chapter is empty or near-empty.");
-            AddRepeated(findings, "EPUB.STRUCTURE.REPEATED_REFERENCE", result.RepeatedReferences, result.TotalRepeatedReferences, 2, -4, -12, "No repeated chapter/reference structure was detected.", "A repeated chapter/reference target was detected.");
-            findings.Add(Finding("EPUB.ENCRYPTION", FindingSeverity.Information, 0, result.EncryptionState == "None" ? "No blocking encryption was detected." : $"Encryption state: {result.EncryptionState}."));
+            else
+            {
+                findings.Add(Finding("EPUB.METADATA.UNASSESSED", FindingSeverity.Information, 0, "Embedded metadata was not available to fallback inspection."));
+            }
+
+            if (HasFacet(result, EpubAssessmentFacet.Cover))
+            {
+                AddBinary(findings, "EPUB.COVER.PRESENT", result.CoverPresent, 4, -6, "A local cover resource is present.", "A usable local cover resource is missing.");
+                bool dimensionsKnown = result.CoverWidth is not null && result.CoverHeight is not null;
+                bool usefulCover = dimensionsKnown && Math.Min(result.CoverWidth!.Value, result.CoverHeight!.Value) >= 600 && Math.Max(result.CoverWidth.Value, result.CoverHeight.Value) >= 800;
+                findings.Add(!dimensionsKnown
+                    ? result.CoverHeaderMalformed
+                        ? Finding("EPUB.COVER.DIMENSIONS", FindingSeverity.Warning, -2, "The declared cover has a malformed supported image header.")
+                        : Finding("EPUB.COVER.DIMENSIONS", FindingSeverity.Information, 0, "Cover dimensions could not be safely determined.")
+                    : usefulCover
+                        ? Finding("EPUB.COVER.DIMENSIONS", FindingSeverity.Positive, 2, "Cover dimensions meet the V1 usefulness threshold.")
+                        : Finding("EPUB.COVER.DIMENSIONS", FindingSeverity.Warning, -3, "Cover dimensions are below the V1 usefulness threshold."));
+            }
+            else
+            {
+                findings.Add(Finding("EPUB.COVER.UNASSESSED", FindingSeverity.Information, 0, "Cover quality was not available to fallback inspection."));
+            }
+
+            AddFacetBinary(findings, result, EpubAssessmentFacet.Navigation, "EPUB.NAVIGATION", result.NavigationPresent, 4, -6, "A usable navigation document is present.", "A usable navigation document is missing.");
+            if (HasFacet(result, EpubAssessmentFacet.Spine))
+            {
+                AddBinary(findings, "EPUB.SPINE.NON_EMPTY", result.SpineItemCount > 0, 5, -20, "The reading spine is non-empty.", "The reading spine is empty.", FindingSeverity.Error);
+                AddRepeated(findings, "EPUB.SPINE.RESOURCE_EXISTS", result.MissingSpineResources, result.TotalMissingSpineResources, 4, -5, -20, "All spine resources resolve locally.", "A spine resource is missing.");
+            }
+            else
+            {
+                findings.Add(Finding("EPUB.SPINE.UNASSESSED", FindingSeverity.Information, 0, "Reading-order spine facts were not available to fallback inspection."));
+            }
+
+            if (HasFacet(result, EpubAssessmentFacet.References))
+            {
+                AddRepeated(findings, "EPUB.RESOURCE.INTERNAL_EXISTS", result.BrokenInternalReferences, result.TotalBrokenInternalReferences, 4, -2, -10, "All inspected internal references resolve locally.", "An internal resource reference is broken.");
+                foreach (string remoteReference in result.RemoteReferences.Order(StringComparer.Ordinal).Take(100))
+                {
+                    findings.Add(Finding("EPUB.RESOURCE.REMOTE_REFERENCE", FindingSeverity.Information, 0, "An external content reference was recorded but never fetched.", remoteReference));
+                }
+                AddOmittedEvidence(findings, "EPUB.RESOURCE.REMOTE_REFERENCE", result.RemoteReferences.Count, result.TotalRemoteReferences);
+            }
+
+            if (HasFacet(result, EpubAssessmentFacet.Content))
+            {
+                findings.Add(result.ReadableCharacterCount >= 5_000
+                    ? Finding("EPUB.TEXT.SUBSTANTIAL", FindingSeverity.Positive, 5, "Substantial readable text is present.")
+                    : Finding("EPUB.TEXT.SUBSTANTIAL", FindingSeverity.Error, result.ReadableCharacterCount >= 500 ? -8 : -15, result.ReadableCharacterCount >= 500 ? "Readable text is limited." : "Readable text is suspiciously small."));
+                if (HasFacet(result, EpubAssessmentFacet.Spine))
+                {
+                    AddRepeated(findings, "EPUB.CHAPTER.EMPTY", result.EmptyChapters, result.TotalEmptyChapters, 2, -2, -10, "No content chapter is empty or near-empty.", "A content chapter is empty or near-empty.");
+                    AddRepeated(findings, "EPUB.STRUCTURE.REPEATED_REFERENCE", result.RepeatedReferences, result.TotalRepeatedReferences, 2, -4, -12, "No repeated chapter/reference structure was detected.", "A repeated chapter/reference target was detected.");
+                }
+            }
+
+            if (HasFacet(result, EpubAssessmentFacet.Encryption))
+            {
+                findings.Add(Finding("EPUB.ENCRYPTION", FindingSeverity.Information, 0, result.EncryptionState == "None" ? "No blocking encryption was detected." : $"Encryption state: {result.EncryptionState}."));
+            }
+
+            if (fallbackReadable)
+            {
+                AddIssueFindings(findings, result.Issues ?? []);
+            }
             foreach (string truncation in (result.OptionalTruncations ?? []).Order(StringComparer.Ordinal).Take(100))
             {
                 findings.Add(Finding("EPUB.ANALYSIS.TRUNCATED", FindingSeverity.Error, 0, "Optional EPUB analysis stopped at a configured safety limit.", truncation));
@@ -115,11 +169,21 @@ public sealed class EpubAssessmentEngine
         bool disqualified = findings.Any(finding => finding.Severity == FindingSeverity.Disqualifying);
         AssessmentStatus status = disqualified
             ? AssessmentStatus.Disqualified
-            : !inspectionComplete
+            : !scoreEligible
                 ? AssessmentStatus.Unassessed
                 : AssessmentStatus.Completed;
+        int? scoreCap = fallbackReadable ? 70 : null;
+        int uncappedScore = Math.Clamp(findings.Sum(finding => finding.ScoreAdjustment), 0, 100);
+        if (fallbackReadable)
+        {
+            findings.Add(Finding(
+                "EPUB.SCORE.FALLBACK_CAP",
+                FindingSeverity.Information,
+                0,
+                $"Fallback-readable assessment score is limited to {scoreCap}; the warning-adjusted uncapped score is {uncappedScore}."));
+        }
         QualityScore? score = status == AssessmentStatus.Completed
-            ? new(Math.Clamp(findings.Sum(finding => finding.ScoreAdjustment), 0, 100))
+            ? new(Math.Min(uncappedScore, scoreCap ?? 100))
             : null;
         EpubFeatureSummary summary = new(
             result.Opened,
@@ -141,8 +205,101 @@ public sealed class EpubAssessmentEngine
             result.TotalBrokenInternalReferences ?? result.BrokenInternalReferences.Count,
             result.ReadableCharacterCount,
             result.EncryptionState,
-            result.AnalysisTruncated);
-        return new(bookId, "EPUB", expectedRelativePath, fingerprint, status, score, AnalyzerVersion, ScoringModelVersion, summary, findings);
+            result.AnalysisTruncated,
+            result.Coverage,
+            result.AvailableFacets,
+            result.FallbackCandidateCount,
+            result.FallbackRenderableCount,
+            result.RenderableEvidence);
+        return new(bookId, "EPUB", expectedRelativePath, fingerprint, status, score, AnalyzerVersion, ScoringModelVersion, summary, findings, scoreCap);
+    }
+
+    private static bool HasFacet(EpubInspectionResult result, EpubAssessmentFacet facet) =>
+        result.AvailableFacets.HasFlag(facet);
+
+    private static void AddFacetBinary(
+        List<AssessmentFinding> findings,
+        EpubInspectionResult result,
+        EpubAssessmentFacet facet,
+        string id,
+        bool success,
+        int positive,
+        int negative,
+        string positiveText,
+        string negativeText)
+    {
+        if (HasFacet(result, facet))
+        {
+            AddBinary(findings, id, success, positive, negative, positiveText, negativeText);
+        }
+        else
+        {
+            findings.Add(Finding(id + ".UNASSESSED", FindingSeverity.Information, 0, $"{facet} facts were not available to fallback inspection."));
+        }
+    }
+
+    private static void AddIssueFindings(List<AssessmentFinding> findings, IReadOnlyList<EpubInspectionIssue> issues)
+    {
+        Dictionary<string, int> appliedByCategory = new(StringComparer.Ordinal);
+        foreach (EpubInspectionIssue issue in issues
+                     .OrderBy(issue => issue.Code)
+                     .ThenBy(issue => issue.Stage, StringComparer.Ordinal)
+                     .ThenBy(issue => issue.Item, StringComparer.Ordinal))
+        {
+            (string category, string rule, int penalty, int cap, string explanation) = IssuePolicy(issue.Code);
+            appliedByCategory.TryGetValue(category, out int applied);
+            int occurrences = checked(issue.OmittedCount + 1);
+            int adjustment = applied <= cap
+                ? 0
+                : Math.Max(checked(penalty * occurrences), cap - applied);
+            appliedByCategory[category] = applied + adjustment;
+            findings.Add(new AssessmentFinding(
+                rule,
+                FindingSeverity.Warning,
+                adjustment,
+                adjustment == 0 ? explanation + " The warning penalty cap was reached." : explanation,
+                IssueEvidence(issue)));
+        }
+    }
+
+    private static (string Category, string Rule, int Penalty, int Cap, string Explanation) IssuePolicy(EpubInspectionIssueCode code) => code switch
+    {
+        EpubInspectionIssueCode.InvalidManifestItemPath or EpubInspectionIssueCode.InvalidManifestItemName =>
+            ("manifest", "EPUB.PACKAGE.INVALID_MANIFEST_ITEM", -3, -12, "An invalid manifest item was skipped."),
+        EpubInspectionIssueCode.MalformedNavigation or EpubInspectionIssueCode.MissingNavigationMap =>
+            ("navigation", "EPUB.NAVIGATION.MALFORMED", -6, -6, "Navigation markup was malformed or incomplete."),
+        EpubInspectionIssueCode.MissingContainer or EpubInspectionIssueCode.MalformedContainer =>
+            ("mandatory-package", "EPUB.PACKAGE.CONTAINER_FALLBACK", -12, -18, "Container metadata was unavailable; bounded content fallback was used."),
+        EpubInspectionIssueCode.MissingPackage or EpubInspectionIssueCode.MalformedPackage =>
+            ("mandatory-package", "EPUB.PACKAGE.DOCUMENT_FALLBACK", -12, -18, "Package metadata was unavailable; bounded content fallback was used."),
+        EpubInspectionIssueCode.UnsupportedParser =>
+            ("parser", "EPUB.PACKAGE.UNSUPPORTED_FALLBACK", -10, -10, "The primary package parser was unsupported; bounded content fallback was used."),
+        EpubInspectionIssueCode.UnsafeEntry =>
+            ("unsafe-entry", "EPUB.ARCHIVE.UNSAFE_ENTRY", -4, -12, "An unsafe archive entry was excluded."),
+        EpubInspectionIssueCode.DuplicateEntry =>
+            ("duplicate-entry", "EPUB.ARCHIVE.DUPLICATE_ENTRY", -5, -15, "A canonical archive-name collision group was excluded."),
+        EpubInspectionIssueCode.EncryptedEntry =>
+            ("encrypted-entry", "EPUB.ENCRYPTION.ENTRY_SKIPPED", -10, -20, "An encrypted archive entry was excluded."),
+        EpubInspectionIssueCode.UnsupportedEntry or EpubInspectionIssueCode.SuspiciousEntry or EpubInspectionIssueCode.OversizedEntry =>
+            ("unsupported-entry", "EPUB.ARCHIVE.ENTRY_SKIPPED", -8, -16, "An unsupported, suspicious, or oversized archive entry was excluded."),
+        EpubInspectionIssueCode.UnknownReadingOrder =>
+            ("reading-order", "EPUB.FALLBACK.READING_ORDER_UNKNOWN", -8, -8, "Fallback inspection could not establish trustworthy package reading order."),
+        _ => ("partial", "EPUB.FALLBACK.PARTIAL_COVERAGE", -5, -5, "Fallback inspection had partial technical coverage."),
+    };
+
+    private static Dictionary<string, string> IssueEvidence(EpubInspectionIssue issue)
+    {
+        Dictionary<string, string> evidence = new(StringComparer.Ordinal)
+        {
+            ["reasonCode"] = issue.Code.ToString(),
+            ["stage"] = issue.Stage,
+        };
+        if (issue.Item is not null) evidence["item"] = issue.Item;
+        if (issue.Observed is not null) evidence["observed"] = issue.Observed.Value.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        if (issue.Limit is not null) evidence["limit"] = issue.Limit.Value.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        if (issue.OmittedCount > 0) evidence["omitted"] = issue.OmittedCount.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        if (issue.ExceptionType is not null) evidence["exceptionType"] = issue.ExceptionType;
+        return evidence;
     }
 
     private static bool IsDefinitiveOpenFailure(EpubInspectionProblemCode code) => code is

@@ -1,4 +1,7 @@
+using System.IO.Compression;
+using System.Text;
 using CalibreLibraryCleaner.Application.Libraries;
+using CalibreLibraryCleaner.Domain.Assessments;
 using CalibreLibraryCleaner.Infrastructure.LibrarySnapshots;
 using CalibreLibraryCleaner.Infrastructure.Tests.Execution;
 using CalibreLibraryCleaner.Infrastructure.Tests.Fixtures;
@@ -50,5 +53,38 @@ public sealed class LibrarySnapshotJsonSerializerTests
         read.Snapshot!.EpubAssessments.Should().ContainSingle();
         read.Snapshot.PdfAssessments.Should().ContainSingle();
         LibrarySnapshotJsonSerializer.Serialize(read.Snapshot).Should().Equal(serialized);
+    }
+
+    [Fact]
+    public async Task FallbackReadableAssessmentRoundTripPreservesCoverageEvidenceAndScoreCap()
+    {
+        using TemporaryDirectory fixtureDirectory = new();
+        string epubPath = Path.Combine(fixtureDirectory.Path, "Fallback.epub");
+        SyntheticEpubBuilder.CreateFromEntries(
+            epubPath,
+            [("chapter.xhtml", $"<html><body><p>{new string('a', 6_000)}</p></body></html>", CompressionLevel.Optimal)]);
+        using SyntheticCalibreLibrary library = new();
+        library.AddSimpleBook(1, await File.ReadAllBytesAsync(epubPath));
+        using ServiceProvider provider = TestServices.CreateProvider();
+        LibraryScanOutcome scan = await TestServices.CreateScanUseCase(provider)
+            .ExecuteAsync(library.RootPath, null, CancellationToken.None);
+
+        EpubAssessment original = scan.Snapshot!.EpubAssessments.Should().ContainSingle().Subject;
+        byte[] serialized = LibrarySnapshotJsonSerializer.Serialize(scan.Snapshot);
+        LibrarySnapshotJsonReadResult read = LibrarySnapshotJsonSerializer.Deserialize(serialized);
+
+        read.IsSuccess.Should().BeTrue(read.Error);
+        EpubAssessment roundTripped = read.Snapshot!.EpubAssessments.Should().ContainSingle().Subject;
+        roundTripped.ScoreCap.Should().Be(70);
+        roundTripped.UncappedScore.Should().Be(original.UncappedScore);
+        roundTripped.Features.Coverage.Should().Be(EpubAssessmentCoverage.FallbackReadable);
+        roundTripped.Features.RenderableEvidence.Should().HaveFlag(EpubRenderableEvidence.Text);
+        LibrarySnapshotJsonSerializer.Serialize(read.Snapshot).Should().Equal(serialized);
+
+        string malformedJson = Encoding.UTF8.GetString(serialized)
+            .Replace("\"scoreCap\": 70", "\"scoreCap\": null", StringComparison.Ordinal);
+        malformedJson.Should().NotBe(Encoding.UTF8.GetString(serialized));
+        LibrarySnapshotJsonReadResult malformed = LibrarySnapshotJsonSerializer.Deserialize(Encoding.UTF8.GetBytes(malformedJson));
+        malformed.IsSuccess.Should().BeFalse();
     }
 }

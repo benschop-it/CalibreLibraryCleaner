@@ -1,4 +1,5 @@
 using CalibreLibraryCleaner.Application.Libraries;
+using CalibreLibraryCleaner.Domain.Assessments;
 using CalibreLibraryCleaner.Domain.Libraries;
 
 namespace CalibreLibraryCleaner.Application.Assessments;
@@ -48,7 +49,73 @@ public enum EpubInspectionProblemCode
     Unreadable,
 }
 
-public sealed record EpubInspectionProblem(EpubInspectionProblemCode Code, string Explanation, string? Evidence = null);
+public sealed record EpubInspectionProblem(
+    EpubInspectionProblemCode Code,
+    string Explanation,
+    string? Evidence = null,
+    EpubInspectionIssueCode? IssueCode = null,
+    bool AllowsFallbackInspection = true);
+
+public enum EpubInspectionIssueCode
+{
+    InvalidManifestItemPath,
+    InvalidManifestItemName,
+    MalformedNavigation,
+    MissingNavigationMap,
+    MissingContainer,
+    MalformedContainer,
+    MissingPackage,
+    MalformedPackage,
+    UnsupportedParser,
+    UnsafeEntry,
+    DuplicateEntry,
+    EncryptedEntry,
+    UnsupportedEntry,
+    SuspiciousEntry,
+    OversizedEntry,
+    UnknownReadingOrder,
+    PartialCoverage,
+}
+
+public sealed record EpubInspectionIssue
+{
+    public EpubInspectionIssue(
+        EpubInspectionIssueCode code,
+        string stage,
+        string? item = null,
+        long? observed = null,
+        long? limit = null,
+        int omittedCount = 0,
+        string? exceptionType = null)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(stage);
+        ArgumentOutOfRangeException.ThrowIfNegative(omittedCount);
+        if (observed < 0 || limit < 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(observed), "Observed values and limits cannot be negative.");
+        }
+
+        Code = code;
+        Stage = Bound(stage)!;
+        Item = Bound(item);
+        Observed = observed;
+        Limit = limit;
+        OmittedCount = omittedCount;
+        ExceptionType = Bound(exceptionType);
+    }
+
+    public EpubInspectionIssueCode Code { get; }
+    public string Stage { get; }
+    public string? Item { get; }
+    public long? Observed { get; }
+    public long? Limit { get; }
+    public int OmittedCount { get; }
+    public string? ExceptionType { get; }
+
+    private static string? Bound(string? value) => string.IsNullOrWhiteSpace(value)
+        ? null
+        : value.Trim()[..Math.Min(value.Trim().Length, 512)];
+}
 
 public sealed record EpubInspectionResult(
     CalibreBookId BookId,
@@ -86,7 +153,13 @@ public sealed record EpubInspectionResult(
     int? TotalEmptyChapters = null,
     int? TotalRepeatedReferences = null,
     int? TotalRemoteReferences = null,
-    IReadOnlyList<EpubInspectionProblem>? RecoverableProblems = null)
+    IReadOnlyList<EpubInspectionProblem>? RecoverableProblems = null,
+    EpubAssessmentCoverage Coverage = EpubAssessmentCoverage.Full,
+    EpubAssessmentFacet AvailableFacets = EpubAssessmentFacet.All,
+    IReadOnlyList<EpubInspectionIssue>? Issues = null,
+    int FallbackCandidateCount = 0,
+    int FallbackRenderableCount = 0,
+    EpubRenderableEvidence RenderableEvidence = EpubRenderableEvidence.None)
 {
     public static EpubInspectionResult Failed(
         CalibreBookId bookId,
@@ -120,7 +193,9 @@ public sealed record EpubInspectionResult(
         0,
         "Unknown",
         false,
-        [new(code, explanation)]);
+        [new(code, explanation)],
+        Coverage: EpubAssessmentCoverage.Incomplete,
+        AvailableFacets: EpubAssessmentFacet.None);
 }
 
 public sealed record EpubAssessmentTarget(

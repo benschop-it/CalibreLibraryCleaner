@@ -24,8 +24,8 @@ public sealed class EpubAssessmentTests
 
         assessment.Score!.Value.Value.Should().Be(100);
         assessment.Findings.Sum(finding => finding.ScoreAdjustment).Should().Be(100);
-        assessment.AnalyzerVersion.Value.Should().Be("epub-inspector/1.0.3");
-        assessment.ScoringModelVersion.Value.Should().Be("epub-quality/1.0.2");
+        assessment.AnalyzerVersion.Value.Should().Be("epub-inspector/1.0.4");
+        assessment.ScoringModelVersion.Value.Should().Be("epub-quality/1.0.3");
     }
 
     [Fact]
@@ -99,6 +99,143 @@ public sealed class EpubAssessmentTests
             && finding.Severity == CalibreLibraryCleaner.Domain.Findings.FindingSeverity.Warning
             && finding.ScoreAdjustment == 0
             && finding.Explanation == "An EPUB manifest item has no content file path.");
+    }
+
+    [Fact]
+    public void FallbackIssuesUseStableReasonCodesAndBoundedStructuredEvidence()
+    {
+        EpubInspectionIssue issue = new(
+            EpubInspectionIssueCode.MalformedPackage,
+            "Package",
+            "OEBPS/content.opf",
+            observed: 1,
+            limit: EpubInspectionLimits.V1.MaximumXmlBytes,
+            omittedCount: 2,
+            exceptionType: nameof(System.Xml.XmlException));
+        EpubInspectionResult result = Healthy(new CalibreBookId(1), "Book.epub") with
+        {
+            Coverage = EpubAssessmentCoverage.FallbackReadable,
+            AvailableFacets = EpubAssessmentFacet.Archive | EpubAssessmentFacet.Content,
+            Issues = [issue],
+            FallbackCandidateCount = 3,
+            FallbackRenderableCount = 1,
+            RenderableEvidence = EpubRenderableEvidence.Text,
+        };
+
+        result.Issues.Should().ContainSingle().Which.Code.Should().Be(EpubInspectionIssueCode.MalformedPackage);
+        result.Issues[0].Item.Should().Be("OEBPS/content.opf");
+        result.Issues[0].ExceptionType.Should().Be(nameof(System.Xml.XmlException));
+    }
+
+    [Fact]
+    public void FallbackReadableWarningsArePenalizedAndScoreIsCappedAtSeventy()
+    {
+        EpubInspectionResult result = Healthy(new CalibreBookId(1), "Book.epub") with
+        {
+            Coverage = EpubAssessmentCoverage.FallbackReadable,
+            AvailableFacets = EpubAssessmentFacet.All,
+            Issues =
+            [
+                new(EpubInspectionIssueCode.InvalidManifestItemPath, "Package", "OEBPS/broken.xhtml"),
+                new(EpubInspectionIssueCode.UnknownReadingOrder, "Fallback"),
+            ],
+            FallbackCandidateCount = 2,
+            FallbackRenderableCount = 1,
+            RenderableEvidence = EpubRenderableEvidence.Text,
+        };
+
+        EpubAssessment assessment = new EpubAssessmentEngine().Assess(new CalibreBookId(1), "Book.epub", Fingerprint, result);
+
+        assessment.Status.Should().Be(AssessmentStatus.Completed);
+        assessment.Score.Should().Be(new QualityScore(70));
+        assessment.ScoreCap.Should().Be(70);
+        assessment.UncappedScore.Should().Be(new QualityScore(89));
+        assessment.Findings.Should().Contain(finding =>
+            finding.RuleId == "EPUB.PACKAGE.INVALID_MANIFEST_ITEM"
+            && finding.Severity == CalibreLibraryCleaner.Domain.Findings.FindingSeverity.Warning
+            && finding.ScoreAdjustment == -3);
+        assessment.Findings.Should().Contain(finding =>
+            finding.RuleId == "EPUB.FALLBACK.READING_ORDER_UNKNOWN"
+            && finding.ScoreAdjustment == -8);
+        assessment.Findings.Should().ContainSingle(finding =>
+            finding.RuleId == "EPUB.SCORE.FALLBACK_CAP"
+            && finding.ScoreAdjustment == 0);
+    }
+
+    [Fact]
+    public void FallbackWarningCategoryCapsRetainExcessEvidenceAndDoNotRaiseLowScores()
+    {
+        EpubInspectionIssue[] issues =
+        [
+            .. Enumerable.Range(1, 5).Select(index => new EpubInspectionIssue(
+                EpubInspectionIssueCode.InvalidManifestItemPath,
+                "Package",
+                $"OEBPS/broken-{index}.xhtml")),
+            new(EpubInspectionIssueCode.EncryptedEntry, "Archive", "OEBPS/locked-1.xhtml"),
+            new(EpubInspectionIssueCode.EncryptedEntry, "Archive", "OEBPS/locked-2.xhtml"),
+            new(EpubInspectionIssueCode.UnknownReadingOrder, "Fallback"),
+        ];
+        EpubInspectionResult result = Healthy(new CalibreBookId(1), "Book.epub") with
+        {
+            Coverage = EpubAssessmentCoverage.FallbackReadable,
+            AvailableFacets = EpubAssessmentFacet.All,
+            Issues = issues,
+            FallbackCandidateCount = 1,
+            FallbackRenderableCount = 1,
+            RenderableEvidence = EpubRenderableEvidence.Text,
+        };
+
+        EpubAssessment assessment = new EpubAssessmentEngine().Assess(new CalibreBookId(1), "Book.epub", Fingerprint, result);
+
+        assessment.UncappedScore.Should().Be(new QualityScore(60));
+        assessment.Score.Should().Be(new QualityScore(60));
+        assessment.ScoreCap.Should().Be(70);
+        assessment.Findings.Where(finding => finding.RuleId == "EPUB.PACKAGE.INVALID_MANIFEST_ITEM")
+            .Select(finding => finding.ScoreAdjustment)
+            .Should().BeEquivalentTo([-3, -3, -3, -3, 0]);
+        assessment.Findings.Should().Contain(finding =>
+            finding.RuleId == "EPUB.PACKAGE.INVALID_MANIFEST_ITEM"
+            && finding.ScoreAdjustment == 0
+            && finding.Explanation.Contains("penalty cap", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void OmittedFallbackIssueOccurrencesStillApplyTheirCategoryCap()
+    {
+        EpubInspectionResult result = Healthy(new CalibreBookId(1), "Book.epub") with
+        {
+            Coverage = EpubAssessmentCoverage.FallbackReadable,
+            AvailableFacets = EpubAssessmentFacet.Archive | EpubAssessmentFacet.Content,
+            Issues =
+            [
+                new(EpubInspectionIssueCode.EncryptedEntry, "Archive", "locked.xhtml", omittedCount: 4),
+                new(EpubInspectionIssueCode.UnknownReadingOrder, "Fallback"),
+            ],
+            FallbackCandidateCount = 1,
+            FallbackRenderableCount = 1,
+            RenderableEvidence = EpubRenderableEvidence.Text,
+        };
+
+        EpubAssessment assessment = new EpubAssessmentEngine().Assess(new CalibreBookId(1), "Book.epub", Fingerprint, result);
+
+        assessment.Findings.Where(finding => finding.RuleId == "EPUB.ENCRYPTION.ENTRY_SKIPPED")
+            .Sum(finding => finding.ScoreAdjustment).Should().Be(-20);
+    }
+
+    [Fact]
+    public void FullCoverageIssuesDoNotApplyFallbackPenaltiesOrDoubleNavigationPenalty()
+    {
+        EpubInspectionResult result = Healthy(new CalibreBookId(1), "Book.epub") with
+        {
+            NavigationPresent = false,
+            Issues = [new(EpubInspectionIssueCode.MalformedNavigation, "Preflight")],
+        };
+
+        EpubAssessment assessment = new EpubAssessmentEngine().Assess(new CalibreBookId(1), "Book.epub", Fingerprint, result);
+
+        assessment.Findings.Should().ContainSingle(finding =>
+            finding.RuleId == "EPUB.NAVIGATION" && finding.ScoreAdjustment == -6);
+        assessment.Findings.Should().NotContain(finding => finding.RuleId == "EPUB.NAVIGATION.MALFORMED");
     }
 
     [Fact]

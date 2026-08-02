@@ -8,6 +8,7 @@ using System.Xml;
 using CalibreLibraryCleaner.Application.Abstractions;
 using CalibreLibraryCleaner.Application.Assessments;
 using CalibreLibraryCleaner.Application.Libraries;
+using CalibreLibraryCleaner.Domain.Assessments;
 using CalibreLibraryCleaner.Domain.Libraries;
 using CalibreLibraryCleaner.Infrastructure.Epub;
 using CalibreLibraryCleaner.Infrastructure.Tests.Fixtures;
@@ -270,12 +271,14 @@ public sealed class VersOneEpubInspectorTests
     }
 
     [Theory]
-    [InlineData("MissingContainer")]
-    [InlineData("MalformedContainer")]
-    [InlineData("MissingPackage")]
-    [InlineData("MalformedPackage")]
-    [InlineData("DtdContainer")]
-    public async Task InvalidContainerOrPackageBecomesStructuredProblem(string scenario)
+    [InlineData("MissingContainer", EpubInspectionIssueCode.MissingContainer)]
+    [InlineData("MalformedContainer", EpubInspectionIssueCode.MalformedContainer)]
+    [InlineData("MissingPackage", EpubInspectionIssueCode.MissingPackage)]
+    [InlineData("MalformedPackage", EpubInspectionIssueCode.MalformedPackage)]
+    [InlineData("DtdContainer", EpubInspectionIssueCode.MalformedContainer)]
+    public async Task InvalidContainerOrPackageUsesFallbackReadableContent(
+        string scenario,
+        EpubInspectionIssueCode expectedIssue)
     {
         using TemporaryDirectory directory = new();
         string path = Path.Combine(directory.Path, $"{scenario}.epub");
@@ -292,8 +295,10 @@ public sealed class VersOneEpubInspectorTests
         EpubInspectionResult result = await provider.GetRequiredService<IEpubInspector>()
             .InspectAsync(request, null, CancellationToken.None);
 
-        result.Problems.Should().ContainSingle(problem => problem.Code == EpubInspectionProblemCode.PackageMalformed);
-        result.Problems.Select(problem => problem.Explanation).Should().NotContain(text => text.Contains("file:///forbidden", StringComparison.Ordinal));
+        result.Problems.Should().BeEmpty();
+        result.Coverage.Should().Be(EpubAssessmentCoverage.FallbackReadable);
+        result.Issues.Should().Contain(issue => issue.Code == expectedIssue);
+        string.Join('|', result.Issues!.Select(issue => issue.Item)).Should().NotContain("file:///forbidden");
     }
 
     [Fact]
@@ -311,9 +316,9 @@ public sealed class VersOneEpubInspectorTests
         EpubInspectionResult result = await provider.GetRequiredService<IEpubInspector>()
             .InspectAsync(await CreateRequestAsync(path), null, CancellationToken.None);
 
-        result.Problems.Should().ContainSingle(problem =>
-            problem.Code == EpubInspectionProblemCode.PackageMalformed
-            && problem.Explanation == "The EPUB container document is not valid XML.");
+        result.Problems.Should().BeEmpty();
+        result.Coverage.Should().Be(EpubAssessmentCoverage.FallbackReadable);
+        result.Issues.Should().Contain(issue => issue.Code == EpubInspectionIssueCode.MalformedContainer);
     }
 
     [Fact]
@@ -329,9 +334,191 @@ public sealed class VersOneEpubInspectorTests
         EpubInspectionResult result = await provider.GetRequiredService<IEpubInspector>()
             .InspectAsync(await CreateRequestAsync(path), null, CancellationToken.None);
 
-        result.Problems.Should().ContainSingle(problem =>
-            problem.Code == EpubInspectionProblemCode.PackageMalformed
-            && problem.Explanation == "The EPUB package document is not valid XML.");
+        result.Problems.Should().BeEmpty();
+        result.Coverage.Should().Be(EpubAssessmentCoverage.FallbackReadable);
+        result.Issues.Should().Contain(issue => issue.Code == EpubInspectionIssueCode.MalformedPackage);
+    }
+
+    [Fact]
+    public async Task MissingContainerUsesBoundedFallbackReadableContent()
+    {
+        using TemporaryDirectory directory = new();
+        string path = Path.Combine(directory.Path, "Fallback.epub");
+        SyntheticEpubBuilder.CreateFromEntries(path,
+        [
+            ("mimetype", "application/epub+zip", CompressionLevel.NoCompression),
+            ("content/chapter.xhtml", $"<html><body><p>{new string('a', 6_000)}</p></body></html>", CompressionLevel.Optimal),
+        ]);
+        using ServiceProvider provider = TestServices.CreateProvider();
+
+        EpubInspectionResult result = await provider.GetRequiredService<IEpubInspector>()
+            .InspectAsync(await CreateRequestAsync(path), null, CancellationToken.None);
+
+        result.Problems.Should().BeEmpty();
+        result.Coverage.Should().Be(EpubAssessmentCoverage.FallbackReadable);
+        result.AvailableFacets.Should().HaveFlag(EpubAssessmentFacet.Content);
+        result.ReadableCharacterCount.Should().Be(6_000);
+        result.FallbackCandidateCount.Should().Be(1);
+        result.FallbackRenderableCount.Should().Be(1);
+        result.RenderableEvidence.Should().HaveFlag(EpubRenderableEvidence.Text);
+        result.Issues.Should().ContainSingle(issue => issue.Code == EpubInspectionIssueCode.MissingContainer);
+    }
+
+    [Fact]
+    public async Task MissingContainerWithoutRenderableContentRemainsIncomplete()
+    {
+        using TemporaryDirectory directory = new();
+        string path = Path.Combine(directory.Path, "Incomplete.epub");
+        SyntheticEpubBuilder.CreateFromEntries(path,
+        [
+            ("mimetype", "application/epub+zip", CompressionLevel.NoCompression),
+            ("notes.txt", "not an EPUB content candidate", CompressionLevel.Optimal),
+        ]);
+        using ServiceProvider provider = TestServices.CreateProvider();
+
+        EpubInspectionResult result = await provider.GetRequiredService<IEpubInspector>()
+            .InspectAsync(await CreateRequestAsync(path), null, CancellationToken.None);
+
+        result.Coverage.Should().Be(EpubAssessmentCoverage.Incomplete);
+        result.Problems.Should().ContainSingle(problem => problem.Code == EpubInspectionProblemCode.PackageMalformed);
+        result.FallbackCandidateCount.Should().Be(0);
+    }
+
+    [Fact]
+    public async Task FallbackNeverReadsContentProtectedByEncryptionMetadata()
+    {
+        using TemporaryDirectory directory = new();
+        string path = Path.Combine(directory.Path, "ProtectedFallback.epub");
+        SyntheticEpubBuilder.CreateFromEntries(path,
+        [
+            ("META-INF/encryption.xml", "<encryption><EncryptedData><CipherData><CipherReference URI=\"protected.xhtml\"/></CipherData></EncryptedData></encryption>", CompressionLevel.Optimal),
+            ("protected.xhtml", $"<html><body><p>{new string('z', 10_000)}</p></body></html>", CompressionLevel.Optimal),
+            ("safe.xhtml", $"<html><body><p>{new string('a', 1_000)}</p></body></html>", CompressionLevel.Optimal),
+        ]);
+        using ServiceProvider provider = TestServices.CreateProvider();
+
+        EpubInspectionResult result = await provider.GetRequiredService<IEpubInspector>()
+            .InspectAsync(await CreateRequestAsync(path), null, CancellationToken.None);
+
+        result.Problems.Should().BeEmpty();
+        result.Coverage.Should().Be(EpubAssessmentCoverage.FallbackReadable);
+        result.AvailableFacets.Should().Be(EpubAssessmentFacet.Archive | EpubAssessmentFacet.Content);
+        result.ReadableCharacterCount.Should().Be(1_000);
+        result.Issues.Should().Contain(issue =>
+            issue.Code == EpubInspectionIssueCode.EncryptedEntry && issue.Item == "protected.xhtml");
+    }
+
+    [Fact]
+    public async Task FallbackStopsWhenEncryptionMetadataIsItselfEncrypted()
+    {
+        using TemporaryDirectory directory = new();
+        string path = Path.Combine(directory.Path, "UnreadableEncryptionMetadata.epub");
+        SyntheticEpubBuilder.CreateFromEntries(path,
+        [
+            ("META-INF/encryption.xml", "<encryption><EncryptedData><CipherData><CipherReference URI=\"chapter.xhtml\"/></CipherData></EncryptedData></encryption>", CompressionLevel.NoCompression),
+            ("chapter.xhtml", $"<html><body><p>{new string('a', 6_000)}</p></body></html>", CompressionLevel.Optimal),
+        ]);
+        MarkFirstEntryEncrypted(path);
+        using ServiceProvider provider = TestServices.CreateProvider();
+
+        EpubInspectionResult result = await provider.GetRequiredService<IEpubInspector>()
+            .InspectAsync(await CreateRequestAsync(path), null, CancellationToken.None);
+
+        result.Coverage.Should().Be(EpubAssessmentCoverage.Incomplete);
+        result.Problems.Should().ContainSingle(problem => problem.Code == EpubInspectionProblemCode.Encrypted);
+        result.ReadableCharacterCount.Should().Be(0);
+    }
+
+    [Fact]
+    public async Task TextlessFallbackReferenceRequiresAcceptedLocalMedia()
+    {
+        using TemporaryDirectory directory = new();
+        string path = Path.Combine(directory.Path, "NonMediaFallback.epub");
+        SyntheticEpubBuilder.CreateFromEntries(path,
+        [
+            ("chapter.xhtml", "<html><body><img src=\"notes.txt\"/></body></html>", CompressionLevel.Optimal),
+            ("notes.txt", "not renderable media", CompressionLevel.Optimal),
+        ]);
+        using ServiceProvider provider = TestServices.CreateProvider();
+
+        EpubInspectionResult result = await provider.GetRequiredService<IEpubInspector>()
+            .InspectAsync(await CreateRequestAsync(path), null, CancellationToken.None);
+
+        result.Coverage.Should().Be(EpubAssessmentCoverage.Incomplete);
+        result.FallbackRenderableCount.Should().Be(0);
+        result.RenderableEvidence.Should().Be(EpubRenderableEvidence.None);
+    }
+
+    [Fact]
+    public async Task NonRenderingDataAttributeCannotProveFallbackReadability()
+    {
+        using TemporaryDirectory directory = new();
+        string path = Path.Combine(directory.Path, "NonRenderingAttribute.epub");
+        SyntheticEpubBuilder.CreateFromEntries(path,
+        [
+            ("chapter.xhtml", "<html><body><div data=\"cover.jpg\"></div></body></html>", CompressionLevel.Optimal),
+            ("cover.jpg", "synthetic image bytes", CompressionLevel.NoCompression),
+        ]);
+        using ServiceProvider provider = TestServices.CreateProvider();
+
+        EpubInspectionResult result = await provider.GetRequiredService<IEpubInspector>()
+            .InspectAsync(await CreateRequestAsync(path), null, CancellationToken.None);
+
+        result.Coverage.Should().Be(EpubAssessmentCoverage.Incomplete);
+        result.RenderableEvidence.Should().Be(EpubRenderableEvidence.None);
+    }
+
+    [Fact]
+    public async Task FallbackLocalReferenceLimitIsSharedAcrossCandidates()
+    {
+        using TemporaryDirectory directory = new();
+        string path = Path.Combine(directory.Path, "ReferenceBudget.epub");
+        SyntheticEpubBuilder.CreateFromEntries(path,
+        [
+            ("chapter-1.xhtml", "<html><body><img src=\"cover-1.jpg\"/></body></html>", CompressionLevel.Optimal),
+            ("chapter-2.xhtml", "<html><body><img src=\"cover-2.jpg\"/></body></html>", CompressionLevel.Optimal),
+            ("cover-1.jpg", "synthetic image bytes", CompressionLevel.NoCompression),
+            ("cover-2.jpg", "synthetic image bytes", CompressionLevel.NoCompression),
+        ]);
+        EpubInspectionRequest request = await CreateRequestAsync(path);
+        using ServiceProvider provider = TestServices.CreateProvider();
+
+        EpubInspectionResult result = await provider.GetRequiredService<IEpubInspector>().InspectAsync(
+            request with { Limits = EpubInspectionLimits.V1 with { MaximumLocalReferences = 1 } },
+            null,
+            CancellationToken.None);
+
+        result.Coverage.Should().Be(EpubAssessmentCoverage.FallbackReadable);
+        result.FallbackRenderableCount.Should().Be(1);
+        result.Issues.Should().Contain(issue =>
+            issue.Code == EpubInspectionIssueCode.PartialCoverage
+            && issue.Stage == "FallbackReferences"
+            && issue.Observed == 2
+            && issue.Limit == 1);
+    }
+
+    [Fact]
+    public async Task SkippedOversizedFallbackCandidateRetainsWarningEvidence()
+    {
+        using TemporaryDirectory directory = new();
+        string path = Path.Combine(directory.Path, "OversizedFallback.epub");
+        SyntheticEpubBuilder.CreateFromEntries(path,
+        [
+            ("large.xhtml", $"<html><body><p>{new string('z', 2_000)}</p></body></html>", CompressionLevel.NoCompression),
+            ("safe.xhtml", $"<html><body><p>{new string('a', 500)}</p></body></html>", CompressionLevel.NoCompression),
+        ]);
+        EpubInspectionRequest request = await CreateRequestAsync(path);
+        using ServiceProvider provider = TestServices.CreateProvider();
+
+        EpubInspectionResult result = await provider.GetRequiredService<IEpubInspector>().InspectAsync(
+            request with { Limits = EpubInspectionLimits.V1 with { MaximumChapterBytes = 1_000 } },
+            null,
+            CancellationToken.None);
+
+        result.Coverage.Should().Be(EpubAssessmentCoverage.FallbackReadable);
+        result.ReadableCharacterCount.Should().Be(500);
+        result.Issues.Should().Contain(issue =>
+            issue.Code == EpubInspectionIssueCode.OversizedEntry && issue.Item == "large.xhtml");
     }
 
     [Fact]
@@ -390,7 +577,9 @@ public sealed class VersOneEpubInspectorTests
         EpubInspectionResult result = await inspector.InspectAsync(
             await CreateRequestAsync(path), null, CancellationToken.None);
 
-        result.Problems.Should().ContainSingle(problem => problem.Code == EpubInspectionProblemCode.PackageMalformed);
+        result.Problems.Should().BeEmpty();
+        result.Coverage.Should().Be(EpubAssessmentCoverage.FallbackReadable);
+        result.Issues.Should().Contain(issue => issue.Code == EpubInspectionIssueCode.MalformedPackage);
         logger.Levels.Should().NotContain(LogLevel.Warning);
     }
 
@@ -473,7 +662,7 @@ public sealed class VersOneEpubInspectorTests
     }
 
     [Fact]
-    public async Task UnsupportedCompressionBecomesStructuredProblem()
+    public async Task UnsupportedCompressionEntryIsSkippedDuringFallback()
     {
         using TemporaryDirectory directory = new();
         string path = Path.Combine(directory.Path, "UnsupportedCompression.epub");
@@ -484,10 +673,9 @@ public sealed class VersOneEpubInspectorTests
         EpubInspectionResult result = await provider.GetRequiredService<IEpubInspector>()
             .InspectAsync(await CreateRequestAsync(path), null, CancellationToken.None);
 
-        result.Problems.Should().ContainSingle();
-        result.Problems[0].Code.Should().BeOneOf(
-            EpubInspectionProblemCode.CannotOpen,
-            EpubInspectionProblemCode.Unsupported);
+        result.Problems.Should().BeEmpty();
+        result.Coverage.Should().Be(EpubAssessmentCoverage.FallbackReadable);
+        result.Issues.Should().Contain(issue => issue.Code == EpubInspectionIssueCode.UnsupportedEntry);
     }
 
     [Theory]
@@ -496,12 +684,12 @@ public sealed class VersOneEpubInspectorTests
     [InlineData("/absolute.xhtml")]
     [InlineData("folder\\ambiguous.xhtml")]
     [InlineData("C:/drive.xhtml")]
-    public async Task UnsafeArchivePathsAreRejectedBeforeParsing(string unsafeName)
+    public async Task UnsafeArchivePathsAreExcludedFromFallback(string unsafeName)
     {
         using TemporaryDirectory directory = new();
         string path = Path.Combine(directory.Path, "Unsafe.epub");
         List<(string Name, string Content, CompressionLevel Compression)> entries = StandardEntries().ToList();
-        entries.Add((unsafeName, "unsafe", CompressionLevel.NoCompression));
+        entries.Add((unsafeName, $"<html><body>{new string('z', 10_000)}</body></html>", CompressionLevel.NoCompression));
         SyntheticEpubBuilder.CreateFromEntries(path, entries);
         EpubInspectionRequest request = await CreateRequestAsync(path);
         using ServiceProvider provider = TestServices.CreateProvider();
@@ -509,7 +697,10 @@ public sealed class VersOneEpubInspectorTests
         EpubInspectionResult result = await provider.GetRequiredService<IEpubInspector>()
             .InspectAsync(request, null, CancellationToken.None);
 
-        result.Problems.Should().ContainSingle(problem => problem.Code == EpubInspectionProblemCode.UnsafeArchive);
+        result.Problems.Should().BeEmpty();
+        result.Coverage.Should().Be(EpubAssessmentCoverage.FallbackReadable);
+        result.ReadableCharacterCount.Should().Be(6_000);
+        result.Issues.Should().Contain(issue => issue.Code == EpubInspectionIssueCode.UnsafeEntry);
         File.Exists(Path.Combine(directory.Path, "outside.xhtml")).Should().BeFalse();
     }
 
@@ -579,12 +770,13 @@ public sealed class VersOneEpubInspectorTests
     }
 
     [Fact]
-    public async Task DuplicateCanonicalArchivePathsAreRejected()
+    public async Task DuplicateCanonicalArchivePathsAreExcludedFromFallback()
     {
         using TemporaryDirectory directory = new();
         string path = Path.Combine(directory.Path, "Duplicate.epub");
         List<(string Name, string Content, CompressionLevel Compression)> entries = StandardEntries().ToList();
         entries.Add(("OEBPS/./chapter.xhtml", "duplicate", CompressionLevel.NoCompression));
+        entries.Add(("fallback.xhtml", $"<html><body><p>{new string('b', 1_000)}</p></body></html>", CompressionLevel.Optimal));
         SyntheticEpubBuilder.CreateFromEntries(path, entries);
         EpubInspectionRequest request = await CreateRequestAsync(path);
         using ServiceProvider provider = TestServices.CreateProvider();
@@ -592,7 +784,10 @@ public sealed class VersOneEpubInspectorTests
         EpubInspectionResult result = await provider.GetRequiredService<IEpubInspector>()
             .InspectAsync(request, null, CancellationToken.None);
 
-        result.Problems.Should().ContainSingle(problem => problem.Code == EpubInspectionProblemCode.UnsafeArchive);
+        result.Problems.Should().BeEmpty();
+        result.Coverage.Should().Be(EpubAssessmentCoverage.FallbackReadable);
+        result.ReadableCharacterCount.Should().Be(1_000);
+        result.Issues.Should().ContainSingle(issue => issue.Code == EpubInspectionIssueCode.DuplicateEntry);
     }
 
     [Fact]
@@ -615,6 +810,9 @@ public sealed class VersOneEpubInspectorTests
         file.Problems.Should().ContainSingle(problem => problem.Code == EpubInspectionProblemCode.LimitExceeded);
         entries.Problems.Should().ContainSingle(problem => problem.Code == EpubInspectionProblemCode.LimitExceeded);
         entry.Problems.Should().ContainSingle(problem => problem.Code == EpubInspectionProblemCode.LimitExceeded);
+        file.Coverage.Should().Be(EpubAssessmentCoverage.Incomplete);
+        entries.Coverage.Should().Be(EpubAssessmentCoverage.Incomplete);
+        entry.Coverage.Should().Be(EpubAssessmentCoverage.Incomplete);
     }
 
     [Fact]
@@ -640,10 +838,14 @@ public sealed class VersOneEpubInspectorTests
         EpubInspectionResult references = await inspector.InspectAsync(
             contentRequest with { Limits = EpubInspectionLimits.V1 with { MaximumLocalReferences = 1 } }, null, CancellationToken.None);
 
-        ratio.Problems.Should().ContainSingle(problem => problem.Code == EpubInspectionProblemCode.UnsafeArchive);
+        ratio.Problems.Should().BeEmpty();
+        ratio.Coverage.Should().Be(EpubAssessmentCoverage.FallbackReadable);
+        ratio.Issues.Should().Contain(issue => issue.Code == EpubInspectionIssueCode.SuspiciousEntry);
         chapter.Problems.Should().ContainSingle(problem => problem.Code == EpubInspectionProblemCode.LimitExceeded);
         readable.Problems.Should().ContainSingle(problem => problem.Code == EpubInspectionProblemCode.LimitExceeded);
-        references.Problems.Should().ContainSingle(problem => problem.Code == EpubInspectionProblemCode.LimitExceeded);
+        references.Problems.Should().BeEmpty();
+        references.Coverage.Should().Be(EpubAssessmentCoverage.FallbackReadable);
+        references.Issues.Should().Contain(issue => issue.Code == EpubInspectionIssueCode.PartialCoverage);
     }
 
     [Fact]
@@ -709,9 +911,13 @@ public sealed class VersOneEpubInspectorTests
         EpubInspectionResult evidence = await inspector.InspectAsync(
             repeated with { Limits = EpubInspectionLimits.V1 with { MaximumEvidencePerRule = 1 } }, null, CancellationToken.None);
 
-        xml.Problems.Should().ContainSingle(problem => problem.Code == EpubInspectionProblemCode.LimitExceeded);
-        cover.Problems.Should().ContainSingle(problem => problem.Code == EpubInspectionProblemCode.LimitExceeded);
+        xml.Coverage.Should().Be(EpubAssessmentCoverage.FallbackReadable);
+        cover.Coverage.Should().Be(EpubAssessmentCoverage.FallbackReadable);
+        spine.Coverage.Should().Be(EpubAssessmentCoverage.Incomplete);
         spine.Problems.Should().ContainSingle(problem => problem.Code == EpubInspectionProblemCode.LimitExceeded);
+        xml.Issues.Should().Contain(issue => issue.Code == EpubInspectionIssueCode.PartialCoverage);
+        cover.Issues.Should().Contain(issue => issue.Code == EpubInspectionIssueCode.PartialCoverage);
+        spine.Issues.Should().Contain(issue => issue.Code == EpubInspectionIssueCode.PartialCoverage);
         evidence.Problems.Should().BeEmpty();
         evidence.BrokenInternalReferences.Should().HaveCount(1);
         evidence.TotalBrokenInternalReferences.Should().Be(4);
@@ -768,6 +974,31 @@ public sealed class VersOneEpubInspectorTests
     }
 
     [Fact]
+    public async Task CancellationDuringFallbackInspectionPropagatesAndLeavesLibraryUnchanged()
+    {
+        using TemporaryDirectory directory = new();
+        string path = Path.Combine(directory.Path, "FallbackCancel.epub");
+        SyntheticEpubBuilder.CreateFromEntries(path,
+        [
+            ("chapter.xhtml", $"<html><body><p>{new string('a', 6_000)}</p></body></html>", CompressionLevel.Optimal),
+        ]);
+        EpubInspectionRequest request = await CreateRequestAsync(path);
+        IReadOnlyList<LibraryEntryState> before = LibraryStateCapture.Capture(directory.Path);
+        using CancellationTokenSource cancellation = new();
+        InlineProgress progress = new(update =>
+        {
+            if (update.Stage == "Fallback") cancellation.Cancel();
+        });
+        using ServiceProvider provider = TestServices.CreateProvider();
+
+        Func<Task> act = async () => await provider.GetRequiredService<IEpubInspector>()
+            .InspectAsync(request, progress, cancellation.Token);
+
+        await act.Should().ThrowAsync<OperationCanceledException>();
+        LibraryStateCapture.Capture(directory.Path).Should().BeEquivalentTo(before, options => options.WithStrictOrdering());
+    }
+
+    [Fact]
     public async Task FileTimestampChangeDuringContentInspectionDiscardsAllPartialFacts()
     {
         using TemporaryDirectory directory = new();
@@ -785,6 +1016,30 @@ public sealed class VersOneEpubInspectorTests
 
         result.Problems.Should().ContainSingle(problem => problem.Code == EpubInspectionProblemCode.ChangedDuringInspection);
         result.PackageParsed.Should().BeFalse();
+        result.ReadableCharacterCount.Should().Be(0);
+    }
+
+    [Fact]
+    public async Task FileTimestampChangeDuringFallbackInspectionDiscardsAllPartialFacts()
+    {
+        using TemporaryDirectory directory = new();
+        string path = Path.Combine(directory.Path, "FallbackChanged.epub");
+        SyntheticEpubBuilder.CreateFromEntries(path,
+        [
+            ("chapter.xhtml", $"<html><body><p>{new string('a', 6_000)}</p></body></html>", CompressionLevel.Optimal),
+        ]);
+        EpubInspectionRequest request = await CreateRequestAsync(path);
+        InlineProgress progress = new(update =>
+        {
+            if (update.Stage == "Fallback") File.SetLastWriteTimeUtc(path, DateTime.UtcNow.AddMinutes(1));
+        });
+        using ServiceProvider provider = TestServices.CreateProvider();
+
+        EpubInspectionResult result = await provider.GetRequiredService<IEpubInspector>()
+            .InspectAsync(request, progress, CancellationToken.None);
+
+        result.Problems.Should().ContainSingle(problem => problem.Code == EpubInspectionProblemCode.ChangedDuringInspection);
+        result.Coverage.Should().Be(EpubAssessmentCoverage.Incomplete);
         result.ReadableCharacterCount.Should().Be(0);
     }
 
@@ -845,7 +1100,9 @@ public sealed class VersOneEpubInspectorTests
             AppDomain.CurrentDomain.FirstChanceException -= handler;
         }
 
-        oversized.Problems.Should().ContainSingle(problem => problem.Code == EpubInspectionProblemCode.LimitExceeded);
+        oversized.Problems.Should().BeEmpty();
+        oversized.Coverage.Should().Be(EpubAssessmentCoverage.FallbackReadable);
+        oversized.Issues.Should().Contain(issue => issue.Code == EpubInspectionIssueCode.PartialCoverage);
         dtd.Problems.Should().BeEmpty();
         dtd.PackageParsed.Should().BeTrue();
         dtdXmlExceptions.Should().Be(0);
@@ -863,7 +1120,9 @@ public sealed class VersOneEpubInspectorTests
 
         EpubInspectionResult unsafeResult = await inspector.InspectAsync(await CreateRequestAsync(unsafePath), null, CancellationToken.None);
 
-        unsafeResult.Problems.Should().ContainSingle(problem => problem.Code == EpubInspectionProblemCode.UnsafeArchive);
+        unsafeResult.Problems.Should().BeEmpty();
+        unsafeResult.Coverage.Should().Be(EpubAssessmentCoverage.FallbackReadable);
+        unsafeResult.Issues.Should().Contain(issue => issue.Code == EpubInspectionIssueCode.InvalidManifestItemPath);
 
         string actualRoot = Path.Combine(directory.Path, "actual");
         string linkedRoot = Path.Combine(directory.Path, "linked");
@@ -937,18 +1196,27 @@ public sealed class VersOneEpubInspectorTests
     }
 
     [Fact]
-    public async Task EncryptedZipFlagIsClassifiedBeforeEntryReads()
+    public async Task EncryptedZipEntryIsSkippedDuringFallback()
     {
         using TemporaryDirectory directory = new();
         string path = Path.Combine(directory.Path, "ZipEncrypted.epub");
-        SyntheticEpubBuilder.CreateValid(path);
+        SyntheticEpubBuilder.CreateFromEntries(path,
+        [
+            ("encrypted.xhtml", $"<html><body><p>{new string('z', 10_000)}</p></body></html>", CompressionLevel.NoCompression),
+            ("fallback.xhtml", $"<html><body><p>{new string('a', 1_000)}</p></body></html>", CompressionLevel.Optimal),
+        ]);
         MarkFirstEntryEncrypted(path);
         using ServiceProvider provider = TestServices.CreateProvider();
 
         EpubInspectionResult result = await provider.GetRequiredService<IEpubInspector>()
             .InspectAsync(await CreateRequestAsync(path), null, CancellationToken.None);
 
-        result.Problems.Should().ContainSingle(problem => problem.Code == EpubInspectionProblemCode.Encrypted);
+        result.Problems.Should().BeEmpty();
+        result.Coverage.Should().Be(EpubAssessmentCoverage.FallbackReadable);
+        result.ReadableCharacterCount.Should().Be(1_000);
+        result.FallbackCandidateCount.Should().Be(1);
+        result.FallbackRenderableCount.Should().Be(1);
+        result.Issues.Should().Contain(issue => issue.Code == EpubInspectionIssueCode.EncryptedEntry);
     }
 
     private static async Task<EpubInspectionRequest> CreateRequestAsync(string path)

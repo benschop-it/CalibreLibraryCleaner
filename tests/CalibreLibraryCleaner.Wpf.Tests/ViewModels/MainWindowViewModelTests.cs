@@ -178,8 +178,8 @@ public sealed class MainWindowViewModelTests
 
         viewModel.EpubAssessments.Should().ContainSingle();
         viewModel.SelectedEpubAssessment!.Score.Should().Be("100");
-        viewModel.SelectedEpubAssessment.AnalyzerVersion.Should().Be("epub-inspector/1.0.3");
-        viewModel.SelectedEpubAssessment.ScoringModelVersion.Should().Be("epub-quality/1.0.2");
+        viewModel.SelectedEpubAssessment.AnalyzerVersion.Should().Be("epub-inspector/1.0.4");
+        viewModel.SelectedEpubAssessment.ScoringModelVersion.Should().Be("epub-quality/1.0.3");
         viewModel.SelectedEpubFeatureSummary.Should().Contain("Readable characters: 6000");
         viewModel.SelectedEpubFeatureSummary.Should().Contain("Dates: 2020-01-01");
         viewModel.SelectedEpubFeatureSummary.Should().Contain("Strong identifiers: 9780306406157");

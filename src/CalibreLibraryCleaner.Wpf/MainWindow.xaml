@@ -779,7 +779,8 @@
               <DataGridTextColumn Width="*" Header="Calibre title (context)" Binding="{Binding BookTitle}" />
               <DataGridTextColumn Width="2*" Header="Expected path" Binding="{Binding ExpectedRelativePath}" />
               <DataGridTextColumn Width="110" Header="Status" Binding="{Binding Status}" />
-              <DataGridTextColumn Width="150" Header="Score" Binding="{Binding Score}" />
+              <DataGridTextColumn Width="150" Header="Coverage" Binding="{Binding Coverage}" />
+              <DataGridTextColumn Width="190" Header="Score" Binding="{Binding Score}" />
               <DataGridTextColumn Width="70" Header="Opened" Binding="{Binding Opened}" />
               <DataGridTextColumn Width="100" Header="Package" Binding="{Binding PackageParsed}" />
               <DataGridTextColumn Width="80" Header="EPUB" Binding="{Binding PackageVersion}" />

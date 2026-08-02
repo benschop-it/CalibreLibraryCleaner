@@ -652,6 +652,10 @@ public sealed class ConsolidationRecommendationPolicy
             {
                 warnings.Add(new("EPUB.ONLY_SOURCE_UNASSESSED", RecommendationWarningSeverity.ManualReview, RecommendationSubjectKind.Assessment, "The sole EPUB is retained because it is the only available copy, but no comparable quality score could be produced.", source.BookId, format));
             }
+            else if (format == "EPUB" && source.Assessment?.ScoreCap is not null)
+            {
+                warnings.Add(new("EPUB.ONLY_SOURCE_CAPPED", RecommendationWarningSeverity.ManualReview, RecommendationSubjectKind.Assessment, "The sole EPUB is retained because it is the only available copy, but its fallback-readable score is capped and requires review.", source.BookId, format));
+            }
 
             return new(format, candidates, source, FormatResolutionStatus.Selected, [], RecommendationDecisionStrength.Strong, [code], unavailable.Length > 0 ? ["FORMAT.FILE_UNAVAILABLE"] : []);
         }
@@ -717,6 +721,18 @@ public sealed class ConsolidationRecommendationPolicy
         if (analyzerVersions.Length != 1 || scoringVersions.Length != 1)
         {
             warnings.Add(new("ASSESSMENT.STALE_OR_INCOMPARABLE", RecommendationWarningSeverity.ManualReview, RecommendationSubjectKind.Assessment, "EPUB assessments use incompatible analyzer or scoring-model versions.", format: "EPUB"));
+            return null;
+        }
+
+        if (candidates.Any(candidate => candidate.Assessment!.ScoreCap is not null))
+        {
+            warnings.Add(new(
+                "EPUB.CAPPED_ASSESSMENT_REQUIRES_REVIEW",
+                RecommendationWarningSeverity.ManualReview,
+                RecommendationSubjectKind.Assessment,
+                "A fallback-readable capped EPUB is present; non-identical candidates require manual review and no source is proposed.",
+                format: "EPUB",
+                evidence: BuildEpubDecisionEvidence(candidates, null)));
             return null;
         }
 
@@ -795,6 +811,8 @@ public sealed class ConsolidationRecommendationPolicy
             EpubAssessment assessment = candidate.Assessment;
             evidence[prefix + "status"] = assessment.Status.ToString();
             evidence[prefix + "score"] = assessment.Score?.Value.ToString(CultureInfo.InvariantCulture) ?? "not-scored";
+            evidence[prefix + "uncappedScore"] = assessment.UncappedScore?.Value.ToString(CultureInfo.InvariantCulture) ?? "not-scored";
+            evidence[prefix + "scoreCap"] = assessment.ScoreCap?.ToString(CultureInfo.InvariantCulture) ?? "none";
             evidence[prefix + "analyzerVersion"] = assessment.AnalyzerVersion.Value;
             evidence[prefix + "scoringModelVersion"] = assessment.ScoringModelVersion.Value;
             evidence[prefix + "decisiveFindings"] = BoundEvidence(string.Join(',', assessment.Findings
@@ -1046,7 +1064,10 @@ public sealed class ConsolidationRecommendationPolicy
             Append(canonical, assessment.CalibreBookId.Value.ToString(CultureInfo.InvariantCulture)); Append(canonical, assessment.ExpectedRelativePath); Append(canonical, assessment.Status.ToString());
             Append(canonical, assessment.ObservedFingerprint?.SizeInBytes.ToString(CultureInfo.InvariantCulture) ?? string.Empty);
             Append(canonical, assessment.ObservedFingerprint?.Sha256.Value ?? string.Empty);
-            Append(canonical, assessment.Score?.Value.ToString(CultureInfo.InvariantCulture) ?? string.Empty); Append(canonical, assessment.AnalyzerVersion.Value); Append(canonical, assessment.ScoringModelVersion.Value);
+            Append(canonical, assessment.Score?.Value.ToString(CultureInfo.InvariantCulture) ?? string.Empty);
+            Append(canonical, assessment.UncappedScore?.Value.ToString(CultureInfo.InvariantCulture) ?? string.Empty);
+            Append(canonical, assessment.ScoreCap?.ToString(CultureInfo.InvariantCulture) ?? string.Empty);
+            Append(canonical, assessment.AnalyzerVersion.Value); Append(canonical, assessment.ScoringModelVersion.Value);
             foreach (AssessmentFinding finding in assessment.Findings.Where(value => DecisiveEpubRules.Contains(value.RuleId))) { Append(canonical, finding.RuleId); Append(canonical, finding.ScoreAdjustment.ToString(CultureInfo.InvariantCulture)); Append(canonical, finding.Severity.ToString()); }
         }
 

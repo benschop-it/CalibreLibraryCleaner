@@ -52,4 +52,31 @@ public sealed class EpubAssessmentRowViewModelTests
         row.Status.Should().Be("Unassessed");
         row.Score.Should().Be("Not scored — unassessed");
     }
+
+    [Fact]
+    public void FallbackReadableRowShowsNumericScoreCoverageAndCap()
+    {
+        AssessmentFinding finding = new("EPUB.BASELINE", FindingSeverity.Information, 89, "Fallback score evidence.");
+        EpubAssessment assessment = new(
+            new CalibreBookId(1), "EPUB", "Book.epub", null, AssessmentStatus.Completed, new QualityScore(70),
+            new AnalyzerVersion("epub-inspector/1.0.4"), new ScoringModelVersion("epub-quality/1.0.3"),
+            new EpubFeatureSummary(
+                true,
+                false,
+                readableCharacterCount: 6_000,
+                coverage: EpubAssessmentCoverage.FallbackReadable,
+                availableFacets: EpubAssessmentFacet.Archive | EpubAssessmentFacet.Content,
+                fallbackCandidateCount: 1,
+                fallbackRenderableCount: 1,
+                renderableEvidence: EpubRenderableEvidence.Text),
+            [finding],
+            scoreCap: 70);
+
+        EpubAssessmentRowViewModel row = new(assessment, null);
+
+        row.Status.Should().Be("Completed");
+        row.Coverage.Should().Be("FallbackReadable");
+        row.Score.Should().Be("70 (fallback; max 70)");
+        row.FeatureSummary.Should().Contain("Uncapped score: 89").And.Contain("Renderable evidence: Text");
+    }
 }

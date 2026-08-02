@@ -27,6 +27,94 @@ public sealed class AssessmentValueTests
     }
 
     [Fact]
+    public void CompletedAssessmentAppliesExplicitScoreCeilingAfterFindingDerivation()
+    {
+        AssessmentFinding finding = new("EPUB.SCORE.BASELINE", FindingSeverity.Positive, 80, "Synthetic raw score.");
+
+        FormatAssessment assessment = new(
+            new CalibreBookId(1), "EPUB", "Book.epub", null, AssessmentStatus.Completed,
+            new QualityScore(70), new AnalyzerVersion("epub-inspector/1.0.4"),
+            new ScoringModelVersion("epub-quality/1.0.3"), [finding], scoreCap: 70);
+
+        assessment.Score.Should().Be(new QualityScore(70));
+        assessment.UncappedScore.Should().Be(new QualityScore(80));
+        assessment.ScoreCap.Should().Be(70);
+    }
+
+    [Fact]
+    public void ScoreCeilingRejectsInconsistentOrUnscoredAssessments()
+    {
+        AssessmentFinding positive = new("EPUB.SCORE.BASELINE", FindingSeverity.Positive, 80, "Synthetic raw score.");
+        AssessmentFinding warning = new("EPUB.PACKAGE", FindingSeverity.Warning, 0, "Incomplete.");
+
+        FluentActions.Invoking(() => new FormatAssessment(
+                new CalibreBookId(1), "EPUB", "Book.epub", null, AssessmentStatus.Completed,
+                new QualityScore(80), new AnalyzerVersion("epub-inspector/1.0.4"),
+                new ScoringModelVersion("epub-quality/1.0.3"), [positive], scoreCap: 70))
+            .Should().Throw<ArgumentException>();
+        FluentActions.Invoking(() => new FormatAssessment(
+                new CalibreBookId(1), "EPUB", "Book.epub", null, AssessmentStatus.Unassessed,
+                null, new AnalyzerVersion("epub-inspector/1.0.4"),
+                new ScoringModelVersion("epub-quality/1.0.3"), [warning], scoreCap: 70))
+            .Should().Throw<ArgumentException>();
+    }
+
+    [Fact]
+    public void FallbackFeatureSummaryRequiresRenderableEvidenceAndContentFacet()
+    {
+        EpubFeatureSummary summary = new(
+            true,
+            false,
+            readableCharacterCount: 250,
+            coverage: EpubAssessmentCoverage.FallbackReadable,
+            availableFacets: EpubAssessmentFacet.Archive | EpubAssessmentFacet.Content,
+            fallbackCandidateCount: 3,
+            fallbackRenderableCount: 1,
+            renderableEvidence: EpubRenderableEvidence.Text);
+
+        summary.Coverage.Should().Be(EpubAssessmentCoverage.FallbackReadable);
+        summary.AvailableFacets.Should().HaveFlag(EpubAssessmentFacet.Content);
+        summary.FallbackCandidateCount.Should().Be(3);
+        summary.FallbackRenderableCount.Should().Be(1);
+        summary.RenderableEvidence.Should().Be(EpubRenderableEvidence.Text);
+
+        FluentActions.Invoking(() => new EpubFeatureSummary(
+                true,
+                false,
+                coverage: EpubAssessmentCoverage.FallbackReadable,
+                availableFacets: EpubAssessmentFacet.Archive,
+                fallbackCandidateCount: 1,
+                fallbackRenderableCount: 0,
+                renderableEvidence: EpubRenderableEvidence.None))
+            .Should().Throw<ArgumentException>();
+    }
+
+    [Fact]
+    public void EpubAssessmentRequiresFallbackCoverageAndScoreCapToAgree()
+    {
+        AssessmentFinding finding = new("EPUB.SCORE.BASELINE", FindingSeverity.Positive, 80, "Synthetic raw score.");
+        FormatAssessment uncapped = new(
+            new CalibreBookId(1), "EPUB", "Book.epub", null, AssessmentStatus.Completed,
+            new QualityScore(80), new AnalyzerVersion("epub-inspector/1.0.4"),
+            new ScoringModelVersion("epub-quality/1.0.3"), [finding]);
+        EpubFeatureSummary fallback = new(
+            true,
+            false,
+            coverage: EpubAssessmentCoverage.FallbackReadable,
+            availableFacets: EpubAssessmentFacet.Archive | EpubAssessmentFacet.Content,
+            fallbackCandidateCount: 1,
+            fallbackRenderableCount: 1,
+            renderableEvidence: EpubRenderableEvidence.Text);
+        FormatAssessment capped = new(
+            new CalibreBookId(1), "EPUB", "Book.epub", null, AssessmentStatus.Completed,
+            new QualityScore(70), new AnalyzerVersion("epub-inspector/1.0.4"),
+            new ScoringModelVersion("epub-quality/1.0.3"), [finding], scoreCap: 70);
+
+        FluentActions.Invoking(() => new EpubAssessment(uncapped, fallback)).Should().Throw<ArgumentException>();
+        FluentActions.Invoking(() => new EpubAssessment(capped, new EpubFeatureSummary(true, true))).Should().Throw<ArgumentException>();
+    }
+
+    [Fact]
     public void DisqualifiedAssessmentHasNoNumericScore()
     {
         EpubAssessment assessment = new(
