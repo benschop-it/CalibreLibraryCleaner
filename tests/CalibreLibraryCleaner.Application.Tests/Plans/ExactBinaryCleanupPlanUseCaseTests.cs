@@ -14,22 +14,21 @@ public sealed class ExactBinaryCleanupPlanUseCaseTests
     private static readonly DateTimeOffset Now = new(2026, 8, 1, 12, 0, 0, TimeSpan.Zero);
 
     [Fact]
-    public void DifferentMetadataStillProducesConsolidationPlanWithUniqueFormatsBackedUp()
+    public void AutomaticSelectionKeepsRicherRecordAndRemovesOnlyDuplicateFormat()
     {
         LibrarySnapshot snapshot = Snapshot();
         ExactBinaryDuplicateGroup group = snapshot.ExactBinaryDuplicateGroups.Single();
-        ExactBinaryDuplicateMember keeper = group.Members.Single(value => value.BookId == new CalibreBookId(1));
         GenerateExactBinaryCleanupPlanUseCase useCase = CreateGenerator();
 
         ExactBinaryCleanupPlanGenerationOutcome outcome = useCase.Execute(
-            snapshot, group.Id, keeper);
+            snapshot, group.Id);
 
         outcome.IsSuccess.Should().BeTrue();
         ExactBinaryCleanupPlan plan = outcome.Plan!;
         plan.State.Should().Be(CleanupPlanState.Valid);
         plan.Definition.RetainedFormat.RecordId.Should().Be(new CalibreBookId(1));
         plan.Definition.RecordIdsToRemove.Should().Equal(new CalibreBookId(2));
-        plan.Definition.DuplicateEvidence.Should().ContainSingle()
+        plan.Definition.FormatRemovals.Should().ContainSingle()
             .Which.RecordId.Should().Be(new CalibreBookId(2));
         plan.Definition.ExpectedRecords.Should().HaveCount(2);
         plan.Definition.ExpectedRecords.Single(value => value.RecordId == new CalibreBookId(1))
@@ -38,7 +37,7 @@ public sealed class ExactBinaryCleanupPlanUseCaseTests
             value.Kind == BackupRequirementKind.FormatFile
             && value.RecordId == new CalibreBookId(1)
             && value.Format == "PDF");
-        plan.Validation.Issues.Should().Contain(value => value.Code == "BINARY_PLAN.SINGLE_KEEPER_CONSOLIDATION");
+        plan.Validation.Issues.Should().Contain(value => value.Code == "BINARY_PLAN.AUTOMATIC_FORMAT_RETENTION");
         plan.ContentDigest.Should().Be(ExactBinaryCleanupPlanContentDigestPolicy.Compute(plan.Definition));
     }
 
@@ -48,7 +47,7 @@ public sealed class ExactBinaryCleanupPlanUseCaseTests
         LibrarySnapshot snapshot = Snapshot();
         ExactBinaryDuplicateGroup group = snapshot.ExactBinaryDuplicateGroups.Single();
         ExactBinaryCleanupPlan valid = CreateGenerator().Execute(
-            snapshot, group.Id, group.Members[0]).Plan!;
+            snapshot, group.Id).Plan!;
         IClock clock = A.Fake<IClock>();
         A.CallTo(() => clock.GetUtcNow()).Returns(Now.AddMinutes(1));
 
@@ -67,7 +66,7 @@ public sealed class ExactBinaryCleanupPlanUseCaseTests
         LibrarySnapshot snapshot = Snapshot();
         ExactBinaryDuplicateGroup group = snapshot.ExactBinaryDuplicateGroups.Single();
         ExactBinaryCleanupPlan valid = CreateGenerator().Execute(
-            snapshot, group.Id, group.Members[0]).Plan!;
+            snapshot, group.Id).Plan!;
         CalibreBook original = snapshot.Books.Single(value => value.Id == new CalibreBookId(1));
         BookFormat epub = original.Formats.Single(value => value.Format == "EPUB");
         BookFormat oldPdf = original.Formats.Single(value => value.Format == "PDF");
@@ -91,25 +90,33 @@ public sealed class ExactBinaryCleanupPlanUseCaseTests
     }
 
     [Fact]
-    public void KeeperOutsideCurrentGroupIsRejectedWithoutAllocatingPlanId()
+    public void MixedFormatLabelsAreSkippedWithoutAllocatingPlanId()
     {
         LibrarySnapshot snapshot = Snapshot();
         ExactBinaryDuplicateGroup group = snapshot.ExactBinaryDuplicateGroups.Single();
         ICleanupPlanIdGenerator ids = A.Fake<ICleanupPlanIdGenerator>();
         IClock clock = A.Fake<IClock>();
         A.CallTo(() => clock.GetUtcNow()).Returns(Now);
-        ExactBinaryDuplicateMember outside = new(new CalibreBookId(99), "EPUB", "Outside/Book.epub");
+        CalibreBook first = snapshot.Books[0];
+        CalibreBook second = snapshot.Books[1];
+        BookFormat epub = second.Formats.Single();
+        CalibreBook anomalous = new(second.Id, second.Title, second.AuthorSort, second.Authors, second.Identifiers,
+            [new("MOBI", epub.StoredFileName, epub.ExpectedRelativePath, epub.FileStatus, epub.Fingerprint, epub.Observation)],
+            second.RelativeDirectory, second.PublicationMetadata);
+        LibrarySnapshot mixed = new(snapshot.Identity, snapshot.ScannedAt, [first, anomalous], [],
+            ExactBinaryDuplicateDetector.Detect([first, anomalous]));
+        ExactBinaryDuplicateGroup mixedGroup = mixed.ExactBinaryDuplicateGroups.Single();
 
         ExactBinaryCleanupPlanGenerationOutcome outcome = new GenerateExactBinaryCleanupPlanUseCase(ids, clock)
-            .Execute(snapshot, group.Id, outside);
+            .Execute(mixed, mixedGroup.Id);
 
         outcome.Plan.Should().BeNull();
-        outcome.Validation.BlockingErrors.Should().Contain(value => value.Code == "BINARY_PLAN.KEEPER_NOT_MEMBER");
+        outcome.Validation.BlockingErrors.Should().Contain(value => value.Code == "BINARY_PLAN.FORMAT_LABEL_MISMATCH");
         A.CallTo(() => ids.Create()).MustNotHaveHappened();
     }
 
     [Fact]
-    public void ThreeRecordGroupAlwaysDeletesEveryRecordExceptKeeper()
+    public void ThreeRecordGroupRemovesEveryCopyExceptAutomaticallySelectedKeeper()
     {
         LibrarySnapshot original = Snapshot();
         FormatFileFingerprint duplicate = original.Books[0].Formats.Single(value => value.Format == "EPUB").Fingerprint!;
@@ -125,14 +132,39 @@ public sealed class ExactBinaryCleanupPlanUseCaseTests
         CalibreBook[] books = [.. original.Books, third];
         LibrarySnapshot snapshot = new(original.Identity, Now, books, [], ExactBinaryDuplicateDetector.Detect(books));
         ExactBinaryDuplicateGroup group = snapshot.ExactBinaryDuplicateGroups.Single();
-        ExactBinaryDuplicateMember keeper = group.Members.Single(value => value.BookId == new CalibreBookId(2));
-
         ExactBinaryCleanupPlanGenerationOutcome outcome = CreateGenerator().Execute(
-            snapshot, group.Id, keeper);
+            snapshot, group.Id);
 
-        outcome.Plan!.Definition.RetainedFormat.RecordId.Should().Be(new CalibreBookId(2));
-        outcome.Plan.Definition.RecordIdsToRemove.Should().Equal(new CalibreBookId(1), new CalibreBookId(3));
-        outcome.Plan.Definition.RecordIdsToRemove.Should().NotContain(new CalibreBookId(2));
+        outcome.Plan!.Definition.RetainedFormat.RecordId.Should().Be(new CalibreBookId(1));
+        outcome.Plan.Definition.FormatRemovals.Select(value => value.RecordId)
+            .Should().Equal(new CalibreBookId(2), new CalibreBookId(3));
+        outcome.Plan.Definition.RecordIdsToRemove.Should().Equal(new CalibreBookId(2), new CalibreBookId(3));
+    }
+
+    [Fact]
+    public void RecordWithAnotherFormatIsNotMarkedForDeletion()
+    {
+        FormatFileFingerprint duplicate = new(10, new Sha256Digest(new string('a', 64)));
+        CalibreBook first = new(
+            new(1), "First", "Alice", [new(new(1), "Alice", "Alice")], [],
+            [Format(1, "EPUB", "first", duplicate), Format(1, "PDF", "first", new(20, new(new string('b', 64))))],
+            "Alice/First (1)");
+        CalibreBook second = new(
+            new(2), "Second", "Bob", [new(new(2), "Bob", "Bob")], [],
+            [Format(2, "EPUB", "second", duplicate), Format(2, "MOBI", "second", new(30, new(new string('c', 64))))],
+            "Bob/Second (2)");
+        CalibreBook[] books = [first, second];
+        LibrarySnapshot snapshot = new(
+            new("87f7ed1f-59a8-45a6-975a-7e06fd84780d", 27, "C:\\synthetic\\library"),
+            Now, books, [], ExactBinaryDuplicateDetector.Detect(books));
+        ExactBinaryDuplicateGroup group = snapshot.ExactBinaryDuplicateGroups.Single();
+
+        ExactBinaryCleanupPlan plan = CreateGenerator().Execute(snapshot, group.Id).Plan!;
+
+        plan.Definition.RetainedFormat.RecordId.Should().Be(new CalibreBookId(1));
+        plan.Definition.FormatRemovals.Should().ContainSingle(value => value.RecordId == new CalibreBookId(2)
+            && value.Format == "EPUB");
+        plan.Definition.RecordIdsToRemove.Should().BeEmpty();
     }
 
     private static GenerateExactBinaryCleanupPlanUseCase CreateGenerator()

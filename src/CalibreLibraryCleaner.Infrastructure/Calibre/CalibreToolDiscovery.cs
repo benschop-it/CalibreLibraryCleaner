@@ -73,6 +73,7 @@ internal sealed partial class CalibreToolDiscovery(
             {
                 ["global-help"] = ["--help"],
                 ["add-format-help"] = ["add_format", "--help"],
+                ["remove-format-help"] = ["remove_format", "--help"],
                 ["remove-help"] = ["remove", "--help"],
                 ["export-help"] = ["export", "--help"],
             };
@@ -80,7 +81,6 @@ internal sealed partial class CalibreToolDiscovery(
             {
                 probes.Add("add-help", ["add", "--help"]);
                 probes.Add("set-metadata-help", ["set_metadata", "--help"]);
-                probes.Add("remove-format-help", ["remove_format", "--help"]);
             }
             Dictionary<string, string> help = new(StringComparer.Ordinal);
             foreach ((string name, string[] arguments) in probes)
@@ -97,14 +97,14 @@ internal sealed partial class CalibreToolDiscovery(
 
             if (!ContainsAll(help.GetValueOrDefault("global-help"), "--with-library")
                 || !ContainsAll(help.GetValueOrDefault("add-format-help"), "add_format", "--dont-replace")
+                || !ContainsAll(help.GetValueOrDefault("remove-format-help"), "remove_format")
                 || !ContainsAll(help.GetValueOrDefault("remove-help"), "remove", "--permanent")
                 || !ContainsAll(help.GetValueOrDefault("export-help"), "export", "--dont-save-extra-files",
                     "--dont-update-metadata", "--to-dir", "--single-dir"))
                 issues.Add(Block("EXECUTION.CALIBRE_CAPABILITY_UNKNOWN", "The exact required documented Calibre commands and options could not be confirmed."));
             if (options.IsValidatedRecoveryProfileEnabled
                 && (!ContainsAll(help.GetValueOrDefault("add-help"), "add", "--empty", "--title", "--authors")
-                    || !ContainsAll(help.GetValueOrDefault("set-metadata-help"), "set_metadata", "--field")
-                    || !ContainsAll(help.GetValueOrDefault("remove-format-help"), "remove_format")))
+                    || !ContainsAll(help.GetValueOrDefault("set-metadata-help"), "set_metadata", "--field")))
                 issues.Add(Block("RECOVERY.CALIBRE_CAPABILITY_UNKNOWN",
                     "The exact required recovery commands and options could not be confirmed."));
         }

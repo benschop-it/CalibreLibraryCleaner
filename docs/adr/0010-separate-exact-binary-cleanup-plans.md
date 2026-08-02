@@ -1,9 +1,11 @@
 # ADR 0010: Use Separate Plans for Single-Keeper Exact-Binary Consolidation
 
-- Status: Accepted
+- Status: Superseded by ADR 0011
 - Date: 2026-08-01
 
 ## Context
+
+This decision described the first exact-binary execution slice. It was superseded after validating the workflow against a library containing thousands of exact-file groups: manual keeper selection and whole-record deletion do not meet the product goal and can remove unrelated formats.
 
 Exact-binary groups are valid cleanup candidates even when their Calibre records have different metadata. The workflow must consolidate a multi-record group to exactly one user-selected keeper, never zero and never an ambiguous subset.
 

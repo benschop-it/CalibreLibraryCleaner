@@ -88,7 +88,7 @@ manual WPF acceptance plan remains the final acceptance activity.
 
 ## Exact-binary record cleanup
 
-Exact file groups support selecting exactly one keeper even when metadata differs. Every other distinct group record is derived as a deletion target. Execution creates and verifies complete external record backups, obtains final confirmation, calls non-permanent `calibredb remove` for every non-keeper ID, and performs a full verification scan after every deletion.
+Exact file groups automatically retain the best located same-format copy using record format count, metadata/identifier/cover completeness, and record ID as the final tie-breaker. Execution creates and verifies complete external record backups, obtains final confirmation, calls typed `calibredb remove_format` for duplicate copies, and calls non-permanent `calibredb remove` only for records projected empty. Successful commands update authoritative state through durable deltas without rescanning.
 
 ## Milestone 10 — Content fingerprints and comparisons
 

@@ -1,5 +1,7 @@
 # Exact Binary Duplicate Record Cleanup
 
+> **DEPRECATED:** Superseded on 2026-08-02 by ADR 0011 and `global-exact-file-deduplication.md`. This document describes the rejected v1 single-keeper-record workflow and must not be used as current design guidance.
+
 ## Objective
 
 Let a user select one keeper in an exact-binary duplicate group and remove every other Calibre record in that group through `calibredb` after a verified external backup.

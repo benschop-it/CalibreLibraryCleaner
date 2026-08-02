@@ -7,8 +7,8 @@ namespace CalibreLibraryCleaner.Application.Plans;
 
 public static class ExactBinaryCleanupPlanVersions
 {
-    public static CleanupPlanSchemaVersion Schema { get; } = new("exact-binary-cleanup-plan/1.0");
-    public static CleanupPlanPolicyVersion Policy { get; } = new("exact-binary-cleanup-plan-policy/1.0.0");
+    public static CleanupPlanSchemaVersion Schema { get; } = new("exact-binary-cleanup-plan/2.0");
+    public static CleanupPlanPolicyVersion Policy { get; } = new("exact-binary-cleanup-plan-policy/2.0.0");
 }
 
 public sealed record ExactBinaryCleanupPlanGenerationOutcome(
@@ -32,7 +32,6 @@ public sealed class GenerateExactBinaryCleanupPlanUseCase(
     public ExactBinaryCleanupPlanGenerationOutcome Execute(
         LibrarySnapshot snapshot,
         ExactBinaryDuplicateGroupId groupId,
-        ExactBinaryDuplicateMember retainedMember,
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(snapshot);
@@ -46,25 +45,24 @@ public sealed class GenerateExactBinaryCleanupPlanUseCase(
             issues.Add(Block("BINARY_PLAN.GROUP_NOT_CURRENT", "The exact-binary group is not present in the current scan."));
             return Failure(issues, now);
         }
-        if (!group.Members.Contains(retainedMember))
+        ExactBinaryRetentionDecision decision = ExactBinaryRetentionPolicy
+            .Select(snapshot.ExactBinaryDuplicateGroups, snapshot.Books, cancellationToken)
+            .Single(value => value.GroupId == groupId);
+        if (!decision.IsEligible)
         {
-            issues.Add(Block("BINARY_PLAN.KEEPER_NOT_MEMBER", "The retained file must be a current member of the exact-binary group."));
+            issues.Add(Block("BINARY_PLAN.FORMAT_LABEL_MISMATCH", decision.SkipReason
+                ?? "The exact-binary group is not eligible for automatic retained-copy selection."));
             return Failure(issues, now);
         }
+        ExactBinaryDuplicateMember retainedMember = decision.RetainedMember!;
 
-        CalibreBookId[] removals = group.Members
-            .Select(value => value.BookId)
-            .Where(value => value != retainedMember.BookId)
-            .Distinct()
-            .OrderBy(value => value.Value)
-            .ToArray();
-        if (removals.Length == 0)
+        if (!group.SpansMultipleBookRecords)
             issues.Add(Block("BINARY_PLAN.MULTIPLE_RECORDS_REQUIRED",
-                "This exact-file group occurs within one Calibre record and cannot be consolidated by record deletion."));
+                "This exact-file group does not contain removable copies on separate Calibre records."));
         if (issues.Count > 0) return Failure(issues, now);
 
         Dictionary<CalibreBookId, CalibreBook> books = snapshot.Books
-            .Where(value => value.Id == retainedMember.BookId || removals.Contains(value.Id))
+            .Where(value => group.Members.Any(member => member.BookId == value.Id))
             .ToDictionary(value => value.Id);
         ExactBinaryDuplicateMember[] plannedMembers = group.Members.ToArray();
         foreach (ExactBinaryDuplicateMember member in plannedMembers)
@@ -99,8 +97,15 @@ public sealed class GenerateExactBinaryCleanupPlanUseCase(
             .SelectMany(value => value.Formats)
             .ToDictionary(value => (value.RecordId, value.Format, value.RelativePath));
         ExpectedFormatState retained = formats[Association(retainedMember)];
-        ExpectedFormatState[] evidence = plannedMembers.Where(value => value != retainedMember)
+        ExpectedFormatState[] formatRemovals = decision.FormatRemovals
             .Select(value => formats[Association(value)]).ToArray();
+        HashSet<(CalibreBookId, string, string)> removalAssociations = formatRemovals
+            .Select(value => (value.RecordId, value.Format, value.RelativePath)).ToHashSet();
+        CalibreBookId[] recordRemovals = records
+            .Where(value => value.Formats.All(format => removalAssociations.Contains(
+                (format.RecordId, format.Format, format.RelativePath))))
+            .Select(value => value.RecordId)
+            .ToArray();
         BackupRequirement[] backups = CreateBackups(records).ToArray();
         ExactBinaryCleanupPlanDefinition definition = new(
             snapshot.Identity.CalibreLibraryUuid,
@@ -108,15 +113,15 @@ public sealed class GenerateExactBinaryCleanupPlanUseCase(
             group.Id,
             group.Fingerprint,
             retained,
-            evidence,
-            removals,
+            formatRemovals,
+            recordRemovals,
             records,
             backups,
             now);
         issues.AddRange(ExactBinaryCleanupPlanSafetyPolicy.Validate(definition));
-        issues.Add(new("BINARY_PLAN.SINGLE_KEEPER_CONSOLIDATION", CleanupPlanIssueSeverity.Information,
-            CleanupPlanIssueSubjectKind.Record,
-            "This plan keeps the selected Calibre record and removes every other record in the exact-binary group after complete external backup."));
+        issues.Add(new("BINARY_PLAN.AUTOMATIC_FORMAT_RETENTION", CleanupPlanIssueSeverity.Information,
+            CleanupPlanIssueSubjectKind.Format,
+            $"This plan automatically retains record {retained.RecordId.Value}'s {retained.Format}, removes {formatRemovals.Length} byte-identical format copy or copies, and removes only records that become completely empty. Other records and non-identical formats are preserved."));
         CleanupPlanContentDigest digest = ExactBinaryCleanupPlanContentDigestPolicy.Compute(definition);
         ExactBinaryCleanupPlanInputIdentity identity = new(
             definition.LibraryUuid,
@@ -236,12 +241,12 @@ public sealed class ValidateExactBinaryCleanupPlanUseCase(IClock clock)
             .SingleOrDefault(value => value.Id == definition.GroupId);
         if (group is null || group.Fingerprint != definition.Fingerprint)
             return [Stale("The exact-binary group or shared fingerprint changed.")];
-        HashSet<(CalibreBookId, string, string)> planned = definition.DuplicateEvidence
+        HashSet<(CalibreBookId, string, string)> planned = definition.FormatRemovals
             .Prepend(definition.RetainedFormat)
             .Select(value => (value.RecordId, value.Format, value.RelativePath)).ToHashSet();
         HashSet<(CalibreBookId, string, string)> currentMembers = group.Members
             .Select(value => (value.BookId, value.Format, value.ExpectedRelativePath.Replace('\\', '/'))).ToHashSet();
-        if (!planned.IsSubsetOf(currentMembers)) return [Stale("A planned exact-binary group member changed or disappeared.")];
+        if (!planned.SetEquals(currentMembers)) return [Stale("The exact-binary group membership changed.")];
 
         Dictionary<CalibreBookId, CalibreBook> books = snapshot.Books.ToDictionary(value => value.Id);
         foreach (ExpectedRecordState expected in definition.ExpectedRecords)
@@ -316,6 +321,12 @@ internal static class ExactBinaryExpectedState
     }
 
     public static bool Matches(ExpectedRecordState expected, CalibreBook current)
+        => Matches(expected, current, new HashSet<(CalibreBookId, string, string)>());
+
+    public static bool Matches(
+        ExpectedRecordState expected,
+        CalibreBook current,
+        IReadOnlySet<(CalibreBookId RecordId, string Format, string RelativePath)> removedFormats)
     {
         if (expected.RecordId != current.Id
             || expected.Title != current.Title
@@ -335,7 +346,10 @@ internal static class ExactBinaryExpectedState
         if (current.Formats.Any(value => value.FileStatus != FormatFileStatus.Present
             || value.Fingerprint is null || value.Observation is null)) return false;
         ExpectedRecordState actual = CreateRecord(current);
-        return expected.Formats.SequenceEqual(actual.Formats);
+        ExpectedFormatState[] remaining = expected.Formats
+            .Where(value => !removedFormats.Contains((value.RecordId, value.Format, value.RelativePath)))
+            .ToArray();
+        return remaining.SequenceEqual(actual.Formats);
     }
 
     private static string Normalize(string value) => value.Replace('\\', '/');

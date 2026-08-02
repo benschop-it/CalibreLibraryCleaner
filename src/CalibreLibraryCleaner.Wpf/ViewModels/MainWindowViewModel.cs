@@ -22,6 +22,7 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
     private readonly IRecommendationExportFilePicker? _exportFilePicker;
     private readonly IClock? _clock;
     private readonly PersistedLibrarySnapshotsUseCase? _persistedSnapshots;
+    private readonly ILibraryStateSession? _libraryStateSession;
     private readonly BulkObservableCollection<BookRowViewModel> _books = [];
     private readonly BulkObservableCollection<string> _persistedLibraryPaths = [];
     private readonly BulkObservableCollection<ExactDuplicateGroupRowViewModel> _exactDuplicateGroups = [];
@@ -68,7 +69,8 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
         ExactBinaryCleanupPlanWorkspaceViewModel? exactBinaryCleanupPlans = null,
         CleanupExecutionWorkspaceViewModel? cleanupExecutions = null,
         RecoveryWorkspaceViewModel? recoveries = null,
-        PersistedLibrarySnapshotsUseCase? persistedSnapshots = null)
+        PersistedLibrarySnapshotsUseCase? persistedSnapshots = null,
+        ILibraryStateSession? libraryStateSession = null)
     {
         _validateLibrary = validateLibrary;
         _scanLibrary = scanLibrary;
@@ -77,6 +79,7 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
         _exportFilePicker = exportFilePicker;
         _clock = clock;
         _persistedSnapshots = persistedSnapshots;
+        _libraryStateSession = libraryStateSession;
         CleanupPlans = cleanupPlans;
         ExactBinaryCleanupPlans = exactBinaryCleanupPlans;
         CleanupExecutions = cleanupExecutions;
@@ -282,7 +285,8 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
             {
                 OnPropertyChanged(nameof(SelectedExactDuplicateMembers));
                 OnPropertyChanged(nameof(RetainedExactDuplicateMember));
-                SelectedExactDuplicateMember = value is { Members.Count: > 0 } ? value.Members[0] : null;
+                SelectedExactDuplicateMember = value?.RetainedMember
+                    ?? (value is { Members.Count: > 0 } ? value.Members[0] : null);
                 ExactBinaryCleanupPlans?.UpdateContext(
                     _isCurrentSnapshotFresh ? _currentSnapshot : null,
                     value,
@@ -299,25 +303,12 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
         get => _selectedExactDuplicateMember;
         set
         {
-            if (SetProperty(ref _selectedExactDuplicateMember, value) && value is not null)
-                RetainedExactDuplicateMember = value;
+            SetProperty(ref _selectedExactDuplicateMember, value);
         }
     }
 
-    public ExactDuplicateMemberRowViewModel? RetainedExactDuplicateMember
-    {
-        get => SelectedExactDuplicateGroup?.RetainedMember;
-        set
-        {
-            if (SelectedExactDuplicateGroup is null || value is null) return;
-            SelectedExactDuplicateGroup.RetainedMember = value;
-            OnPropertyChanged();
-            ExactBinaryCleanupPlans?.UpdateContext(
-                _isCurrentSnapshotFresh ? _currentSnapshot : null,
-                SelectedExactDuplicateGroup,
-                value);
-        }
-    }
+    public ExactDuplicateMemberRowViewModel? RetainedExactDuplicateMember =>
+        SelectedExactDuplicateGroup?.RetainedMember;
 
     public MetadataDuplicateGroupRowViewModel? SelectedMetadataDuplicateGroup
     {
@@ -520,6 +511,7 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
             progress.Complete();
             if (outcome.IsSuccess)
             {
+                _libraryStateSession?.StartFromScan(outcome.Snapshot!);
                 SnapshotPresentation presentation = await Task.Run(
                         () => CreatePresentation(outcome.Snapshot!, _scanCancellation.Token),
                         _scanCancellation.Token)

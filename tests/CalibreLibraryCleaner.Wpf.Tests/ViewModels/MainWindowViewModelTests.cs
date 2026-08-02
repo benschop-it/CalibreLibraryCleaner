@@ -45,6 +45,7 @@ public sealed class MainWindowViewModelTests
     {
         ILibraryFolderPicker picker = A.Fake<ILibraryFolderPicker>();
         ILibrarySnapshotStore store = A.Fake<ILibrarySnapshotStore>();
+        ILibraryStateSession stateSession = A.Fake<ILibraryStateSession>();
         A.CallTo(() => store.ListAsync(A<CancellationToken>._)).Returns([]);
         A.CallTo(() => picker.PickFolder(A<string?>._)).Returns("library");
         MainWindowViewModel viewModel = CreateViewModel(
@@ -52,7 +53,8 @@ public sealed class MainWindowViewModelTests
             out ILibraryPathResolver resolver,
             out ICalibreMetadataReader reader,
             out IFormatFileHasher hasher,
-            new(store));
+            new(store),
+            stateSession);
         ValidatedLibraryLocation location = new("library", "database");
         A.CallTo(() => resolver.ValidateAsync("library", A<CancellationToken>._))
             .Returns(LibraryValidationOutcome.Success(location));
@@ -77,6 +79,9 @@ public sealed class MainWindowViewModelTests
         A.CallTo(() => store.WriteAsync(
             A<LibrarySnapshot>.That.Matches(value => value.Identity.LibraryRoot == "library"),
             A<CancellationToken>._)).MustHaveHappenedOnceExactly();
+        A.CallTo(() => stateSession.StartFromScan(
+            A<LibrarySnapshot>.That.Matches(value => value.Identity.LibraryRoot == "library")))
+            .MustHaveHappenedOnceExactly();
     }
 
     [Fact]
@@ -249,7 +254,7 @@ public sealed class MainWindowViewModelTests
         A.CallTo(() => resolver.ValidateAsync("library", A<CancellationToken>._))
             .Returns(LibraryValidationOutcome.Success(location));
         A.CallTo(() => reader.ReadAsync(location, A<IProgress<LibraryScanProgress>?>._, A<CancellationToken>._))
-            .Returns(CalibreCatalogReadOutcome.Success(CreateCatalog(bookCount: 2)));
+            .Returns(CalibreCatalogReadOutcome.Success(CreateCatalog(bookCount: 2, secondBookHasPdf: true)));
         A.CallTo(() => resolver.ResolveFormat(
                 location,
                 A<string>.That.IsNotNull(),
@@ -261,6 +266,7 @@ public sealed class MainWindowViewModelTests
                 return ResolvedFormatPathOutcome.Success(new("library", directory, $"{directory}/Book.epub"));
             });
         FormatFileFingerprint fingerprint = new(4, new Sha256Digest(new string('d', 64)));
+        FormatFileFingerprint pdfFingerprint = new(5, new Sha256Digest(new string('e', 64)));
         A.CallTo(() => hasher.HashAsync(
                 A<IReadOnlyList<FormatHashRequest>>._,
                 A<int>._,
@@ -268,7 +274,8 @@ public sealed class MainWindowViewModelTests
                 A<CancellationToken>._))
             .ReturnsLazily(call => Task.FromResult<IReadOnlyList<FormatHashResult>>(
                 call.GetArgument<IReadOnlyList<FormatHashRequest>>(0)!
-                    .Select(request => Successful(request.Sequence, fingerprint))
+                    .Select(request => Successful(request.Sequence,
+                        request.Format == "EPUB" ? fingerprint : pdfFingerprint))
                     .ToArray()));
 
         await viewModel.SelectLibraryCommand.ExecuteAsync(null);
@@ -281,20 +288,18 @@ public sealed class MainWindowViewModelTests
 
         ExactDuplicateMemberRowViewModel first = viewModel.SelectedExactDuplicateMembers[0];
         ExactDuplicateMemberRowViewModel second = viewModel.SelectedExactDuplicateMembers[1];
-        viewModel.RetainedExactDuplicateMember.Should().BeSameAs(first);
-        first.CleanupAction.Should().Be("Keep");
-        second.CleanupAction.Should().Be("Delete book");
-        viewModel.ExactDuplicateGroups[0].RecordIdsToDelete.Should().Equal(new CalibreBookId(2));
+        viewModel.RetainedExactDuplicateMember.Should().BeSameAs(second);
+        first.CleanupAction.Should().Be("Remove format");
+        second.CleanupAction.Should().Be("Keep");
+        viewModel.ExactDuplicateGroups[0].RecordIdsToDelete.Should().Equal(new CalibreBookId(1));
 
-        viewModel.SelectedExactDuplicateMember = second;
+        viewModel.SelectedExactDuplicateMember = first;
 
         viewModel.RetainedExactDuplicateMember.Should().BeSameAs(second);
-        first.CleanupAction.Should().Be("Delete book");
+        first.CleanupAction.Should().Be("Remove format");
         second.CleanupAction.Should().Be("Keep");
         viewModel.ExactDuplicateGroups[0].RecordIdsToDelete.Should().Equal(new CalibreBookId(1));
         viewModel.ExactDuplicateGroups[0].RecordIdsToDelete.Should().NotContain(second.Member.BookId);
-        Action clearKeeper = () => viewModel.ExactDuplicateGroups[0].RetainedMember = null!;
-        clearKeeper.Should().Throw<ArgumentNullException>();
     }
 
     [Fact]
@@ -432,7 +437,8 @@ public sealed class MainWindowViewModelTests
         out ILibraryPathResolver resolver,
         out ICalibreMetadataReader reader,
         out IFormatFileHasher hasher,
-        PersistedLibrarySnapshotsUseCase? persistedSnapshots = null)
+        PersistedLibrarySnapshotsUseCase? persistedSnapshots = null,
+        ILibraryStateSession? stateSession = null)
     {
         resolver = A.Fake<ILibraryPathResolver>();
         reader = A.Fake<ICalibreMetadataReader>();
@@ -442,7 +448,8 @@ public sealed class MainWindowViewModelTests
             new ValidateLibraryUseCase(resolver),
             new ScanLibraryUseCase(resolver, reader, hasher, clock, new()),
             picker,
-            persistedSnapshots: persistedSnapshots);
+            persistedSnapshots: persistedSnapshots,
+            libraryStateSession: stateSession);
     }
 
     private static LibrarySnapshot Snapshot(string libraryRoot) => new(
@@ -456,7 +463,7 @@ public sealed class MainWindowViewModelTests
         fingerprint,
         new FormatFileObservation(fingerprint.SizeInBytes, DateTimeOffset.UnixEpoch, DateTimeOffset.UnixEpoch, 0));
 
-    private static CalibreCatalogRecord CreateCatalog(int bookCount = 1) => new(
+    private static CalibreCatalogRecord CreateCatalog(int bookCount = 1, bool secondBookHasPdf = false) => new(
         "87f7ed1f-59a8-45a6-975a-7e06fd84780d",
         27,
         Enumerable.Range(1, bookCount).Select(id =>
@@ -467,7 +474,9 @@ public sealed class MainWindowViewModelTests
                 $"Book {id}",
                 [new CalibreAuthorRecord(id, "Author", "Author")],
                 [],
-            [new CalibreFormatRecord("EPUB", "Book")])));
+            id == 2 && secondBookHasPdf
+                ? [new CalibreFormatRecord("EPUB", "Book"), new CalibreFormatRecord("PDF", "Book")]
+                : [new CalibreFormatRecord("EPUB", "Book")])));
 
     private static CalibreCatalogRecord CreateMetadataDuplicateCatalog(
         string libraryUuid = "87f7ed1f-59a8-45a6-975a-7e06fd84780d") => new(

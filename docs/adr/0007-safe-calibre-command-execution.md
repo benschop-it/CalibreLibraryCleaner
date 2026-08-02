@@ -1,6 +1,6 @@
 # ADR 0007: Execute Cleanup Plans Through a Typed, Verified Calibre Boundary
 
-- Status: Accepted
+- Status: Accepted, amended by ADRs 0011 and 0012
 - Date: 2026-07-19
 
 ## Context
@@ -24,8 +24,12 @@ The V1 mutation allow-list is:
 
 - `add_format` to add a selected format or replace an explicitly reviewed
   inferior target format; and
+- `remove_format` to remove one approved byte-identical duplicate format only
+   after another current copy with the same canonical format, length, and
+   SHA-256 is retained and a complete verified backup exists; and
 - non-permanent `remove` to remove a redundant source record after every
-  retained contribution is present and verified on the target.
+   retained contribution is present and verified on the target, or to remove an
+   exact-file cleanup record only after a fresh scan proves it has no formats.
 
 Target metadata and formats already retained on the target are verified no-ops.
 Because the V1 snapshot records only cover presence rather than cover bytes,

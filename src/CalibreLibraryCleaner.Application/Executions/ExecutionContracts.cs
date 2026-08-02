@@ -9,6 +9,7 @@ public enum CalibreExecutionCapability
 {
     ExportRecord,
     AddOrReplaceFormat,
+    RemoveFormat,
     RemoveRecordNonPermanently,
 }
 
@@ -32,6 +33,7 @@ public sealed record CalibreToolDescriptor
     public bool SupportsAllRequired =>
         Capabilities.Contains(CalibreExecutionCapability.ExportRecord)
         && Capabilities.Contains(CalibreExecutionCapability.AddOrReplaceFormat)
+        && Capabilities.Contains(CalibreExecutionCapability.RemoveFormat)
         && Capabilities.Contains(CalibreExecutionCapability.RemoveRecordNonPermanently);
 }
 
@@ -74,6 +76,12 @@ public sealed record RemoveCalibreRecordRequest(
     CalibreToolDescriptor Tool,
     string LibraryRoot,
     CalibreBookId RecordId);
+
+public sealed record RemoveCalibreFormatRequest(
+    CalibreToolDescriptor Tool,
+    string LibraryRoot,
+    CalibreBookId RecordId,
+    string CanonicalFormat);
 
 public sealed record BackupDestinationValidation(
     string? CanonicalDestinationIdentity,

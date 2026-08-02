@@ -16,18 +16,19 @@ namespace CalibreLibraryCleaner.Wpf.Tests.ViewModels;
 public sealed class ExactBinaryCleanupPlanWorkspaceViewModelTests
 {
     [Fact]
-    public void SelectedKeeperCanBePlannedValidatedAndApprovedWithoutMetadataMatch()
+    public void GeneratedRetainedCopyCanBePlannedValidatedAndApprovedWithoutMetadataMatch()
     {
         DateTimeOffset now = new(2026, 8, 1, 12, 0, 0, TimeSpan.Zero);
         LibrarySnapshot snapshot = Snapshot(now);
         ExactBinaryDuplicateGroup group = snapshot.ExactBinaryDuplicateGroups.Single();
         Dictionary<CalibreBookId, CalibreBook> books = snapshot.Books.ToDictionary(value => value.Id);
         ExactDuplicateGroupRowViewModel groupRow = new(group, books);
-        ExactDuplicateMemberRowViewModel retained = groupRow.Members[0];
+        ExactDuplicateMemberRowViewModel retained = groupRow.RetainedMember!;
         ICleanupPlanIdGenerator ids = A.Fake<ICleanupPlanIdGenerator>();
         IClock clock = A.Fake<IClock>();
         IExactBinaryCleanupPlanConfirmationService confirmation = A.Fake<IExactBinaryCleanupPlanConfirmationService>();
-        IExecutionLibraryScanner scanner = A.Fake<IExecutionLibraryScanner>();
+        LibraryStateSession stateSession = new();
+        stateSession.StartFromScan(snapshot);
         ICalibreToolDiscovery tools = A.Fake<ICalibreToolDiscovery>();
         IExecutionBackupStore workspaceStore = A.Fake<IExecutionBackupStore>();
         ICalibreCommandGateway commands = A.Fake<ICalibreCommandGateway>();
@@ -42,8 +43,8 @@ public sealed class ExactBinaryCleanupPlanWorkspaceViewModelTests
         A.CallTo(() => confirmation.ConfirmApproval(A<ExactBinaryCleanupPlan>._)).Returns(true);
         ExactBinaryCleanupPlanWorkspaceViewModel viewModel = new(
             new(ids, clock), new(clock), new(clock),
-            new(scanner, tools, workspaceStore),
-            new(scanner, tools, commands, lease, workspaceStore, recordBackup, executionIds,
+            new(stateSession, tools, workspaceStore),
+            new(stateSession, tools, commands, lease, workspaceStore, recordBackup, executionIds,
                 deletionConfirmation, persistedSnapshots, clock),
             backupPicker,
             confirmation);
@@ -55,8 +56,9 @@ public sealed class ExactBinaryCleanupPlanWorkspaceViewModelTests
 
         viewModel.Plan!.State.Should().Be(CleanupPlanState.Approved);
         viewModel.Plan.Definition.RetainedFormat.RecordId.Should().Be(retained.Member.BookId);
+        viewModel.Plan.Definition.FormatRemovals.Should().ContainSingle();
         viewModel.Plan.Definition.RecordIdsToRemove.Should().Equal(new CalibreBookId(2));
-        viewModel.PlanSummary.Should().Contain("other 1 duplicate record");
+        viewModel.PlanSummary.Should().Contain("remove 1 duplicate format");
     }
 
     private static LibrarySnapshot Snapshot(DateTimeOffset now)

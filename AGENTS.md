@@ -20,9 +20,11 @@ Treat these documents as authoritative. For substantial work, create or update a
 - Never rename, move, overwrite, or delete Calibre-managed files during analysis.
 - Never delete or replace a unique format without a verified backup.
 - Destructive actions require an immutable, explicitly approved cleanup plan.
-- Revalidate cleanup plans immediately before execution.
+- Revalidate cleanup plans against the current authoritative projected revision immediately before execution.
 - Prefer supported Calibre tooling for library mutations.
-- Verify every applied change and preserve rollback information.
+- Verify every applied change by durably committing its typed state delta and preserve rollback information.
+- Only an explicit user scan may read and reanalyze the complete library; cleanup and recovery must not trigger scans.
+- A failed, ambiguous, interrupted, or unprojectable mutation marks state uncertain and blocks further mutation until explicit rescan.
 - AI recommendations must never directly trigger destructive actions.
 
 ## Architecture

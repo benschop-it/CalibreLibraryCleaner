@@ -8,7 +8,7 @@ using CalibreLibraryCleaner.Domain.Plans;
 namespace CalibreLibraryCleaner.Application.Executions;
 
 public sealed class PrepareExactBinaryRecordDeletionUseCase(
-    IExecutionLibraryScanner scanLibrary,
+    ILibraryStateSession libraryState,
     ICalibreToolDiscovery toolDiscovery,
     IExecutionBackupStore backupStore)
 {
@@ -24,19 +24,20 @@ public sealed class PrepareExactBinaryRecordDeletionUseCase(
         CalibreToolDiscoveryResult tool = await toolDiscovery.DiscoverAndProbeAsync(
             request.LibraryRoot, cancellationToken).ConfigureAwait(false);
         issues.AddRange(tool.Issues);
-        LibraryScanOutcome scan = await scanLibrary.ScanFreshAsync(
-            request.LibraryRoot, progress, cancellationToken).ConfigureAwait(false);
-        if (!scan.IsSuccess)
-            issues.Add(Block("BINARY_EXECUTION.SCAN_FAILED", "A fresh read-only library scan could not be completed."));
+        LibraryState? state = libraryState.GetCurrent(request.LibraryRoot);
+        if (state is null)
+            issues.Add(Block("BINARY_EXECUTION.STATE_NOT_LOADED", "Run an explicit library scan before preparing exact duplicate cleanup."));
+        else if (!state.IsAuthoritative)
+            issues.Add(Block("BINARY_EXECUTION.STATE_UNCERTAIN", "The projected library state is uncertain; run an explicit scan before cleanup."));
         else
             issues.AddRange(ToExecutionIssues(ValidateExactBinaryCleanupPlanUseCase.EvaluateStaleness(
-                request.Plan, scan.Snapshot!, cancellationToken)));
+                request.Plan, state.Snapshot, cancellationToken)));
 
         BackupDestinationValidation destination = await backupStore.ValidateDestinationAsync(
             request.LibraryRoot, request.BackupDestination, EstimateBackupBytes(request.Plan),
             cancellationToken).ConfigureAwait(false);
         issues.AddRange(destination.Issues);
-        return new(request.Plan, tool.Tool, scan.Snapshot?.Identity.LibraryRoot,
+        return new(request.Plan, tool.Tool, state?.Snapshot.Identity.LibraryRoot,
             destination.CanonicalDestinationIdentity, issues);
     }
 
@@ -49,9 +50,10 @@ public sealed class PrepareExactBinaryRecordDeletionUseCase(
             || ExactBinaryCleanupPlanContentDigestPolicy.Compute(plan.Definition) != plan.ContentDigest
             || plan.InputIdentity.DefinitionDigest != plan.ContentDigest)
             issues.Add(Block("BINARY_EXECUTION.PLAN_INVALID", "The marked-record plan is blocked or its immutable body changed."));
-        if (plan.Definition.RecordIdsToRemove.Count == 0
-            || plan.Definition.RecordIdsToRemove.Contains(plan.Definition.RetainedFormat.RecordId))
-            issues.Add(Block("BINARY_EXECUTION.RECORD_SELECTION_INVALID", "The deletion set is empty or contains the keeper record."));
+        if (plan.Definition.FormatRemovals.Count == 0
+            || plan.Definition.FormatRemovals.Any(value => value.RecordId == plan.Definition.RetainedFormat.RecordId
+                && value.Format == plan.Definition.RetainedFormat.Format))
+            issues.Add(Block("BINARY_EXECUTION.FORMAT_SELECTION_INVALID", "The format-removal set is empty or contains the retained format."));
         return issues;
     }
 
@@ -79,7 +81,7 @@ public sealed class PrepareExactBinaryRecordDeletionUseCase(
 }
 
 public sealed class ExecuteExactBinaryRecordDeletionUseCase(
-    IExecutionLibraryScanner scanLibrary,
+    ILibraryStateSession libraryState,
     ICalibreToolDiscovery toolDiscovery,
     ICalibreCommandGateway commandGateway,
     ILibraryMutationLease executionLease,
@@ -101,7 +103,9 @@ public sealed class ExecuteExactBinaryRecordDeletionUseCase(
         ExecutionWorkspace? workspace = null;
         ExactBinaryRecordBackupManifest? manifest = null;
         bool mutationStarted = false;
+        int removedFormatCount = 0;
         int removedCount = 0;
+        HashSet<(CalibreBookId RecordId, string Format, string RelativePath)> removedFormats = [];
         HashSet<CalibreBookId> removed = [];
         if (!request.OtherCalibreMutatorsClosed || !request.FullLibraryCopyAcknowledged)
             issues.Add(Block("BINARY_EXECUTION.ACKNOWLEDGEMENT_REQUIRED",
@@ -127,26 +131,30 @@ public sealed class ExecuteExactBinaryRecordDeletionUseCase(
             CalibreToolDiscoveryResult tool = await toolDiscovery.DiscoverAndProbeAsync(
                 request.LibraryRoot, cancellationToken).ConfigureAwait(false);
             issues.AddRange(tool.Issues);
-            LibraryScanOutcome initialScan = await scanLibrary.ScanFreshAsync(
-                request.LibraryRoot, null, cancellationToken).ConfigureAwait(false);
-            if (!tool.IsSuccess || !initialScan.IsSuccess)
+            LibraryState? initialState = libraryState.GetCurrent(request.LibraryRoot);
+            if (!tool.IsSuccess || initialState is null || !initialState.IsAuthoritative)
             {
-                if (!initialScan.IsSuccess) issues.Add(Block("BINARY_EXECUTION.SCAN_FAILED", "The fresh preflight scan failed."));
+                if (initialState is null)
+                    issues.Add(Block("BINARY_EXECUTION.STATE_NOT_LOADED", "Run an explicit library scan before exact duplicate cleanup."));
+                else if (!initialState.IsAuthoritative)
+                    issues.Add(Block("BINARY_EXECUTION.STATE_UNCERTAIN", "The projected library state is uncertain; run an explicit scan before cleanup."));
                 return Result(ExactBinaryRecordDeletionState.PreflightFailed);
             }
             issues.AddRange(PrepareExactBinaryRecordDeletionUseCase.ToExecutionIssues(
-                ValidateExactBinaryCleanupPlanUseCase.EvaluateStaleness(request.Plan, initialScan.Snapshot!, cancellationToken)));
+                ValidateExactBinaryCleanupPlanUseCase.EvaluateStaleness(request.Plan, initialState.Snapshot, cancellationToken)));
             if (HasBlockingIssues()) return Result(ExactBinaryRecordDeletionState.PreflightFailed);
 
             CalibreBookId[] involved = request.Plan.Definition.ExpectedRecords.Select(value => value.RecordId).ToArray();
-            Sha256Digest unaffectedBaseline = ExecutionSnapshotDigestPolicy.ComputeUnaffected(initialScan.Snapshot!, involved);
+            Sha256Digest unaffectedBaseline = ExecutionSnapshotDigestPolicy.ComputeUnaffected(initialState.Snapshot, involved);
             workspace = await workspaceStore.CreateWorkspaceAsync(executionId,
                 destination.CanonicalDestinationIdentity!, cancellationToken).ConfigureAwait(false);
             await backupStore.AppendAuditAsync(workspace, new(clock.GetUtcNow(), "ExecutionCreated",
                 "Exact-binary marked-record execution created."), cancellationToken).ConfigureAwait(false);
 
-            progress?.Report(new("Creating complete external backups of the keeper and marked records.", 0,
-                request.Plan.Definition.RecordIdsToRemove.Count, false));
+            int totalOperations = request.Plan.Definition.FormatRemovals.Count
+                + request.Plan.Definition.RecordIdsToRemove.Count;
+            progress?.Report(new("Creating complete external backups of all affected records and formats.", 0,
+                totalOperations, false));
             ExactBinaryRecordBackupInputs inputs = await backupStore.CreateInputsAsync(
                 workspace, request.Plan, request.LibraryRoot, tool.Tool!, request.ApplicationVersion,
                 cancellationToken).ConfigureAwait(false);
@@ -178,16 +186,15 @@ public sealed class ExecuteExactBinaryRecordDeletionUseCase(
             await backupStore.AppendAuditAsync(workspace, new(clock.GetUtcNow(), "BackupVerified",
                 $"Backup manifest {manifest.ManifestDigest.Value} verified."), cancellationToken).ConfigureAwait(false);
 
-            LibraryScanOutcome finalGate = await scanLibrary.ScanFreshAsync(
-                request.LibraryRoot, null, cancellationToken).ConfigureAwait(false);
-            if (!finalGate.IsSuccess)
-                issues.Add(Block("BINARY_EXECUTION.FINAL_GATE_SCAN_FAILED", "The library could not be scanned after backup."));
+            LibraryState? finalGate = libraryState.GetCurrent(request.LibraryRoot);
+            if (finalGate is null || !finalGate.IsAuthoritative)
+                issues.Add(Block("BINARY_EXECUTION.STATE_UNAVAILABLE", "Authoritative projected state became unavailable during backup."));
             else
             {
                 issues.AddRange(PrepareExactBinaryRecordDeletionUseCase.ToExecutionIssues(
-                    ValidateExactBinaryCleanupPlanUseCase.EvaluateStaleness(request.Plan, finalGate.Snapshot!, cancellationToken)));
-                if (ExecutionSnapshotDigestPolicy.ComputeUnaffected(finalGate.Snapshot!, involved) != unaffectedBaseline)
-                    issues.Add(Block("BINARY_EXECUTION.UNRELATED_STATE_CHANGED", "Unrelated library state changed during backup."));
+                    ValidateExactBinaryCleanupPlanUseCase.EvaluateStaleness(request.Plan, finalGate.Snapshot, cancellationToken)));
+                if (ExecutionSnapshotDigestPolicy.ComputeUnaffected(finalGate.Snapshot, involved) != unaffectedBaseline)
+                    issues.Add(Block("BINARY_EXECUTION.UNRELATED_STATE_CHANGED", "Unrelated projected state changed during backup."));
             }
             issues.AddRange(await backupStore.VerifyAvailableAsync(workspace, manifest, cancellationToken).ConfigureAwait(false));
             if (!lease.IsHeld) issues.Add(Block("BINARY_EXECUTION.LEASE_LOST", "The cleanup lease was lost before deletion."));
@@ -212,6 +219,66 @@ public sealed class ExecuteExactBinaryRecordDeletionUseCase(
                 "The persisted library snapshot was deleted before mutation."), cancellationToken).ConfigureAwait(false);
 
             CalibreToolDescriptor expectedTool = tool.Tool!;
+            foreach (ExpectedFormatState format in request.Plan.Definition.FormatRemovals)
+            {
+                if (cancellationToken.IsCancellationRequested)
+                    return Result(mutationStarted
+                        ? ExactBinaryRecordDeletionState.PartiallyApplied
+                        : ExactBinaryRecordDeletionState.CancelledBeforeMutation);
+
+                (CalibreToolDescriptor? currentTool, LibrarySnapshot? gateSnapshot) = await ValidateCommandGateAsync(
+                    request, workspace, manifest, expectedTool, involved, unaffectedBaseline, removedFormats, removed,
+                    lease, issues, cancellationToken).ConfigureAwait(false);
+                if (currentTool is null || gateSnapshot is null || HasBlockingIssues())
+                    return Result(mutationStarted
+                        ? ExactBinaryRecordDeletionState.PartiallyApplied
+                        : ExactBinaryRecordDeletionState.PreflightFailed);
+
+                mutationStarted = true;
+                await backupStore.AppendAuditAsync(workspace, new(clock.GetUtcNow(), "FormatRemovalStarting",
+                    "Typed Calibre duplicate-format removal starting.", format.RecordId, "remove_format"),
+                    CancellationToken.None).ConfigureAwait(false);
+                progress?.Report(new($"Removing duplicate {format.Format} from record {format.RecordId.Value} through Calibre.",
+                    removedFormatCount + removedCount, totalOperations, true));
+                CalibreCommandResult command = await commandGateway.RemoveFormatAsync(new(
+                    currentTool, request.LibraryRoot, format.RecordId, format.Format), CancellationToken.None).ConfigureAwait(false);
+                await backupStore.AppendAuditAsync(workspace, new(clock.GetUtcNow(), "FormatRemovalCommand",
+                    command.IsSuccess ? "Calibre format removal command completed." : "Calibre format removal command failed.",
+                    format.RecordId, command.CommandKind, command.ExitCode, command.FailureCode),
+                    CancellationToken.None).ConfigureAwait(false);
+                if (!command.IsSuccess)
+                {
+                    MarkUncertain(request.LibraryRoot, "REMOVE_FORMAT_COMMAND_FAILED",
+                        "Calibre did not return an unambiguous successful format-removal result.",
+                        $"remove-format:{format.RecordId.Value}:{format.Format}");
+                    issues.Add(Block("BINARY_EXECUTION.REMOVE_FORMAT_FAILED",
+                        "Calibre failed to remove a planned duplicate format.", format.RecordId, format.Format));
+                    return Result(ExactBinaryRecordDeletionState.PartiallyApplied);
+                }
+
+                LibraryState currentState = libraryState.GetCurrent(request.LibraryRoot)!;
+                string operationId = $"remove-format:{format.RecordId.Value}:{format.Format}";
+                LibraryStateSessionOutcome projection = libraryState.Apply(request.LibraryRoot,
+                    new RemoveFormatLibraryStateDelta(currentState.GenerationId, currentState.Revision,
+                        operationId, clock.GetUtcNow(), format.RecordId, format.Format, format.Fingerprint));
+                if (!projection.IsSuccess)
+                {
+                    MarkUncertain(request.LibraryRoot, "FORMAT_DELTA_REJECTED",
+                        projection.Explanation ?? "The successful format-removal command could not be projected.", operationId);
+                    issues.Add(Block("BINARY_EXECUTION.DELTA_REJECTED",
+                        "The successful format removal could not be applied to projected state.", format.RecordId, format.Format));
+                    return Result(ExactBinaryRecordDeletionState.VerificationFailed);
+                }
+                removedFormats.Add((format.RecordId, format.Format, format.RelativePath));
+                if (!VerifyCurrentState(request.Plan, projection.State!.Snapshot,
+                        removedFormats, removed, unaffectedBaseline, issues))
+                    return Result(ExactBinaryRecordDeletionState.VerificationFailed);
+                removedFormatCount++;
+                await backupStore.AppendAuditAsync(workspace, new(clock.GetUtcNow(), "FormatRemovalVerified",
+                    "Duplicate format absence and all preservation expectations verified.", format.RecordId),
+                    CancellationToken.None).ConfigureAwait(false);
+            }
+
             foreach (CalibreBookId recordId in request.Plan.Definition.RecordIdsToRemove)
             {
                 if (cancellationToken.IsCancellationRequested)
@@ -220,7 +287,7 @@ public sealed class ExecuteExactBinaryRecordDeletionUseCase(
                         : ExactBinaryRecordDeletionState.CancelledBeforeMutation);
 
                 (CalibreToolDescriptor? currentTool, LibrarySnapshot? gateSnapshot) = await ValidateCommandGateAsync(
-                    request, workspace, manifest, expectedTool, involved, unaffectedBaseline, removed,
+                    request, workspace, manifest, expectedTool, involved, unaffectedBaseline, removedFormats, removed,
                     lease, issues, cancellationToken).ConfigureAwait(false);
                 if (currentTool is null || gateSnapshot is null || HasBlockingIssues())
                     return Result(mutationStarted
@@ -231,8 +298,8 @@ public sealed class ExecuteExactBinaryRecordDeletionUseCase(
                 await backupStore.AppendAuditAsync(workspace, new(clock.GetUtcNow(), "RecordRemovalStarting",
                     "Typed non-permanent Calibre record removal starting.", recordId, "remove"),
                     CancellationToken.None).ConfigureAwait(false);
-                progress?.Report(new($"Removing non-keeper duplicate record {recordId.Value} through Calibre.",
-                    removedCount, request.Plan.Definition.RecordIdsToRemove.Count, true));
+                progress?.Report(new($"Removing empty duplicate record {recordId.Value} through Calibre.",
+                    removedFormatCount + removedCount, totalOperations, true));
                 CalibreCommandResult command = await commandGateway.RemoveRecordAsync(new(
                     currentTool, request.LibraryRoot, recordId), CancellationToken.None).ConfigureAwait(false);
                 await backupStore.AppendAuditAsync(workspace, new(clock.GetUtcNow(), "RecordRemovalCommand",
@@ -241,22 +308,31 @@ public sealed class ExecuteExactBinaryRecordDeletionUseCase(
                     CancellationToken.None).ConfigureAwait(false);
                 if (!command.IsSuccess)
                 {
+                    MarkUncertain(request.LibraryRoot, "REMOVE_RECORD_COMMAND_FAILED",
+                        "Calibre did not return an unambiguous successful record-removal result.",
+                        $"remove-record:{recordId.Value}");
                     issues.Add(Block("BINARY_EXECUTION.REMOVE_FAILED",
-                        "Calibre failed to remove the non-keeper duplicate record.", recordId));
+                        "Calibre failed to remove a record that was verified empty after format cleanup.", recordId));
                     return Result(ExactBinaryRecordDeletionState.PartiallyApplied);
                 }
 
-                removed.Add(recordId);
-                LibraryScanOutcome verification = await scanLibrary.ScanFreshAsync(
-                    request.LibraryRoot, null, CancellationToken.None).ConfigureAwait(false);
-                if (!verification.IsSuccess || !VerifyCurrentState(request.Plan, verification.Snapshot,
-                        removed, unaffectedBaseline, issues))
+                LibraryState currentState = libraryState.GetCurrent(request.LibraryRoot)!;
+                string operationId = $"remove-record:{recordId.Value}";
+                LibraryStateSessionOutcome projection = libraryState.Apply(request.LibraryRoot,
+                    new RemoveRecordLibraryStateDelta(currentState.GenerationId, currentState.Revision,
+                        operationId, clock.GetUtcNow(), recordId));
+                if (!projection.IsSuccess)
                 {
-                    if (!verification.IsSuccess)
-                        issues.Add(Block("BINARY_EXECUTION.VERIFICATION_SCAN_FAILED",
-                            "The library could not be scanned after record removal.", recordId));
+                    MarkUncertain(request.LibraryRoot, "RECORD_DELTA_REJECTED",
+                        projection.Explanation ?? "The successful record-removal command could not be projected.", operationId);
+                    issues.Add(Block("BINARY_EXECUTION.DELTA_REJECTED",
+                        "The successful record removal could not be applied to projected state.", recordId));
                     return Result(ExactBinaryRecordDeletionState.VerificationFailed);
                 }
+                removed.Add(recordId);
+                if (!VerifyCurrentState(request.Plan, projection.State!.Snapshot,
+                        removedFormats, removed, unaffectedBaseline, issues))
+                    return Result(ExactBinaryRecordDeletionState.VerificationFailed);
                 removedCount++;
                 await backupStore.AppendAuditAsync(workspace, new(clock.GetUtcNow(), "RecordRemovalVerified",
                     "Marked record absence and all preservation expectations verified.", recordId),
@@ -264,10 +340,10 @@ public sealed class ExecuteExactBinaryRecordDeletionUseCase(
             }
 
             await backupStore.AppendAuditAsync(workspace, new(clock.GetUtcNow(), "Completed",
-                "All non-keeper duplicate records were removed and the final state verified."),
+                "All planned duplicate formats and derived empty records were removed and verified."),
                 CancellationToken.None).ConfigureAwait(false);
-            progress?.Report(new("Single-keeper duplicate consolidation completed.", removedCount,
-                request.Plan.Definition.RecordIdsToRemove.Count, true));
+            progress?.Report(new("Exact duplicate format cleanup completed.", totalOperations,
+                totalOperations, true));
             return Result(ExactBinaryRecordDeletionState.Completed);
         }
         catch (OperationCanceledException)
@@ -288,8 +364,10 @@ public sealed class ExecuteExactBinaryRecordDeletionUseCase(
         }
 
         ExactBinaryRecordDeletionResult Result(ExactBinaryRecordDeletionState state) => new(
-            executionId, state, issues.ToArray(), workspace?.BundlePath, removedCount, mutationStarted);
+            executionId, state, issues.ToArray(), workspace?.BundlePath, removedFormatCount, removedCount, mutationStarted);
         bool HasBlockingIssues() => issues.Any(value => value.Severity == ExecutionIssueSeverity.BlockingError);
+        void MarkUncertain(string root, string code, string explanation, string operationId) =>
+            libraryState.MarkUncertain(root, new(code, explanation, clock.GetUtcNow(), operationId));
     }
 
     private async Task<(CalibreToolDescriptor? Tool, LibrarySnapshot? Snapshot)> ValidateCommandGateAsync(
@@ -299,6 +377,7 @@ public sealed class ExecuteExactBinaryRecordDeletionUseCase(
         CalibreToolDescriptor expectedTool,
         IReadOnlyCollection<CalibreBookId> involved,
         Sha256Digest unaffectedBaseline,
+        IReadOnlySet<(CalibreBookId RecordId, string Format, string RelativePath)> removedFormats,
         IReadOnlySet<CalibreBookId> removed,
         ILibraryMutationLeaseHandle lease,
         List<ExecutionIssue> issues,
@@ -314,19 +393,19 @@ public sealed class ExecuteExactBinaryRecordDeletionUseCase(
         issues.AddRange(tool.Issues);
         if (!tool.IsSuccess || tool.Tool!.Identity != expectedTool.Identity)
             issues.Add(Block("BINARY_EXECUTION.TOOL_CHANGED", "The trusted Calibre tool changed before deletion."));
-        LibraryScanOutcome scan = await scanLibrary.ScanFreshAsync(
-            request.LibraryRoot, null, cancellationToken).ConfigureAwait(false);
-        if (!scan.IsSuccess)
-            issues.Add(Block("BINARY_EXECUTION.COMMAND_GATE_SCAN_FAILED", "A fresh scan failed immediately before deletion."));
+        LibraryState? state = libraryState.GetCurrent(request.LibraryRoot);
+        if (state is null || !state.IsAuthoritative)
+            issues.Add(Block("BINARY_EXECUTION.STATE_UNAVAILABLE", "Authoritative projected state is unavailable before mutation."));
         else
-            VerifyCurrentState(request.Plan, scan.Snapshot, removed, unaffectedBaseline, issues);
+            VerifyCurrentState(request.Plan, state.Snapshot, removedFormats, removed, unaffectedBaseline, issues);
         return (issues.Any(value => value.Severity == ExecutionIssueSeverity.BlockingError) ? null : tool.Tool,
-            scan.Snapshot);
+            state?.Snapshot);
     }
 
     private static bool VerifyCurrentState(
         ExactBinaryCleanupPlan plan,
         LibrarySnapshot? snapshot,
+        IReadOnlySet<(CalibreBookId RecordId, string Format, string RelativePath)> removedFormats,
         IReadOnlySet<CalibreBookId> removed,
         Sha256Digest unaffectedBaseline,
         List<ExecutionIssue> issues)
@@ -342,7 +421,7 @@ public sealed class ExecuteExactBinaryRecordDeletionUseCase(
                         "A removed record remains present after Calibre reported success.", expected.RecordId));
             }
             else if (!current.TryGetValue(expected.RecordId, out CalibreBook? book)
-                     || !ExactBinaryExpectedState.Matches(expected, book))
+                     || !ExactBinaryExpectedState.Matches(expected, book, removedFormats))
             {
                 issues.Add(Block("BINARY_EXECUTION.PRESERVATION_MISMATCH",
                     "A keeper or pending marked record changed unexpectedly.", expected.RecordId));

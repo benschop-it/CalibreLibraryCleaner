@@ -19,6 +19,10 @@ public interface ICalibreCommandGateway
         AddOrReplaceCalibreFormatRequest request,
         CancellationToken cancellationToken);
 
+    Task<CalibreCommandResult> RemoveFormatAsync(
+        RemoveCalibreFormatRequest request,
+        CancellationToken cancellationToken);
+
     Task<CalibreCommandResult> RemoveRecordAsync(
         RemoveCalibreRecordRequest request,
         CancellationToken cancellationToken);

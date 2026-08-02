@@ -39,13 +39,13 @@ Domain <- Application <- Infrastructure
 
 Must be asynchronous, cancellable, progress-reporting, bounded in parallelism, and non-blocking to the UI.
 
-## Persisted analysis snapshot boundary
+## Persistent library-state boundary
 
-Application owns the `ILibrarySnapshotStore` port and list/load/save outcomes. Infrastructure owns the versioned, bounded JSON representation and atomic latest-only storage under the user's local application-data directory. Canonical library folder paths are keys; their SHA-256 digests are filenames, and the embedded path is revalidated on read. Snapshot artifacts are never written inside a Calibre library.
+Application owns the authoritative library-state session and persistence ports. Infrastructure owns the versioned baseline/checkpoint representation, append-only hash-chained delta journal, atomic state manifest, replay, and compaction under the user's local application-data directory. State artifacts are never written inside a Calibre library.
 
-WPF lists persisted library paths at startup, loads only after an explicit user command, and automatically replaces the cached result after a complete successful scan. Loaded snapshots are historical review evidence: cleanup-plan, execution, and recovery contexts remain cleared until a fresh scan supplies live state. Existing execution and recovery preflight rules always perform fresh scans before mutation.
+One explicit successful scan creates a new authoritative generation. Successful typed cleanup and recovery commands durably append and apply deterministic deltas; they never trigger catalog reads, hashing, ebook inspection, or targeted state scans. Replayed authoritative state remains mutation-eligible across restart until the user explicitly rescans.
 
-Mutation verification scans are not persisted because execution may intentionally omit expensive assessment phases such as PDF assessment. Exact-binary record deletion invalidates the cached snapshot before the first mutation. The next normal full scan recreates a complete cache rather than synthesizing one from command effects.
+The application intentionally does not detect external library changes between explicit scans. Failed, ambiguous, interrupted, unpersistable, or unprojectable mutations mark the generation uncertain and block all mutation until explicit rescan.
 
 ## EPUB inspection boundary
 
@@ -69,7 +69,7 @@ Domain owns immutable cleanup-plan bodies, expected library/record/format state,
 
 Cleanup plans are non-executable data. Milestone 6 introduces no Calibre process, command, backup creator, lock, mutation, simulation, or rollback boundary.
 
-Exact-binary record cleanup uses a separate plan and compact executor because metadata-consolidation plans choose metadata and format sources for an entire candidate group. WPF owns the single keeper selection, approval, backup destination, and final confirmation; all non-keeper record IDs are derived. Application performs fresh scans before every typed non-permanent `calibredb remove` and verifies each record absence plus keeper/unrelated-state preservation afterward. Infrastructure creates a complete external bundle of raw formats and Calibre exports, seals a hash manifest, and appends the execution audit.
+Exact-binary cleanup uses a separate plan and compact executor because metadata-consolidation plans choose metadata and format sources for candidate books. Domain generates deterministic retained-copy decisions from the authoritative state; WPF presents those decisions but row selection does not change them. Application applies typed remove-format and empty-record deltas after successful commands without rescanning. Infrastructure creates a complete external bundle of raw formats and Calibre exports, seals a hash manifest, and appends the execution audit.
 
 ## Safe execution boundary
 
@@ -85,8 +85,8 @@ and accurate terminal-state presentation.
 
 Every mutation uses direct `calibredb` invocation with a fixed executable and
 argument list. No shell, GUI automation, direct SQLite write, or managed-library
-filesystem write is permitted. Complete fresh read-only scans revalidate the
-plan before every mutation and semantically verify each command. Confirmation
+filesystem write is permitted. The current authoritative revision revalidates
+the plan before mutation; successful commands are verified by durable typed deltas. Confirmation
 is bound to the canonical library root and operation graph. An application-local
 recovery guard precedes the first mutation marker, and reconciliation requires
 the terminal journal and immutable summary to agree. Plans with cover-bearing

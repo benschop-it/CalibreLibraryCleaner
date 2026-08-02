@@ -13,7 +13,7 @@ public sealed record ExactBinaryCleanupPlanDefinition
         ExactBinaryDuplicateGroupId groupId,
         FormatFileFingerprint fingerprint,
         ExpectedFormatState retainedFormat,
-        IEnumerable<ExpectedFormatState> duplicateEvidence,
+        IEnumerable<ExpectedFormatState> formatRemovals,
         IEnumerable<CalibreBookId> recordIdsToRemove,
         IEnumerable<ExpectedRecordState> expectedRecords,
         IEnumerable<BackupRequirement> backupRequirements,
@@ -24,12 +24,12 @@ public sealed record ExactBinaryCleanupPlanDefinition
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(librarySchemaVersion);
         ArgumentNullException.ThrowIfNull(fingerprint);
         ArgumentNullException.ThrowIfNull(retainedFormat);
-        ArgumentNullException.ThrowIfNull(duplicateEvidence);
+        ArgumentNullException.ThrowIfNull(formatRemovals);
         ArgumentNullException.ThrowIfNull(recordIdsToRemove);
         ArgumentNullException.ThrowIfNull(expectedRecords);
         ArgumentNullException.ThrowIfNull(backupRequirements);
 
-        ExpectedFormatState[] evidence = duplicateEvidence
+        ExpectedFormatState[] removalsByFormat = formatRemovals
             .OrderBy(value => value.RecordId.Value)
             .ThenBy(value => value.Format, StringComparer.Ordinal)
             .ThenBy(value => value.RelativePath, StringComparer.Ordinal)
@@ -42,33 +42,44 @@ public sealed record ExactBinaryCleanupPlanDefinition
             .ThenBy(value => value.Format, StringComparer.Ordinal)
             .ThenBy(value => value.Id, StringComparer.Ordinal)
             .ToArray();
-        if (removals.Length == 0) throw new ArgumentException("At least one duplicate record must be marked for deletion.", nameof(recordIdsToRemove));
+        if (removalsByFormat.Length == 0) throw new ArgumentException("At least one duplicate format must be marked for removal.", nameof(formatRemovals));
         if (records.Length == 0 || records.Select(value => value.RecordId).Distinct().Count() != records.Length)
             throw new ArgumentException("Expected records must be non-empty and unique.", nameof(expectedRecords));
         if (backups.Select(value => value.Id).Distinct(StringComparer.Ordinal).Count() != backups.Length)
             throw new ArgumentException("Backup requirement IDs must be unique.", nameof(backupRequirements));
 
-        ExpectedFormatState[] groupMembers = evidence.Prepend(retainedFormat).ToArray();
+        ExpectedFormatState[] groupMembers = removalsByFormat.Prepend(retainedFormat).ToArray();
+        if (removalsByFormat.Any(value => Association(value) == Association(retainedFormat)))
+            throw new ArgumentException("The retained format cannot also be planned for removal.", nameof(formatRemovals));
+        if (removals.Contains(retainedFormat.RecordId))
+            throw new ArgumentException("The record containing the retained format cannot be planned for removal.", nameof(recordIdsToRemove));
         if (groupMembers.Select(Association).Distinct().Count() != groupMembers.Length
-            || groupMembers.Any(value => value.Fingerprint != fingerprint))
-            throw new ArgumentException("Every exact-file evidence item must be distinct and match the group fingerprint.", nameof(duplicateEvidence));
+            || groupMembers.Any(value => value.Fingerprint != fingerprint)
+            || groupMembers.Any(value => !string.Equals(value.Format, retainedFormat.Format, StringComparison.Ordinal)))
+            throw new ArgumentException("Every exact-file association must be distinct and match the retained fingerprint and canonical format.", nameof(formatRemovals));
         Dictionary<(CalibreBookId, string, string), ExpectedFormatState> expected = records
             .SelectMany(value => value.Formats)
             .ToDictionary(Association);
         CalibreBookId[] groupRecordIds = groupMembers.Select(value => value.RecordId)
             .Distinct().OrderBy(value => value.Value).ToArray();
+        HashSet<(CalibreBookId RecordId, string Format, string Path)> removedAssociations = removalsByFormat
+            .Select(Association).ToHashSet();
+        CalibreBookId[] expectedEmptyRecords = records
+            .Where(value => value.Formats.All(format => removedAssociations.Contains(Association(format))))
+            .Select(value => value.RecordId)
+            .OrderBy(value => value.Value)
+            .ToArray();
         if (groupMembers.Any(value => !expected.TryGetValue(Association(value), out ExpectedFormatState? current) || current != value)
-            || removals.Contains(retainedFormat.RecordId)
-            || !removals.SequenceEqual(groupRecordIds.Where(value => value != retainedFormat.RecordId))
+            || !removals.SequenceEqual(expectedEmptyRecords)
             || !groupRecordIds.SequenceEqual(records.Select(value => value.RecordId)))
-            throw new ArgumentException("The cleanup plan must delete every group record except the one keeper.", nameof(expectedRecords));
+            throw new ArgumentException("Record removals must contain exactly the records made empty by the planned format removals.", nameof(expectedRecords));
 
         LibraryUuid = libraryUuid.Trim();
         LibrarySchemaVersion = librarySchemaVersion;
         GroupId = groupId;
         Fingerprint = fingerprint;
         RetainedFormat = retainedFormat;
-        DuplicateEvidence = Array.AsReadOnly(evidence);
+        FormatRemovals = Array.AsReadOnly(removalsByFormat);
         RecordIdsToRemove = Array.AsReadOnly(removals);
         ExpectedRecords = Array.AsReadOnly(records);
         BackupRequirements = Array.AsReadOnly(backups);
@@ -80,7 +91,7 @@ public sealed record ExactBinaryCleanupPlanDefinition
     public ExactBinaryDuplicateGroupId GroupId { get; }
     public FormatFileFingerprint Fingerprint { get; }
     public ExpectedFormatState RetainedFormat { get; }
-    public IReadOnlyList<ExpectedFormatState> DuplicateEvidence { get; }
+    public IReadOnlyList<ExpectedFormatState> FormatRemovals { get; }
     public IReadOnlyList<CalibreBookId> RecordIdsToRemove { get; }
     public IReadOnlyList<ExpectedRecordState> ExpectedRecords { get; }
     public IReadOnlyList<BackupRequirement> BackupRequirements { get; }
@@ -184,7 +195,7 @@ public static class ExactBinaryCleanupPlanSafetyPolicy
 
 public static class ExactBinaryCleanupPlanContentDigestPolicy
 {
-    private const string CanonicalVersion = "exact-binary-cleanup-plan-body-canonical/1.0";
+    private const string CanonicalVersion = "exact-binary-cleanup-plan-body-canonical/2.0";
 
     public static CleanupPlanContentDigest Compute(ExactBinaryCleanupPlanDefinition definition)
     {
@@ -197,7 +208,7 @@ public static class ExactBinaryCleanupPlanContentDigestPolicy
         Add(value, definition.Fingerprint.SizeInBytes);
         Add(value, definition.Fingerprint.Sha256.Value);
         AddFormat(value, definition.RetainedFormat);
-        foreach (ExpectedFormatState evidence in definition.DuplicateEvidence) AddFormat(value, evidence);
+        foreach (ExpectedFormatState removal in definition.FormatRemovals) AddFormat(value, removal);
         foreach (CalibreBookId recordId in definition.RecordIdsToRemove) Add(value, recordId.Value);
         foreach (ExpectedRecordState record in definition.ExpectedRecords) AddRecord(value, record);
         foreach (BackupRequirement backup in definition.BackupRequirements)
@@ -372,7 +383,7 @@ public static class ExactBinaryCleanupPlanLifecyclePolicy
         CleanupPlanApproval approval = new(atUtc.ToUniversalTime(), CleanupPlanApprovalMethod.ExplicitLocalUser,
             plan.ArtifactRevision, plan.ContentDigest);
         return Transition(plan, revision, CleanupPlanState.Approved, atUtc,
-            "Explicit approval of single-keeper exact-binary consolidation.", validation, approval, null);
+            "Explicit approval of exact duplicate format removal and derived empty-record cleanup.", validation, approval, null);
     }
 
     public static ExactBinaryCleanupPlan MarkStale(

@@ -17,23 +17,30 @@ public sealed class ExecuteExactBinaryRecordDeletionUseCaseTests
     private static readonly DateTimeOffset Now = new(2026, 8, 1, 12, 0, 0, TimeSpan.Zero);
 
     [Fact]
-    public async Task CompleteBackupAndConfirmationPrecedeTypedRecordRemovalAndVerification()
+    public async Task CompleteBackupAndConfirmationPrecedeFormatThenEmptyRecordRemoval()
     {
         Harness harness = Harness.Success();
 
         ExactBinaryRecordDeletionResult result = await harness.ExecuteAsync();
 
         result.IsCompleted.Should().BeTrue();
+        result.RemovedFormatCount.Should().Be(1);
         result.RemovedRecordCount.Should().Be(1);
         A.CallTo(() => harness.Commands.ExportRecordAsync(A<ExportCalibreRecordRequest>._, A<CancellationToken>._))
             .MustHaveHappened(2, Times.Exactly);
         A.CallTo(() => harness.Confirmation.ConfirmAsync(harness.Plan,
             A<ExactBinaryRecordBackupManifest>._, A<CancellationToken>._)).MustHaveHappenedOnceExactly();
+        A.CallTo(() => harness.Commands.RemoveFormatAsync(
+            A<RemoveCalibreFormatRequest>.That.Matches(value => value.RecordId == new CalibreBookId(2)
+                && value.CanonicalFormat == "EPUB"), A<CancellationToken>._)).MustHaveHappenedOnceExactly();
         A.CallTo(() => harness.Commands.RemoveRecordAsync(
             A<RemoveCalibreRecordRequest>.That.Matches(value => value.RecordId == new CalibreBookId(2)),
             A<CancellationToken>._)).MustHaveHappenedOnceExactly();
         harness.Trace.Should().ContainInOrder("backup-inputs", "export", "export", "backup-sealed",
-            "confirm", "snapshot-invalidated", "remove", "scan-post");
+            "confirm", "snapshot-invalidated", "remove-format", "remove-record");
+        harness.StateSession.GetCurrent("C:\\library")!.Revision.Should().Be(new LibraryStateRevision(2));
+        harness.StateSession.GetCurrent("C:\\library")!.Snapshot.Books.Select(value => value.Id)
+            .Should().Equal(new CalibreBookId(1), new CalibreBookId(3));
     }
 
     [Fact]
@@ -51,6 +58,8 @@ public sealed class ExecuteExactBinaryRecordDeletionUseCaseTests
         result.MutationStarted.Should().BeFalse();
         A.CallTo(() => harness.Commands.RemoveRecordAsync(A<RemoveCalibreRecordRequest>._,
             A<CancellationToken>._)).MustNotHaveHappened();
+        A.CallTo(() => harness.Commands.RemoveFormatAsync(A<RemoveCalibreFormatRequest>._,
+            A<CancellationToken>._)).MustNotHaveHappened();
     }
 
     [Fact]
@@ -66,6 +75,27 @@ public sealed class ExecuteExactBinaryRecordDeletionUseCaseTests
         result.Issues.Should().Contain(value => value.Code == "BINARY_EXECUTION.SNAPSHOT_INVALIDATION_FAILED");
         A.CallTo(() => harness.Commands.RemoveRecordAsync(A<RemoveCalibreRecordRequest>._,
             A<CancellationToken>._)).MustNotHaveHappened();
+        A.CallTo(() => harness.Commands.RemoveFormatAsync(A<RemoveCalibreFormatRequest>._,
+            A<CancellationToken>._)).MustNotHaveHappened();
+    }
+
+    [Fact]
+    public async Task AmbiguousCommandMarksStateUncertainWithoutApplyingDelta()
+    {
+        Harness harness = Harness.Success();
+        A.CallTo(() => harness.Commands.RemoveFormatAsync(
+                A<RemoveCalibreFormatRequest>._, A<CancellationToken>._))
+            .Returns(new CalibreCommandResult("remove_format", true, null, [], string.Empty,
+                string.Empty, TimeSpan.FromMilliseconds(1), "COMMAND_RESULT_AMBIGUOUS"));
+
+        ExactBinaryRecordDeletionResult result = await harness.ExecuteAsync();
+
+        result.State.Should().Be(ExactBinaryRecordDeletionState.PartiallyApplied);
+        LibraryState state = harness.StateSession.GetCurrent("C:\\library")!;
+        state.Status.Should().Be(LibraryStateStatus.Uncertain);
+        state.Revision.Should().Be(new LibraryStateRevision(0));
+        A.CallTo(() => harness.Commands.RemoveRecordAsync(A<RemoveCalibreRecordRequest>._,
+            A<CancellationToken>._)).MustNotHaveHappened();
     }
 
     private sealed class Harness
@@ -74,22 +104,17 @@ public sealed class ExecuteExactBinaryRecordDeletionUseCaseTests
         private readonly ICleanupExecutionIdGenerator _ids;
         private readonly ILibraryMutationLease _lease;
         private readonly IExecutionBackupStore _workspaceStore;
-        private readonly IExecutionLibraryScanner _scanner;
         private readonly ICalibreToolDiscovery _tools;
         private readonly PersistedLibrarySnapshotsUseCase _persistedSnapshots;
-        private readonly LibrarySnapshot _before;
-        private readonly LibrarySnapshot _after;
 
         private Harness(
             ExactBinaryCleanupPlan plan,
-            LibrarySnapshot before,
-            LibrarySnapshot after,
             IClock clock,
             ICleanupExecutionIdGenerator ids,
             ILibraryMutationLease lease,
             IExecutionBackupStore workspaceStore,
             IExactBinaryRecordBackupStore recordBackup,
-            IExecutionLibraryScanner scanner,
+            LibraryStateSession stateSession,
             ICalibreToolDiscovery tools,
             PersistedLibrarySnapshotsUseCase persistedSnapshots,
             ILibrarySnapshotStore snapshotStore,
@@ -98,14 +123,12 @@ public sealed class ExecuteExactBinaryRecordDeletionUseCaseTests
             List<string> trace)
         {
             Plan = plan;
-            _before = before;
-            _after = after;
             _clock = clock;
             _ids = ids;
             _lease = lease;
             _workspaceStore = workspaceStore;
             RecordBackup = recordBackup;
-            _scanner = scanner;
+            StateSession = stateSession;
             _tools = tools;
             _persistedSnapshots = persistedSnapshots;
             SnapshotStore = snapshotStore;
@@ -116,6 +139,7 @@ public sealed class ExecuteExactBinaryRecordDeletionUseCaseTests
 
         public ExactBinaryCleanupPlan Plan { get; }
         public IExactBinaryRecordBackupStore RecordBackup { get; }
+        public LibraryStateSession StateSession { get; }
         public ICalibreCommandGateway Commands { get; }
         public IExactBinaryRecordDeletionConfirmation Confirmation { get; }
         public ILibrarySnapshotStore SnapshotStore { get; }
@@ -123,7 +147,7 @@ public sealed class ExecuteExactBinaryRecordDeletionUseCaseTests
 
         public static Harness Success()
         {
-            (ExactBinaryCleanupPlan plan, LibrarySnapshot before, LibrarySnapshot after) = ApprovedPlan();
+            (ExactBinaryCleanupPlan plan, LibrarySnapshot before) = ApprovedPlan();
             List<string> trace = [];
             IClock clock = A.Fake<IClock>();
             A.CallTo(() => clock.GetUtcNow()).Returns(Now);
@@ -157,17 +181,8 @@ public sealed class ExecuteExactBinaryRecordDeletionUseCaseTests
                 .Returns(new ExactBinaryRecordBackupResult(manifest, []));
             A.CallTo(() => recordBackup.VerifyAvailableAsync(workspace, manifest, A<CancellationToken>._))
                 .Returns([]);
-            IExecutionLibraryScanner scanner = A.Fake<IExecutionLibraryScanner>();
-            int scanIndex = 0;
-            A.CallTo(() => scanner.ScanFreshAsync(A<string>._, A<IProgress<LibraryScanProgress>?>._,
-                    A<CancellationToken>._))
-                .ReturnsLazily(() =>
-                {
-                    scanIndex++;
-                    bool post = scanIndex >= 4;
-                    if (post) trace.Add("scan-post");
-                    return LibraryScanOutcome.Success(post ? after : before);
-                });
+            LibraryStateSession stateSession = new();
+            stateSession.StartFromScan(before);
             CalibreToolDescriptor tool = new("C:\\Calibre2\\calibredb.exe",
                 new("C:\\Calibre2\\calibredb.exe", "9.11.0", new(new string('f', 64)),
                     "calibredb/windows/9.11.0"), Enum.GetValues<CalibreExecutionCapability>());
@@ -177,8 +192,10 @@ public sealed class ExecuteExactBinaryRecordDeletionUseCaseTests
             ICalibreCommandGateway commands = A.Fake<ICalibreCommandGateway>();
             A.CallTo(() => commands.ExportRecordAsync(A<ExportCalibreRecordRequest>._, A<CancellationToken>._))
                 .Invokes(() => trace.Add("export")).Returns(Command("export"));
+            A.CallTo(() => commands.RemoveFormatAsync(A<RemoveCalibreFormatRequest>._, A<CancellationToken>._))
+                .Invokes(() => trace.Add("remove-format")).Returns(Command("remove_format"));
             A.CallTo(() => commands.RemoveRecordAsync(A<RemoveCalibreRecordRequest>._, A<CancellationToken>._))
-                .Invokes(() => trace.Add("remove")).Returns(Command("remove"));
+                .Invokes(() => trace.Add("remove-record")).Returns(Command("remove"));
             IExactBinaryRecordDeletionConfirmation confirmation = A.Fake<IExactBinaryRecordDeletionConfirmation>();
             A.CallTo(() => confirmation.ConfirmAsync(plan, manifest, A<CancellationToken>._))
                 .Invokes(() => trace.Add("confirm")).Returns(true);
@@ -186,12 +203,12 @@ public sealed class ExecuteExactBinaryRecordDeletionUseCaseTests
             A.CallTo(() => snapshotStore.DeleteAsync(A<string>._, A<CancellationToken>._))
                 .Invokes(() => trace.Add("snapshot-invalidated"));
             PersistedLibrarySnapshotsUseCase persistedSnapshots = new(snapshotStore);
-            return new(plan, before, after, clock, ids, lease, workspaceStore, recordBackup,
-                scanner, tools, persistedSnapshots, snapshotStore, commands, confirmation, trace);
+            return new(plan, clock, ids, lease, workspaceStore, recordBackup,
+                stateSession, tools, persistedSnapshots, snapshotStore, commands, confirmation, trace);
         }
 
         public Task<ExactBinaryRecordDeletionResult> ExecuteAsync() => new ExecuteExactBinaryRecordDeletionUseCase(
-            _scanner, _tools, Commands, _lease, _workspaceStore, RecordBackup, _ids, Confirmation,
+            StateSession, _tools, Commands, _lease, _workspaceStore, RecordBackup, _ids, Confirmation,
             _persistedSnapshots, _clock)
             .ExecuteAsync(new(Plan, "C:\\library", "C:\\backup", "test", true, true), null,
                 CancellationToken.None);
@@ -200,7 +217,7 @@ public sealed class ExecuteExactBinaryRecordDeletionUseCaseTests
             kind, true, 0, [], string.Empty, string.Empty, TimeSpan.FromMilliseconds(1));
     }
 
-    private static (ExactBinaryCleanupPlan Plan, LibrarySnapshot Before, LibrarySnapshot After) ApprovedPlan()
+    private static (ExactBinaryCleanupPlan Plan, LibrarySnapshot Before) ApprovedPlan()
     {
         FormatFileFingerprint fingerprint = new(4, new Sha256Digest(new string('a', 64)));
         CalibreBook keeper = Book(1, "Keeper", "Alice", fingerprint);
@@ -210,16 +227,15 @@ public sealed class ExecuteExactBinaryRecordDeletionUseCaseTests
         CalibreBook[] beforeBooks = [keeper, duplicate, unrelated];
         LibraryIdentity identity = new("87f7ed1f-59a8-45a6-975a-7e06fd84780d", 27, "C:\\library");
         LibrarySnapshot before = new(identity, Now, beforeBooks, [], ExactBinaryDuplicateDetector.Detect(beforeBooks));
-        LibrarySnapshot after = new(identity, Now.AddMinutes(1), [keeper, unrelated], [], []);
         ExactBinaryDuplicateGroup group = before.ExactBinaryDuplicateGroups.Single();
         ICleanupPlanIdGenerator planIds = A.Fake<ICleanupPlanIdGenerator>();
         A.CallTo(() => planIds.Create()).Returns(new CleanupPlanId(Guid.Parse("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee")));
         IClock clock = A.Fake<IClock>();
         A.CallTo(() => clock.GetUtcNow()).Returns(Now);
         ExactBinaryCleanupPlan valid = new GenerateExactBinaryCleanupPlanUseCase(planIds, clock).Execute(
-            before, group.Id, group.Members.Single(value => value.BookId == keeper.Id)).Plan!;
+            before, group.Id).Plan!;
         ExactBinaryCleanupPlan approved = new ApproveExactBinaryCleanupPlanUseCase(clock).Execute(valid, before).Plan!;
-        return (approved, before, after);
+        return (approved, before);
     }
 
     private static CalibreBook Book(long id, string title, string author, FormatFileFingerprint fingerprint)

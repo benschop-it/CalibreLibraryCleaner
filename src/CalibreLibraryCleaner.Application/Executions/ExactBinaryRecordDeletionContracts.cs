@@ -115,8 +115,8 @@ public enum ExactBinaryRecordDeletionState
 
 public sealed record ExactBinaryRecordDeletionProgress(
     string Message,
-    int CompletedRecords,
-    int TotalRecords,
+    int CompletedOperations,
+    int TotalOperations,
     bool MutationStarted);
 
 public sealed record ExactBinaryRecordDeletionResult(
@@ -124,6 +124,7 @@ public sealed record ExactBinaryRecordDeletionResult(
     ExactBinaryRecordDeletionState State,
     IReadOnlyList<ExecutionIssue> Issues,
     string? BundlePath,
+    int RemovedFormatCount,
     int RemovedRecordCount,
     bool MutationStarted)
 {

@@ -103,13 +103,15 @@ public sealed class CalibreCommandBoundaryTests : IDisposable
         (await gateway.ExportRecordAsync(new(tool, library, new(2), export), CancellationToken.None)).IsSuccess.Should().BeTrue();
         (await gateway.AddOrReplaceFormatAsync(new(tool, library, new(1), "PDF", backup,
             Fingerprint(backupBytes)), CancellationToken.None)).IsSuccess.Should().BeTrue();
+        (await gateway.RemoveFormatAsync(new(tool, library, new(1), "PDF"), CancellationToken.None)).IsSuccess.Should().BeTrue();
         (await gateway.RemoveRecordAsync(new(tool, library, new(2)), CancellationToken.None)).IsSuccess.Should().BeTrue();
 
         string[][] calls = File.ReadLines(log).Select(value => JsonSerializer.Deserialize<string[]>(value)!).ToArray();
-        calls.Should().HaveCount(3);
+        calls.Should().HaveCount(4);
         calls[0].Should().Equal("--with-library", library, "export", "--dont-update-metadata", "--to-dir", export, "--single-dir", "2");
         calls[1].Should().Equal("--with-library", library, "add_format", "1", backup);
-        calls[2].Should().Equal("--with-library", library, "remove", "2");
+        calls[2].Should().Equal("--with-library", library, "remove_format", "1", "PDF");
+        calls[3].Should().Equal("--with-library", library, "remove", "2");
         calls.SelectMany(value => value).Should().NotContain("--permanent");
     }
 

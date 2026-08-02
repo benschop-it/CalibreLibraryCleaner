@@ -9,11 +9,11 @@ internal sealed class MessageBoxExactBinaryCleanupPlanConfirmationService :
     IExactBinaryRecordDeletionConfirmation
 {
     public bool ConfirmApproval(ExactBinaryCleanupPlan plan) => MessageBox.Show(
-        $"Approve keeping one record and deleting the other {plan.Definition.RecordIdsToRemove.Count} duplicate record(s)?\n\n" +
-        $"Keep record {plan.Definition.RetainedFormat.RecordId.Value}.\n" +
-        $"Delete records: {string.Join(", ", plan.Definition.RecordIdsToRemove.Select(value => value.Value))}.\n" +
+        $"Approve removing {plan.Definition.FormatRemovals.Count} byte-identical format copy or copies?\n\n" +
+        $"Retain {plan.Definition.RetainedFormat.Format} on record {plan.Definition.RetainedFormat.RecordId.Value}.\n" +
+        $"Records removed if empty: {RecordList(plan)}.\n" +
         $"Approval binds only to digest {plan.ContentDigest}. No Calibre change or backup will occur yet.",
-        "Approve exact duplicate consolidation",
+        "Approve exact duplicate format cleanup",
         MessageBoxButton.YesNo,
         MessageBoxImage.Warning,
         MessageBoxResult.No) == MessageBoxResult.Yes;
@@ -25,15 +25,20 @@ internal sealed class MessageBoxExactBinaryCleanupPlanConfirmationService :
     {
         cancellationToken.ThrowIfCancellationRequested();
         bool confirmed = MessageBox.Show(
-            $"Delete the following Calibre book records now?\n\n" +
-            $"{string.Join(", ", plan.Definition.RecordIdsToRemove.Select(value => value.Value))}\n\n" +
-            $"Keeper: {plan.Definition.RetainedFormat.RecordId.Value}\n" +
+            $"Remove {plan.Definition.FormatRemovals.Count} byte-identical format copy or copies now?\n\n" +
+            $"Retained copy: record {plan.Definition.RetainedFormat.RecordId.Value}, {plan.Definition.RetainedFormat.Format}\n" +
+            $"Records removed after becoming empty: {RecordList(plan)}\n" +
             $"Verified backup: {manifest.ManifestDigest.Value}\n\n" +
-            "Calibre will perform non-permanent record removal.",
-            "Consolidate exact duplicate books",
+            "Calibre will remove duplicate formats and then remove only empty records.",
+            "Remove exact duplicate formats",
             MessageBoxButton.YesNo,
             MessageBoxImage.Warning,
             MessageBoxResult.No) == MessageBoxResult.Yes;
         return Task.FromResult(confirmed);
     }
+
+    private static string RecordList(ExactBinaryCleanupPlan plan) =>
+        plan.Definition.RecordIdsToRemove.Count == 0
+            ? "none"
+            : string.Join(", ", plan.Definition.RecordIdsToRemove.Select(value => value.Value));
 }

@@ -52,7 +52,7 @@ use.
 
 ## Automation policy
 
-Only records contributing provably byte-identical content are eligible for this cleanup path without metadata equality. The user selects exactly one keeper; all other distinct records in the group are deleted. All non-identical matches require separate review.
+Only same-format files contributing provably byte-identical content are eligible for this cleanup path without metadata equality. One retained copy is generated automatically from record format count, metadata completeness, validated identifiers, cover presence, and a final record-ID tie-breaker. Other copies are removed as formats; records with remaining formats are preserved. All non-identical matches require separate review.
 
 ## Exact binary file groups
 
@@ -60,4 +60,4 @@ Milestone 2 hashes every safely readable declared format with streaming SHA-256.
 
 Group identity is derived from the length and digest. Groups are ordered by size descending and digest; members are ordered by record ID, format, and managed relative path. These are file-level groups: even when identical files span records, the result does not assert that the book records are metadata duplicates, equivalent editions, or safe to merge or delete.
 
-An exact-binary cleanup decision removes every non-keeper Calibre record through non-permanent `calibredb remove`. Additional formats and metadata on those records are displayed, backed up, and removed with their records.
+An exact-binary cleanup decision removes duplicate copies through typed `calibredb remove_format`. It removes a Calibre record through non-permanent `calibredb remove` only after the authoritative projected state contains no formats. Successful commands apply typed deltas; no cleanup scan occurs. Additional formats and metadata remain on their records.

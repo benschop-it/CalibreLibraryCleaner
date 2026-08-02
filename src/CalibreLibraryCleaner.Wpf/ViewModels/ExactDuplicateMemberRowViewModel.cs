@@ -10,6 +10,7 @@ public sealed class ExactDuplicateMemberRowViewModel(
     string format) : ObservableObject
 {
     private bool _isRetained;
+    private bool _isSkipped;
 
     public ExactBinaryDuplicateMember Member { get; } = member;
     public long BookId { get; } = member.BookId.Value;
@@ -27,5 +28,14 @@ public sealed class ExactDuplicateMemberRowViewModel(
         }
     }
 
-    public string CleanupAction => IsRetained ? "Keep" : "Delete book";
+    public bool IsSkipped
+    {
+        get => _isSkipped;
+        internal set
+        {
+            if (SetProperty(ref _isSkipped, value)) OnPropertyChanged(nameof(CleanupAction));
+        }
+    }
+
+    public string CleanupAction => IsSkipped ? "Skip anomaly" : IsRetained ? "Keep" : "Remove format";
 }

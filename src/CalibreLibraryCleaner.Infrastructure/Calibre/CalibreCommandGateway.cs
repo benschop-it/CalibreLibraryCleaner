@@ -103,6 +103,31 @@ internal sealed class CalibreCommandGateway(
             [validation.CanonicalLibraryRoot!], false, null, CancellationToken.None).ConfigureAwait(false);
     }
 
+    public async Task<CalibreCommandResult> RemoveFormatAsync(
+        RemoveCalibreFormatRequest request,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        cancellationToken.ThrowIfCancellationRequested();
+        ToolBoundaryValidation validation = await ValidateToolAndLibraryAsync(request.Tool, request.LibraryRoot,
+            CalibreExecutionCapability.RemoveFormat, cancellationToken).ConfigureAwait(false);
+        await using FileStream? executableLock = validation.ExecutableLock;
+        if (validation.FailureCode is not null) return Failed("remove_format", validation.FailureCode);
+        string format = request.CanonicalFormat.ToUpperInvariant();
+        if (format.Length == 0 || !format.All(char.IsAsciiLetterOrDigit))
+            return Failed("remove_format", "CALIBRE_FORMAT_INVALID");
+        string[] arguments =
+        [
+            "--with-library", validation.CanonicalLibraryRoot!,
+            "remove_format", request.RecordId.Value.ToString(
+                System.Globalization.CultureInfo.InvariantCulture), format,
+        ];
+        return await processRunner.RunAsync(
+            request.Tool.CanonicalExecutablePath, validation.CanonicalLibraryRoot!, "remove_format",
+            arguments, [validation.CanonicalLibraryRoot!], false, null,
+            CancellationToken.None).ConfigureAwait(false);
+    }
+
     public async Task<RecoveryCalibreCommandResult> CreateEmptyRecordAsync(
         CreateRecoveryRecordCommand request,
         CancellationToken cancellationToken)
@@ -185,25 +210,9 @@ internal sealed class CalibreCommandGateway(
         ArgumentNullException.ThrowIfNull(request);
         if (!Supports(request.Tool, request.Profile, RecoveryCapability.RemoveCleanupAddedFormat))
             return RecoveryFailed("remove_format", "CALIBRE_RECOVERY_CAPABILITY_DISABLED");
-        ToolBoundaryValidation validation = await ValidateToolAndLibraryAsync(
-            request.Tool, request.LibraryRoot, CalibreExecutionCapability.ExportRecord,
-            cancellationToken).ConfigureAwait(false);
-        await using FileStream? executableLock = validation.ExecutableLock;
-        if (validation.FailureCode is not null)
-            return RecoveryFailed("remove_format", validation.FailureCode);
-        string format = request.CanonicalFormat.ToUpperInvariant();
-        if (format.Length == 0 || !format.All(char.IsAsciiLetterOrDigit))
-            return RecoveryFailed("remove_format", "CALIBRE_FORMAT_INVALID");
-        string[] arguments =
-        [
-            "--with-library", validation.CanonicalLibraryRoot!,
-            "remove_format", request.RecordId.Value.ToString(
-                System.Globalization.CultureInfo.InvariantCulture), format,
-        ];
-        return Convert(await processRunner.RunAsync(
-            request.Tool.CanonicalExecutablePath, validation.CanonicalLibraryRoot!, "remove_format",
-            arguments, [validation.CanonicalLibraryRoot!], false, null,
-            CancellationToken.None).ConfigureAwait(false));
+        return Convert(await RemoveFormatAsync(new RemoveCalibreFormatRequest(
+            request.Tool, request.LibraryRoot, request.RecordId, request.CanonicalFormat),
+            cancellationToken).ConfigureAwait(false));
     }
 
     public async Task<RecoveryCalibreCommandResult> RemoveRecordAsync(

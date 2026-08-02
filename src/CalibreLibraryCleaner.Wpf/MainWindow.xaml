@@ -154,10 +154,10 @@
             <RowDefinition Height="*" />
           </Grid.RowDefinitions>
           <StackPanel Grid.Row="0" Margin="0,0,0,8">
-            <TextBlock Text="These groups contain byte-identical files. Select the one record to keep; every other record in the group will be deleted."
+            <TextBlock Text="These groups contain byte-identical files. The best located copy is retained automatically and the other format copies are proposed for removal."
                        TextWrapping="Wrap" />
             <TextBlock Margin="0,4,0,0"
-                       Text="Changing the selected row changes the keeper. Additional formats and metadata on deleted records are included in their backup."
+                       Text="Selecting a row only inspects it. A record is removed only when no formats remain after verified backup and cleanup."
                        TextWrapping="Wrap" />
             <StackPanel Margin="0,8,0,0" DataContext="{Binding ExactBinaryCleanupPlans}">
               <WrapPanel>
@@ -168,7 +168,7 @@
               <TextBlock Margin="0,5,0,0" Text="{Binding Status}" FontWeight="Bold" TextWrapping="Wrap" />
               <TextBlock Margin="0,3,0,0" Text="{Binding PlanSummary}" TextWrapping="Wrap" />
               <TextBlock Margin="0,3,0,0"
-                         Text="Execution uses non-permanent Calibre record removal after external backup and fresh validation."
+                         Text="Execution uses Calibre format removal and removes only derived empty records after external backup and fresh validation."
                          TextWrapping="Wrap" />
               <TextBlock Margin="0,3,0,0" Text="{Binding PlanDigest}" TextWrapping="Wrap"
                          AutomationProperties.Name="Duplicate-record cleanup plan canonical SHA-256" />
@@ -177,7 +177,7 @@
                 <Button Margin="0,0,6,0" Padding="8,4" Content="Choose _backup folder" Command="{Binding ChooseBackupCommand}" />
                 <TextBox Width="360" Margin="0,0,6,0" IsReadOnly="True" Text="{Binding BackupDestination, Mode=OneWay}" />
                 <Button Margin="0,0,6,0" Padding="8,4" Content="_Prepare" Command="{Binding PrepareCommand}" />
-                <Button Padding="8,4" Content="_Consolidate duplicates" Command="{Binding ExecuteCommand}" />
+                <Button Padding="8,4" Content="_Remove duplicate formats" Command="{Binding ExecuteCommand}" />
               </WrapPanel>
               <CheckBox Margin="0,5,0,0" IsChecked="{Binding OtherMutatorsClosed}"
                         Content="I confirm that Calibre and other library-writing tools are closed." />
@@ -206,7 +206,7 @@
               </DataGrid.Columns>
             </DataGrid>
           </GroupBox>
-          <GroupBox Grid.Row="2" Margin="0,8,0,0" Header="Select the one record to keep">
+          <GroupBox Grid.Row="2" Margin="0,8,0,0" Header="Generated retained copy and format removals">
             <DataGrid ItemsSource="{Binding SelectedExactDuplicateMembers}"
                       SelectedItem="{Binding SelectedExactDuplicateMember}"
                       AutoGenerateColumns="False"

@@ -75,7 +75,7 @@ public sealed class ExactBinaryRecordBackupStoreTests
         IClock clock = A.Fake<IClock>();
         A.CallTo(() => clock.GetUtcNow()).Returns(DateTimeOffset.UtcNow);
         ExactBinaryCleanupPlan valid = new GenerateExactBinaryCleanupPlanUseCase(ids, clock).Execute(
-            snapshot, group.Id, group.Members.Single(value => value.BookId == first.Id)).Plan!;
+            snapshot, group.Id).Plan!;
         ExactBinaryCleanupPlan approved = new ApproveExactBinaryCleanupPlanUseCase(clock).Execute(valid, snapshot).Plan!;
         return (approved, library, bytes);
     }

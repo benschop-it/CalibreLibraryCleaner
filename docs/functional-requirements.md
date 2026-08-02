@@ -23,7 +23,7 @@ Support progressively:
 
 Every group must expose confidence and reasons. Exact title/author matches are candidates, not proof of identical content.
 
-For a byte-identical file group spanning multiple Calibre records, the user selects exactly one keeper record. Every other distinct record in that group becomes a deletion target. This decision is independent of metadata equality, and the complete metadata, covers, formats, and managed state of deleted records must first be backed up externally.
+For each byte-identical same-format file group, automatically retain the copy on the record with the most formats, then the best metadata/validated identifiers/cover evidence, using the lowest Calibre ID only as a tie-breaker. Remove the other format copies, not their records. A record becomes a deletion target only when no formats remain after deduplication. Mixed-format-label groups are anomalous and skipped. Complete affected-record metadata, covers, formats, and managed state must first be backed up externally.
 
 ## EPUB analysis
 
@@ -64,9 +64,9 @@ The user can navigate groups, compare records, inspect findings and covers, open
 
 Generate an immutable JSON plan containing record IDs, chosen metadata source, chosen format sources, removals, expected hashes, backup requirements, warnings, and approval details.
 
-Exact-binary record cleanup uses a separate plan body containing the retained exact-file association, every non-keeper record ID, exact-binary evidence for every involved record, complete involved-record state, backup requirements, and explicit approval.
+Exact-binary cleanup uses a separate plan body containing the automatically retained exact-file association, every duplicate-format removal, only the record IDs derived to become empty, exact-binary evidence, complete involved-record state, backup requirements, and explicit approval.
 
-Execution must revalidate the plan, back up content and metadata, use supported Calibre tooling, capture command output, reload the library, verify results, and retain audit history.
+Execution must revalidate the plan against the current authoritative revision, back up content and metadata, use supported Calibre tooling, capture command output, durably apply the corresponding typed state delta, and retain audit history. Cleanup and recovery never scan or reload the library; only explicit Scan replaces projected state with observed state.
 
 ## AI
 

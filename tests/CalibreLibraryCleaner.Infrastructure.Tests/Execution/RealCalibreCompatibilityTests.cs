@@ -102,6 +102,12 @@ public sealed class RealCalibreCompatibilityTests
                 .Should().Contain(value => value.Format == "PDF"
                     && value.Fingerprint!.Sha256 == replacementPdfDigest);
 
+            (await gateway.RemoveFormatAsync(new(tool, library, new(1), "PDF"), CancellationToken.None)).IsSuccess.Should().BeTrue();
+            LibraryScanOutcome formatRemoved = await Scanner(provider).ExecuteAsync(library, null, CancellationToken.None);
+            formatRemoved.IsSuccess.Should().BeTrue();
+            formatRemoved.Snapshot!.Books.Single(value => value.Id == new CalibreBookId(1)).Formats
+                .Should().NotContain(value => value.Format == "PDF");
+
             (await gateway.RemoveRecordAsync(new(tool, library, new(2)), CancellationToken.None)).IsSuccess.Should().BeTrue();
             LibraryScanOutcome removed = await Scanner(provider).ExecuteAsync(library, null, CancellationToken.None);
             removed.IsSuccess.Should().BeTrue();

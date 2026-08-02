@@ -7,7 +7,7 @@ namespace CalibreLibraryCleaner.Wpf.ViewModels;
 
 public sealed class ExactDuplicateGroupRowViewModel : ObservableObject
 {
-    private ExactDuplicateMemberRowViewModel? _retainedMember;
+    private readonly IReadOnlyList<CalibreBookId> _recordIdsToDelete;
 
     public ExactDuplicateGroupRowViewModel(
         ExactBinaryDuplicateGroup group,
@@ -30,7 +30,23 @@ public sealed class ExactDuplicateGroupRowViewModel : ObservableObject
                     member.Format);
             })
             .ToArray());
-        RetainedMember = Members[0];
+        ExactBinaryRetentionDecision decision = ExactBinaryRetentionPolicy.Select([group], books.Values).Single();
+        IsCleanupEligible = decision.IsEligible && group.SpansMultipleBookRecords;
+        SkipReason = decision.SkipReason;
+        RetainedMember = decision.RetainedMember is null
+            ? null
+            : Members.Single(value => value.Member == decision.RetainedMember);
+        foreach (ExactDuplicateMemberRowViewModel member in Members)
+        {
+            member.IsRetained = member == RetainedMember;
+            member.IsSkipped = !decision.IsEligible;
+        }
+        _recordIdsToDelete = decision.FormatRemovals
+            .Where(value => books[value.BookId].Formats.Count == 1)
+            .Select(value => value.BookId)
+            .Distinct()
+            .OrderBy(value => value.Value)
+            .ToArray();
     }
 
     public ExactBinaryDuplicateGroupId GroupId { get; }
@@ -47,30 +63,11 @@ public sealed class ExactDuplicateGroupRowViewModel : ObservableObject
 
     public IReadOnlyList<ExactDuplicateMemberRowViewModel> Members { get; }
 
-    public ExactDuplicateMemberRowViewModel RetainedMember
-    {
-        get => _retainedMember!;
-        set
-        {
-            ArgumentNullException.ThrowIfNull(value);
-            if (!Members.Contains(value))
-            {
-                throw new ArgumentException("The retained file must belong to this exact duplicate group.", nameof(value));
-            }
+    public ExactDuplicateMemberRowViewModel? RetainedMember { get; }
 
-            if (!SetProperty(ref _retainedMember, value)) return;
-            foreach (ExactDuplicateMemberRowViewModel member in Members)
-            {
-                member.IsRetained = member.BookId == value.BookId;
-            }
-            OnPropertyChanged(nameof(RecordIdsToDelete));
-        }
-    }
+    public bool IsCleanupEligible { get; }
 
-    public IReadOnlyList<CalibreBookId> RecordIdsToDelete => Members
-        .Where(value => value.BookId != RetainedMember.BookId)
-        .Select(value => value.Member.BookId)
-        .Distinct()
-        .OrderBy(value => value.Value)
-        .ToArray();
+    public string? SkipReason { get; }
+
+    public IReadOnlyList<CalibreBookId> RecordIdsToDelete => _recordIdsToDelete;
 }
