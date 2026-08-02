@@ -238,6 +238,37 @@ public sealed class VersOneEpubInspectorTests
         result.RepeatedReferences.Should().Contain(item => item.StartsWith("navigation:", StringComparison.Ordinal));
     }
 
+    [Fact]
+    public async Task Epub2NcxExternalDoctypeIsAllowedWithoutFetchingIt()
+    {
+        using TcpListener listener = new(IPAddress.Loopback, 0);
+        listener.Start();
+        int port = ((IPEndPoint)listener.LocalEndpoint).Port;
+        using TemporaryDirectory directory = new();
+        string path = Path.Combine(directory.Path, "NcxDoctype.epub");
+        List<(string Name, string Content, CompressionLevel Compression)> entries = StandardEntries(
+            packageBody: "<manifest><item id=\"chapter\" href=\"chapter.xhtml\" media-type=\"application/xhtml+xml\"/><item id=\"ncx\" href=\"toc.ncx\" media-type=\"application/x-dtbncx+xml\"/></manifest><spine toc=\"ncx\"><itemref idref=\"chapter\"/></spine>",
+            packageVersion: "2.0").ToList();
+        entries.Add(("OEBPS/toc.ncx", $"""
+            <!DOCTYPE ncx SYSTEM "http://127.0.0.1:{port}/ncx.dtd">
+            <ncx xmlns="http://www.daisy.org/z3986/2005/ncx/" version="2005-1">
+              <head><meta name="dtb:uid" content="book-id"/></head>
+              <docTitle><text>Synthetic</text></docTitle>
+              <navMap><navPoint id="chapter"><navLabel><text>Chapter</text></navLabel><content src="chapter.xhtml"/></navPoint></navMap>
+            </ncx>
+            """, CompressionLevel.Optimal));
+        SyntheticEpubBuilder.CreateFromEntries(path, entries);
+        using ServiceProvider provider = TestServices.CreateProvider();
+
+        EpubInspectionResult result = await provider.GetRequiredService<IEpubInspector>()
+            .InspectAsync(await CreateRequestAsync(path), null, CancellationToken.None);
+
+        listener.Pending().Should().BeFalse();
+        result.Problems.Should().BeEmpty();
+        result.PackageParsed.Should().BeTrue();
+        result.NavigationPresent.Should().BeTrue();
+    }
+
     [Theory]
     [InlineData("MissingContainer")]
     [InlineData("MalformedContainer")]
@@ -763,7 +794,7 @@ public sealed class VersOneEpubInspectorTests
     }
 
     [Fact]
-    public async Task NavigationIsSizeAndDtdCheckedBeforeVersOne()
+    public async Task NavigationIsSizeCheckedBeforeVersOneAndHarmlessDoctypeIsAllowed()
     {
         using TemporaryDirectory directory = new();
         string oversizedPath = Path.Combine(directory.Path, "OversizedNav.epub");
@@ -803,7 +834,8 @@ public sealed class VersOneEpubInspectorTests
         }
 
         oversized.Problems.Should().ContainSingle(problem => problem.Code == EpubInspectionProblemCode.LimitExceeded);
-        dtd.Problems.Should().ContainSingle(problem => problem.Code == EpubInspectionProblemCode.PackageMalformed);
+        dtd.Problems.Should().BeEmpty();
+        dtd.PackageParsed.Should().BeTrue();
         dtdXmlExceptions.Should().Be(0);
     }
 
@@ -879,7 +911,7 @@ public sealed class VersOneEpubInspectorTests
         using TemporaryDirectory directory = new();
         string path = Path.Combine(directory.Path, "External.epub");
         SyntheticEpubBuilder.CreateFromEntries(path, StandardEntries(
-            chapter: $"<html><body><a href=\"http://user:secret@127.0.0.1:{port}/book?token=secret\">remote</a><img src=\"file:///C:/private/book.jpg\"/></body></html>"));
+            chapter: $"<html><body><a href=\"http://user:secret@127.0.0.1:{port}/book?token=secret\">remote</a><a href=\"http://www\u2028.sybex.com/book\">invalid host</a><img src=\"file:///C:/private/book.jpg\"/></body></html>"));
         using ServiceProvider provider = TestServices.CreateProvider();
 
         EpubInspectionResult result = await provider.GetRequiredService<IEpubInspector>()
@@ -887,8 +919,9 @@ public sealed class VersOneEpubInspectorTests
 
         listener.Pending().Should().BeFalse();
         result.RemoteReferences.Should().Contain($"scheme:http;host:127.0.0.1");
+        result.RemoteReferences.Should().Contain("scheme:http;host:www.sybex.com");
         result.RemoteReferences.Should().Contain("scheme:file");
-        string.Join('|', result.RemoteReferences).Should().NotContainAny("secret", "C:/", "book.jpg");
+        string.Join('|', result.RemoteReferences).Should().NotContainAny("secret", "C:/", "book.jpg", "\u2028");
     }
 
     [Fact]
@@ -923,12 +956,13 @@ public sealed class VersOneEpubInspectorTests
 
     private static IEnumerable<(string Name, string Content, CompressionLevel Compression)> StandardEntries(
         string? packageBody = null,
-        string? chapter = null)
+        string? chapter = null,
+        string packageVersion = "3.0")
     {
         yield return ("mimetype", "application/epub+zip", CompressionLevel.NoCompression);
         yield return ("META-INF/container.xml", "<container xmlns=\"urn:oasis:names:tc:opendocument:xmlns:container\" version=\"1.0\"><rootfiles><rootfile full-path=\"OEBPS/content.opf\" media-type=\"application/oebps-package+xml\"/></rootfiles></container>", CompressionLevel.Optimal);
         yield return ("OEBPS/content.opf", $"""
-            <package xmlns="http://www.idpf.org/2007/opf" version="3.0" unique-identifier="book-id">
+            <package xmlns="http://www.idpf.org/2007/opf" version="{packageVersion}" unique-identifier="book-id">
               <metadata xmlns:dc="http://purl.org/dc/elements/1.1/">
                 <dc:identifier id="book-id">9780306406157</dc:identifier><dc:title>Synthetic</dc:title>
                 <dc:creator>Author</dc:creator><dc:language>en</dc:language><dc:date>2020-01-01</dc:date>

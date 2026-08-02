@@ -24,7 +24,7 @@ public sealed class EpubAssessmentTests
 
         assessment.Score!.Value.Value.Should().Be(100);
         assessment.Findings.Sum(finding => finding.ScoreAdjustment).Should().Be(100);
-        assessment.AnalyzerVersion.Value.Should().Be("epub-inspector/1.0.1");
+        assessment.AnalyzerVersion.Value.Should().Be("epub-inspector/1.0.2");
         assessment.ScoringModelVersion.Value.Should().Be("epub-quality/1.0.0");
     }
 

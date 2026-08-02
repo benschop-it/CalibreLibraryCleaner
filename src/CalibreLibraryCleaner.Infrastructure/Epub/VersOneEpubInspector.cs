@@ -23,14 +23,6 @@ internal sealed class VersOneEpubInspector(ILogger<VersOneEpubInspector> logger)
     private const uint CentralDirectoryFileHeaderSignature = 0x02014B50;
     private const uint Zip64EndOfCentralDirectorySignature = 0x06064B50;
     private const uint Zip64EndOfCentralDirectoryLocatorSignature = 0x07064B50;
-    private static readonly byte[][] EncodedDtdDeclarations =
-    [
-        "<!DOCTYPE"u8.ToArray(),
-        Encoding.Unicode.GetBytes("<!DOCTYPE"),
-        Encoding.BigEndianUnicode.GetBytes("<!DOCTYPE"),
-        Encoding.UTF32.GetBytes("<!DOCTYPE"),
-        new UTF32Encoding(bigEndian: true, byteOrderMark: false).GetBytes("<!DOCTYPE"),
-    ];
     private static readonly Action<ILogger, string, Exception?> InspectionFailed = LoggerMessage.Define<string>(
         LogLevel.Debug,
         new EventId(1, nameof(InspectionFailed)),
@@ -218,11 +210,6 @@ internal sealed class VersOneEpubInspector(ILogger<VersOneEpubInspector> logger)
             return PreflightResult.Fail(EpubInspectionProblemCode.LimitExceeded, "The EPUB container document exceeds its configured limit.");
         }
 
-        if (await ContainsDtdDeclarationAsync(containerEntry, request.Limits.MaximumXmlBytes, token).ConfigureAwait(false))
-        {
-            return PreflightResult.Fail(EpubInspectionProblemCode.PackageMalformed, "DTD declarations are prohibited in EPUB XML documents.");
-        }
-
         XDocument container;
         try
         {
@@ -243,11 +230,6 @@ internal sealed class VersOneEpubInspector(ILogger<VersOneEpubInspector> logger)
         if (packageEntry.Length > request.Limits.MaximumXmlBytes)
         {
             return PreflightResult.Fail(EpubInspectionProblemCode.LimitExceeded, "The EPUB package document exceeds its configured limit.");
-        }
-
-        if (await ContainsDtdDeclarationAsync(packageEntry, request.Limits.MaximumXmlBytes, token).ConfigureAwait(false))
-        {
-            return PreflightResult.Fail(EpubInspectionProblemCode.PackageMalformed, "DTD declarations are prohibited in EPUB XML documents.");
         }
 
         XDocument package;
@@ -327,11 +309,6 @@ internal sealed class VersOneEpubInspector(ILogger<VersOneEpubInspector> logger)
                 return PreflightResult.Fail(EpubInspectionProblemCode.LimitExceeded, "An EPUB navigation document exceeds its configured limit.");
             }
 
-            if (await ContainsDtdDeclarationAsync(eagerXmlEntry, request.Limits.MaximumXmlBytes, token).ConfigureAwait(false))
-            {
-                return PreflightResult.Fail(EpubInspectionProblemCode.PackageMalformed, "DTD declarations are prohibited in EPUB XML documents.");
-            }
-
             XDocument eagerXml;
             try
             {
@@ -354,11 +331,6 @@ internal sealed class VersOneEpubInspector(ILogger<VersOneEpubInspector> logger)
             if (encryptionEntry.Length > request.Limits.MaximumXmlBytes)
             {
                 return PreflightResult.Fail(EpubInspectionProblemCode.LimitExceeded, "The EPUB encryption document exceeds its configured limit.");
-            }
-
-            if (await ContainsDtdDeclarationAsync(encryptionEntry, request.Limits.MaximumXmlBytes, token).ConfigureAwait(false))
-            {
-                return PreflightResult.Fail(EpubInspectionProblemCode.PackageMalformed, "DTD declarations are prohibited in EPUB XML documents.");
             }
 
             XDocument encryption;
@@ -847,7 +819,7 @@ internal sealed class VersOneEpubInspector(ILogger<VersOneEpubInspector> logger)
         Encoding encoding = ResolveXmlEncoding(bytes);
         using MemoryStream source = new(bytes, writable: false);
         using StreamReader textReader = new(source, encoding, detectEncodingFromByteOrderMarks: true);
-        XmlReaderSettings settings = new() { DtdProcessing = DtdProcessing.Prohibit, XmlResolver = null, MaxCharactersInDocument = maximumBytes, Async = true };
+        XmlReaderSettings settings = new() { DtdProcessing = DtdProcessing.Ignore, XmlResolver = null, MaxCharactersInDocument = maximumBytes, Async = true };
         using XmlReader reader = XmlReader.Create(textReader, settings);
         return await XDocument.LoadAsync(reader, LoadOptions.None, token).ConfigureAwait(false);
     }
@@ -924,23 +896,6 @@ internal sealed class VersOneEpubInspector(ILogger<VersOneEpubInspector> logger)
 
         string name = declaration.Slice(start, end).Trim().ToString();
         return name.Length > 0 ? name : null;
-    }
-
-    private static async Task<bool> ContainsDtdDeclarationAsync(
-        ZipArchiveEntry entry,
-        long maximumBytes,
-        CancellationToken token)
-    {
-        if (entry.Length > maximumBytes || entry.Length > int.MaxValue)
-        {
-            throw new InspectionLimitException();
-        }
-
-        byte[] content = new byte[(int)entry.Length];
-        await using Stream stream = entry.Open();
-        using LimitedReadStream limited = new(stream, maximumBytes, token);
-        await limited.ReadExactlyAsync(content, token).ConfigureAwait(false);
-        return EncodedDtdDeclarations.Any(declaration => content.AsSpan().IndexOf(declaration) >= 0);
     }
 
     private static async Task<string> ReadTextAsync(
@@ -1136,21 +1091,39 @@ internal sealed class VersOneEpubInspector(ILogger<VersOneEpubInspector> logger)
 
     private static string SanitizeExternalReference(string reference)
     {
-        string value = reference.Trim();
+        string value = reference.Replace("\u2028", string.Empty, StringComparison.Ordinal).Trim();
         if (value.StartsWith("//", StringComparison.Ordinal)
             && Uri.TryCreate($"https:{value}", UriKind.Absolute, out Uri? protocolRelative))
         {
-            return Bound($"scheme:protocol-relative;host:{protocolRelative.IdnHost}")!;
+            return SanitizeParsedExternalReference(protocolRelative, "protocol-relative");
         }
 
         if (Uri.TryCreate(value, UriKind.Absolute, out Uri? uri))
         {
-            return Bound(uri.IsFile || string.IsNullOrEmpty(uri.Host)
-                ? $"scheme:{uri.Scheme}"
-                : $"scheme:{uri.Scheme};host:{uri.IdnHost}")!;
+            return SanitizeParsedExternalReference(uri, uri.Scheme);
         }
 
         return "scheme:external";
+    }
+
+    private static string SanitizeParsedExternalReference(Uri uri, string scheme)
+    {
+        try
+        {
+            if (uri.IsFile || string.IsNullOrEmpty(uri.Host))
+            {
+                return Bound($"scheme:{scheme}")!;
+            }
+
+            string host = uri.IdnHost;
+            return Bound(string.IsNullOrEmpty(host)
+                ? $"scheme:{scheme};host:invalid"
+                : $"scheme:{scheme};host:{host}")!;
+        }
+        catch (UriFormatException)
+        {
+            return Bound($"scheme:{scheme};host:invalid")!;
+        }
     }
     private static EpubInspectionResult Fail(EpubInspectionRequest request, EpubInspectionProblemCode code, string explanation) => EpubInspectionResult.Failed(request.BookId, request.ExpectedRelativePath, code, explanation);
 

@@ -167,7 +167,7 @@ public sealed class ConsolidationRecommendationPolicyTests
             failedFormat.Fingerprint,
             AssessmentStatus.Disqualified,
             null,
-            new("epub-inspector/1.0.1"),
+            new("epub-inspector/1.0.2"),
             new("epub-quality/1.0.0"),
             new(false, false),
             [new AssessmentFinding("EPUB.OPEN", FindingSeverity.Disqualifying, 0, "Synthetic open failure.")]);
@@ -230,7 +230,7 @@ public sealed class ConsolidationRecommendationPolicyTests
             failedFormat.Fingerprint,
             AssessmentStatus.Disqualified,
             null,
-            new("epub-inspector/1.0.1"),
+            new("epub-inspector/1.0.2"),
             new("epub-quality/1.0.0"),
             new(false, false),
             [new AssessmentFinding("EPUB.ENCRYPTION", FindingSeverity.Disqualifying, 0, "Synthetic encryption finding.")]);
@@ -456,7 +456,7 @@ public sealed class ConsolidationRecommendationPolicyTests
             format.Fingerprint,
             AssessmentStatus.Completed,
             new QualityScore(score),
-            new("epub-inspector/1.0.1"),
+            new("epub-inspector/1.0.2"),
             new("epub-quality/1.0.0"),
             new(true, true),
             [new AssessmentFinding(ruleId, FindingSeverity.Positive, decisiveAdjustment, "Synthetic assessment evidence.")]);

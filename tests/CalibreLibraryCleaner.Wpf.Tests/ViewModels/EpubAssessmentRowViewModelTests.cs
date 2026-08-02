@@ -21,7 +21,7 @@ public sealed class EpubAssessmentRowViewModelTests
             null,
             AssessmentStatus.Completed,
             new QualityScore(50),
-            new AnalyzerVersion("epub-inspector/1.0.1"),
+            new AnalyzerVersion("epub-inspector/1.0.2"),
             new ScoringModelVersion("epub-quality/1.0.0"),
             new EpubFeatureSummary(true, true),
             [finding]);

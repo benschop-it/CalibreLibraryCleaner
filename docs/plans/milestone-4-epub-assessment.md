@@ -155,7 +155,7 @@ Infrastructure owns all file, archive, parser, HTML, XML, and image details:
 - `EpubArchivePathResolver` normalizes forward-slash archive paths, resolves package-relative references, rejects traversal/absolute/drive/UNC/NUL/backslash ambiguity, and compares paths ordinally according to ZIP entry naming.
 - `EpubFileStateGuard` repeats trusted-root, parent-chain, reparse-point, expected file-state, and regular-file checks immediately before open and after inspection.
 - `CancellationCheckingStream` checks the token between bounded reads so long entry reads can stop even though VersOne APIs do not accept a `CancellationToken`.
-- `SafeXmlReaderFactory` uses `DtdProcessing.Prohibit`, `XmlResolver = null`, zero entity expansion, and explicit document-character limits for XML inspected outside the library. Malformed XML is translated into a problem code.
+- `SafeXmlReaderFactory` uses `DtdProcessing.Ignore`, `XmlResolver = null`, zero entity expansion, and explicit document-character limits for XML inspected outside the library. Document type declarations are tolerated without processing their grammars; entity-dependent or malformed XML is translated into a problem code.
 - `HtmlChapterInspector` uses Html Agility Pack on one size-capped XHTML/HTML resource at a time, removes non-readable elements, counts normalized Unicode letters/digits and local references, and discards the DOM and text before moving to the next chapter. It does not retain full-book text.
 - `SafeImageHeaderInspector` reads only a bounded header for supported PNG, JPEG, GIF, WebP, and SVG cover resources. It returns optional dimensions without fully decoding or rendering an image. Unsupported or malformed image headers become findings, not failures.
 
@@ -261,7 +261,7 @@ Cap application uses normalized evidence ordering, not discovery or task complet
 
 The initial versions are:
 
-- Analyzer: `epub-inspector/1.0.1` after the 2026-07-18 security hardening pass (`1.0.0` was the initial implementation).
+- Analyzer: `epub-inspector/1.0.2` after the 2026-08-01 doctype compatibility amendment (`1.0.0` was the initial implementation and `1.0.1` the 2026-07-18 security hardening pass).
 - Scoring model: `epub-quality/1.0.0`.
 
 Changes to archive parsing, content extraction, reference resolution, image support, security limits, or dependency behavior that can change facts require a new analyzer version. Changes to baseline, weights, caps, thresholds, formula, rule applicability, or disqualification behavior require a new scoring-model version. Persisted or later cached assessments must key by file fingerprint plus both versions. The UI and future recommendation code must not compare or rank scores whose scoring-model versions differ without explicit migration/reassessment. Caching and cross-score ranking are not implemented in Milestone 4.
@@ -296,7 +296,7 @@ Disqualify, without a numeric score, when any of these prevents safe and compara
 - invalid/unsupported ZIP container or encrypted ZIP entry required for analysis;
 - unsafe entry path, canonical duplicate, archive bomb signal, count/size/ratio breach, or observed bytes beyond a declared/configured bound;
 - missing or malformed `META-INF/container.xml` or package document;
-- DTD/external-entity use or XML processing that cannot be completed with external resolution disabled;
+- entity use that depends on an ignored DTD, malformed DTD syntax, or XML processing that cannot be completed with external resolution disabled;
 - DRM or encryption preventing package, navigation, spine, or readable content inspection;
 - file-state mismatch against the hash observation before/during/after inspection;
 - mandatory analysis truncated by a security limit;
@@ -311,7 +311,7 @@ Do not disqualify merely for missing title/author/language/date/identifier/cover
 - Never call `ZipArchiveEntry.ExtractToFile`, create an extraction directory, or map archive paths onto filesystem paths. Archive paths are identifiers only.
 - Reject absolute paths, drive-qualified paths, UNC forms, NULs, `..` traversal after normalization, ambiguous backslashes, and canonical-name collisions even though extraction is forbidden.
 - Preflight counts, sizes, ratios, and checked sums before parser invocation. Wrap actual entry streams with byte limits and cancellation checks so lying metadata cannot evade bounds.
-- Configure XML with DTD processing prohibited, no resolver, no entity expansion, and maximum character limits. Never use an API that resolves external schemas/entities.
+- Configure XML to ignore DTD grammars, use no resolver or entity expansion, and enforce maximum character limits. Never use an API that resolves external schemas/entities.
 - Parse HTML locally and tolerate malformed markup only within size/node/count limits. Treat `http`, `https`, protocol-relative, `file`, `data`, and other non-archive references as evidence; never dereference them.
 - Set VersOne content downloading to false and provide a fail-closed downloader. Add a test that an EPUB containing external URLs makes no outbound request.
 - Read supported image headers only. Validate dimensions and multiplication with checked arithmetic; do not allocate `width * height` buffers and do not render images.
@@ -690,6 +690,7 @@ It deliberately excludes Milestone 5 and later functionality: no format recommen
 - [x] Remediate the post-completion review findings with the smallest Milestone 4-only corrections: reject oversized central directories before `ZipArchive` materialization; preflight every XML resource eagerly read by VersOne; enforce archive-entry and managed-root traversal rules; bound and sanitize retained evidence; bound HTML structure and cancellation; validate scoring contracts; serialize progress; and materialize WPF finding details on demand.
 - [x] Add focused regressions for navigation limits/DTDs, embedded traversal, root reparse points, HTML structure/cancellation, evidence bounds/redaction, scoring-contract disqualification, monotonic progress, lazy WPF details, and complete selected-feature display.
 - [x] Re-run restore, build, all tests, format verification, safety tests, and complete diff review after remediation.
+- [x] Permit ignored document type declarations while retaining no-resolution and no-entity-expansion safeguards; harden invalid IDN host evidence; record analyzer `epub-inspector/1.0.2`; and add HTML/NCX/no-network/entity/Unicode-host regressions.
 
 ## Final outcome
 
@@ -707,7 +708,7 @@ Verification actually performed:
 - `dotnet list package --vulnerable --include-transitive` found no known vulnerable packages from the configured sources.
 - `git diff --check`, parser-boundary searches, mutation/extraction/network/eager-reader searches, package-reference review, and the complete changed/new file review found no Calibre mutation path, extraction API, runtime network client, eager `ReadBook` use, or EPUB-library type outside Infrastructure.
 
-The V1 inspector enforces the frozen 1 GiB file, 10,000-entry, 512 MiB declared and actual aggregate-read, 64 MiB entry, 4 MiB XML/navigation, 8 MiB chapter, 2 MiB CSS, 32 MiB cover/64 KiB cover-header, 10,000-spine-item, 50,000-local-reference, 100-evidence-item, 20-million-readable-character, and per-entry/aggregate compression-ratio limits. It rejects unsafe or duplicate canonical archive paths, DTD/external XML, unsupported DRM, stale file observations, and parent reparse points. It opens files read-only with restrictive sharing, never extracts, disables VersOne downloading, installs a fail-closed downloader, bounds reads, and checks cancellation between bounded operations.
+The V1 inspector enforces the frozen 1 GiB file, 10,000-entry, 512 MiB declared and actual aggregate-read, 64 MiB entry, 4 MiB XML/navigation, 8 MiB chapter, 2 MiB CSS, 32 MiB cover/64 KiB cover-header, 10,000-spine-item, 50,000-local-reference, 100-evidence-item, 20-million-readable-character, and per-entry/aggregate compression-ratio limits. It rejects unsafe or duplicate canonical archive paths, entity-dependent or malformed XML, unsupported DRM, stale file observations, and parent reparse points. It ignores DTD grammars with external resolution disabled, opens files read-only with restrictive sharing, never extracts, disables VersOne downloading, installs a fail-closed downloader, bounds reads, and checks cancellation between bounded operations.
 
 The frozen `epub-quality/1.0.0` catalog uses the documented +50 baseline and positive/negative weights for open/package, embedded metadata, validated ISBN, cover presence/header/dimensions, usable navigation, spine/resources, internal references, readable text, near-empty chapters, repeated spine/href/navigation references, and encryption state. Repeated penalties remain visible after their independent caps. Completed scores equal `clamp(sum(finding adjustments), 0, 100)`; missing, unreadable, invalid, changed, unsafe, malformed-package, limit-exceeding, or unsupported-encrypted EPUBs are disqualified and have no numeric score. A parsed empty spine remains scored with its severe penalty.
 
@@ -716,5 +717,7 @@ Assessment concurrency defaults to two and is explicitly bounded; result slots p
 Implementation-shape deviations do not change the approved behavior or milestone boundary: cohesive private inspector helpers remain in and around `VersOneEpubInspector` rather than every planned helper being a separate source file; V1 rule evaluations are consolidated in the pure `EpubAssessmentEngine` rather than one source file per rule; and selected feature detail is presented by an immutable assessment row rather than a separate feature-summary view-model. Failed/canceled scans retain the prior atomic UI snapshot, consistent with the established Milestone 3 behavior, rather than clearing already-published results. No PDF, content fingerprint/similarity, recommendation, retention choice, cleanup, mutation, backup/rollback, AI, or online lookup work was introduced.
 
 Post-completion remediation on 2026-07-18 hardened archive central-directory preflight, eager navigation XML validation, archive and managed-root path handling, HTML structure limits, evidence retention/redaction, score derivation, progress serialization, and selected-row WPF materialization. The behavior change is recorded as analyzer `epub-inspector/1.0.1`; the unchanged scoring catalog remains `epub-quality/1.0.0`. The remediation verification succeeded with zero build warnings or errors and 195 passing tests: Domain 59, Application 35, Infrastructure 78, Architecture 14, and WPF 9. The focused EPUB/safety filter passed 71 tests across Application, Infrastructure, Architecture, and WPF; `dotnet format --verify-no-changes` and `git diff --check` also succeeded.
+
+The 2026-08-01 compatibility amendment advances the analyzer to `epub-inspector/1.0.2` while retaining `epub-quality/1.0.0`. It accepts document type declarations without processing DTD grammars or resolving external identifiers; entity-dependent XML remains disqualifying. URI evidence removes Unicode line separators before host canonicalization, while other invalid IDN hosts produce bounded `host:invalid` evidence rather than aborting assessment. Final verification for this amendment is recorded in `docs/plans/epub-doctype-compatibility.md`.
 
 Remaining risks are the documented non-transactional same-size/same-timestamp hostile replacement race, parser rejection of malformed-but-potentially-salvageable publications outside the four explicitly tolerated conditions, simple bounded HTML/CSS/image-header heuristics, and the policy nature of the initial scoring weights. Interactive high-DPI/screen-reader review remains manual; automated WPF construction and behavior tests pass.
