@@ -301,7 +301,9 @@ internal static class ExactBinaryExpectedState
             book.Id,
             book.Title,
             book.AuthorSort,
-            book.Authors.Select(value => new ExpectedAuthorState(value.Id, value.Name, value.SortName)),
+            book.Authors.Select(value => new ExpectedAuthorState(
+                value.Id ?? throw new InvalidOperationException("Projected authors require an explicit rescan before exact cleanup planning."),
+                value.Name, value.SortName)),
             book.Identifiers.Select(value => new ExpectedIdentifierState(value.Type, value.Value)),
             publication.Publisher,
             publication.PublicationDate,
@@ -337,7 +339,9 @@ internal static class ExactBinaryExpectedState
             || expected.PublicationDate != current.PublicationMetadata.PublicationDate
             || expected.Series != current.PublicationMetadata.Series
             || expected.SeriesIndex != current.PublicationMetadata.SeriesIndex
-            || !expected.Authors.SequenceEqual(current.Authors.Select(value => new ExpectedAuthorState(value.Id, value.Name, value.SortName)))
+            || current.Authors.Any(value => value.Id is null)
+            || !expected.Authors.SequenceEqual(current.Authors.Select(value => new ExpectedAuthorState(
+                value.Id!.Value, value.Name, value.SortName)))
             || !expected.Identifiers.SequenceEqual(current.Identifiers
                 .Select(value => new ExpectedIdentifierState(value.Type, value.Value))
                 .OrderBy(value => value.Type, StringComparer.Ordinal).ThenBy(value => value.Value, StringComparer.Ordinal))

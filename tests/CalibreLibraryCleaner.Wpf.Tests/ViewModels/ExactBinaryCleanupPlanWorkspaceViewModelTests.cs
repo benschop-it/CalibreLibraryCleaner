@@ -16,7 +16,7 @@ namespace CalibreLibraryCleaner.Wpf.Tests.ViewModels;
 public sealed class ExactBinaryCleanupPlanWorkspaceViewModelTests
 {
     [Fact]
-    public void GeneratedRetainedCopyCanBePlannedValidatedAndApprovedWithoutMetadataMatch()
+    public async Task GeneratedRetainedCopyCanBePlannedValidatedAndApprovedWithoutMetadataMatch()
     {
         DateTimeOffset now = new(2026, 8, 1, 12, 0, 0, TimeSpan.Zero);
         LibrarySnapshot snapshot = Snapshot(now);
@@ -28,7 +28,7 @@ public sealed class ExactBinaryCleanupPlanWorkspaceViewModelTests
         IClock clock = A.Fake<IClock>();
         IExactBinaryCleanupPlanConfirmationService confirmation = A.Fake<IExactBinaryCleanupPlanConfirmationService>();
         LibraryStateSession stateSession = new();
-        stateSession.StartFromScan(snapshot);
+        await stateSession.StartFromScanAsync(snapshot, CancellationToken.None);
         ICalibreToolDiscovery tools = A.Fake<ICalibreToolDiscovery>();
         IExecutionBackupStore workspaceStore = A.Fake<IExecutionBackupStore>();
         ICalibreCommandGateway commands = A.Fake<ICalibreCommandGateway>();
@@ -37,7 +37,6 @@ public sealed class ExactBinaryCleanupPlanWorkspaceViewModelTests
         ICleanupExecutionIdGenerator executionIds = A.Fake<ICleanupExecutionIdGenerator>();
         IExactBinaryRecordDeletionConfirmation deletionConfirmation = A.Fake<IExactBinaryRecordDeletionConfirmation>();
         IExecutionBackupFolderPicker backupPicker = A.Fake<IExecutionBackupFolderPicker>();
-        PersistedLibrarySnapshotsUseCase persistedSnapshots = new(A.Fake<ILibrarySnapshotStore>());
         A.CallTo(() => ids.Create()).Returns(new CleanupPlanId(Guid.Parse("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee")));
         A.CallTo(() => clock.GetUtcNow()).Returns(now);
         A.CallTo(() => confirmation.ConfirmApproval(A<ExactBinaryCleanupPlan>._)).Returns(true);
@@ -45,7 +44,7 @@ public sealed class ExactBinaryCleanupPlanWorkspaceViewModelTests
             new(ids, clock), new(clock), new(clock),
             new(stateSession, tools, workspaceStore),
             new(stateSession, tools, commands, lease, workspaceStore, recordBackup, executionIds,
-                deletionConfirmation, persistedSnapshots, clock),
+                deletionConfirmation, clock),
             backupPicker,
             confirmation);
 

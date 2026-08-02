@@ -78,6 +78,63 @@ public sealed class LibraryStateDeltaPolicyTests
         act.Should().Throw<InvalidOperationException>().WithMessage("*fingerprint does not match*");
     }
 
+    [Fact]
+    public void AddFormatCreatesProjectedFactWithoutInventingManagedPath()
+    {
+        LibraryState baseline = LibraryState.FromScan(Snapshot(), Generation);
+        FormatFileFingerprint pdf = new(20, new(new string('b', 64)));
+
+        LibraryState projected = LibraryStateDeltaPolicy.Apply(baseline,
+            new AddOrReplaceFormatLibraryStateDelta(Generation, new(0), "add-format:1:PDF",
+                ScannedAt.AddSeconds(1), new(1), "PDF", pdf, null));
+
+        BookFormat format = projected.Snapshot.Books.Single(value => value.Id == new CalibreBookId(1))
+            .Formats.Single(value => value.Format == "PDF");
+        format.FileStatus.Should().Be(FormatFileStatus.ProjectedPresent);
+        format.Fingerprint.Should().Be(pdf);
+        format.Observation.Should().BeNull();
+        format.ExpectedRelativePath.Should().BeEmpty();
+    }
+
+    [Fact]
+    public void RecordWithContentRequiresExplicitConsolidationDelta()
+    {
+        LibraryState baseline = LibraryState.FromScan(Snapshot(), Generation);
+
+        LibraryState projected = LibraryStateDeltaPolicy.Apply(baseline,
+            new RemoveRecordWithContentLibraryStateDelta(Generation, new(0), "remove-source:2",
+                ScannedAt.AddSeconds(1), new(2)));
+
+        projected.Snapshot.Books.Select(value => value.Id).Should().Equal(new CalibreBookId(1));
+        projected.Snapshot.ExactBinaryDuplicateGroups.Should().BeEmpty();
+    }
+
+    [Fact]
+    public void SixThousandDeltasProjectTenThousandRecordLibraryWithoutRescan()
+    {
+        const int recordCount = 10_000;
+        const int removalCount = 6_000;
+        LibrarySnapshot snapshot = new(
+            new("87f7ed1f-59a8-45a6-975a-7e06fd84780d", 27, "C:\\large-library"),
+            ScannedAt,
+            Enumerable.Range(1, recordCount).Select(id => new CalibreBook(
+                new(id), $"Book {id}", "Author", [new(new CalibreAuthorId(id), "Author", "Author")],
+                [], [], $"Author/Book {id}")),
+            []);
+        LibraryState state = LibraryState.FromScan(snapshot, Generation);
+
+        for (int index = 0; index < removalCount; index++)
+        {
+            state = LibraryStateDeltaPolicy.Apply(state, new RemoveRecordLibraryStateDelta(
+                Generation, state.Revision, $"remove:{index + 1}", ScannedAt.AddSeconds(index + 1),
+                new(index + 1)));
+        }
+
+        state.Revision.Should().Be(new LibraryStateRevision(removalCount));
+        state.Snapshot.Books.Should().HaveCount(recordCount - removalCount);
+        state.Snapshot.Books[0].Id.Should().Be(new CalibreBookId(removalCount + 1));
+    }
+
     private static LibrarySnapshot Snapshot()
     {
         CalibreBook[] books = [Book(1), Book(2)];

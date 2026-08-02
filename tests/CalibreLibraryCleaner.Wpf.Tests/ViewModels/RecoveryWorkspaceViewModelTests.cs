@@ -1,5 +1,6 @@
 using System.Reflection;
 using CalibreLibraryCleaner.Application.Abstractions;
+using CalibreLibraryCleaner.Application.Libraries;
 using CalibreLibraryCleaner.Application.Recoveries;
 using CalibreLibraryCleaner.Domain.Executions;
 using CalibreLibraryCleaner.Domain.Libraries;
@@ -66,7 +67,7 @@ public sealed class RecoveryWorkspaceViewModelTests
         A.CallTo(() => clock.GetUtcNow()).Returns(DateTimeOffset.UnixEpoch);
         return new(
             new(A.Fake<IRecoverySourceArtifactReader>()),
-            new(A.Fake<IRecoveryCurrentStateScanner>(),
+            new(A.Fake<ILibraryStateSession>(),
                 A.Fake<ICurrentStateReconciler>()),
             new(A.Fake<IRecoveryEligibilityValidator>(), clock),
             new(A.Fake<IRecoveryPlanGenerator>(), clock),

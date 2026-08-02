@@ -26,8 +26,8 @@ Milestone 7 tests use faked Application ports for orchestration and controlled
 helper executables for process invocation. They prove exact-version capability
 rejection, backup-before-mutation, external-only path guards, manifest
 rehashing, lease exclusion, write-ahead journaling, constructive-before-
-destructive ordering, fresh semantic verification after every command,
-fresh per-command preflight, confirmation root/graph binding, executable and
+destructive ordering, durable typed-delta commits after successful commands,
+projected per-command validation, confirmation root/graph binding, executable and
 backup path-substitution resistance, reparse-point rejection, safe-boundary
 cancellation, and durable recovery-required results. Journal tests require an
 agreeing immutable terminal summary after mutation, and cover-bearing plans
@@ -40,7 +40,7 @@ record IDs. Application tests use faked ports and mutable synthetic snapshots
 to prove three-way reconciliation, mismatch and unexpected-data
 classification, warning-bound approval, current-backup-before-mutation,
 constructive-before-destructive ordering, safe cancellation, no retry,
-process-success semantic failure, partial recovery, destructive failure, final
+missing created IDs, delta-commit failure, partial recovery, destructive failure, final
 verification, and durable mappings.
 
 Infrastructure recovery tests use temporary directories, synthetic Milestone 7
@@ -57,6 +57,8 @@ WPF tests require individual warning acknowledgements and accurate immutable
 approval state. Architecture tests prohibit filesystem/process/JSON/UI leakage
 into recovery core layers, direct alternate process boundaries, shell use, and
 automatic rollback/resume/bulk recovery.
+
+ADR 0012 tests prove baseline/delta replay, hash-chain tamper detection, uncertainty persistence, checkpoint compaction, authoritative restart loading, revision publication, and zero scanner abstractions in mutation workflows. A deterministic 10,000-record/6,000-delta test verifies state projection without a wall-clock threshold.
 
 Real-Calibre recovery qualification is opt-in only. It requires an exact
 explicit executable and caller-marked disposable test root and must qualify

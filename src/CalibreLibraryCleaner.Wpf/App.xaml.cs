@@ -40,7 +40,6 @@ public partial class App : System.Windows.Application
         builder.Services.AddSingleton<ScanLibraryUseCase>();
         builder.Services.AddSingleton<ILibraryStateSession, LibraryStateSession>();
         builder.Services.AddSingleton<PersistedLibrarySnapshotsUseCase>();
-        builder.Services.AddSingleton<IExecutionLibraryScanner, FullExecutionLibraryScanner>();
         builder.Services.AddSingleton<ExportRecommendationsUseCase>();
         builder.Services.AddSingleton<GenerateCleanupPlanUseCase>();
         builder.Services.AddSingleton<ValidateCleanupPlanUseCase>();

@@ -41,11 +41,44 @@ public sealed class MainWindowViewModelTests
     }
 
     [Fact]
+    public async Task PersistedAuthoritativeStateLoadsAsMutationEligible()
+    {
+        const string libraryRoot = "C:\\Books";
+        ILibrarySnapshotStore store = A.Fake<ILibrarySnapshotStore>();
+        LibrarySnapshot snapshot = Snapshot(libraryRoot);
+        A.CallTo(() => store.ListAsync(A<CancellationToken>._))
+            .Returns([new(libraryRoot, snapshot.ScannedAt)]);
+        ILibraryStateSession stateSession = A.Fake<ILibraryStateSession>();
+        LibraryState state = new(new(Guid.Parse("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee")),
+            new(7), LibraryStateStatus.Authoritative, snapshot, snapshot.ScannedAt.AddMinutes(1));
+        A.CallTo(() => stateSession.LoadAsync(libraryRoot, A<CancellationToken>._))
+            .Returns(LibraryStateSessionOutcome.Success(state));
+        MainWindowViewModel viewModel = CreateViewModel(
+            A.Fake<ILibraryFolderPicker>(), out _, out _, out _, new(store), stateSession);
+
+        await viewModel.InitializeAsync();
+        viewModel.SelectedPersistedLibraryPath = libraryRoot;
+        await viewModel.LoadPersistedSnapshotCommand.ExecuteAsync(null);
+
+        viewModel.StatusMessage.Should().Contain("authoritative projected state revision 7")
+            .And.Contain("External Calibre changes require Rescan");
+        viewModel.Books.Should().ContainSingle(value => value.Title == "Persisted Book");
+    }
+
+    [Fact]
     public async Task SuccessfulScanPersistsLatestSnapshot()
     {
         ILibraryFolderPicker picker = A.Fake<ILibraryFolderPicker>();
         ILibrarySnapshotStore store = A.Fake<ILibrarySnapshotStore>();
         ILibraryStateSession stateSession = A.Fake<ILibraryStateSession>();
+        A.CallTo(() => stateSession.StartFromScanAsync(
+                A<LibrarySnapshot>._, A<CancellationToken>._))
+            .ReturnsLazily(call =>
+            {
+                LibrarySnapshot snapshot = call.GetArgument<LibrarySnapshot>(0)!;
+                return Task.FromResult(LibraryStateSessionOutcome.Success(LibraryState.FromScan(snapshot,
+                    new(Guid.Parse("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee")))));
+            });
         A.CallTo(() => store.ListAsync(A<CancellationToken>._)).Returns([]);
         A.CallTo(() => picker.PickFolder(A<string?>._)).Returns("library");
         MainWindowViewModel viewModel = CreateViewModel(
@@ -79,8 +112,9 @@ public sealed class MainWindowViewModelTests
         A.CallTo(() => store.WriteAsync(
             A<LibrarySnapshot>.That.Matches(value => value.Identity.LibraryRoot == "library"),
             A<CancellationToken>._)).MustHaveHappenedOnceExactly();
-        A.CallTo(() => stateSession.StartFromScan(
-            A<LibrarySnapshot>.That.Matches(value => value.Identity.LibraryRoot == "library")))
+        A.CallTo(() => stateSession.StartFromScanAsync(
+            A<LibrarySnapshot>.That.Matches(value => value.Identity.LibraryRoot == "library"),
+            A<CancellationToken>._))
             .MustHaveHappenedOnceExactly();
     }
 

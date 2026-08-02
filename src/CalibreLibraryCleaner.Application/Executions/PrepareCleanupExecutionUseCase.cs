@@ -1,11 +1,12 @@
 using CalibreLibraryCleaner.Application.Abstractions;
 using CalibreLibraryCleaner.Application.Libraries;
 using CalibreLibraryCleaner.Domain.Executions;
+using CalibreLibraryCleaner.Domain.Libraries;
 
 namespace CalibreLibraryCleaner.Application.Executions;
 
 public sealed class PrepareCleanupExecutionUseCase(
-    IExecutionLibraryScanner scanLibrary,
+    ILibraryStateSession libraryState,
     ICalibreToolDiscovery toolDiscovery,
     IExecutionBackupStore backupStore,
     IClock clock) : IPrepareCleanupExecution
@@ -29,20 +30,20 @@ public sealed class PrepareCleanupExecutionUseCase(
         if (!tool.IsSuccess)
             return new(request.Plan, tool.Tool, capability.Graph, null, null, issues, clock.GetUtcNow());
 
-        LibraryScanOutcome scan = await scanLibrary.ScanFreshAsync(request.LibraryRoot, scanProgress, cancellationToken).ConfigureAwait(false);
-        if (!scan.IsSuccess)
+        LibraryState? state = libraryState.GetCurrent(request.LibraryRoot);
+        if (state is null || !state.IsAuthoritative)
         {
-            issues.Add(new("EXECUTION.SCAN_FAILED", ExecutionIssueSeverity.BlockingError,
-                "A fresh read-only library scan could not be completed."));
+            issues.Add(new("EXECUTION.STATE_UNAVAILABLE", ExecutionIssueSeverity.BlockingError,
+                "Run an explicit scan to establish authoritative library state before cleanup."));
             return new(request.Plan, tool.Tool, capability.Graph, null, null, issues, clock.GetUtcNow());
         }
 
-        issues.AddRange(ExecutionPreflightPolicy.Evaluate(request.Plan, scan.Snapshot!));
+        issues.AddRange(ExecutionPreflightPolicy.Evaluate(request.Plan, state.Snapshot));
         long requiredBytes = ExecutionPreflightPolicy.EstimateRequiredBackupBytes(request.Plan);
         BackupDestinationValidation destination = await backupStore.ValidateDestinationAsync(
             request.LibraryRoot, request.BackupDestination, requiredBytes, cancellationToken).ConfigureAwait(false);
         issues.AddRange(destination.Issues);
-        return new(request.Plan, tool.Tool, capability.Graph, scan.Snapshot!.Identity.LibraryRoot,
+        return new(request.Plan, tool.Tool, capability.Graph, state.Snapshot.Identity.LibraryRoot,
             destination.CanonicalDestinationIdentity,
             issues, clock.GetUtcNow());
     }

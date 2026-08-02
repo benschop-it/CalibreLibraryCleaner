@@ -199,7 +199,7 @@ public sealed class CurrentStateReconciler : ICurrentStateReconciler
             SourceOperationProjection? sourceOperation = journalOperations.Values.SingleOrDefault(value =>
                 value.Format == format && (value.SourceRecordId == expected.RecordId
                     || value.TargetRecordId == expected.RecordId));
-            FormatFileFingerprint? actualFingerprint = actual is { FileStatus: FormatFileStatus.Present }
+            FormatFileFingerprint? actualFingerprint = actual is { FileStatus: FormatFileStatus.Present or FormatFileStatus.ProjectedPresent }
                 ? actual.Fingerprint : null;
             RecoveryReconciliationClassification classification;
             bool preserve = false;
@@ -329,7 +329,7 @@ public sealed class CurrentStateReconciler : ICurrentStateReconciler
         RecoveryRecordFingerprintPolicy.Compute(expected) == RecoveryRecordFingerprintPolicy.Compute(current)
         && expected.Formats.Count == current.Formats.Count
         && expected.Formats.All(format => current.Formats.SingleOrDefault(value => value.Format == format.Format)
-            is { FileStatus: FormatFileStatus.Present, Fingerprint: not null } actual
+            is { FileStatus: FormatFileStatus.Present or FormatFileStatus.ProjectedPresent, Fingerprint: not null } actual
             && actual.Fingerprint == format.Fingerprint);
 
     private static bool IsIndependentlyModifiedRetainedTarget(
@@ -353,7 +353,7 @@ public sealed class CurrentStateReconciler : ICurrentStateReconciler
             ExpectedPostFormats(plan, expected.RecordId, operations);
         return current.Formats.Count == post.Count
             && current.Formats.All(format =>
-                format is { FileStatus: FormatFileStatus.Present, Fingerprint: not null }
+                format is { FileStatus: FormatFileStatus.Present or FormatFileStatus.ProjectedPresent, Fingerprint: not null }
                 && post.TryGetValue(format.Format,
                     out FormatFileFingerprint? fingerprint)
                 && fingerprint == format.Fingerprint);
@@ -367,7 +367,7 @@ public sealed class CurrentStateReconciler : ICurrentStateReconciler
             == RecoveryRecordFingerprintPolicy.Compute(current);
         bool exactBackedFormat = expected.Formats.Any(format =>
             current.Formats.SingleOrDefault(value => value.Format == format.Format) is
-            { FileStatus: FormatFileStatus.Present, Fingerprint: not null } actual
+            { FileStatus: FormatFileStatus.Present or FormatFileStatus.ProjectedPresent, Fingerprint: not null } actual
             && actual.Fingerprint == format.Fingerprint);
         return exactMetadata && exactBackedFormat;
     }

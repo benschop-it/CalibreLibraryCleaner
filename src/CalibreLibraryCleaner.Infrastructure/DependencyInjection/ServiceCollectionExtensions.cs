@@ -33,6 +33,7 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<IFormatFileHasher, StreamingSha256FormatFileHasher>();
         services.AddSingleton(new LibrarySnapshotStorageOptions());
         services.AddSingleton<ILibrarySnapshotStore, VersionedJsonLibrarySnapshotStore>();
+        services.AddSingleton<ILibraryStateStore, VersionedJsonLibraryStateStore>();
         services.AddSingleton<IEpubInspector, VersOneEpubInspector>();
         services.AddSingleton(new PdfWorkerOptions());
         services.AddSingleton<IPdfInspector, IsolatedPdfInspector>();
@@ -55,7 +56,6 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<IExecutionJournalStore, JsonLinesExecutionJournalStore>();
         services.AddSingleton<IExecutionHistoryStore, FileExecutionHistoryStore>();
         services.AddSingleton<ICleanupExecutionIdGenerator, SystemCleanupExecutionIdGenerator>();
-        services.AddSingleton<IRecoveryCurrentStateScanner, FullRecoveryCurrentStateScanner>();
         services.AddSingleton<IRecoverySourceArtifactReader, FileRecoverySourceArtifactReader>();
         services.AddSingleton<IRecoveryPlanStore, RecoveryPlanJsonStore>();
         services.AddSingleton<IRecoveryStateBackupService, FileRecoveryStateBackupService>();

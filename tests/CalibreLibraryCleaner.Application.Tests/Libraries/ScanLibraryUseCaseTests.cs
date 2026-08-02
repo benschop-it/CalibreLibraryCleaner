@@ -1,7 +1,6 @@
 using CalibreLibraryCleaner.Application.Abstractions;
 using CalibreLibraryCleaner.Application.Assessments;
 using CalibreLibraryCleaner.Application.Assessments.Pdf;
-using CalibreLibraryCleaner.Application.Executions;
 using CalibreLibraryCleaner.Application.Libraries;
 using CalibreLibraryCleaner.Domain.Assessments;
 using CalibreLibraryCleaner.Domain.Libraries;
@@ -83,16 +82,6 @@ public sealed class ScanLibraryUseCaseTests
         outcome.Snapshot.ConsolidationRecommendations.Should().BeEmpty();
         progress.Should().Contain(update => update.Phase == LibraryScanPhase.AssessingPdfFormats);
 
-        Fake.ClearRecordedCalls(inspector);
-        LibraryScanOutcome executionScan = await new FullExecutionLibraryScanner(useCase)
-            .ScanFreshAsync("C:/Library", null, CancellationToken.None);
-        executionScan.IsSuccess.Should().BeTrue();
-        executionScan.Snapshot!.PdfAssessments.Should().BeEmpty();
-        A.CallTo(() => inspector.InspectAsync(
-            A<PdfInspectionRequest>._,
-            A<Func<PdfDocumentHeaderFacts, CancellationToken, ValueTask<IReadOnlyList<int>>>>._,
-            A<IProgress<PdfInspectionProgress>?>._,
-            A<CancellationToken>._)).MustNotHaveHappened();
     }
 
     [Theory]

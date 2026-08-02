@@ -59,7 +59,9 @@ public static class ExactBinaryDuplicateDetector
             foreach (BookFormat format in book.Formats)
             {
                 cancellationToken.ThrowIfCancellationRequested();
-                if (format.Fingerprint is not null)
+                if (format.FileStatus == FormatFileStatus.Present
+                    && format.Fingerprint is not null
+                    && !string.IsNullOrWhiteSpace(format.ExpectedRelativePath))
                 {
                     yield return new(book.Id, format);
                 }

@@ -24,7 +24,7 @@ Same-format exact-binary groups may produce an automatic format-cleanup plan. Ge
 
 The application trusts unambiguous successful typed command results. Any failed, ambiguous, interrupted, unpersistable, or unprojectable mutation marks state uncertain and blocks all cleanup and recovery until explicit rescan. External Calibre changes are not detected automatically.
 
-The stored analysis snapshot is deleted after final confirmation and before the first format or record removal. Failure to invalidate it blocks mutation. Verification scans do not replace it because they are not guaranteed to include every normal analysis phase; the user runs a fresh normal scan to create the next persisted snapshot.
+The scan baseline remains available as the persisted library listing while a separate versioned state manifest and hash-chained delta journal track projected revisions. Explicit Rescan atomically replaces that generation. Cleanup and recovery never invalidate the baseline merely to force another scan.
 
 Cleanup-plan import/export is explicit and restricted to `.cleanup-plan.json` files outside the physically resolved selected library. Export uses an external temporary sibling and publication step; import is bounded and read-only. Neither operation creates a plan, temporary file, cache, lock, or backup inside the library.
 
@@ -39,14 +39,14 @@ Back up all formats, cover, exported metadata/OPF where available, original path
 3. Create and verify backup.
 4. Invoke supported Calibre operations.
 5. Capture output and exit status.
-6. Reload the library.
-7. Verify metadata, formats, paths, and hashes.
+6. Durably commit the typed state delta.
+7. Verify projected metadata, formats, and operation dependencies.
 8. Persist audit result.
 
-Milestone 7 implements this order with two complete pre-mutation scans, a
+Milestone 7 execution now uses one explicit scan generation, a
 write-ahead mutation marker, constructive format operations, an explicit
-destructive gate, record removals last, and a complete read-only scan after every
-Calibre command. A complete scan, lease check, immutable plan/graph check, tool
+destructive gate, record removals last, and a durable projected delta after every
+successful Calibre command. A revision check, lease check, immutable plan/graph check, tool
 identity check, backup recheck, and confirmation check also run immediately
 before every command. The local recovery guard is durable before the first
 mutation marker. Only exact-profile typed `calibredb` operations are allowed.
@@ -67,7 +67,7 @@ approved immutable plan. Eligibility strictly reloads and cross-checks the
 Milestone 7 cleanup plan, hash-chained journal, any journal-proven terminal
 summary, manifest, and every original backup item. Nonterminal source execution
 is recoverable without inventing a summary; an orphan summary without a
-terminal journal event is ignored. A complete fresh read-only scan is reconciled
+terminal journal event is ignored. The authoritative projected state is reconciled
 against verified pre-state and durable execution progress. Unknown journal
 state, identity mismatch, ambiguity, unsupported capability, or potential
 silent data loss blocks recovery.
@@ -84,22 +84,19 @@ the backup can authorize mutation.
 Recovery then executes in this order:
 
 1. Hold the shared cleanup/recovery lease and repeat source, tool, plan, and
-   current-state checks.
+   projected-revision checks.
 2. Create and verify the current-state backup.
 3. Apply constructive operations serially through typed Calibre commands.
-4. Rescan after every command and verify restored hashes and semantic identity.
+4. Commit a typed delta after every successful command and verify projected hashes and semantic identity.
 5. Verify all constructive and preservation expectations.
 6. Obtain a separate confirmation bound to the exact destructive graph.
 7. Apply approved destructive operations last, without automatic retry.
 8. Perform final semantic verification, including unrelated and preserved data.
-9. Finalize every scan-discovered record-ID mapping with the verified formats
+9. Finalize every command-returned record-ID mapping with the verified formats
    and identifiers, then persist the terminal journal, history, and resolution
    link.
 
-An unplanned format on an affected record, collateral affected-record metadata
-change, preservation mismatch, or unrelated-record change blocks semantic
-success. A process exit code of zero records transport success only; every
-mutation still requires a fresh full read-only scan and semantic verification.
+An unsupported projected transition blocks semantic success. External Calibre changes are intentionally ignored until explicit Rescan. A successful typed command is trusted and must be followed by one durable projected delta; ambiguity marks state uncertain and blocks mutation.
 
 Cancellation before mutation is immediate. During backup it prevents mutation.
 After mutation begins it is a safe-stop request honored only after the active

@@ -23,6 +23,7 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
     private readonly IClock? _clock;
     private readonly PersistedLibrarySnapshotsUseCase? _persistedSnapshots;
     private readonly ILibraryStateSession? _libraryStateSession;
+    private readonly SynchronizationContext? _uiContext;
     private readonly BulkObservableCollection<BookRowViewModel> _books = [];
     private readonly BulkObservableCollection<string> _persistedLibraryPaths = [];
     private readonly BulkObservableCollection<ExactDuplicateGroupRowViewModel> _exactDuplicateGroups = [];
@@ -80,6 +81,9 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
         _clock = clock;
         _persistedSnapshots = persistedSnapshots;
         _libraryStateSession = libraryStateSession;
+        _uiContext = SynchronizationContext.Current;
+        if (_libraryStateSession is not null)
+            _libraryStateSession.StateChanged += OnLibraryStateChanged;
         CleanupPlans = cleanupPlans;
         ExactBinaryCleanupPlans = exactBinaryCleanupPlans;
         CleanupExecutions = cleanupExecutions;
@@ -465,7 +469,29 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
     {
         _scanCancellation?.Cancel();
         _scanCancellation?.Dispose();
+        if (_libraryStateSession is not null)
+            _libraryStateSession.StateChanged -= OnLibraryStateChanged;
         Recoveries?.Dispose();
+    }
+
+    private void OnLibraryStateChanged(object? sender, LibraryStateChangedEventArgs eventArgs)
+    {
+        if (_uiContext is null || !PathsEqual(SelectedLibraryPath, eventArgs.State.Snapshot.Identity.LibraryRoot))
+            return;
+        _uiContext.Post(_ => _ = ApplyProjectedStateAsync(eventArgs.State), null);
+    }
+
+    private async Task ApplyProjectedStateAsync(LibraryState state)
+    {
+        if (!PathsEqual(SelectedLibraryPath, state.Snapshot.Identity.LibraryRoot)) return;
+        SnapshotPresentation presentation = await Task.Run(
+            () => CreatePresentation(state.Snapshot, CancellationToken.None)).ConfigureAwait(true);
+        LibraryState? latest = _libraryStateSession?.GetCurrent(state.Snapshot.Identity.LibraryRoot);
+        if (latest?.GenerationId != state.GenerationId || latest.Revision != state.Revision) return;
+        ApplySnapshot(state.Snapshot, presentation, state.IsAuthoritative);
+        StatusMessage = state.IsAuthoritative
+            ? $"Projected library state updated to revision {state.Revision.Value}. External Calibre changes require Rescan."
+            : $"Library state is uncertain after revision {state.Revision.Value}. Rescan is required before cleanup or recovery.";
     }
 
     private async Task SelectLibraryAsync()
@@ -511,7 +537,17 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
             progress.Complete();
             if (outcome.IsSuccess)
             {
-                _libraryStateSession?.StartFromScan(outcome.Snapshot!);
+                if (_libraryStateSession is not null)
+                {
+                    LibraryStateSessionOutcome stateStart = await _libraryStateSession
+                        .StartFromScanAsync(outcome.Snapshot!, _scanCancellation.Token)
+                        .ConfigureAwait(true);
+                    if (!stateStart.IsSuccess)
+                    {
+                        ErrorMessage = stateStart.Explanation ?? "The authoritative library state could not be persisted.";
+                        ErrorAction = "Retry the scan before running cleanup or recovery.";
+                    }
+                }
                 SnapshotPresentation presentation = await Task.Run(
                         () => CreatePresentation(outcome.Snapshot!, _scanCancellation.Token),
                         _scanCancellation.Token)
@@ -575,6 +611,31 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
         ClearError();
         try
         {
+            if (_libraryStateSession is not null)
+            {
+                LibraryStateSessionOutcome stateLoad = await _libraryStateSession
+                    .LoadAsync(SelectedLibraryPath, CancellationToken.None)
+                    .ConfigureAwait(true);
+                if (stateLoad.IsSuccess)
+                {
+                    LibraryState state = stateLoad.State!;
+                    SnapshotPresentation projectedPresentation = await Task.Run(
+                        () => CreatePresentation(state.Snapshot, CancellationToken.None)).ConfigureAwait(true);
+                    SelectedLibraryPath = state.Snapshot.Identity.LibraryRoot;
+                    ApplySnapshot(state.Snapshot, projectedPresentation, state.IsAuthoritative);
+                    StatusMessage = state.IsAuthoritative
+                        ? $"Loaded authoritative projected state revision {state.Revision.Value} from baseline {state.Snapshot.ScannedAt:u}. External Calibre changes require Rescan."
+                        : $"Loaded uncertain projected state revision {state.Revision.Value}. Rescan is required before cleanup or recovery.";
+                    return;
+                }
+                if (stateLoad.ErrorCode != "LIBRARY_STATE.NOT_FOUND")
+                {
+                    ErrorMessage = stateLoad.Explanation ?? "The persisted projected state could not be loaded.";
+                    ErrorAction = "Run an explicit scan to replace the projected state.";
+                    StatusMessage = "Projected state loading failed. Current results were not replaced.";
+                    return;
+                }
+            }
             PersistedLibrarySnapshotLoadResult load = await _persistedSnapshots
                 .LoadAsync(SelectedLibraryPath, CancellationToken.None)
                 .ConfigureAwait(true);

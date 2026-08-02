@@ -127,7 +127,7 @@ internal sealed class FileRecoveryStateBackupService(
             await WriteJsonCreateNewAsync(inventoryPath, books.Select(book => new InventoryRecordDto(
                 book.Id.Value, book.Title, book.AuthorSort,
                 book.Authors.Select(author => new InventoryAuthorDto(
-                    author.Id.Value, author.Name, author.SortName)).ToArray(),
+                    author.Id?.Value, author.Name, author.SortName)).ToArray(),
                 book.Identifiers.OrderBy(value => value.Type, StringComparer.Ordinal)
                     .ThenBy(value => value.Value, StringComparer.Ordinal)
                     .Select(value => new InventoryIdentifierDto(value.Type, value.Value)).ToArray(),
@@ -789,7 +789,7 @@ internal sealed class FileRecoveryStateBackupService(
         string RelativeDirectory,
         InventoryFormatDto[] Formats);
 
-    private sealed record InventoryAuthorDto(long AuthorId, string Name, string SortName);
+    private sealed record InventoryAuthorDto(long? AuthorId, string Name, string SortName);
 
     private sealed record InventoryIdentifierDto(string Type, string Value);
 

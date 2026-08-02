@@ -1,6 +1,8 @@
+using CalibreLibraryCleaner.Application.Abstractions;
 using CalibreLibraryCleaner.Application.Libraries;
 using CalibreLibraryCleaner.Domain.Duplicates;
 using CalibreLibraryCleaner.Domain.Libraries;
+using FakeItEasy;
 using FluentAssertions;
 using Xunit;
 
@@ -14,15 +16,15 @@ public sealed class LibraryStateSessionTests
     private static readonly FormatFileFingerprint Fingerprint = new(10, new(new string('a', 64)));
 
     [Fact]
-    public void SessionSerializesRevisionsForOneLibrary()
+    public async Task SessionSerializesRevisionsForOneLibrary()
     {
         LibraryStateSession session = new();
         LibrarySnapshot snapshot = Snapshot("C:\\library");
-        LibraryState baseline = session.StartFromScan(snapshot).State!;
+        LibraryState baseline = (await session.StartFromScanAsync(snapshot, CancellationToken.None)).State!;
 
-        LibraryStateSessionOutcome outcome = session.Apply(snapshot.Identity.LibraryRoot,
+        LibraryStateSessionOutcome outcome = await session.ApplyAsync(snapshot.Identity.LibraryRoot,
             new RemoveFormatLibraryStateDelta(baseline.GenerationId, new(0), "remove-format:2:EPUB",
-                ScannedAt.AddSeconds(1), new(2), "EPUB", Fingerprint));
+            ScannedAt.AddSeconds(1), new(2), "EPUB", Fingerprint), CancellationToken.None);
 
         outcome.IsSuccess.Should().BeTrue();
         outcome.State!.Revision.Should().Be(new LibraryStateRevision(1));
@@ -30,52 +32,90 @@ public sealed class LibraryStateSessionTests
     }
 
     [Fact]
-    public void RejectedDeltaDoesNotReplaceCurrentState()
+    public async Task RejectedDeltaMarksStateUncertain()
     {
         LibraryStateSession session = new();
         LibrarySnapshot snapshot = Snapshot("C:\\library");
-        LibraryState baseline = session.StartFromScan(snapshot).State!;
+        LibraryState baseline = (await session.StartFromScanAsync(snapshot, CancellationToken.None)).State!;
 
-        LibraryStateSessionOutcome outcome = session.Apply(snapshot.Identity.LibraryRoot,
+        LibraryStateSessionOutcome outcome = await session.ApplyAsync(snapshot.Identity.LibraryRoot,
             new RemoveFormatLibraryStateDelta(baseline.GenerationId, new(9), "remove-format:2:EPUB",
-                ScannedAt.AddSeconds(1), new(2), "EPUB", Fingerprint));
+            ScannedAt.AddSeconds(1), new(2), "EPUB", Fingerprint), CancellationToken.None);
 
         outcome.IsSuccess.Should().BeFalse();
         outcome.ErrorCode.Should().Be("LIBRARY_STATE.DELTA_REJECTED");
-        session.GetCurrent(snapshot.Identity.LibraryRoot).Should().BeSameAs(baseline);
+        session.GetCurrent(snapshot.Identity.LibraryRoot)!.Status.Should().Be(LibraryStateStatus.Uncertain);
     }
 
     [Fact]
-    public void UncertaintyPersistsAndBlocksLaterDelta()
+    public async Task UncertaintyPersistsAndBlocksLaterDelta()
     {
         LibraryStateSession session = new();
         LibrarySnapshot snapshot = Snapshot("C:\\library");
-        LibraryState baseline = session.StartFromScan(snapshot).State!;
-        session.MarkUncertain(snapshot.Identity.LibraryRoot, new(
-            "COMMAND_OUTCOME_AMBIGUOUS", "The command result was ambiguous.", ScannedAt.AddSeconds(1)));
+        LibraryState baseline = (await session.StartFromScanAsync(snapshot, CancellationToken.None)).State!;
+        await session.MarkUncertainAsync(snapshot.Identity.LibraryRoot, new(
+            "COMMAND_OUTCOME_AMBIGUOUS", "The command result was ambiguous.", ScannedAt.AddSeconds(1)),
+            CancellationToken.None);
 
-        LibraryStateSessionOutcome outcome = session.Apply(snapshot.Identity.LibraryRoot,
+        LibraryStateSessionOutcome outcome = await session.ApplyAsync(snapshot.Identity.LibraryRoot,
             new RemoveFormatLibraryStateDelta(baseline.GenerationId, new(0), "remove-format:2:EPUB",
-                ScannedAt.AddSeconds(2), new(2), "EPUB", Fingerprint));
+                ScannedAt.AddSeconds(2), new(2), "EPUB", Fingerprint), CancellationToken.None);
 
         outcome.IsSuccess.Should().BeFalse();
         session.GetCurrent(snapshot.Identity.LibraryRoot)!.Status.Should().Be(LibraryStateStatus.Uncertain);
     }
 
     [Fact]
-    public void DifferentLibrariesKeepIndependentRevisions()
+    public async Task DifferentLibrariesKeepIndependentRevisions()
     {
         LibraryStateSession session = new();
         LibrarySnapshot first = Snapshot("C:\\first");
         LibrarySnapshot second = Snapshot("C:\\second");
-        LibraryState firstState = session.StartFromScan(first).State!;
-        session.StartFromScan(second);
+        LibraryState firstState = (await session.StartFromScanAsync(first, CancellationToken.None)).State!;
+        await session.StartFromScanAsync(second, CancellationToken.None);
 
-        session.Apply(first.Identity.LibraryRoot, new RemoveFormatLibraryStateDelta(
-            firstState.GenerationId, new(0), "remove-format:2:EPUB", ScannedAt.AddSeconds(1), new(2), "EPUB", Fingerprint));
+        await session.ApplyAsync(first.Identity.LibraryRoot, new RemoveFormatLibraryStateDelta(
+            firstState.GenerationId, new(0), "remove-format:2:EPUB", ScannedAt.AddSeconds(1), new(2), "EPUB", Fingerprint),
+            CancellationToken.None);
 
         session.GetCurrent(first.Identity.LibraryRoot)!.Revision.Should().Be(new LibraryStateRevision(1));
         session.GetCurrent(second.Identity.LibraryRoot)!.Revision.Should().Be(new LibraryStateRevision(0));
+    }
+
+    [Fact]
+    public async Task SuccessfulDeltaPublishesCommittedRevision()
+    {
+        using LibraryStateSession session = new();
+        LibrarySnapshot snapshot = Snapshot("C:\\library");
+        LibraryState baseline = (await session.StartFromScanAsync(snapshot, CancellationToken.None)).State!;
+        List<LibraryState> published = [];
+        session.StateChanged += (_, eventArgs) => published.Add(eventArgs.State);
+
+        await session.ApplyAsync(snapshot.Identity.LibraryRoot,
+            new RemoveFormatLibraryStateDelta(baseline.GenerationId, baseline.Revision,
+                "remove-format:2:EPUB", ScannedAt.AddSeconds(1), new(2), "EPUB", Fingerprint),
+            CancellationToken.None);
+
+        published.Should().ContainSingle().Which.Revision.Should().Be(new LibraryStateRevision(1));
+    }
+
+    [Fact]
+    public async Task UncertaintyPersistenceFailureIsReportedAndRemainsBlockedInMemory()
+    {
+        ILibraryStateStore store = A.Fake<ILibraryStateStore>();
+        A.CallTo(() => store.WriteUncertaintyAsync(A<string>._, A<LibraryState>._,
+                A<CancellationToken>._))
+            .ThrowsAsync(new IOException("controlled persistence failure"));
+        using LibraryStateSession session = new(store);
+        LibrarySnapshot snapshot = Snapshot("C:\\library");
+        LibraryState baseline = (await session.StartFromScanAsync(snapshot, CancellationToken.None)).State!;
+
+        LibraryStateSessionOutcome outcome = await session.ApplyAsync(snapshot.Identity.LibraryRoot,
+            new RemoveFormatLibraryStateDelta(baseline.GenerationId, new(9), "stale-delta",
+                ScannedAt.AddSeconds(1), new(2), "EPUB", Fingerprint), CancellationToken.None);
+
+        outcome.ErrorCode.Should().Be("LIBRARY_STATE.UNCERTAINTY_PERSIST_FAILED");
+        session.GetCurrent(snapshot.Identity.LibraryRoot)!.Status.Should().Be(LibraryStateStatus.Uncertain);
     }
 
     private static LibrarySnapshot Snapshot(string root)

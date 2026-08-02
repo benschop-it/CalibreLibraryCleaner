@@ -40,27 +40,28 @@ public sealed record ReconcileCurrentRecoveryStateResult(
 }
 
 public sealed class ReconcileCurrentRecoveryStateUseCase(
-    IRecoveryCurrentStateScanner scanner,
+    ILibraryStateSession libraryState,
     ICurrentStateReconciler reconciler)
 {
-    public async Task<ReconcileCurrentRecoveryStateResult> ExecuteAsync(
+    public Task<ReconcileCurrentRecoveryStateResult> ExecuteAsync(
         ReconcileCurrentRecoveryStateRequest request,
         IProgress<LibraryScanProgress>? progress,
         CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(request);
         if (request.Source.CleanupPlan is null)
-            return new(null, null,
+            return Task.FromResult(new ReconcileCurrentRecoveryStateResult(null, null,
                 [new("RECOVERY.SOURCE_PLAN_MISSING", RecoveryIssueSeverity.Blocking,
-                    "Source execution", "The verified source cleanup plan is required.")]);
-        RecoveryCurrentStateScanResult scan = await scanner.ScanFreshAsync(
-            request.LibraryRoot, request.Source.CleanupPlan.Definition.InvolvedRecordIds,
-            progress, cancellationToken).ConfigureAwait(false);
+                    "Source execution", "The verified source cleanup plan is required.")]));
+        cancellationToken.ThrowIfCancellationRequested();
+        RecoveryCurrentStateScanResult scan = ProjectedRecoveryCurrentState.Create(
+            libraryState.GetCurrent(request.LibraryRoot),
+            request.Source.CleanupPlan.Definition.InvolvedRecordIds);
         if (!scan.IsSuccess)
-            return new(scan.CurrentState, null, scan.Issues);
+            return Task.FromResult(new ReconcileCurrentRecoveryStateResult(scan.CurrentState, null, scan.Issues));
         CurrentStateReconciliation reconciliation = reconciler.Reconcile(request.Source, scan.CurrentState!);
-        return new(scan.CurrentState, reconciliation,
-            scan.Issues.Concat(reconciliation.Issues).Distinct().ToArray());
+        return Task.FromResult(new ReconcileCurrentRecoveryStateResult(scan.CurrentState, reconciliation,
+            scan.Issues.Concat(reconciliation.Issues).Distinct().ToArray()));
     }
 }
 

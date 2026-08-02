@@ -61,6 +61,117 @@ public sealed record RemoveRecordLibraryStateDelta : LibraryStateDelta
     public CalibreBookId RecordId { get; }
 }
 
+public sealed record AddOrReplaceFormatLibraryStateDelta : LibraryStateDelta
+{
+    public AddOrReplaceFormatLibraryStateDelta(
+        LibraryStateGenerationId generationId,
+        LibraryStateRevision expectedRevision,
+        string operationId,
+        DateTimeOffset appliedAtUtc,
+        CalibreBookId recordId,
+        string format,
+        FormatFileFingerprint fingerprint,
+        FormatFileFingerprint? expectedPreviousFingerprint)
+        : base(generationId, expectedRevision, operationId, appliedAtUtc)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(format);
+        RecordId = recordId;
+        Format = format.Trim().ToUpperInvariant();
+        Fingerprint = fingerprint ?? throw new ArgumentNullException(nameof(fingerprint));
+        ExpectedPreviousFingerprint = expectedPreviousFingerprint;
+    }
+
+    public CalibreBookId RecordId { get; }
+    public string Format { get; }
+    public FormatFileFingerprint Fingerprint { get; }
+    public FormatFileFingerprint? ExpectedPreviousFingerprint { get; }
+}
+
+public sealed record RemoveRecordWithContentLibraryStateDelta : LibraryStateDelta
+{
+    public RemoveRecordWithContentLibraryStateDelta(
+        LibraryStateGenerationId generationId,
+        LibraryStateRevision expectedRevision,
+        string operationId,
+        DateTimeOffset appliedAtUtc,
+        CalibreBookId recordId)
+        : base(generationId, expectedRevision, operationId, appliedAtUtc) => RecordId = recordId;
+
+    public CalibreBookId RecordId { get; }
+}
+
+public sealed record CreateRecordLibraryStateDelta : LibraryStateDelta
+{
+    public CreateRecordLibraryStateDelta(
+        LibraryStateGenerationId generationId,
+        LibraryStateRevision expectedRevision,
+        string operationId,
+        DateTimeOffset appliedAtUtc,
+        CalibreBookId recordId,
+        string title,
+        IEnumerable<string> authors,
+        string authorSort)
+        : base(generationId, expectedRevision, operationId, appliedAtUtc)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(title);
+        ArgumentNullException.ThrowIfNull(authors);
+        ArgumentNullException.ThrowIfNull(authorSort);
+        string[] values = authors.Select(value =>
+        {
+            ArgumentException.ThrowIfNullOrWhiteSpace(value);
+            return value;
+        }).ToArray();
+        if (values.Length == 0) throw new ArgumentException("A projected record requires at least one author.", nameof(authors));
+        RecordId = recordId;
+        Title = title;
+        Authors = Array.AsReadOnly(values);
+        AuthorSort = authorSort;
+    }
+
+    public CalibreBookId RecordId { get; }
+    public string Title { get; }
+    public IReadOnlyList<string> Authors { get; }
+    public string AuthorSort { get; }
+}
+
+public enum LibraryMetadataField
+{
+    Title,
+    Authors,
+    AuthorSort,
+    Publisher,
+    PublicationDate,
+    Languages,
+    Identifiers,
+    Series,
+    SeriesIndex,
+}
+
+public sealed record SetMetadataLibraryStateDelta : LibraryStateDelta
+{
+    public SetMetadataLibraryStateDelta(
+        LibraryStateGenerationId generationId,
+        LibraryStateRevision expectedRevision,
+        string operationId,
+        DateTimeOffset appliedAtUtc,
+        CalibreBookId recordId,
+        LibraryMetadataField field,
+        IEnumerable<string> values)
+        : base(generationId, expectedRevision, operationId, appliedAtUtc)
+    {
+        ArgumentNullException.ThrowIfNull(values);
+        if (!Enum.IsDefined(field)) throw new ArgumentOutOfRangeException(nameof(field));
+        RecordId = recordId;
+        Field = field;
+        Values = Array.AsReadOnly(values.Select(value => value ?? throw new ArgumentException(
+            "Metadata values cannot contain null.", nameof(values))).ToArray());
+    }
+
+    public CalibreBookId RecordId { get; }
+    public LibraryMetadataField Field { get; }
+    public IReadOnlyList<string> Values { get; }
+}
+
 public static class LibraryStateDeltaPolicy
 {
     public static LibraryState Apply(LibraryState state, LibraryStateDelta delta)
@@ -80,6 +191,11 @@ public static class LibraryStateDeltaPolicy
         {
             RemoveFormatLibraryStateDelta removeFormat => RemoveFormat(state.Snapshot, removeFormat),
             RemoveRecordLibraryStateDelta removeRecord => RemoveRecord(state.Snapshot, removeRecord),
+            AddOrReplaceFormatLibraryStateDelta addOrReplace => AddOrReplaceFormat(state.Snapshot, addOrReplace),
+            RemoveRecordWithContentLibraryStateDelta removeWithContent => RemoveRecord(
+                state.Snapshot, removeWithContent.RecordId, requireEmpty: false),
+            CreateRecordLibraryStateDelta createRecord => CreateRecord(state.Snapshot, createRecord),
+            SetMetadataLibraryStateDelta setMetadata => SetMetadata(state.Snapshot, setMetadata),
             _ => throw new ArgumentOutOfRangeException(nameof(delta), delta.GetType().Name, "Unsupported library-state delta."),
         };
         return new(state.GenerationId, state.Revision.Next(), LibraryStateStatus.Authoritative,
@@ -115,29 +231,178 @@ public static class LibraryStateDeltaPolicy
 
     private static LibrarySnapshot RemoveRecord(
         LibrarySnapshot snapshot,
-        RemoveRecordLibraryStateDelta delta)
+        RemoveRecordLibraryStateDelta delta) => RemoveRecord(snapshot, delta.RecordId, requireEmpty: true);
+
+    private static LibrarySnapshot RemoveRecord(
+        LibrarySnapshot snapshot,
+        CalibreBookId recordId,
+        bool requireEmpty)
     {
-        CalibreBook removed = snapshot.Books.SingleOrDefault(value => value.Id == delta.RecordId)
+        CalibreBook removed = snapshot.Books.SingleOrDefault(value => value.Id == recordId)
             ?? throw new InvalidOperationException("The record removal target is not present in the authoritative state.");
-        if (removed.Formats.Count != 0)
+        if (requireEmpty && removed.Formats.Count != 0)
             throw new InvalidOperationException("A record can be projected as removed only after all formats are absent.");
 
-        CalibreBook[] books = snapshot.Books.Where(value => value.Id != delta.RecordId).ToArray();
+        CalibreBook[] books = snapshot.Books.Where(value => value.Id != recordId).ToArray();
         ExactBinaryDuplicateGroup[] binaryGroups = FilterBinaryGroups(snapshot.ExactBinaryDuplicateGroups,
-            member => member.BookId == delta.RecordId);
+            member => member.BookId == recordId);
         ExactMetadataDuplicateGroup[] metadataGroups = snapshot.ExactMetadataDuplicateGroups
-            .Select(group => group.Members.Contains(delta.RecordId)
-                ? CreateMetadataGroup(group, group.Members.Where(value => value != delta.RecordId))
+            .Select(group => group.Members.Contains(recordId)
+                ? CreateMetadataGroup(group, group.Members.Where(value => value != recordId))
                 : group)
             .Where(value => value is not null)
             .Cast<ExactMetadataDuplicateGroup>()
             .ToArray();
         return Project(snapshot, books,
-            snapshot.Findings.Where(value => value.BookId != delta.RecordId),
+            snapshot.Findings.Where(value => value.BookId != recordId),
             binaryGroups,
             metadataGroups,
-            snapshot.EpubAssessments.Where(value => value.CalibreBookId != delta.RecordId),
-            snapshot.PdfAssessments.Where(value => value.CalibreBookId != delta.RecordId));
+            snapshot.EpubAssessments.Where(value => value.CalibreBookId != recordId),
+            snapshot.PdfAssessments.Where(value => value.CalibreBookId != recordId));
+    }
+
+    private static LibrarySnapshot AddOrReplaceFormat(
+        LibrarySnapshot snapshot,
+        AddOrReplaceFormatLibraryStateDelta delta)
+    {
+        CalibreBook current = snapshot.Books.SingleOrDefault(value => value.Id == delta.RecordId)
+            ?? throw new InvalidOperationException("The format target record is not present in authoritative state.");
+        BookFormat? existing = current.Formats.SingleOrDefault(value =>
+            string.Equals(value.Format, delta.Format, StringComparison.Ordinal));
+        if (existing?.Fingerprint != delta.ExpectedPreviousFingerprint)
+            throw new InvalidOperationException("The target format does not match the expected previous fingerprint.");
+        BookFormat projectedFormat = new(delta.Format, string.Empty, string.Empty,
+            FormatFileStatus.ProjectedPresent, delta.Fingerprint);
+        BookFormat[] formats = current.Formats
+            .Where(value => !string.Equals(value.Format, delta.Format, StringComparison.Ordinal))
+            .Append(projectedFormat)
+            .OrderBy(value => value.Format, StringComparer.Ordinal)
+            .ToArray();
+        CalibreBook replacement = CopyBook(current, formats);
+        CalibreBook[] books = snapshot.Books.Select(value => value.Id == current.Id ? replacement : value).ToArray();
+        ExactBinaryDuplicateGroup[] binaryGroups = ExactBinaryDuplicateDetector.Detect(books).ToArray();
+        return Project(snapshot, books,
+            snapshot.Findings.Where(value => value.BookId != delta.RecordId
+                || !string.Equals(value.Format, delta.Format, StringComparison.Ordinal)),
+            binaryGroups,
+            snapshot.ExactMetadataDuplicateGroups,
+            snapshot.EpubAssessments.Where(value => value.CalibreBookId != delta.RecordId
+                || !string.Equals(value.Format, delta.Format, StringComparison.Ordinal)),
+            snapshot.PdfAssessments.Where(value => value.CalibreBookId != delta.RecordId
+                || !string.Equals(value.Format, delta.Format, StringComparison.Ordinal)));
+    }
+
+    private static LibrarySnapshot CreateRecord(
+        LibrarySnapshot snapshot,
+        CreateRecordLibraryStateDelta delta)
+    {
+        if (snapshot.Books.Any(value => value.Id == delta.RecordId))
+            throw new InvalidOperationException("The projected created record ID already exists.");
+        CalibreBook created = new(delta.RecordId, delta.Title, delta.AuthorSort,
+            delta.Authors.Select(value => new BookAuthor(null, value, value)), [], [], string.Empty);
+        CalibreBook[] books = snapshot.Books.Append(created).OrderBy(value => value.Id.Value).ToArray();
+        ExactMetadataDuplicateGroup[] metadataGroups = ExactMetadataDuplicateDetector.Detect(books).ToArray();
+        return Project(snapshot, books, snapshot.Findings, snapshot.ExactBinaryDuplicateGroups,
+            metadataGroups, snapshot.EpubAssessments, snapshot.PdfAssessments);
+    }
+
+    private static LibrarySnapshot SetMetadata(
+        LibrarySnapshot snapshot,
+        SetMetadataLibraryStateDelta delta)
+    {
+        CalibreBook current = snapshot.Books.SingleOrDefault(value => value.Id == delta.RecordId)
+            ?? throw new InvalidOperationException("The metadata target record is not present in authoritative state.");
+        CalibreBook replacement = UpdateMetadata(current, delta);
+        CalibreBook[] books = snapshot.Books.Select(value => value.Id == current.Id ? replacement : value).ToArray();
+        ExactMetadataDuplicateGroup[] metadataGroups = ExactMetadataDuplicateDetector.Detect(books).ToArray();
+        return Project(snapshot, books, snapshot.Findings, snapshot.ExactBinaryDuplicateGroups,
+            metadataGroups, snapshot.EpubAssessments, snapshot.PdfAssessments);
+    }
+
+    private static CalibreBook UpdateMetadata(CalibreBook source, SetMetadataLibraryStateDelta delta)
+    {
+        string title = source.Title;
+        string authorSort = source.AuthorSort;
+        IReadOnlyList<BookAuthor> authors = source.Authors;
+        IReadOnlyList<BookIdentifier> identifiers = source.Identifiers;
+        BookPublicationMetadata publication = source.PublicationMetadata;
+        switch (delta.Field)
+        {
+            case LibraryMetadataField.Title:
+                title = Single(delta);
+                break;
+            case LibraryMetadataField.Authors:
+                if (delta.Values.Count == 0) throw new InvalidOperationException("Authors cannot be empty.");
+                authors = delta.Values.Select(value => new BookAuthor(null, value, value)).ToArray();
+                break;
+            case LibraryMetadataField.AuthorSort:
+                authorSort = Single(delta);
+                break;
+            case LibraryMetadataField.Identifiers:
+                identifiers = delta.Values.Select(ParseIdentifier).ToArray();
+                break;
+            default:
+                publication = UpdatePublication(publication, delta);
+                break;
+        }
+        return new(source.Id, title, authorSort, authors, identifiers, source.Formats,
+            source.RelativeDirectory, publication);
+    }
+
+    private static BookPublicationMetadata UpdatePublication(
+        BookPublicationMetadata source,
+        SetMetadataLibraryStateDelta delta)
+    {
+        string? publisher = source.Publisher;
+        DateTimeOffset? publicationDate = source.PublicationDate;
+        string? series = source.Series;
+        decimal? seriesIndex = source.SeriesIndex;
+        IReadOnlyList<string> languages = source.Languages;
+        switch (delta.Field)
+        {
+            case LibraryMetadataField.Publisher:
+                publisher = OptionalSingle(delta);
+                break;
+            case LibraryMetadataField.PublicationDate:
+                string? date = OptionalSingle(delta);
+                publicationDate = date is null ? null : DateTimeOffset.Parse(date,
+                    System.Globalization.CultureInfo.InvariantCulture,
+                    System.Globalization.DateTimeStyles.RoundtripKind);
+                break;
+            case LibraryMetadataField.Languages:
+                languages = delta.Values;
+                break;
+            case LibraryMetadataField.Series:
+                series = OptionalSingle(delta);
+                break;
+            case LibraryMetadataField.SeriesIndex:
+                string? index = OptionalSingle(delta);
+                seriesIndex = index is null ? null : decimal.Parse(index,
+                    System.Globalization.CultureInfo.InvariantCulture);
+                break;
+            default:
+                throw new InvalidOperationException("The metadata field is not a publication field.");
+        }
+        return new(publisher, publicationDate, series, seriesIndex, languages, source.HasCover);
+    }
+
+    private static string Single(SetMetadataLibraryStateDelta delta) => delta.Values.Count == 1
+        && !string.IsNullOrWhiteSpace(delta.Values[0])
+        ? delta.Values[0]
+        : throw new InvalidOperationException("The metadata field requires one nonblank value.");
+
+    private static string? OptionalSingle(SetMetadataLibraryStateDelta delta)
+    {
+        if (delta.Values.Count != 1) throw new InvalidOperationException("The metadata field requires one value.");
+        return string.IsNullOrWhiteSpace(delta.Values[0]) ? null : delta.Values[0];
+    }
+
+    private static BookIdentifier ParseIdentifier(string value)
+    {
+        int separator = value.IndexOf(':');
+        if (separator <= 0 || separator == value.Length - 1)
+            throw new InvalidOperationException("A projected identifier must use type:value syntax.");
+        return new(value[..separator], value[(separator + 1)..]);
     }
 
     private static CalibreBook CopyBook(CalibreBook source, IEnumerable<BookFormat> formats) => new(

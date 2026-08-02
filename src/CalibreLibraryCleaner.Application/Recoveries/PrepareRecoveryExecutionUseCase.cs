@@ -8,7 +8,7 @@ namespace CalibreLibraryCleaner.Application.Recoveries;
 
 public sealed class PrepareRecoveryExecutionUseCase(
     IRecoverySourceArtifactReader sourceReader,
-    IRecoveryCurrentStateScanner currentStateScanner,
+    ILibraryStateSession libraryState,
     ICurrentStateReconciler reconciler,
     IRecoveryStateBackupService backupService,
     IRecoveryHistoryStore history,
@@ -48,9 +48,8 @@ public sealed class PrepareRecoveryExecutionUseCase(
             issues.Add(Block("RECOVERY.CAPABILITY_PROFILE_CHANGED",
                 "Calibre capability", "The exact Calibre tool or recovery capability profile changed."));
 
-        RecoveryCurrentStateScanResult scan = await currentStateScanner.ScanFreshAsync(
-            request.LibraryRoot, AffectedRecordIds(request.Plan),
-            progress, cancellationToken).ConfigureAwait(false);
+        RecoveryCurrentStateScanResult scan = ProjectedRecoveryCurrentState.Create(
+            libraryState.GetCurrent(request.LibraryRoot), AffectedRecordIds(request.Plan));
         issues.AddRange(scan.Issues);
         if (scan.CurrentState is null)
             return new(request.Plan, source, null, null, null, discovery.Tool,

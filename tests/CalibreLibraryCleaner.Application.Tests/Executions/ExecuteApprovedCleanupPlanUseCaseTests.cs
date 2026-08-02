@@ -15,14 +15,14 @@ public sealed class ExecuteApprovedCleanupPlanUseCaseTests
     [Fact]
     public async Task VerifiedBackupConstructiveVerificationAndDestructiveGatePrecedeRecordRemoval()
     {
-        Harness harness = Harness.Success();
+        Harness harness = await Harness.SuccessAsync();
 
         CleanupExecutionResult result = await harness.ExecuteAsync();
 
         result.IsCompleted.Should().BeTrue();
-        harness.Trace.Should().ContainInOrder("lease", "scan", "backup-inputs", "export-1", "export-2",
-            "backup-sealed", "scan", "recovery-guard", "mutation-marker", "add", "scan",
-            "destructive-confirmation", "remove", "scan", "scan");
+        harness.Trace.Should().ContainInOrder("lease", "backup-inputs", "export-1", "export-2",
+            "backup-sealed", "recovery-guard", "mutation-marker", "add",
+            "destructive-confirmation", "remove");
         harness.Trace.IndexOf("remove").Should().BeGreaterThan(harness.Trace.IndexOf("destructive-confirmation"));
         A.CallTo(() => harness.Backup.VerifyAvailableAsync(A<ExecutionWorkspace>._, A<VerifiedBackupManifest>._, A<CancellationToken>._))
             .MustHaveHappened(3, Times.OrMore);
@@ -34,7 +34,7 @@ public sealed class ExecuteApprovedCleanupPlanUseCaseTests
     [Fact]
     public async Task BackupFailurePreventsEveryMutatingCommand()
     {
-        Harness harness = Harness.Success();
+        Harness harness = await Harness.SuccessAsync();
         A.CallTo(() => harness.Backup.VerifyAndSealAsync(A<SealBackupRequest>._, A<CancellationToken>._))
             .Returns(Task.FromResult(new ExecutionBackupResult(null, harness.RawPaths,
                 [new("EXECUTION.BACKUP_HASH_MISMATCH", ExecutionIssueSeverity.BlockingError, "Backup mismatch.")])));
@@ -48,37 +48,32 @@ public sealed class ExecuteApprovedCleanupPlanUseCaseTests
     }
 
     [Fact]
-    public async Task ChangedSecondScanStopsBeforeMutationEvenAfterBackupWasVerified()
+    public async Task ExternalChangesAreNotReadDuringExecution()
     {
-        Harness harness = Harness.Success();
-        harness.SetScans(harness.Preflight, ExecutionTestData.ChangedSource(harness.Preflight));
+        Harness harness = await Harness.SuccessAsync();
 
         CleanupExecutionResult result = await harness.ExecuteAsync();
 
-        result.State.Should().Be(CleanupExecutionState.ExecutionFailedBeforeMutation);
-        result.MutationStarted.Should().BeFalse();
-        result.Issues.Should().Contain(value => value.Code == "EXECUTION.PLAN_STALE" || value.Code == "EXECUTION.FINAL_GATE_CHANGED");
-        A.CallTo(() => harness.Commands.AddOrReplaceFormatAsync(A<AddOrReplaceCalibreFormatRequest>._, A<CancellationToken>._)).MustNotHaveHappened();
+        result.IsCompleted.Should().BeTrue();
+        harness.StateSession.GetCurrent(harness.Preflight.Identity.LibraryRoot)!.Revision.Value.Should().Be(2);
     }
 
     [Fact]
-    public async Task ConstructiveVerificationFailureBlocksDestructionAndRequiresRecovery()
+    public async Task ProjectedConstructiveVerificationAllowsDestructionWithoutScan()
     {
-        Harness harness = Harness.Success();
-        harness.SetScans(harness.Preflight, harness.Preflight, harness.Preflight, harness.Preflight);
+        Harness harness = await Harness.SuccessAsync();
 
         CleanupExecutionResult result = await harness.ExecuteAsync();
 
-        result.Disposition.Should().Be(CleanupExecutionDisposition.RecoveryRequired);
-        result.MutationStarted.Should().BeTrue();
-        result.Issues.Should().Contain(value => value.Code == "EXECUTION.RETAINED_FORMAT_MISSING");
-        A.CallTo(() => harness.Commands.RemoveRecordAsync(A<RemoveCalibreRecordRequest>._, A<CancellationToken>._)).MustNotHaveHappened();
+        result.IsCompleted.Should().BeTrue();
+        A.CallTo(() => harness.Commands.RemoveRecordAsync(A<RemoveCalibreRecordRequest>._,
+            A<CancellationToken>._)).MustHaveHappenedOnceExactly();
     }
 
     [Fact]
     public async Task CancellationDuringConstructiveCommandWaitsForVerificationAndStopsBeforeRemoval()
     {
-        Harness harness = Harness.Success();
+        Harness harness = await Harness.SuccessAsync();
         CancellationTokenSource cancellation = new();
         A.CallTo(() => harness.Commands.AddOrReplaceFormatAsync(A<AddOrReplaceCalibreFormatRequest>._, A<CancellationToken>._))
             .Invokes(() => cancellation.Cancel())
@@ -87,7 +82,7 @@ public sealed class ExecuteApprovedCleanupPlanUseCaseTests
         CleanupExecutionResult result = await harness.ExecuteAsync(cancellation.Token);
 
         result.Disposition.Should().Be(CleanupExecutionDisposition.RecoveryRequired);
-        harness.Trace.Should().Contain("scan");
+        harness.Trace.Should().NotContain("scan");
         A.CallTo(() => harness.Commands.RemoveRecordAsync(A<RemoveCalibreRecordRequest>._, A<CancellationToken>._)).MustNotHaveHappened();
         A.CallTo(() => harness.Journal.AppendAsync(A<ExecutionJournalEvent>.That.Matches(value =>
             value.Kind == "CancellationRequested"), A<CancellationToken>._)).MustHaveHappened();
@@ -96,7 +91,7 @@ public sealed class ExecuteApprovedCleanupPlanUseCaseTests
     [Fact]
     public async Task DestructiveCommandFailureStopsLaterWorkAndPersistsRecoveryRequired()
     {
-        Harness harness = Harness.Success();
+        Harness harness = await Harness.SuccessAsync();
         A.CallTo(() => harness.Commands.RemoveRecordAsync(A<RemoveCalibreRecordRequest>._, A<CancellationToken>._))
             .Returns(Task.FromResult(new CalibreCommandResult("remove", true, 1, [], string.Empty,
                 "controlled failure", TimeSpan.FromMilliseconds(1), "CALIBRE_PROCESS_NONZERO_EXIT")));
@@ -116,7 +111,7 @@ public sealed class ExecuteApprovedCleanupPlanUseCaseTests
             new(1), CleanupPlanState.Valid, approved.ContentDigest, approved.InputIdentity,
             approved.CreatedAtUtc, approved.LastValidatedAtUtc, approved.Definition, approved.Validation,
             null, null, approved.LifecycleHistory.Take(1));
-        Harness harness = Harness.Success(valid, preflight);
+        Harness harness = await Harness.SuccessAsync(valid, preflight);
 
         CleanupExecutionResult result = await harness.ExecuteAsync();
 
@@ -127,7 +122,7 @@ public sealed class ExecuteApprovedCleanupPlanUseCaseTests
     [Fact]
     public async Task LeaseContentionFailsBeforeWorkspaceBackupScanOrMutation()
     {
-        Harness harness = Harness.Success();
+        Harness harness = await Harness.SuccessAsync();
         A.CallTo(() => harness.Lease.TryAcquireAsync(A<LibraryMutationLeaseRequest>._, A<CancellationToken>._))
             .Returns(Task.FromResult(new LibraryMutationLeaseAcquisition(null,
                 [new("EXECUTION.LEASE_HELD", ExecutionIssueSeverity.BlockingError, "Held.")])));
@@ -136,8 +131,6 @@ public sealed class ExecuteApprovedCleanupPlanUseCaseTests
 
         result.State.Should().Be(CleanupExecutionState.PreflightFailed);
         result.MutationStarted.Should().BeFalse();
-        A.CallTo(() => harness.Scanner.ScanFreshAsync(A<string>._, A<IProgress<LibraryScanProgress>?>._,
-            A<CancellationToken>._)).MustNotHaveHappened();
         A.CallTo(() => harness.Backup.CreateWorkspaceAsync(A<CleanupExecutionId>._, A<string>._,
             A<CancellationToken>._)).MustNotHaveHappened();
     }
@@ -145,7 +138,7 @@ public sealed class ExecuteApprovedCleanupPlanUseCaseTests
     [Fact]
     public async Task PriorRecoveryRequiredBlocksBeforeBackupAndMutation()
     {
-        Harness harness = Harness.Success();
+        Harness harness = await Harness.SuccessAsync();
         A.CallTo(() => harness.History.HasRecoveryRequiredAsync(
             A<string>._, A<string>._, A<CancellationToken>._)).Returns(true);
 
@@ -160,7 +153,7 @@ public sealed class ExecuteApprovedCleanupPlanUseCaseTests
     [Fact]
     public async Task ChangedToolAtPerCommandGateStopsBeforeMutation()
     {
-        Harness harness = Harness.Success();
+        Harness harness = await Harness.SuccessAsync();
         CalibreToolDescriptor changed = new(harness.Tool.CanonicalExecutablePath,
             new(harness.Tool.CanonicalExecutablePath, "9.11.0", new(new string('f', 64)),
                 "calibredb/windows/9.11.0"), harness.Tool.Capabilities);
@@ -179,19 +172,18 @@ public sealed class ExecuteApprovedCleanupPlanUseCaseTests
     }
 
     [Fact]
-    public async Task FreshStateChangeAtPerCommandGateStopsBeforeMutation()
+    public async Task UncertainProjectedStateStopsBeforeMutation()
     {
-        Harness harness = Harness.Success();
-        harness.SetScans(
-            harness.Preflight,
-            harness.Preflight,
-            ExecutionTestData.ChangedSource(harness.Preflight));
+        Harness harness = await Harness.SuccessAsync();
+        await harness.StateSession.MarkUncertainAsync(harness.Preflight.Identity.LibraryRoot,
+            new("CONTROLLED_UNCERTAINTY", "Controlled test uncertainty.", ExecutionTestData.Now),
+            CancellationToken.None);
 
         CleanupExecutionResult result = await harness.ExecuteAsync();
 
-        result.State.Should().Be(CleanupExecutionState.ExecutionFailedBeforeMutation);
+        result.State.Should().Be(CleanupExecutionState.PreflightFailed);
         result.MutationStarted.Should().BeFalse();
-        result.Issues.Should().Contain(value => value.Code == "EXECUTION.SOURCE_STATE_CHANGED");
+        result.Issues.Should().Contain(value => value.Code == "EXECUTION.STATE_UNAVAILABLE");
         A.CallTo(() => harness.Commands.AddOrReplaceFormatAsync(
             A<AddOrReplaceCalibreFormatRequest>._, A<CancellationToken>._)).MustNotHaveHappened();
     }
@@ -199,7 +191,7 @@ public sealed class ExecuteApprovedCleanupPlanUseCaseTests
     [Fact]
     public async Task JournalFailureAfterMutationProducesDurableRecoveryClassificationWithoutLaterRemoval()
     {
-        Harness harness = Harness.Success();
+        Harness harness = await Harness.SuccessAsync();
         A.CallTo(() => harness.Journal.AppendAsync(
                 A<ExecutionJournalEvent>.That.Matches(value => value.Kind == "OperationVerified"),
                 A<CancellationToken>._))
@@ -219,18 +211,16 @@ public sealed class ExecuteApprovedCleanupPlanUseCaseTests
     {
         private readonly ExecuteApprovedCleanupPlanUseCase _useCase;
         private readonly CleanupExecutionConfirmation _confirmation;
-        private Queue<LibrarySnapshot> _scans;
 
         private Harness(
             CleanupPlan plan,
             LibrarySnapshot preflight,
-            LibrarySnapshot constructive,
-            LibrarySnapshot final)
+            LibraryStateSession stateSession)
         {
             Plan = plan;
             Preflight = preflight;
             Trace = [];
-            Scanner = A.Fake<IExecutionLibraryScanner>();
+            StateSession = stateSession;
             Tools = A.Fake<ICalibreToolDiscovery>();
             Commands = A.Fake<ICalibreCommandGateway>();
             Lease = A.Fake<ILibraryMutationLease>();
@@ -256,19 +246,6 @@ public sealed class ExecuteApprovedCleanupPlanUseCaseTests
             Manifest = VerifiedBackupManifest.Create(executionId, plan, ExecutionTestData.Now, manifestEntries);
             ExecutionBackupInputs inputs = new(Workspace,
                 plan.Definition.InvolvedRecordIds.ToDictionary(value => value, value => $"C:\\backup\\exports\\{value.Value}"), RawPaths, []);
-            _scans = new([
-                preflight,
-                preflight,
-                preflight,
-                constructive,
-                constructive,
-                constructive,
-                final,
-                final,
-            ]);
-            A.CallTo(() => Scanner.ScanFreshAsync(A<string>._, A<IProgress<LibraryScanProgress>?>._, A<CancellationToken>._))
-                .Invokes(() => Trace.Add("scan"))
-                .ReturnsLazily(() => Task.FromResult(LibraryScanOutcome.Success(_scans.Dequeue())));
             A.CallTo(() => Tools.DiscoverAndProbeAsync(A<string>._, A<CancellationToken>._))
                 .Returns(Task.FromResult(new CalibreToolDiscoveryResult(Tool, [])));
             A.CallTo(() => Lease.TryAcquireAsync(A<LibraryMutationLeaseRequest>._, A<CancellationToken>._))
@@ -329,13 +306,13 @@ public sealed class ExecuteApprovedCleanupPlanUseCaseTests
             _confirmation = new(plan.Id, plan.ArtifactRevision, plan.ContentDigest, plan.InputIdentity.LibraryUuid,
                 preflight.Identity.LibraryRoot, operationGraphDigest,
                 Tool.Identity, "C:\\backup", ExecutionTestData.Now, true, true);
-            _useCase = new(Scanner, Tools, Commands, Lease, Backup, Journals, History, ids, destructive, clock);
+            _useCase = new(StateSession, Tools, Commands, Lease, Backup, Journals, History, ids, destructive, clock);
         }
 
         public CleanupPlan Plan { get; }
         public LibrarySnapshot Preflight { get; }
         public List<string> Trace { get; }
-        public IExecutionLibraryScanner Scanner { get; }
+        public LibraryStateSession StateSession { get; }
         public ICalibreToolDiscovery Tools { get; }
         public ICalibreCommandGateway Commands { get; }
         public ILibraryMutationLease Lease { get; }
@@ -348,13 +325,14 @@ public sealed class ExecuteApprovedCleanupPlanUseCaseTests
         public IReadOnlyDictionary<BackupFormatKey, string> RawPaths { get; }
         public VerifiedBackupManifest Manifest { get; }
 
-        public static Harness Success(CleanupPlan? plan = null, LibrarySnapshot? preflight = null)
+        public static async Task<Harness> SuccessAsync(CleanupPlan? plan = null, LibrarySnapshot? preflight = null)
         {
-            (CleanupPlan defaultPlan, LibrarySnapshot defaultPreflight, LibrarySnapshot constructive, LibrarySnapshot final) = ExecutionTestData.Approved();
-            return new(plan ?? defaultPlan, preflight ?? defaultPreflight, constructive, final);
+            (CleanupPlan defaultPlan, LibrarySnapshot defaultPreflight, _, _) = ExecutionTestData.Approved();
+            LibrarySnapshot baseline = preflight ?? defaultPreflight;
+            LibraryStateSession stateSession = new();
+            await stateSession.StartFromScanAsync(baseline, CancellationToken.None);
+            return new(plan ?? defaultPlan, baseline, stateSession);
         }
-
-        public void SetScans(params LibrarySnapshot[] scans) => _scans = new(scans);
 
         public Task<CleanupExecutionResult> ExecuteAsync(CancellationToken cancellationToken = default) =>
             _useCase.ExecuteAsync(new(Plan, Preflight.Identity.LibraryRoot, "C:\\backup", _confirmation, "1.0.0"),

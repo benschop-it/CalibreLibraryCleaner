@@ -57,7 +57,7 @@ public static class CleanupPlanStalenessPolicy
         BookPublicationMetadata publication = current.PublicationMetadata;
         if (!string.Equals(expected.Title, current.Title, StringComparison.Ordinal)
             || !string.Equals(expected.AuthorSort, current.AuthorSort, StringComparison.Ordinal)
-            || !expected.Authors.SequenceEqual(current.Authors.Select(value => new ExpectedAuthorState(value.Id, value.Name, value.SortName)))
+            || !AuthorsMatch(expected.Authors, current.Authors)
             || !expected.Identifiers.SequenceEqual(current.Identifiers.OrderBy(value => value.Type, StringComparer.Ordinal)
                 .ThenBy(value => value.Value, StringComparer.Ordinal).Select(value => new ExpectedIdentifierState(value.Type, value.Value)))
             || !string.Equals(expected.Publisher, publication.Publisher, StringComparison.Ordinal)
@@ -89,6 +89,12 @@ public static class CleanupPlanStalenessPolicy
         return expected.Formats.Count == currentFormats.Length
             && expected.Formats.Zip(currentFormats).All(pair => FormatMatches(pair.First, pair.Second));
     }
+
+    private static bool AuthorsMatch(
+        IReadOnlyList<ExpectedAuthorState> expected,
+        IReadOnlyList<BookAuthor> current) => current.All(value => value.Id is not null)
+        && expected.SequenceEqual(current.Select(value => new ExpectedAuthorState(
+            value.Id!.Value, value.Name, value.SortName)));
 
     private static bool FormatMatches(ExpectedFormatState left, ExpectedFormatState right) =>
         left.RecordId == right.RecordId

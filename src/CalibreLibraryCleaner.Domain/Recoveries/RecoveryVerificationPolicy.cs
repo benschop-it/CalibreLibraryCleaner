@@ -66,7 +66,8 @@ public static class RecoveryVerificationPolicy
             foreach (ExpectedFormatState expectedFormat in record.OriginalState.Formats)
             {
                 BookFormat? format = actual.Formats.SingleOrDefault(value => value.Format == expectedFormat.Format);
-                if (format is null || format.FileStatus != FormatFileStatus.Present
+                if (format is null
+                    || format.FileStatus is not (FormatFileStatus.Present or FormatFileStatus.ProjectedPresent)
                     || format.Fingerprint != expectedFormat.Fingerprint)
                     Block(issues, "RECOVERY.FORMAT_MISMATCH", "A restored format is missing or does not match the original backup hash.",
                         record.LogicalRecordId, actual.Id, expectedFormat.Format);

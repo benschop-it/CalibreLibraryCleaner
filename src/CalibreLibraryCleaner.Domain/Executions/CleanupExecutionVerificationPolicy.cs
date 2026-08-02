@@ -35,7 +35,7 @@ public static class ExecutionSnapshotDigestPolicy
         Add(canonical, book.Id.Value.ToString(CultureInfo.InvariantCulture));
         Add(canonical, book.Title);
         Add(canonical, book.AuthorSort);
-        foreach (BookAuthor author in book.Authors) { Add(canonical, author.Id.Value.ToString(CultureInfo.InvariantCulture)); Add(canonical, author.Name); Add(canonical, author.SortName); }
+        foreach (BookAuthor author in book.Authors) { Add(canonical, author.Id?.Value.ToString(CultureInfo.InvariantCulture) ?? "projected"); Add(canonical, author.Name); Add(canonical, author.SortName); }
         foreach (BookIdentifier identifier in book.Identifiers.OrderBy(value => value.Type, StringComparer.Ordinal).ThenBy(value => value.Value, StringComparer.Ordinal)) { Add(canonical, identifier.Type); Add(canonical, identifier.Value); }
         BookPublicationMetadata publication = book.PublicationMetadata;
         Add(canonical, publication.Publisher ?? string.Empty);
@@ -147,7 +147,8 @@ public static class CleanupExecutionVerificationPolicy
             FormatFileFingerprint expectedFingerprint = shouldHaveSelected
                 ? retention.SourceState.Fingerprint
                 : original[retention.Format].Fingerprint;
-            if (actual.FileStatus != FormatFileStatus.Present || actual.Fingerprint != expectedFingerprint)
+            if (actual.FileStatus is not (FormatFileStatus.Present or FormatFileStatus.ProjectedPresent)
+                || actual.Fingerprint != expectedFingerprint)
                 Block(issues, "EXECUTION.RETAINED_FORMAT_MISMATCH", "A target format does not match the selected source bytes.", target.Id, retention.Format);
             if (retention.Mode == FormatRetentionMode.RetainInTarget
                 && (!original.TryGetValue(retention.Format, out ExpectedFormatState? preserved) || !FormatMatches(preserved, actual)))
@@ -169,7 +170,7 @@ public static class CleanupExecutionVerificationPolicy
         return expected.RecordId == current.Id
             && string.Equals(expected.Title, current.Title, StringComparison.Ordinal)
             && string.Equals(expected.AuthorSort, current.AuthorSort, StringComparison.Ordinal)
-            && expected.Authors.SequenceEqual(current.Authors.Select(value => new ExpectedAuthorState(value.Id, value.Name, value.SortName)))
+            && AuthorsMatch(expected.Authors, current.Authors)
             && expected.Identifiers.SequenceEqual(current.Identifiers.OrderBy(value => value.Type, StringComparer.Ordinal)
                 .ThenBy(value => value.Value, StringComparer.Ordinal).Select(value => new ExpectedIdentifierState(value.Type, value.Value)))
             && string.Equals(expected.Publisher, publication.Publisher, StringComparison.Ordinal)
@@ -180,6 +181,12 @@ public static class CleanupExecutionVerificationPolicy
             && expected.HasCover == publication.HasCover
             && string.Equals(expected.RelativeDirectory, current.RelativeDirectory.Replace('\\', '/'), StringComparison.Ordinal);
     }
+
+    private static bool AuthorsMatch(
+        IReadOnlyList<ExpectedAuthorState> expected,
+        IReadOnlyList<BookAuthor> current) => current.All(value => value.Id is not null)
+        && expected.SequenceEqual(current.Select(value => new ExpectedAuthorState(
+            value.Id!.Value, value.Name, value.SortName)));
 
     private static bool FormatMatches(ExpectedFormatState expected, BookFormat current) =>
         expected.Format == current.Format

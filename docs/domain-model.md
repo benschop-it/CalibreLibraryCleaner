@@ -31,6 +31,10 @@ public sealed record AssessmentFinding(
 
 Additional types: `BookFormat`, `DuplicateGroup`, `NormalizedBookIdentity`, `FormatAssessment`, `BookAssessment`, `ConsolidationRecommendation`, `CleanupPlan`, and expected pre-operation file states.
 
+ADR 0012 adds `LibraryState`, generation and revision values, authoritative/uncertain status, and a closed state-delta hierarchy. One explicit scan creates revision zero. Successful typed commands advance the revision through removal, add/replace, record-creation, or metadata deltas without rereading the library. Uncertain state blocks all mutation until explicit Rescan creates a new generation.
+
+`BookFormat` distinguishes scan-observed `Present` state from `ProjectedPresent`. A projected format carries the command's verified fingerprint but no fabricated managed path, stored filename, or observation. `BookAuthor.Id` may be absent only for projected authors. Projected physical facts are ineligible for new plans requiring observed paths and file state.
+
 Milestone 4 adds immutable assessment values. Milestone 9 generalizes `FormatAssessment` into a shared identity/result core with explicit score components while preserving a typed `EpubAssessment` wrapper and its established recommendation semantics. Each assessment is associated with a Calibre book ID, canonical format, presentation-safe expected relative path, and observed file fingerprint. Completed assessments have a 0-through-100 score derived only from ordered findings and may declare an explicit score ceiling; `UncappedScore` remains findings-derived while `Score` is the lesser of that value and the ceiling. Unassessed results have no score or ceiling, no disqualifying finding, and only zero-point evidence because comparable facts were unavailable. Disqualified assessments have no numeric score or ceiling and at least one disqualifying finding. EPUB policy reserves disqualification for definitive file open/read failures; other formats retain their documented policies. `EpubFeatureSummary` records `Full`, `FallbackReadable`, or `Incomplete` coverage, available assessment facets, and bounded fallback candidate/renderability evidence. Snapshots keep EPUB and PDF assessments in separate deterministic collections and reject duplicate associations.
 
 `PdfAssessment` adds `PdfFeatureSummary`, classification/confidence, open/encryption status, bounded metadata values, text/image/page summaries, outline facts, inert active-content marker counts, checksum-valid bounded identifier evidence, conservative repeated-page clusters, sampling disclosure, a technical/embedded-metadata score breakdown, and classification/resource policy versions. Classifications are `DigitalText`, `ScannedWithoutOcr`, `ScannedWithOcr`, `Mixed`, `EmptyOrNearEmpty`, `Encrypted`, `Unreadable`, and `Unknown`. Classification is evidence rather than score; scanned, illustrated, image-heavy, or text-unavailable presentation is not itself penalized.
@@ -56,7 +60,7 @@ Milestone 6 plan body or lifecycle.
 
 Milestone 8 adds immutable recovery values under `Domain.Recoveries`. A
 `CurrentStateReconciliation` binds verified pre-execution state, durable source
-journal progress, and a fresh actual snapshot. A `RecoveryPlan` binds that
+journal progress, and the authoritative projected snapshot. A `RecoveryPlan` binds that
 reconciliation, the source plan/execution/journal/manifest hashes, current
 library identity, capability profile, preservation expectations, dependency
 graph, expected semantic final state, issues, and canonical immutable-body
@@ -68,7 +72,7 @@ require a new recovery-plan ID.
 destructive boundaries, per-operation durable status, final semantic
 verification, failure classification, and `RecoveryRecordIdMapping` values.
 Logical recovery identity remains stable when Calibre assigns a new numeric
-record ID. A created record first records its actual scan-discovered numeric
+record ID. A created record first records its command-returned numeric
 mapping. After complete final verification, the same mapping is finalized with
 the exact restored formats and verified identifiers. A recovered terminal
 journal is invalid unless every created-record mapping has this matching
@@ -93,7 +97,7 @@ finalized event.
 - Approval binds to the canonical immutable-body digest. Staleness prevents further approval and preserves any prior approval only as audit information.
 - Every involved record requires a metadata backup; every affected format requires file and managed-state backups; reported covers require later resolution/backup; and plan/audit artifacts remain mandatory.
 - An execution cannot cross the mutation boundary without an approved current
-  plan, a held lease, an exact supported tool, two fresh matching scans, and a
+  plan, a held lease, an exact supported tool, an authoritative projected revision, and a
   complete verified backup manifest.
 - Constructive operations precede destructive record removals. Each mutation is
   serial and must be semantically verified before dependent operations start.

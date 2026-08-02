@@ -116,12 +116,17 @@ git diff --check HEAD
 - [x] Performance and consistency decisions fixed.
 - [x] ADR 0012 accepted.
 - [x] Authoritative state and removal delta foundation implemented.
-- [ ] Remaining projected mutation types implemented.
-- [ ] Persistence and replay implemented.
-- [ ] Cleanup and recovery scan calls removed. Exact-file cleanup is complete; metadata cleanup and recovery remain.
-- [ ] WPF lifecycle migrated.
-- [ ] Performance proof and final verification complete.
+- [x] Remaining projected mutation types implemented.
+- [x] Persistence, replay, tamper detection, and compaction implemented.
+- [x] Exact-file cleanup, metadata cleanup, and recovery scan calls removed.
+- [x] WPF authoritative restart load and live revision publication implemented.
+- [x] Structural and large synthetic performance proofs implemented.
+- [x] Final repository verification and complete diff review.
 
 ## Final outcome
 
-In progress.
+ADR 0012 is implemented across exact-file cleanup, metadata cleanup, and recovery. `ScanLibraryUseCase` is reachable only from the explicit WPF Scan command; production scanner abstractions and implementations were removed. Successful typed commands durably append hash-chained deltas and update authoritative projected state. Failed, ambiguous, unpersistable, or unprojectable commands mark state uncertain and block mutation until explicit Rescan.
+
+Projected formats and authors carry explicit unknown physical provenance rather than fabricated Calibre paths, observations, or author IDs. Persisted generations support baseline replay, tamper-to-uncertain handling, authoritative restart loading, live WPF revision publication, and bounded checkpoint compaction.
+
+The structural architecture test prevents scanner APIs in mutation workflows. A deterministic 10,000-record/6,000-delta test proves large in-memory projection. Standard restore, build, test, formatting, diagnostics, and diff checks pass; real-Calibre cleanup and recovery qualification remain opt-in.

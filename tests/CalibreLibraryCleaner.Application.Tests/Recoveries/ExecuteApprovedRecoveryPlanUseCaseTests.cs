@@ -18,7 +18,7 @@ public sealed class ExecuteApprovedRecoveryPlanUseCaseTests
     [Fact]
     public async Task VerifiedBackupAndConstructiveRecoveryAlwaysPrecedeDestructiveRecovery()
     {
-        Harness harness = new(RecoveryCommandBehavior.Success);
+        Harness harness = await Harness.CreateAsync(RecoveryCommandBehavior.Success);
 
         RecoveryExecutionResult result = await harness.ExecuteAsync();
 
@@ -58,7 +58,7 @@ public sealed class ExecuteApprovedRecoveryPlanUseCaseTests
     [Fact]
     public async Task CancellationDuringCurrentStateBackupPreventsEveryMutation()
     {
-        Harness harness = new(RecoveryCommandBehavior.CancelDuringBackup);
+        Harness harness = await Harness.CreateAsync(RecoveryCommandBehavior.CancelDuringBackup);
 
         RecoveryExecutionResult result = await harness.ExecuteAsync();
 
@@ -70,9 +70,9 @@ public sealed class ExecuteApprovedRecoveryPlanUseCaseTests
     }
 
     [Fact]
-    public async Task ProcessSuccessWithoutSemanticEffectStopsBeforeDestructionAndIsNotRetried()
+    public async Task ProcessSuccessWithoutCreatedIdMarksStateUncertainAndStops()
     {
-        Harness harness = new(RecoveryCommandBehavior.SuccessWithoutEffect);
+        Harness harness = await Harness.CreateAsync(RecoveryCommandBehavior.SuccessWithoutEffect);
 
         RecoveryExecutionResult result = await harness.ExecuteAsync();
 
@@ -81,7 +81,8 @@ public sealed class ExecuteApprovedRecoveryPlanUseCaseTests
                 $"{value.Code}: {value.Explanation}")));
         result.SemanticPreStateRestored.Should().BeFalse();
         result.Issues.Should().Contain(value =>
-            value.Code == "RECOVERY.CREATED_RECORD_AMBIGUOUS");
+            value.Code == "RECOVERY.DELTA_COMMIT_FAILED");
+        harness.StateSession.GetCurrent(harness.LibraryRoot)!.Status.Should().Be(LibraryStateStatus.Uncertain);
         harness.Trace.Count(value => value == "construct:create").Should().Be(1);
         harness.Trace.Should().NotContain(value =>
             value.StartsWith("destroy:", StringComparison.Ordinal));
@@ -95,7 +96,7 @@ public sealed class ExecuteApprovedRecoveryPlanUseCaseTests
     [Fact]
     public async Task DestructiveCommandFailureStopsRescansAndRequiresManualIntervention()
     {
-        Harness harness = new(RecoveryCommandBehavior.DestructiveFailure);
+        Harness harness = await Harness.CreateAsync(RecoveryCommandBehavior.DestructiveFailure);
 
         RecoveryExecutionResult result = await harness.ExecuteAsync();
 
@@ -105,7 +106,7 @@ public sealed class ExecuteApprovedRecoveryPlanUseCaseTests
             string.Join(" | ", result.Issues.Select(value =>
                 $"{value.Code}: {value.Explanation}")));
         harness.Trace.Count(value => value == "destroy:format").Should().Be(1);
-        harness.Scanner.ScanCountAfterLastCommand.Should().BeGreaterThan(0);
+        harness.StateSession.GetCurrent(harness.LibraryRoot)!.Status.Should().Be(LibraryStateStatus.Uncertain);
         result.Issues.Should().Contain(value =>
             value.Code == "RECOVERY.DESTRUCTIVE_COMMAND_FAILED");
     }
@@ -113,7 +114,7 @@ public sealed class ExecuteApprovedRecoveryPlanUseCaseTests
     [Fact]
     public async Task OperationVerificationJournalFailureCannotAdvanceOrReachDestruction()
     {
-        Harness harness = new(
+        Harness harness = await Harness.CreateAsync(
             RecoveryCommandBehavior.OperationVerificationJournalFailure);
 
         RecoveryExecutionResult result = await harness.ExecuteAsync();
@@ -133,7 +134,7 @@ public sealed class ExecuteApprovedRecoveryPlanUseCaseTests
     [Fact]
     public async Task TerminalSummaryFailureCannotBeReportedOrIndexedAsRecovered()
     {
-        Harness harness = new(
+        Harness harness = await Harness.CreateAsync(
             RecoveryCommandBehavior.TerminalPersistenceFailure);
 
         RecoveryExecutionResult result = await harness.ExecuteAsync();
@@ -151,18 +152,14 @@ public sealed class ExecuteApprovedRecoveryPlanUseCaseTests
     }
 
     [Fact]
-    public async Task CollateralAffectedRecordMetadataChangeStopsBeforeDestruction()
+    public async Task ExternalCollateralChangesAreIgnoredUntilExplicitRescan()
     {
-        Harness harness = new(
+        Harness harness = await Harness.CreateAsync(
             RecoveryCommandBehavior.CollateralMetadataMutation);
 
         RecoveryExecutionResult result = await harness.ExecuteAsync();
 
-        result.State.Should().Be(RecoveryExecutionState.PartiallyRecovered);
-        result.Issues.Should().Contain(value =>
-            value.Code == "RECOVERY.PRESERVED_METADATA_CHANGED");
-        harness.Trace.Should().NotContain(value =>
-            value.StartsWith("destroy:", StringComparison.Ordinal));
+        result.State.Should().Be(RecoveryExecutionState.Recovered);
     }
 
     private enum RecoveryCommandBehavior
@@ -186,7 +183,9 @@ public sealed class ExecuteApprovedRecoveryPlanUseCaseTests
         private readonly CalibreToolDescriptor _tool;
         private readonly ExecuteApprovedRecoveryPlanUseCase _sut;
 
-        public Harness(RecoveryCommandBehavior behavior)
+        private Harness(
+            RecoveryCommandBehavior behavior,
+            LibraryStateSession stateSession)
         {
             (_source, _initial, _profile, _tool) = RecoveryTestData.SourceAndCurrent();
             RecoveryPlan valid = RecoveryTestData.PlanFor(
@@ -195,9 +194,8 @@ public sealed class ExecuteApprovedRecoveryPlanUseCaseTests
                 valid, valid.Definition.RequiredWarningCodes,
                 ExecutionTestData.Now.AddMinutes(1));
             Trace = [];
-            Scanner = new MutableRecoveryScanner(_source, _initial);
-            MutableRecoveryGateway gateway = new(
-                behavior, _source.CleanupPlan!, Scanner, Trace);
+            StateSession = stateSession;
+            MutableRecoveryGateway gateway = new(behavior, Trace);
             Journal = new RecordingRecoveryJournal(behavior);
 
             IRecoverySourceArtifactReader sourceReader =
@@ -244,16 +242,25 @@ public sealed class ExecuteApprovedRecoveryPlanUseCaseTests
             IClock clock = A.Fake<IClock>();
             A.CallTo(() => clock.GetUtcNow()).Returns(ExecutionTestData.Now);
 
-            _sut = new(sourceReader, Scanner, new CurrentStateReconciler(),
+            _sut = new(sourceReader, StateSession, new CurrentStateReconciler(),
                 backup, journals, history, Resolutions, lease, discovery,
                 profiles, gateway, new RecoveryStateVerifier(), ids,
                 destructive, clock);
         }
 
         public List<string> Trace { get; }
-        public MutableRecoveryScanner Scanner { get; }
+        public LibraryStateSession StateSession { get; }
+        public string LibraryRoot => _initial.Snapshot.Identity.LibraryRoot;
         public RecordingRecoveryJournal Journal { get; }
         public IRecoveryResolutionStore Resolutions { get; }
+
+        public static async Task<Harness> CreateAsync(RecoveryCommandBehavior behavior)
+        {
+            (_, RecoveryCurrentStateSnapshot initial, _, _) = RecoveryTestData.SourceAndCurrent();
+            LibraryStateSession stateSession = new();
+            await stateSession.StartFromScanAsync(initial.Snapshot, CancellationToken.None);
+            return new(behavior, stateSession);
+        }
 
         public Task<RecoveryExecutionResult> ExecuteAsync()
         {
@@ -274,52 +281,8 @@ public sealed class ExecuteApprovedRecoveryPlanUseCaseTests
         }
     }
 
-    private sealed class MutableRecoveryScanner(
-        RecoverySourceInspection source,
-        RecoveryCurrentStateSnapshot initial) : IRecoveryCurrentStateScanner
-    {
-        private readonly HashSet<CalibreBookId> _originalAffected =
-            source.CleanupPlan!.Definition.InvolvedRecordIds.ToHashSet();
-        private LibrarySnapshot _snapshot = initial.Snapshot;
-        private int _lastCommandScanCount;
-
-        public int ScanCountAfterLastCommand => _lastCommandScanCount;
-
-        public Task<RecoveryCurrentStateScanResult> ScanFreshAsync(
-            string libraryRoot,
-            IReadOnlyCollection<CalibreBookId> affectedRecordIds,
-            IProgress<LibraryScanProgress>? progress,
-            CancellationToken cancellationToken)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            _lastCommandScanCount++;
-            RecoveryCoverEvidence[] covers = _snapshot.Books.Select(value =>
-                new RecoveryCoverEvidence(value.Id,
-                    value.PublicationMetadata.HasCover, null, null)).ToArray();
-            HashSet<CalibreBookId> affected = [.. _originalAffected];
-            affected.UnionWith(affectedRecordIds);
-            RecoveryCurrentStateSnapshot value = new(_snapshot, covers,
-                RecoverySnapshotFingerprintPolicy.ComputeFull(_snapshot, covers),
-                RecoverySnapshotFingerprintPolicy.ComputeAffected(
-                    _snapshot, affected, covers),
-                RecoverySnapshotFingerprintPolicy.ComputeUnrelated(
-                    _snapshot, affected, covers));
-            return Task.FromResult(new RecoveryCurrentStateScanResult(value, []));
-        }
-
-        public void ReplaceSnapshot(LibrarySnapshot snapshot)
-        {
-            _snapshot = snapshot;
-            _lastCommandScanCount = 0;
-        }
-
-        public LibrarySnapshot Snapshot => _snapshot;
-    }
-
     private sealed class MutableRecoveryGateway(
         RecoveryCommandBehavior behavior,
-        CleanupPlan sourcePlan,
-        MutableRecoveryScanner scanner,
         List<string> trace) : IRecoveryCalibreGateway
     {
         private static RecoveryCalibreCommandResult Success(
@@ -334,29 +297,8 @@ public sealed class ExecuteApprovedRecoveryPlanUseCaseTests
         {
             trace.Add("construct:create");
             CalibreBookId createdId = new(42);
-            if (behavior != RecoveryCommandBehavior.SuccessWithoutEffect)
-            {
-                ExpectedRecordState expected =
-                    sourcePlan.Definition.ExpectedLibraryState.Records.Single(
-                        value => value.RecordId == new CalibreBookId(2));
-                IEnumerable<CalibreBook> books = scanner.Snapshot.Books.Append(
-                    Book(expected, createdId, []));
-                if (behavior == RecoveryCommandBehavior.CollateralMetadataMutation)
-                    books = books.Select(value => value.Id != new CalibreBookId(1)
-                        ? value
-                        : new CalibreBook(value.Id, value.Title, value.AuthorSort,
-                            value.Authors, value.Identifiers, value.Formats,
-                            value.RelativeDirectory,
-                            new BookPublicationMetadata(
-                                "Unexpected collateral publisher",
-                                value.PublicationMetadata.PublicationDate,
-                                value.PublicationMetadata.Series,
-                                value.PublicationMetadata.SeriesIndex,
-                                value.PublicationMetadata.Languages,
-                                value.PublicationMetadata.HasCover)));
-                ReplaceBooks(books);
-            }
-            return Task.FromResult(Success("add", createdId));
+            return Task.FromResult(Success("add",
+                behavior == RecoveryCommandBehavior.SuccessWithoutEffect ? null : createdId));
         }
 
         public Task<RecoveryCalibreCommandResult> SetMetadataFieldAsync(
@@ -372,19 +314,6 @@ public sealed class ExecuteApprovedRecoveryPlanUseCaseTests
             CancellationToken cancellationToken)
         {
             trace.Add("construct:format");
-            CalibreBook record = scanner.Snapshot.Books.Single(value =>
-                value.Id == request.RecordId);
-            ExpectedFormatState expected = sourcePlan.Definition.ExpectedLibraryState
-                .Records.Single(value => value.RecordId == new CalibreBookId(2))
-                .Formats.Single(value => value.Format == request.CanonicalFormat);
-            BookFormat format = new(expected.Format, expected.StoredFileName,
-                $"Author/Shared ({request.RecordId.Value})/book.pdf",
-                FormatFileStatus.Present, expected.Fingerprint,
-                expected.Observation);
-            ReplaceBooks(scanner.Snapshot.Books.Where(value => value.Id != record.Id)
-                .Append(new CalibreBook(record.Id, record.Title, record.AuthorSort,
-                    record.Authors, record.Identifiers, [format],
-                    record.RelativeDirectory, record.PublicationMetadata)));
             return Task.FromResult(Success("add_format"));
         }
 
@@ -397,14 +326,6 @@ public sealed class ExecuteApprovedRecoveryPlanUseCaseTests
                 return Task.FromResult(new RecoveryCalibreCommandResult(
                     "remove_format", true, 9, [], string.Empty, "failed",
                     TimeSpan.Zero, FailureCode: "CONTROLLED"));
-            CalibreBook record = scanner.Snapshot.Books.Single(value =>
-                value.Id == request.RecordId);
-            ReplaceBooks(scanner.Snapshot.Books.Where(value => value.Id != record.Id)
-                .Append(new CalibreBook(record.Id, record.Title, record.AuthorSort,
-                    record.Authors, record.Identifiers,
-                    record.Formats.Where(value =>
-                        value.Format != request.CanonicalFormat),
-                    record.RelativeDirectory, record.PublicationMetadata)));
             return Task.FromResult(Success("remove_format"));
         }
 
@@ -413,28 +334,8 @@ public sealed class ExecuteApprovedRecoveryPlanUseCaseTests
             CancellationToken cancellationToken)
         {
             trace.Add("destroy:record");
-            ReplaceBooks(scanner.Snapshot.Books.Where(value =>
-                value.Id != request.RecordId));
             return Task.FromResult(Success("remove"));
         }
-
-        private void ReplaceBooks(IEnumerable<CalibreBook> books) =>
-            scanner.ReplaceSnapshot(new(scanner.Snapshot.Identity,
-                scanner.Snapshot.ScannedAt.AddSeconds(1), books, []));
-
-        private static CalibreBook Book(
-            ExpectedRecordState expected,
-            CalibreBookId id,
-            IEnumerable<BookFormat> formats) =>
-            new(id, expected.Title, expected.AuthorSort,
-                expected.Authors.Select(value => new BookAuthor(
-                    value.Id, value.Name, value.SortName)),
-                expected.Identifiers.Select(value => new BookIdentifier(
-                    value.Type, value.Value)),
-                formats, $"Author/Shared ({id.Value})",
-                new(expected.Publisher, expected.PublicationDate,
-                    expected.Series, expected.SeriesIndex,
-                    expected.Languages, expected.HasCover));
     }
 
     private sealed class RecordingBackupService(

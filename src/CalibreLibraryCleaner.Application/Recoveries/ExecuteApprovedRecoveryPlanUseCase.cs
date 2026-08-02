@@ -10,7 +10,7 @@ namespace CalibreLibraryCleaner.Application.Recoveries;
 
 public sealed class ExecuteApprovedRecoveryPlanUseCase(
     IRecoverySourceArtifactReader sourceReader,
-    IRecoveryCurrentStateScanner currentStateScanner,
+    ILibraryStateSession libraryState,
     ICurrentStateReconciler reconciler,
     IRecoveryStateBackupService backupService,
     IRecoveryJournalStore journalStore,
@@ -289,6 +289,9 @@ public sealed class ExecuteApprovedRecoveryPlanUseCase(
                         CancellationToken.None).ConfigureAwait(false);
                     if (!command.IsTransportSuccess)
                     {
+                        await MarkStateUncertainAsync(request.LibraryRoot, "RECOVERY_CONSTRUCTIVE_COMMAND_FAILED",
+                            "Calibre did not return an unambiguous successful constructive recovery result.",
+                            operation.Id.Value).ConfigureAwait(false);
                         issues.Add(Block("RECOVERY.CONSTRUCTIVE_COMMAND_FAILED",
                             $"Operation {operation.Id}", "The constructive Calibre command failed."));
                         await AddFailureRescanIssuesAsync(
@@ -299,6 +302,16 @@ public sealed class ExecuteApprovedRecoveryPlanUseCase(
                     }
 
                     execution = execution.MarkCommandSucceeded(operation.Id);
+                    LibraryStateSessionOutcome deltaOutcome = await ApplyRecoveryDeltaAsync(
+                        request, execution, operation, command).ConfigureAwait(false);
+                    if (!deltaOutcome.IsSuccess)
+                    {
+                        issues.Add(Block("RECOVERY.DELTA_COMMIT_FAILED", $"Operation {operation.Id}",
+                            deltaOutcome.Explanation ?? "The successful recovery command could not be durably projected."));
+                        return await FailExecutionAsync(execution, operation.Id, issues,
+                            RecoveryFailureClassification.ConstructiveVerification,
+                            request.LibraryRoot, bundleIdentity, journal, backup, false).ConfigureAwait(false);
+                    }
                     RecoveryCurrentStateScanResult after = await ScanAsync(request, execution,
                         command.CreatedRecordId, CancellationToken.None).ConfigureAwait(false);
                     issues.AddRange(after.Issues);
@@ -453,6 +466,9 @@ public sealed class ExecuteApprovedRecoveryPlanUseCase(
                         CancellationToken.None).ConfigureAwait(false);
                     if (!command.IsTransportSuccess)
                     {
+                        await MarkStateUncertainAsync(request.LibraryRoot, "RECOVERY_DESTRUCTIVE_COMMAND_FAILED",
+                            "Calibre did not return an unambiguous successful destructive recovery result.",
+                            operation.Id.Value).ConfigureAwait(false);
                         issues.Add(Block("RECOVERY.DESTRUCTIVE_COMMAND_FAILED",
                             $"Operation {operation.Id}",
                             "A destructive recovery command failed; no later operation was attempted."));
@@ -463,6 +479,16 @@ public sealed class ExecuteApprovedRecoveryPlanUseCase(
                             request.LibraryRoot, bundleIdentity, journal, backup, true).ConfigureAwait(false);
                     }
                     execution = execution.MarkCommandSucceeded(operation.Id);
+                    LibraryStateSessionOutcome deltaOutcome = await ApplyRecoveryDeltaAsync(
+                        request, execution, operation, command).ConfigureAwait(false);
+                    if (!deltaOutcome.IsSuccess)
+                    {
+                        issues.Add(Block("RECOVERY.DELTA_COMMIT_FAILED", $"Operation {operation.Id}",
+                            deltaOutcome.Explanation ?? "The successful destructive recovery command could not be durably projected."));
+                        return await FailExecutionAsync(execution, operation.Id, issues,
+                            RecoveryFailureClassification.DestructiveCommand,
+                            request.LibraryRoot, bundleIdentity, journal, backup, true).ConfigureAwait(false);
+                    }
                     RecoveryCurrentStateScanResult after = await ScanAsync(request, execution,
                         null, CancellationToken.None).ConfigureAwait(false);
                     issues.AddRange(after.Issues);
@@ -809,7 +835,7 @@ public sealed class ExecuteApprovedRecoveryPlanUseCase(
         if (operation.Kind == RecoveryOperationKind.RestoreFormatFromBackup)
         {
             if (current?.Formats.SingleOrDefault(value => value.Format == operation.Format)
-                is not { FileStatus: FormatFileStatus.Present, Fingerprint: not null } format
+                is not { FileStatus: FormatFileStatus.Present or FormatFileStatus.ProjectedPresent, Fingerprint: not null } format
                 || format.Fingerprint != operation.OriginalBackupFingerprint)
                 return Block("RECOVERY.FORMAT_VERIFICATION_FAILED", $"Operation {operation.Id}",
                     "The restored format hash does not match the original verified backup.");
@@ -847,7 +873,7 @@ public sealed class ExecuteApprovedRecoveryPlanUseCase(
         {
             if (state.Snapshot.Books.SingleOrDefault(value => value.Id == preserved.CurrentRecordId)?
                     .Formats.SingleOrDefault(value => value.Format == preserved.Format)
-                is not { FileStatus: FormatFileStatus.Present, Fingerprint: not null } format
+                is not { FileStatus: FormatFileStatus.Present or FormatFileStatus.ProjectedPresent, Fingerprint: not null } format
                 || format.Fingerprint != preserved.Fingerprint)
                 issues.Add(Block("RECOVERY.PRESERVED_CONTENT_CHANGED",
                     $"Logical record {preserved.LogicalRecordId} / {preserved.Format}",
@@ -871,18 +897,92 @@ public sealed class ExecuteApprovedRecoveryPlanUseCase(
         return issues.All(value => value.Severity != RecoveryIssueSeverity.Blocking);
     }
 
-    private async Task<RecoveryCurrentStateScanResult> ScanAsync(
+    private async Task<LibraryStateSessionOutcome> ApplyRecoveryDeltaAsync(
+        ExecuteRecoveryPlanRequest request,
+        RecoveryExecution execution,
+        RecoveryOperation operation,
+        RecoveryCalibreCommandResult command)
+    {
+        LibraryState current = libraryState.GetCurrent(request.LibraryRoot)
+            ?? throw new InvalidOperationException("Authoritative projected state disappeared during recovery.");
+        DateTimeOffset appliedAt = clock.GetUtcNow().ToUniversalTime();
+        if (appliedAt < current.ProjectedAtUtc) appliedAt = current.ProjectedAtUtc;
+        ExpectedRecordState expected = request.Plan.Definition.ExpectedFinalState.Records
+            .Single(value => value.LogicalRecordId == operation.LogicalRecordId).OriginalState;
+        LibraryStateDelta? delta = operation.Kind switch
+        {
+            RecoveryOperationKind.CreateRecoveredRecord when command.CreatedRecordId is not null =>
+                new CreateRecordLibraryStateDelta(current.GenerationId, current.Revision,
+                    operation.Id.Value, appliedAt, command.CreatedRecordId.Value,
+                    expected.Title, expected.Authors.Select(value => value.Name), expected.AuthorSort),
+            RecoveryOperationKind.RestoreMetadataFromBackup =>
+                new SetMetadataLibraryStateDelta(current.GenerationId, current.Revision,
+                    operation.Id.Value, appliedAt, ResolveCurrentRecordId(operation, execution),
+                    ToLibraryMetadataField(ParseMetadataField(operation.RequiredCapability)),
+                    MetadataValues(ParseMetadataField(operation.RequiredCapability), expected)),
+            RecoveryOperationKind.RestoreFormatFromBackup =>
+                new AddOrReplaceFormatLibraryStateDelta(current.GenerationId, current.Revision,
+                    operation.Id.Value, appliedAt, ResolveCurrentRecordId(operation, execution),
+                    operation.Format!, operation.OriginalBackupFingerprint!, null),
+            RecoveryOperationKind.RemoveFormatAddedByExecution =>
+                new RemoveFormatLibraryStateDelta(current.GenerationId, current.Revision,
+                    operation.Id.Value, appliedAt, ResolveCurrentRecordId(operation, execution),
+                    operation.Format!, operation.ExpectedCurrentFingerprint!),
+            RecoveryOperationKind.RemoveRecordCreatedByExecution =>
+                new RemoveRecordWithContentLibraryStateDelta(current.GenerationId, current.Revision,
+                    operation.Id.Value, appliedAt, ResolveCurrentRecordId(operation, execution)),
+            _ => null,
+        };
+        if (operation.Kind == RecoveryOperationKind.CreateRecoveredRecord && command.CreatedRecordId is null)
+        {
+            await MarkStateUncertainAsync(request.LibraryRoot, "RECOVERY_CREATED_ID_MISSING",
+                "Calibre reported record creation success without one deterministic created record ID.",
+                operation.Id.Value).ConfigureAwait(false);
+            return LibraryStateSessionOutcome.Failure("LIBRARY_STATE.CREATED_ID_MISSING",
+                "A successful create-record command did not return a deterministic record ID.");
+        }
+        if (delta is null)
+            return LibraryStateSessionOutcome.Failure("LIBRARY_STATE.DELTA_UNSUPPORTED",
+                "The recovery operation has no projected-state delta mapping.");
+        return await libraryState.ApplyAsync(request.LibraryRoot, delta, CancellationToken.None)
+            .ConfigureAwait(false);
+    }
+
+    private Task<LibraryStateSessionOutcome> MarkStateUncertainAsync(
+        string libraryRoot,
+        string code,
+        string explanation,
+        string operationId) => libraryState.MarkUncertainAsync(libraryRoot,
+        new(code, explanation, clock.GetUtcNow(), operationId), CancellationToken.None);
+
+    private static LibraryMetadataField ToLibraryMetadataField(
+        RecoveryCalibreMetadataField field) => field switch
+        {
+            RecoveryCalibreMetadataField.Title => LibraryMetadataField.Title,
+            RecoveryCalibreMetadataField.Authors => LibraryMetadataField.Authors,
+            RecoveryCalibreMetadataField.AuthorSort => LibraryMetadataField.AuthorSort,
+            RecoveryCalibreMetadataField.Publisher => LibraryMetadataField.Publisher,
+            RecoveryCalibreMetadataField.PublicationDate => LibraryMetadataField.PublicationDate,
+            RecoveryCalibreMetadataField.Languages => LibraryMetadataField.Languages,
+            RecoveryCalibreMetadataField.Identifiers => LibraryMetadataField.Identifiers,
+            RecoveryCalibreMetadataField.Series => LibraryMetadataField.Series,
+            RecoveryCalibreMetadataField.SeriesIndex => LibraryMetadataField.SeriesIndex,
+            _ => throw new ArgumentOutOfRangeException(nameof(field)),
+        };
+
+    private Task<RecoveryCurrentStateScanResult> ScanAsync(
         ExecuteRecoveryPlanRequest request,
         RecoveryExecution execution,
         CalibreBookId? additionalId,
         CancellationToken cancellationToken)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         HashSet<CalibreBookId> affected =
             PrepareRecoveryExecutionUseCase.AffectedRecordIds(request.Plan).ToHashSet();
         affected.UnionWith(execution.RecordIdMappings.Select(value => value.RecoveredRecordId));
         if (additionalId is not null) affected.Add(additionalId.Value);
-        return await currentStateScanner.ScanFreshAsync(request.LibraryRoot, affected,
-            null, cancellationToken).ConfigureAwait(false);
+        return Task.FromResult(ProjectedRecoveryCurrentState.Create(
+            libraryState.GetCurrent(request.LibraryRoot), affected));
     }
 
     private async Task AddFailureRescanIssuesAsync(
@@ -1134,7 +1234,7 @@ public sealed class ExecuteApprovedRecoveryPlanUseCase(
         BookFormat? format = state.Snapshot.Books.SingleOrDefault(value => value.Id == recordId)?
             .Formats.SingleOrDefault(value => value.Format == expectation.Format);
         return expectation.ExpectedPresent
-            ? format is { FileStatus: FormatFileStatus.Present, Fingerprint: not null }
+            ? format is { FileStatus: FormatFileStatus.Present or FormatFileStatus.ProjectedPresent, Fingerprint: not null }
                 && (expectation.ExpectedFingerprint is null
                     || format.Fingerprint == expectation.ExpectedFingerprint)
             : format is null;
@@ -1163,7 +1263,7 @@ public sealed class ExecuteApprovedRecoveryPlanUseCase(
             || RecoveryRecordFingerprintPolicy.Compute(record)
                 != identity.Identity.MetadataFingerprint
             || format is not
-            { FileStatus: FormatFileStatus.Present, Fingerprint: not null }
+            { FileStatus: FormatFileStatus.Present or FormatFileStatus.ProjectedPresent, Fingerprint: not null }
             || operation.ExpectedCurrentFingerprint is null
             || format.Fingerprint != operation.ExpectedCurrentFingerprint)
             return Block("RECOVERY.DESTRUCTIVE_TARGET_CHANGED",

@@ -19,7 +19,7 @@ public sealed class ExecuteExactBinaryRecordDeletionUseCaseTests
     [Fact]
     public async Task CompleteBackupAndConfirmationPrecedeFormatThenEmptyRecordRemoval()
     {
-        Harness harness = Harness.Success();
+        Harness harness = await Harness.SuccessAsync();
 
         ExactBinaryRecordDeletionResult result = await harness.ExecuteAsync();
 
@@ -37,7 +37,7 @@ public sealed class ExecuteExactBinaryRecordDeletionUseCaseTests
             A<RemoveCalibreRecordRequest>.That.Matches(value => value.RecordId == new CalibreBookId(2)),
             A<CancellationToken>._)).MustHaveHappenedOnceExactly();
         harness.Trace.Should().ContainInOrder("backup-inputs", "export", "export", "backup-sealed",
-            "confirm", "snapshot-invalidated", "remove-format", "remove-record");
+            "confirm", "remove-format", "remove-record");
         harness.StateSession.GetCurrent("C:\\library")!.Revision.Should().Be(new LibraryStateRevision(2));
         harness.StateSession.GetCurrent("C:\\library")!.Snapshot.Books.Select(value => value.Id)
             .Should().Equal(new CalibreBookId(1), new CalibreBookId(3));
@@ -46,7 +46,7 @@ public sealed class ExecuteExactBinaryRecordDeletionUseCaseTests
     [Fact]
     public async Task BackupFailurePreventsRecordRemoval()
     {
-        Harness harness = Harness.Success();
+        Harness harness = await Harness.SuccessAsync();
         A.CallTo(() => harness.RecordBackup.VerifyAndSealAsync(
                 A<ExactBinaryRecordBackupInputs>._, harness.Plan, A<CancellationToken>._))
             .Returns(new ExactBinaryRecordBackupResult(null,
@@ -63,26 +63,21 @@ public sealed class ExecuteExactBinaryRecordDeletionUseCaseTests
     }
 
     [Fact]
-    public async Task SnapshotInvalidationFailurePreventsRecordRemoval()
+    public async Task BaselineListingSnapshotIsNotInvalidatedDuringDeltaCleanup()
     {
-        Harness harness = Harness.Success();
-        A.CallTo(() => harness.SnapshotStore.DeleteAsync(A<string>._, A<CancellationToken>._))
-            .Throws(new IOException("controlled"));
+        Harness harness = await Harness.SuccessAsync();
 
         ExactBinaryRecordDeletionResult result = await harness.ExecuteAsync();
 
-        result.State.Should().Be(ExactBinaryRecordDeletionState.PreflightFailed);
-        result.Issues.Should().Contain(value => value.Code == "BINARY_EXECUTION.SNAPSHOT_INVALIDATION_FAILED");
-        A.CallTo(() => harness.Commands.RemoveRecordAsync(A<RemoveCalibreRecordRequest>._,
-            A<CancellationToken>._)).MustNotHaveHappened();
-        A.CallTo(() => harness.Commands.RemoveFormatAsync(A<RemoveCalibreFormatRequest>._,
-            A<CancellationToken>._)).MustNotHaveHappened();
+        result.IsCompleted.Should().BeTrue();
+        A.CallTo(() => harness.SnapshotStore.DeleteAsync(A<string>._, A<CancellationToken>._))
+            .MustNotHaveHappened();
     }
 
     [Fact]
     public async Task AmbiguousCommandMarksStateUncertainWithoutApplyingDelta()
     {
-        Harness harness = Harness.Success();
+        Harness harness = await Harness.SuccessAsync();
         A.CallTo(() => harness.Commands.RemoveFormatAsync(
                 A<RemoveCalibreFormatRequest>._, A<CancellationToken>._))
             .Returns(new CalibreCommandResult("remove_format", true, null, [], string.Empty,
@@ -105,7 +100,6 @@ public sealed class ExecuteExactBinaryRecordDeletionUseCaseTests
         private readonly ILibraryMutationLease _lease;
         private readonly IExecutionBackupStore _workspaceStore;
         private readonly ICalibreToolDiscovery _tools;
-        private readonly PersistedLibrarySnapshotsUseCase _persistedSnapshots;
 
         private Harness(
             ExactBinaryCleanupPlan plan,
@@ -116,7 +110,6 @@ public sealed class ExecuteExactBinaryRecordDeletionUseCaseTests
             IExactBinaryRecordBackupStore recordBackup,
             LibraryStateSession stateSession,
             ICalibreToolDiscovery tools,
-            PersistedLibrarySnapshotsUseCase persistedSnapshots,
             ILibrarySnapshotStore snapshotStore,
             ICalibreCommandGateway commands,
             IExactBinaryRecordDeletionConfirmation confirmation,
@@ -130,7 +123,6 @@ public sealed class ExecuteExactBinaryRecordDeletionUseCaseTests
             RecordBackup = recordBackup;
             StateSession = stateSession;
             _tools = tools;
-            _persistedSnapshots = persistedSnapshots;
             SnapshotStore = snapshotStore;
             Commands = commands;
             Confirmation = confirmation;
@@ -145,7 +137,7 @@ public sealed class ExecuteExactBinaryRecordDeletionUseCaseTests
         public ILibrarySnapshotStore SnapshotStore { get; }
         public List<string> Trace { get; }
 
-        public static Harness Success()
+        public static async Task<Harness> SuccessAsync()
         {
             (ExactBinaryCleanupPlan plan, LibrarySnapshot before) = ApprovedPlan();
             List<string> trace = [];
@@ -182,7 +174,7 @@ public sealed class ExecuteExactBinaryRecordDeletionUseCaseTests
             A.CallTo(() => recordBackup.VerifyAvailableAsync(workspace, manifest, A<CancellationToken>._))
                 .Returns([]);
             LibraryStateSession stateSession = new();
-            stateSession.StartFromScan(before);
+            await stateSession.StartFromScanAsync(before, CancellationToken.None);
             CalibreToolDescriptor tool = new("C:\\Calibre2\\calibredb.exe",
                 new("C:\\Calibre2\\calibredb.exe", "9.11.0", new(new string('f', 64)),
                     "calibredb/windows/9.11.0"), Enum.GetValues<CalibreExecutionCapability>());
@@ -200,16 +192,13 @@ public sealed class ExecuteExactBinaryRecordDeletionUseCaseTests
             A.CallTo(() => confirmation.ConfirmAsync(plan, manifest, A<CancellationToken>._))
                 .Invokes(() => trace.Add("confirm")).Returns(true);
             ILibrarySnapshotStore snapshotStore = A.Fake<ILibrarySnapshotStore>();
-            A.CallTo(() => snapshotStore.DeleteAsync(A<string>._, A<CancellationToken>._))
-                .Invokes(() => trace.Add("snapshot-invalidated"));
-            PersistedLibrarySnapshotsUseCase persistedSnapshots = new(snapshotStore);
             return new(plan, clock, ids, lease, workspaceStore, recordBackup,
-                stateSession, tools, persistedSnapshots, snapshotStore, commands, confirmation, trace);
+                stateSession, tools, snapshotStore, commands, confirmation, trace);
         }
 
         public Task<ExactBinaryRecordDeletionResult> ExecuteAsync() => new ExecuteExactBinaryRecordDeletionUseCase(
             StateSession, _tools, Commands, _lease, _workspaceStore, RecordBackup, _ids, Confirmation,
-            _persistedSnapshots, _clock)
+            _clock)
             .ExecuteAsync(new(Plan, "C:\\library", "C:\\backup", "test", true, true), null,
                 CancellationToken.None);
 

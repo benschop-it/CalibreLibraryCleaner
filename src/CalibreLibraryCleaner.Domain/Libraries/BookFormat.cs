@@ -13,12 +13,16 @@ public sealed record BookFormat
         ArgumentException.ThrowIfNullOrWhiteSpace(format);
         ArgumentNullException.ThrowIfNull(storedFileName);
         ArgumentNullException.ThrowIfNull(expectedRelativePath);
-        if ((fileStatus == FormatFileStatus.Present) != (fingerprint is not null && observation is not null))
+        bool scannedPresent = fileStatus == FormatFileStatus.Present;
+        bool projectedPresent = fileStatus == FormatFileStatus.ProjectedPresent;
+        if (scannedPresent != (fingerprint is not null && observation is not null)
+            || projectedPresent && (fingerprint is null || observation is not null)
+            || !scannedPresent && !projectedPresent && (fingerprint is not null || observation is not null))
         {
-            throw new ArgumentException("Only a present format must have a fingerprint and verified observation.", nameof(fingerprint));
+            throw new ArgumentException("Scanned formats require fingerprint and observation; projected formats require only a fingerprint.", nameof(fingerprint));
         }
 
-        if (fingerprint is not null && fingerprint.SizeInBytes != observation!.Length)
+        if (observation is not null && fingerprint!.SizeInBytes != observation.Length)
         {
             throw new ArgumentException("The fingerprint and verified observation lengths must match.", nameof(observation));
         }
@@ -42,4 +46,6 @@ public sealed record BookFormat
     public FormatFileFingerprint? Fingerprint { get; }
 
     public FormatFileObservation? Observation { get; }
+
+    public bool IsProjected => FileStatus == FormatFileStatus.ProjectedPresent;
 }

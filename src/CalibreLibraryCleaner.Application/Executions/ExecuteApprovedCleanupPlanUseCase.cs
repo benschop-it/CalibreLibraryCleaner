@@ -7,7 +7,7 @@ using CalibreLibraryCleaner.Domain.Plans;
 namespace CalibreLibraryCleaner.Application.Executions;
 
 public sealed class ExecuteApprovedCleanupPlanUseCase(
-    IExecutionLibraryScanner scanLibrary,
+    ILibraryStateSession libraryState,
     ICalibreToolDiscovery toolDiscovery,
     ICalibreCommandGateway commandGateway,
     ILibraryMutationLease executionLease,
@@ -107,17 +107,17 @@ public sealed class ExecuteApprovedCleanupPlanUseCase(
             await AppendAsync(journal, execution, "ExecutionCreated", "Execution workspace and durable journal created.", cancellationToken).ConfigureAwait(false);
 
             execution = execution.Transition(CleanupExecutionState.PreflightValidating);
-            progress?.Report(new(CleanupExecutionProgressPhase.Preflight, "Running a fresh read-only preflight scan.", 0,
+            progress?.Report(new(CleanupExecutionProgressPhase.Preflight, "Validating the authoritative projected state.", 0,
                 execution.Graph.Operations.Count, false));
-            await AppendAsync(journal, execution, "PreflightStarted", "Fresh read-only preflight started.", cancellationToken).ConfigureAwait(false);
+            await AppendAsync(journal, execution, "PreflightStarted", "Authoritative projected-state validation started.", cancellationToken).ConfigureAwait(false);
 
             CalibreToolDiscoveryResult discovery = await toolDiscovery.DiscoverAndProbeAsync(
                 request.LibraryRoot, cancellationToken).ConfigureAwait(false);
             issues.AddRange(discovery.Issues);
-            LibraryScanOutcome firstScan = await scanLibrary.ScanFreshAsync(request.LibraryRoot, null, cancellationToken).ConfigureAwait(false);
-            if (!discovery.IsSuccess || !firstScan.IsSuccess)
+            LibraryState? initialState = libraryState.GetCurrent(request.LibraryRoot);
+            if (!discovery.IsSuccess || initialState is null || !initialState.IsAuthoritative)
             {
-                if (!firstScan.IsSuccess) issues.Add(Block("EXECUTION.SCAN_FAILED", "The fresh read-only preflight scan failed."));
+                issues.Add(Block("EXECUTION.STATE_UNAVAILABLE", "Run an explicit scan to establish authoritative library state before cleanup."));
                 execution = execution.Transition(CleanupExecutionState.PreflightFailed);
                 await AppendFailureAsync(journal, execution, "PreflightFailed", issues, cancellationToken).ConfigureAwait(false);
                 return await FinishAsync(execution, issues, workspace, journal, manifest,
@@ -125,10 +125,10 @@ public sealed class ExecuteApprovedCleanupPlanUseCase(
             }
 
             if (!request.Confirmation.Matches(request.Plan, discovery.Tool!.Identity,
-                    destination.CanonicalDestinationIdentity!, firstScan.Snapshot!.Identity.LibraryRoot,
+                    destination.CanonicalDestinationIdentity!, initialState.Snapshot.Identity.LibraryRoot,
                     capability.Graph!.Digest))
                 issues.Add(Block("EXECUTION.CONFIRMATION_CHANGED", "The plan, library, tool, or destination no longer matches the local execution confirmation."));
-            issues.AddRange(ExecutionPreflightPolicy.Evaluate(request.Plan, firstScan.Snapshot!));
+            issues.AddRange(ExecutionPreflightPolicy.Evaluate(request.Plan, initialState.Snapshot));
             if (issues.Any(value => value.Severity == ExecutionIssueSeverity.BlockingError))
             {
                 execution = execution.Transition(CleanupExecutionState.PreflightFailed);
@@ -138,7 +138,7 @@ public sealed class ExecuteApprovedCleanupPlanUseCase(
             }
 
             unaffectedBaseline = ExecutionSnapshotDigestPolicy.ComputeUnaffected(
-                firstScan.Snapshot!, request.Plan.Definition.InvolvedRecordIds);
+                initialState.Snapshot, request.Plan.Definition.InvolvedRecordIds);
             execution = execution.Transition(CleanupExecutionState.ReadyForBackup);
             await AppendAsync(journal, execution, "PreflightVerified", "All live preconditions and capability checks passed.",
                 cancellationToken, issues).ConfigureAwait(false);
@@ -196,10 +196,10 @@ public sealed class ExecuteApprovedCleanupPlanUseCase(
                 execution.Graph.Operations.Count, false));
             CalibreToolDiscoveryResult secondDiscovery = await toolDiscovery.DiscoverAndProbeAsync(
                 request.LibraryRoot, cancellationToken).ConfigureAwait(false);
-            LibraryScanOutcome secondScan = await scanLibrary.ScanFreshAsync(request.LibraryRoot, null, cancellationToken).ConfigureAwait(false);
+            LibraryState? postBackupState = libraryState.GetCurrent(request.LibraryRoot);
             issues.AddRange(secondDiscovery.Issues);
             if (!secondDiscovery.IsSuccess || secondDiscovery.Tool!.Identity != discovery.Tool.Identity
-                || !secondScan.IsSuccess
+                || postBackupState is null || !postBackupState.IsAuthoritative
                 || CleanupPlanContentDigestPolicy.Compute(request.Plan.Definition) != request.Plan.ContentDigest
                 || !lease.IsHeld)
             {
@@ -208,13 +208,13 @@ public sealed class ExecuteApprovedCleanupPlanUseCase(
             else
             {
                 if (!request.Confirmation.Matches(request.Plan, secondDiscovery.Tool.Identity,
-                        workspace.CanonicalBackupDestinationIdentity, secondScan.Snapshot!.Identity.LibraryRoot,
+                    workspace.CanonicalBackupDestinationIdentity, postBackupState.Snapshot.Identity.LibraryRoot,
                         capability.Graph!.Digest))
                     issues.Add(Block("EXECUTION.CONFIRMATION_CHANGED",
                         "The local confirmation no longer matches the final mutation gate."));
-                issues.AddRange(ExecutionPreflightPolicy.Evaluate(request.Plan, secondScan.Snapshot!));
-                if (ExecutionSnapshotDigestPolicy.ComputeUnaffected(secondScan.Snapshot!, request.Plan.Definition.InvolvedRecordIds) != unaffectedBaseline)
-                    issues.Add(Block("EXECUTION.UNRELATED_STATE_CHANGED", "Unrelated library state changed during backup."));
+                issues.AddRange(ExecutionPreflightPolicy.Evaluate(request.Plan, postBackupState.Snapshot));
+                if (ExecutionSnapshotDigestPolicy.ComputeUnaffected(postBackupState.Snapshot, request.Plan.Definition.InvolvedRecordIds) != unaffectedBaseline)
+                    issues.Add(Block("EXECUTION.UNRELATED_STATE_CHANGED", "Unrelated projected state changed during backup."));
                 issues.AddRange(await backupStore.VerifyAvailableAsync(workspace, manifest, cancellationToken).ConfigureAwait(false));
             }
 
@@ -229,7 +229,7 @@ public sealed class ExecuteApprovedCleanupPlanUseCase(
             execution = execution.Transition(CleanupExecutionState.ReadyToExecute);
             HashSet<string> processedRetentions = [];
             HashSet<CalibreBookId> removedRecords = [];
-            LibrarySnapshot currentSnapshot = secondScan.Snapshot!;
+            LibrarySnapshot currentSnapshot = postBackupState!.Snapshot;
             foreach (CleanupExecutionOperation operation in execution.Graph.Operations.Where(value => value.Phase == ExecutionOperationPhase.Precondition))
             {
                 execution = execution.SatisfyNoOp(operation.Id);
@@ -286,28 +286,37 @@ public sealed class ExecuteApprovedCleanupPlanUseCase(
                 await AppendCommandAsync(journal, execution, operation.Id, command, true, CancellationToken.None).ConfigureAwait(false);
                 if (!command.IsSuccess)
                 {
+                    await MarkStateUncertainAsync(request.LibraryRoot, "CONSTRUCTIVE_COMMAND_FAILED",
+                        "Calibre did not return an unambiguous successful add-format result.", operation.Id.Value).ConfigureAwait(false);
                     execution = execution.MarkOperationFailed(operation.Id, command.FailureCode ?? "EXECUTION.CALIBRE_COMMAND_FAILED",
                         CleanupExecutionFailureClassification.ConstructiveCommand).RequireRecovery(CleanupExecutionFailureClassification.ConstructiveCommand);
                     issues.Add(Block("EXECUTION.CONSTRUCTIVE_COMMAND_FAILED", "A constructive Calibre operation failed; no destructive operation was started.", operation.SourceRecordId, operation.Format));
-                    await CaptureFailureScanAsync(request, journal, execution, unaffectedBaseline, processedRetentions, removedRecords).ConfigureAwait(false);
                     return await FinishAsync(execution, issues, workspace, journal, manifest,
                         CleanupExecutionFailureClassification.ConstructiveCommand, terminalPersisted).ConfigureAwait(false);
                 }
 
                 execution = execution.MarkOperationSucceeded(operation.Id);
                 processedRetentions.Add(retention.Id);
-                LibraryScanOutcome verificationScan = await scanLibrary.ScanFreshAsync(request.LibraryRoot, null, CancellationToken.None).ConfigureAwait(false);
-                if (!verificationScan.IsSuccess)
+                LibraryState currentState = libraryState.GetCurrent(request.LibraryRoot)!;
+                BookFormat? previousTarget = currentState.Snapshot.Books
+                    .Single(value => value.Id == request.Plan.Definition.TargetRecordId)
+                    .Formats.SingleOrDefault(value => value.Format == retention.Format);
+                LibraryStateSessionOutcome projection = await libraryState.ApplyAsync(request.LibraryRoot,
+                    new AddOrReplaceFormatLibraryStateDelta(currentState.GenerationId, currentState.Revision,
+                        operation.Id.Value, clock.GetUtcNow(), request.Plan.Definition.TargetRecordId,
+                        retention.Format, retention.SourceState.Fingerprint, previousTarget?.Fingerprint),
+                    CancellationToken.None).ConfigureAwait(false);
+                if (!projection.IsSuccess)
                 {
-                    execution = execution.MarkOperationFailed(operation.Id, "EXECUTION.VERIFICATION_SCAN_FAILED",
+                    execution = execution.MarkOperationFailed(operation.Id, "EXECUTION.DELTA_COMMIT_FAILED",
                         CleanupExecutionFailureClassification.IntermediateVerification).RequireRecovery(CleanupExecutionFailureClassification.IntermediateVerification);
-                    issues.Add(Block("EXECUTION.VERIFICATION_SCAN_FAILED", "The library could not be scanned after a constructive operation."));
+                    issues.Add(Block("EXECUTION.DELTA_COMMIT_FAILED", "The successful constructive command could not be durably projected."));
                     return await FinishAsync(execution, issues, workspace, journal, manifest,
                         CleanupExecutionFailureClassification.IntermediateVerification, terminalPersisted).ConfigureAwait(false);
                 }
 
                 ExecutionVerificationResult verification = CleanupExecutionVerificationPolicy.VerifyConstructiveState(
-                    request.Plan, verificationScan.Snapshot!, processedRetentions, removedRecords,
+                    request.Plan, projection.State!.Snapshot, processedRetentions, removedRecords,
                     unaffectedBaseline, clock.GetUtcNow());
                 issues.AddRange(verification.Issues);
                 await AppendVerificationAsync(journal, execution, operation.Id, verification, CancellationToken.None).ConfigureAwait(false);
@@ -320,7 +329,7 @@ public sealed class ExecuteApprovedCleanupPlanUseCase(
                 }
 
                 execution = execution.MarkOperationVerified(operation.Id);
-                currentSnapshot = verificationScan.Snapshot!;
+                currentSnapshot = projection.State.Snapshot;
                 completedOperations++;
                 await AppendOperationVerifiedAsync(journal, execution, operation, false, CancellationToken.None).ConfigureAwait(false);
                 if (cancellationToken.IsCancellationRequested)
@@ -349,17 +358,16 @@ public sealed class ExecuteApprovedCleanupPlanUseCase(
             IReadOnlyList<ExecutionIssue> backupAvailability = await backupStore.VerifyAvailableAsync(
                 workspace, manifest, execution.MutationStarted ? CancellationToken.None : cancellationToken).ConfigureAwait(false);
             issues.AddRange(backupAvailability);
-            LibraryScanOutcome destructiveGateScan = await scanLibrary.ScanFreshAsync(
-                request.LibraryRoot, null, execution.MutationStarted ? CancellationToken.None : cancellationToken).ConfigureAwait(false);
-            if (!destructiveGateScan.IsSuccess)
-                issues.Add(Block("EXECUTION.DESTRUCTIVE_GATE_SCAN_FAILED", "The library could not be freshly scanned at the destructive-action gate."));
+            LibraryState? destructiveGateState = libraryState.GetCurrent(request.LibraryRoot);
+            if (destructiveGateState is null || !destructiveGateState.IsAuthoritative)
+                issues.Add(Block("EXECUTION.DESTRUCTIVE_GATE_STATE_UNAVAILABLE", "Authoritative projected state is unavailable at the destructive-action gate."));
             else
             {
                 ExecutionVerificationResult gateVerification = CleanupExecutionVerificationPolicy.VerifyConstructiveState(
-                    request.Plan, destructiveGateScan.Snapshot!, request.Plan.Definition.FormatRetentions.Select(value => value.Id),
+                    request.Plan, destructiveGateState.Snapshot, request.Plan.Definition.FormatRetentions.Select(value => value.Id),
                     removedRecords, unaffectedBaseline, clock.GetUtcNow());
                 issues.AddRange(gateVerification.Issues);
-                currentSnapshot = destructiveGateScan.Snapshot!;
+                currentSnapshot = destructiveGateState.Snapshot;
             }
 
             if (issues.Any(value => value.Severity == ExecutionIssueSeverity.BlockingError))
@@ -419,29 +427,32 @@ public sealed class ExecuteApprovedCleanupPlanUseCase(
                 await AppendCommandAsync(journal, execution, operation.Id, command, true, CancellationToken.None).ConfigureAwait(false);
                 if (!command.IsSuccess)
                 {
+                    await MarkStateUncertainAsync(request.LibraryRoot, "DESTRUCTIVE_COMMAND_FAILED",
+                        "Calibre did not return an unambiguous successful record-removal result.", operation.Id.Value).ConfigureAwait(false);
                     execution = execution.MarkOperationFailed(operation.Id, command.FailureCode ?? "EXECUTION.CALIBRE_COMMAND_FAILED",
                         CleanupExecutionFailureClassification.DestructiveCommand).RequireRecovery(CleanupExecutionFailureClassification.DestructiveCommand);
                     issues.Add(Block("EXECUTION.DESTRUCTIVE_COMMAND_FAILED", "A destructive Calibre operation failed; no later removal was attempted.", recordToRemove));
-                    await CaptureFailureScanAsync(request, journal, execution, unaffectedBaseline,
-                        request.Plan.Definition.FormatRetentions.Select(value => value.Id), removedRecords).ConfigureAwait(false);
                     return await FinishAsync(execution, issues, workspace, journal, manifest,
                         CleanupExecutionFailureClassification.DestructiveCommand, terminalPersisted).ConfigureAwait(false);
                 }
 
                 execution = execution.MarkOperationSucceeded(operation.Id);
-                removedRecords.Add(recordToRemove);
-                LibraryScanOutcome verificationScan = await scanLibrary.ScanFreshAsync(request.LibraryRoot, null, CancellationToken.None).ConfigureAwait(false);
-                if (!verificationScan.IsSuccess)
+                LibraryState currentState = libraryState.GetCurrent(request.LibraryRoot)!;
+                LibraryStateSessionOutcome projection = await libraryState.ApplyAsync(request.LibraryRoot,
+                    new RemoveRecordWithContentLibraryStateDelta(currentState.GenerationId, currentState.Revision,
+                        operation.Id.Value, clock.GetUtcNow(), recordToRemove), CancellationToken.None).ConfigureAwait(false);
+                if (!projection.IsSuccess)
                 {
-                    execution = execution.MarkOperationFailed(operation.Id, "EXECUTION.VERIFICATION_SCAN_FAILED",
+                    execution = execution.MarkOperationFailed(operation.Id, "EXECUTION.DELTA_COMMIT_FAILED",
                         CleanupExecutionFailureClassification.IntermediateVerification).RequireRecovery(CleanupExecutionFailureClassification.IntermediateVerification);
-                    issues.Add(Block("EXECUTION.VERIFICATION_SCAN_FAILED", "The library could not be scanned after a destructive operation."));
+                    issues.Add(Block("EXECUTION.DELTA_COMMIT_FAILED", "The successful destructive command could not be durably projected."));
                     return await FinishAsync(execution, issues, workspace, journal, manifest,
                         CleanupExecutionFailureClassification.IntermediateVerification, terminalPersisted).ConfigureAwait(false);
                 }
 
+                removedRecords.Add(recordToRemove);
                 ExecutionVerificationResult verification = CleanupExecutionVerificationPolicy.VerifyConstructiveState(
-                    request.Plan, verificationScan.Snapshot!, request.Plan.Definition.FormatRetentions.Select(value => value.Id),
+                    request.Plan, projection.State!.Snapshot, request.Plan.Definition.FormatRetentions.Select(value => value.Id),
                     removedRecords, unaffectedBaseline, clock.GetUtcNow());
                 issues.AddRange(verification.Issues);
                 await AppendVerificationAsync(journal, execution, operation.Id, verification, CancellationToken.None).ConfigureAwait(false);
@@ -454,7 +465,7 @@ public sealed class ExecuteApprovedCleanupPlanUseCase(
                 }
 
                 execution = execution.MarkOperationVerified(operation.Id);
-                currentSnapshot = verificationScan.Snapshot!;
+                currentSnapshot = projection.State.Snapshot;
                 completedOperations++;
                 await AppendOperationVerifiedAsync(journal, execution, operation, false, CancellationToken.None).ConfigureAwait(false);
                 if (cancellationToken.IsCancellationRequested)
@@ -464,11 +475,11 @@ public sealed class ExecuteApprovedCleanupPlanUseCase(
 
             execution = execution.Transition(CleanupExecutionState.Verifying);
             progress?.Report(new(CleanupExecutionProgressPhase.FinalVerification,
-                "Performing final semantic verification.", completedOperations, execution.Graph.Operations.Count, true));
-            LibraryScanOutcome finalScan = await scanLibrary.ScanFreshAsync(request.LibraryRoot, null, CancellationToken.None).ConfigureAwait(false);
-            if (!finalScan.IsSuccess)
+                "Validating final projected state.", completedOperations, execution.Graph.Operations.Count, true));
+            LibraryState? finalState = libraryState.GetCurrent(request.LibraryRoot);
+            if (finalState is null || !finalState.IsAuthoritative)
             {
-                issues.Add(Block("EXECUTION.FINAL_SCAN_FAILED", "The library could not be read for final verification."));
+                issues.Add(Block("EXECUTION.FINAL_STATE_UNAVAILABLE", "Authoritative projected state is unavailable for final verification."));
                 execution = execution.Transition(CleanupExecutionState.VerificationFailed)
                     .RequireRecovery(CleanupExecutionFailureClassification.FinalVerification);
                 return await FinishAsync(execution, issues, workspace, journal, manifest,
@@ -476,7 +487,7 @@ public sealed class ExecuteApprovedCleanupPlanUseCase(
             }
 
             ExecutionVerificationResult finalVerification = CleanupExecutionVerificationPolicy.VerifyFinalState(
-                request.Plan, finalScan.Snapshot!, unaffectedBaseline, clock.GetUtcNow());
+                request.Plan, finalState.Snapshot, unaffectedBaseline, clock.GetUtcNow());
             issues.AddRange(finalVerification.Issues);
             await AppendVerificationAsync(journal, execution, null, finalVerification, CancellationToken.None).ConfigureAwait(false);
             if (!finalVerification.IsVerified)
@@ -489,7 +500,7 @@ public sealed class ExecuteApprovedCleanupPlanUseCase(
 
             execution = execution.Transition(CleanupExecutionState.Completed);
             progress?.Report(new(CleanupExecutionProgressPhase.Completed,
-                "Execution completed and the final library state was verified.", execution.Graph.Operations.Count,
+                "Execution completed and the final projected state was verified.", execution.Graph.Operations.Count,
                 execution.Graph.Operations.Count, true));
             CleanupExecutionResult completed = await FinishAsync(execution, issues, workspace, journal, manifest,
                 CleanupExecutionFailureClassification.None, terminalPersisted).ConfigureAwait(false);
@@ -554,24 +565,23 @@ public sealed class ExecuteApprovedCleanupPlanUseCase(
         if (!tool.IsSuccess || tool.Tool!.Identity != expectedTool.Identity)
             issues.Add(Block("EXECUTION.TOOL_CHANGED_AT_GATE", "The trusted Calibre executable changed before a command."));
         issues.AddRange(await backupStore.VerifyAvailableAsync(workspace, manifest, cancellationToken).ConfigureAwait(false));
-        LibraryScanOutcome scan = await scanLibrary.ScanFreshAsync(
-            request.LibraryRoot, null, cancellationToken).ConfigureAwait(false);
-        if (!scan.IsSuccess)
-            issues.Add(Block("EXECUTION.COMMAND_GATE_SCAN_FAILED",
-                "A complete fresh library scan could not be proven immediately before the command."));
+        LibraryState? state = libraryState.GetCurrent(request.LibraryRoot);
+        if (state is null || !state.IsAuthoritative)
+            issues.Add(Block("EXECUTION.COMMAND_GATE_STATE_UNAVAILABLE",
+                "Authoritative projected state is unavailable immediately before the command."));
         else if (capability.Graph is not null)
         {
             if (!request.Confirmation.Matches(request.Plan, expectedTool.Identity,
-                    workspace.CanonicalBackupDestinationIdentity, scan.Snapshot!.Identity.LibraryRoot,
+                    workspace.CanonicalBackupDestinationIdentity, state.Snapshot.Identity.LibraryRoot,
                     capability.Graph.Digest))
                 issues.Add(Block("EXECUTION.CONFIRMATION_CHANGED_AT_GATE",
                     "The local confirmation no longer matches the plan, graph, library, tool, or backup destination."));
             issues.AddRange(CleanupExecutionVerificationPolicy.VerifyConstructiveState(
-                request.Plan, scan.Snapshot!, processedRetentions, removedRecords,
+                request.Plan, state.Snapshot, processedRetentions, removedRecords,
                 unaffectedBaseline, clock.GetUtcNow()).Issues);
         }
         return (!issues.Any(value => value.Severity == ExecutionIssueSeverity.BlockingError),
-            tool.Tool, scan.Snapshot, issues);
+            tool.Tool, state?.Snapshot, issues);
     }
 
     private async Task<bool> PersistMutationGuardAsync(
@@ -671,26 +681,12 @@ public sealed class ExecuteApprovedCleanupPlanUseCase(
         return await FinishAsync(execution, issues, workspace, journal, manifest, terminalClassification, false).ConfigureAwait(false);
     }
 
-    private async Task CaptureFailureScanAsync(
-        ExecuteCleanupPlanRequest request,
-        IExecutionJournalSession journal,
-        CleanupExecution execution,
-        Sha256Digest unaffectedBaseline,
-        IEnumerable<string> processedRetentions,
-        IEnumerable<CalibreBookId> removedRecords)
-    {
-        LibraryScanOutcome scan = await scanLibrary.ScanFreshAsync(request.LibraryRoot, null, CancellationToken.None).ConfigureAwait(false);
-        if (!scan.IsSuccess)
-        {
-            await AppendAsync(journal, execution, "FailureStateScanFailed",
-                "The current partial library state could not be scanned.", CancellationToken.None).ConfigureAwait(false);
-            return;
-        }
-
-        ExecutionVerificationResult verification = CleanupExecutionVerificationPolicy.VerifyConstructiveState(
-            request.Plan, scan.Snapshot!, processedRetentions, removedRecords, unaffectedBaseline, clock.GetUtcNow());
-        await AppendVerificationAsync(journal, execution, null, verification, CancellationToken.None).ConfigureAwait(false);
-    }
+    private Task<LibraryStateSessionOutcome> MarkStateUncertainAsync(
+        string libraryRoot,
+        string code,
+        string explanation,
+        string operationId) => libraryState.MarkUncertainAsync(libraryRoot,
+        new(code, explanation, clock.GetUtcNow(), operationId), CancellationToken.None);
 
     private async Task<CleanupExecutionResult> FinishAsync(
         CleanupExecution execution,
@@ -756,7 +752,7 @@ public sealed class ExecuteApprovedCleanupPlanUseCase(
 
     private static bool TargetAlreadyMatches(LibrarySnapshot snapshot, CalibreBookId targetId, FormatRetentionInstruction retention) =>
         snapshot.Books.Single(value => value.Id == targetId).Formats.SingleOrDefault(value => value.Format == retention.Format)
-            is { FileStatus: FormatFileStatus.Present, Fingerprint: not null } format
+            is { FileStatus: FormatFileStatus.Present or FormatFileStatus.ProjectedPresent, Fingerprint: not null } format
         && format.Fingerprint == retention.SourceState.Fingerprint;
 
     private async Task AppendMutationStartingAsync(IExecutionJournalSession journal, CleanupExecution execution, CancellationToken cancellationToken) =>

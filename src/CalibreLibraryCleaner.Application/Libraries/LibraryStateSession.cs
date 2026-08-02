@@ -1,3 +1,5 @@
+using System.Collections.Concurrent;
+using CalibreLibraryCleaner.Application.Abstractions;
 using CalibreLibraryCleaner.Domain.Libraries;
 
 namespace CalibreLibraryCleaner.Application.Libraries;
@@ -15,51 +17,110 @@ public sealed record LibraryStateSessionOutcome(
         new(null, code, explanation);
 }
 
+public sealed class LibraryStateChangedEventArgs(LibraryState state) : EventArgs
+{
+    public LibraryState State { get; } = state ?? throw new ArgumentNullException(nameof(state));
+}
+
 public interface ILibraryStateSession
 {
-    LibraryStateSessionOutcome StartFromScan(
-        LibrarySnapshot snapshot);
+    event EventHandler<LibraryStateChangedEventArgs>? StateChanged;
+
+    Task<LibraryStateSessionOutcome> StartFromScanAsync(
+        LibrarySnapshot snapshot,
+        CancellationToken cancellationToken);
+
+    Task<LibraryStateSessionOutcome> LoadAsync(
+        string libraryRoot,
+        CancellationToken cancellationToken);
 
     LibraryState? GetCurrent(string libraryRoot);
 
-    LibraryStateSessionOutcome Apply(string libraryRoot, LibraryStateDelta delta);
-
-    LibraryStateSessionOutcome MarkUncertain(
+    Task<LibraryStateSessionOutcome> ApplyAsync(
         string libraryRoot,
-        LibraryStateUncertainty uncertainty);
+        LibraryStateDelta delta,
+        CancellationToken cancellationToken);
+
+    Task<LibraryStateSessionOutcome> MarkUncertainAsync(
+        string libraryRoot,
+        LibraryStateUncertainty uncertainty,
+        CancellationToken cancellationToken);
 }
 
-public sealed class LibraryStateSession : ILibraryStateSession
+public sealed class LibraryStateSession(ILibraryStateStore? store = null) : ILibraryStateSession, IDisposable
 {
-    private readonly object _gate = new();
-    private readonly Dictionary<string, LibraryState> _states = new(PathComparer());
+    private readonly SemaphoreSlim _gate = new(1, 1);
+    private readonly ConcurrentDictionary<string, LibraryState> _states = new(PathComparer());
 
-    public LibraryStateSessionOutcome StartFromScan(
-        LibrarySnapshot snapshot)
+    public event EventHandler<LibraryStateChangedEventArgs>? StateChanged;
+
+    public async Task<LibraryStateSessionOutcome> StartFromScanAsync(
+        LibrarySnapshot snapshot,
+        CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(snapshot);
         LibraryState state = LibraryState.FromScan(snapshot, new(Guid.NewGuid()));
-        lock (_gate)
+        await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
         {
+            if (store is not null)
+                await store.WriteBaselineAsync(state, cancellationToken).ConfigureAwait(false);
             _states[snapshot.Identity.LibraryRoot] = state;
+            return LibraryStateSessionOutcome.Success(state);
         }
-        return LibraryStateSessionOutcome.Success(state);
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException
+                                           or InvalidDataException or InvalidOperationException)
+        {
+            return LibraryStateSessionOutcome.Failure("LIBRARY_STATE.BASELINE_PERSIST_FAILED", exception.Message);
+        }
+        finally
+        {
+            _gate.Release();
+        }
+    }
+
+    public async Task<LibraryStateSessionOutcome> LoadAsync(
+        string libraryRoot,
+        CancellationToken cancellationToken)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(libraryRoot);
+        if (store is null)
+            return LibraryStateSessionOutcome.Failure("LIBRARY_STATE.STORE_UNAVAILABLE", "No persistent library-state store is configured.");
+        await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            LibraryState? state = await store.ReadAsync(libraryRoot, cancellationToken).ConfigureAwait(false);
+            if (state is null)
+                return LibraryStateSessionOutcome.Failure("LIBRARY_STATE.NOT_FOUND", "No persisted authoritative library state exists.");
+            _states[state.Snapshot.Identity.LibraryRoot] = state;
+            return LibraryStateSessionOutcome.Success(state);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException
+                                           or InvalidDataException or InvalidOperationException)
+        {
+            return LibraryStateSessionOutcome.Failure("LIBRARY_STATE.LOAD_FAILED", exception.Message);
+        }
+        finally
+        {
+            _gate.Release();
+        }
     }
 
     public LibraryState? GetCurrent(string libraryRoot)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(libraryRoot);
-        lock (_gate)
-        {
-            return _states.GetValueOrDefault(libraryRoot);
-        }
+        return _states.GetValueOrDefault(libraryRoot);
     }
 
-    public LibraryStateSessionOutcome Apply(string libraryRoot, LibraryStateDelta delta)
+    public async Task<LibraryStateSessionOutcome> ApplyAsync(
+        string libraryRoot,
+        LibraryStateDelta delta,
+        CancellationToken cancellationToken)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(libraryRoot);
         ArgumentNullException.ThrowIfNull(delta);
-        lock (_gate)
+        await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
         {
             if (!_states.TryGetValue(libraryRoot, out LibraryState? current))
                 return LibraryStateSessionOutcome.Failure(
@@ -68,38 +129,84 @@ public sealed class LibraryStateSession : ILibraryStateSession
             try
             {
                 LibraryState projected = LibraryStateDeltaPolicy.Apply(current, delta);
+                if (store is not null)
+                    await store.AppendDeltaAsync(libraryRoot, delta, projected, cancellationToken).ConfigureAwait(false);
                 _states[libraryRoot] = projected;
+                StateChanged?.Invoke(this, new(projected));
                 return LibraryStateSessionOutcome.Success(projected);
             }
             catch (Exception exception) when (exception is ArgumentException
                                                or InvalidOperationException
-                                               or OverflowException)
+                                               or OverflowException
+                                               or IOException
+                                               or UnauthorizedAccessException
+                                               or InvalidDataException)
             {
+                LibraryStateUncertainty uncertainty = new("DELTA_COMMIT_FAILED",
+                    exception.Message, DateTimeOffset.UtcNow, delta.OperationId);
+                LibraryState uncertain = current.MarkUncertain(uncertainty);
+                _states[libraryRoot] = uncertain;
+                StateChanged?.Invoke(this, new(uncertain));
+                if (store is not null)
+                {
+                    try
+                    {
+                        await store.WriteUncertaintyAsync(libraryRoot, uncertain, CancellationToken.None)
+                            .ConfigureAwait(false);
+                    }
+                    catch (Exception persistException) when (persistException is IOException or UnauthorizedAccessException
+                                                              or InvalidDataException or InvalidOperationException)
+                    {
+                        return LibraryStateSessionOutcome.Failure(
+                            "LIBRARY_STATE.UNCERTAINTY_PERSIST_FAILED",
+                            $"{exception.Message} Uncertainty persistence also failed: {persistException.Message}");
+                    }
+                }
                 return LibraryStateSessionOutcome.Failure(
                     "LIBRARY_STATE.DELTA_REJECTED",
                     exception.Message);
             }
         }
+        finally
+        {
+            _gate.Release();
+        }
     }
 
-    public LibraryStateSessionOutcome MarkUncertain(
+    public async Task<LibraryStateSessionOutcome> MarkUncertainAsync(
         string libraryRoot,
-        LibraryStateUncertainty uncertainty)
+        LibraryStateUncertainty uncertainty,
+        CancellationToken cancellationToken)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(libraryRoot);
         ArgumentNullException.ThrowIfNull(uncertainty);
-        lock (_gate)
+        await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
         {
             if (!_states.TryGetValue(libraryRoot, out LibraryState? current))
                 return LibraryStateSessionOutcome.Failure(
                     "LIBRARY_STATE.NOT_LOADED",
                     "No authoritative library state exists to mark uncertain.");
             LibraryState uncertain = current.MarkUncertain(uncertainty);
+            if (store is not null)
+                await store.WriteUncertaintyAsync(libraryRoot, uncertain, cancellationToken).ConfigureAwait(false);
             _states[libraryRoot] = uncertain;
+            StateChanged?.Invoke(this, new(uncertain));
             return LibraryStateSessionOutcome.Success(uncertain);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException
+                                           or InvalidDataException or InvalidOperationException)
+        {
+            return LibraryStateSessionOutcome.Failure("LIBRARY_STATE.UNCERTAINTY_PERSIST_FAILED", exception.Message);
+        }
+        finally
+        {
+            _gate.Release();
         }
     }
 
     private static StringComparer PathComparer() =>
         OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal;
+
+    public void Dispose() => _gate.Dispose();
 }

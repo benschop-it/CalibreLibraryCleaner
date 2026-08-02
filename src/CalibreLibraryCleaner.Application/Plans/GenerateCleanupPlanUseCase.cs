@@ -155,7 +155,9 @@ public sealed class GenerateCleanupPlanUseCase(
             book.Id,
             book.Title,
             book.AuthorSort,
-            book.Authors.Select(value => new ExpectedAuthorState(value.Id, value.Name, value.SortName)),
+            book.Authors.Select(value => new ExpectedAuthorState(
+                value.Id ?? throw new InvalidOperationException("Projected authors require an explicit rescan before cleanup planning."),
+                value.Name, value.SortName)),
             book.Identifiers.Select(value => new ExpectedIdentifierState(value.Type, value.Value)),
             publication.Publisher,
             publication.PublicationDate,

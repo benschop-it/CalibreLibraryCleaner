@@ -8,4 +8,6 @@ public sealed record LibrarySnapshotStorageOptions
         "library-snapshots");
 
     public long MaximumSnapshotBytes { get; init; } = 512L * 1024 * 1024;
+
+    public int StateDeltaCompactionThreshold { get; init; } = 1_000;
 }

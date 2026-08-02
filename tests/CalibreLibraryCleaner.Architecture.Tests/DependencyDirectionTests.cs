@@ -128,6 +128,21 @@ public sealed class DependencyDirectionTests
     }
 
     [Fact]
+    public void ProductionMutationWorkflowsCannotInvokeLibraryScanners()
+    {
+        string applicationRoot = Path.Combine(RepositoryRoot, "src", ApplicationProject);
+        string[] mutationFiles = Directory.EnumerateFiles(applicationRoot, "*.cs", SearchOption.AllDirectories)
+            .Where(path => path.Contains($"{Path.DirectorySeparatorChar}Executions{Path.DirectorySeparatorChar}", StringComparison.Ordinal)
+                || path.Contains($"{Path.DirectorySeparatorChar}Recoveries{Path.DirectorySeparatorChar}", StringComparison.Ordinal))
+            .ToArray();
+        string source = string.Join(Environment.NewLine, mutationFiles.Select(File.ReadAllText));
+
+        source.Should().NotContain("ScanFreshAsync");
+        source.Should().NotContain("IExecutionLibraryScanner");
+        source.Should().NotContain("IRecoveryCurrentStateScanner");
+    }
+
+    [Fact]
     public void CoreAndWpfSourceDoNotImplementFileHashing()
     {
         string[] projectNames = [DomainProject, ApplicationProject, WpfProject];

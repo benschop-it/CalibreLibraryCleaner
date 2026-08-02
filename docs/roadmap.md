@@ -38,22 +38,21 @@ Implemented as a single-plan, serial, fail-closed execution workflow for the
 exact Calibre 9.11.0 Windows compatibility profile. The supported mutation
 mapping is limited to `add_format` additions/replacements and non-permanent
 `remove` of redundant source records, after an exclusive application lease,
-fresh plan revalidation, and a complete independently hash-verified external
-backup. Every mutation uses a direct no-shell process boundary and is followed
-by a fresh semantic scan. Hash-chained journals, recovery-required
+authoritative-revision plan validation, and a complete independently hash-verified external
+backup. Every mutation uses a direct no-shell process boundary and durably commits a typed state delta. Hash-chained journals, recovery-required
 reconciliation, safe-stop semantics, WPF confirmations, progress, and durable
 results are included. Automatic rollback, resume, retry, repair, bulk
 execution, metadata transfer, cover replacement, and standalone format removal
 remain unsupported.
 
 Post-implementation hardening binds confirmation to canonical root and operation
-graph, repeats a complete preflight before every command, prevents verified
+graph, validates the current projected revision before every command, prevents verified
 executable/backup substitution, and persists an application-local recovery
 guard. Cover-bearing plans are blocked until cover bytes are modeled and can be
 verified exactly.
 
 The exact 9.11.0 cleanup runtime profile is enabled by default and still requires
-exact executable identity, version, command probes, fresh scans, and typed command
+exact executable identity, version, command probes, authoritative state, and typed command
 mapping. Recovery capabilities remain independently disabled unless qualified.
 
 ## Milestone 8 — Rollback
@@ -61,11 +60,11 @@ mapping. Recovery capabilities remain independently disabled unless qualified.
 Rollback plans, supported restore operations, verification, and history UI.
 
 Implemented as a single-execution, explicitly approved, reconciliation-driven
-recovery workflow. It strictly reverifies Milestone 7 source artifacts, performs
-a fresh full scan, generates a canonical immutable recovery plan, preserves or
+recovery workflow. It strictly reverifies Milestone 7 source artifacts, uses
+the authoritative projected state, generates a canonical immutable recovery plan, preserves or
 blocks on unexpected current data, creates and verifies a separate current-state
 backup, restores constructively before separately confirmed destructive work,
-rescans after every command, verifies the final semantic state, and persists
+commits a typed delta after every successful command, verifies the final projected state, and persists
 hash-chained journals, append-only history, source-resolution links, and changed
 record-ID mappings. Cleanup and recovery share one lease domain. No direct
 database or managed-library filesystem mutation, shell invocation, automatic

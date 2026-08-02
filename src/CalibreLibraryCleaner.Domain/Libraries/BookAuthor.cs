@@ -2,7 +2,7 @@ namespace CalibreLibraryCleaner.Domain.Libraries;
 
 public sealed record BookAuthor
 {
-    public BookAuthor(CalibreAuthorId id, string name, string sortName)
+    public BookAuthor(CalibreAuthorId? id, string name, string sortName)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(name);
         ArgumentNullException.ThrowIfNull(sortName);
@@ -11,9 +11,11 @@ public sealed record BookAuthor
         SortName = sortName;
     }
 
-    public CalibreAuthorId Id { get; }
+    public CalibreAuthorId? Id { get; }
 
     public string Name { get; }
 
     public string SortName { get; }
+
+    public bool IsProjected => Id is null;
 }
