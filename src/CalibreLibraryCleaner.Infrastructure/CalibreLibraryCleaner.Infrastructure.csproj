@@ -13,4 +13,9 @@
     <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" />
     <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" />
   </ItemGroup>
+
+  <ItemGroup>
+    <EmbeddedResource Include="Calibre\calibre_mutation_worker.py"
+                      LogicalName="CalibreLibraryCleaner.Infrastructure.Calibre.calibre_mutation_worker.py" />
+  </ItemGroup>
 </Project>

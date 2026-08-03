@@ -10,6 +10,7 @@ public sealed class ExecuteBulkExactDuplicateCleanupUseCase(
     ILibraryStateSession libraryState,
     ICalibreToolDiscovery toolDiscovery,
     ICalibreCommandGateway commandGateway,
+    ICalibreMutationWorkerFactory workerFactory,
     IExactDuplicateFormatStaging staging,
     ILibraryMutationLease mutationLease,
     ICleanupExecutionIdGenerator executionIds,
@@ -66,6 +67,24 @@ public sealed class ExecuteBulkExactDuplicateCleanupUseCase(
         bool mutationStarted = false;
         try
         {
+            CalibreMutationWorkerOpenResult worker = await workerFactory.TryOpenAsync(new(
+                discovery.Tool!, request.LibraryRoot, initial.Snapshot.Identity.CalibreLibraryUuid),
+                cancellationToken).ConfigureAwait(false);
+            if (worker.IsSuccess)
+            {
+                await using ICalibreMutationWorkerSession session = worker.Session!;
+                return await ExecuteWithWorkerAsync(session).ConfigureAwait(false);
+            }
+            if (!worker.IsCliFallbackAllowed)
+            {
+                issues.Add(Block("BULK_EXACT.WORKER_PREFLIGHT_BLOCKED",
+                    "The persistent Calibre worker failed a safety preflight. Close Calibre and run an explicit scan before retrying."));
+                return Result(BulkExactDuplicateCleanupState.PreflightFailed, 0, 0, 0,
+                    plan.SkippedRecordCount);
+            }
+            issues.Add(new("BULK_EXACT.WORKER_UNAVAILABLE", ExecutionIssueSeverity.Warning,
+                "Persistent Calibre mutation was unavailable; cleanup is using the slower command-line fallback."));
+
             progress?.Report(new("Preparing complementary formats for record merging.", 0, plan.TotalOperations));
             foreach (TransferOperation transfer in plan.Transfers.Where(value => value.NeedsAdd))
             {
@@ -229,7 +248,133 @@ public sealed class ExecuteBulkExactDuplicateCleanupUseCase(
             CalibreBookId? recordId) => libraryState.MarkUncertainAsync(request.LibraryRoot,
             new(code, explanation, clock.GetUtcNow(), recordId?.Value.ToString(
                 System.Globalization.CultureInfo.InvariantCulture)), CancellationToken.None);
+
+        async Task<BulkExactDuplicateCleanupResult> ExecuteWithWorkerAsync(
+            ICalibreMutationWorkerSession session)
+        {
+            using IDisposable statePublication = libraryState.DeferStateChanged(request.LibraryRoot);
+            WorkerPlannedOperation[] operations = BuildWorkerOperations(plan);
+            int chunkNumber = 0;
+            foreach (WorkerPlannedOperation[] chunk in operations.Chunk(CalibreMutationChunkRequest.MaximumOperationCount))
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                if (!lease.IsHeld) throw new InvalidOperationException("The cleanup lease was lost.");
+                progress?.Report(new("Removing exact duplicates through the persistent Calibre worker.",
+                    completed, plan.TotalOperations));
+                string chunkId = $"{executionId}:{++chunkNumber}";
+                CalibreMutationOperation[] chunkOperations = chunk.Select(value => value.Operation).ToArray();
+                LibraryState intentState = Current();
+                LibraryStateSessionOutcome intent = await libraryState.BeginMutationBatchAsync(
+                    request.LibraryRoot, new LibraryStateMutationIntent(chunkId,
+                        intentState.GenerationId, intentState.Revision,
+                        chunkOperations.Select(value => value.OperationId), clock.GetUtcNow()),
+                    cancellationToken).ConfigureAwait(false);
+                if (!intent.IsSuccess)
+                {
+                    issues.Add(Block("BULK_EXACT.MUTATION_INTENT_FAILED",
+                        "A durable mutation intent could not be written before the next Calibre chunk."));
+                    return Result(mutationStarted
+                            ? BulkExactDuplicateCleanupState.PartiallyCompleted
+                            : BulkExactDuplicateCleanupState.PreflightFailed,
+                        removedFormats, mergedRecords, removedRecords, plan.SkippedRecordCount);
+                }
+                CalibreMutationChunkResult workerResult = await session.ExecuteChunkAsync(
+                    new(chunkId, chunkOperations), CancellationToken.None).ConfigureAwait(false);
+                mutationStarted |= workerResult.MutationStarted;
+
+                (WorkerPlannedOperation Planned, CalibreMutationOperationResult Outcome)[] successful = chunk
+                    .Zip(workerResult.OperationResults)
+                    .Where(pair => pair.Second.IsSuccess)
+                    .Select(pair => (pair.First, pair.Second))
+                    .ToArray();
+                if (successful.Length > 0)
+                {
+                    LibraryState current = Current();
+                    LibraryStateRevision revision = current.Revision;
+                    DateTimeOffset appliedAt = AppliedAt(current);
+                    List<LibraryStateDelta> deltas = new(successful.Length);
+                    foreach ((WorkerPlannedOperation planned, _) in successful)
+                    {
+                        deltas.Add(CreateDelta(current.GenerationId, revision, appliedAt, planned));
+                        revision = revision.Next();
+                    }
+                    LibraryStateSessionOutcome applied = await libraryState.ApplyMutationBatchAsync(
+                        request.LibraryRoot, chunkId, deltas,
+                        completeMutationIntent: workerResult.IsSuccess,
+                        CancellationToken.None).ConfigureAwait(false);
+                    if (!applied.IsSuccess)
+                    {
+                        return FailProjection("A worker mutation batch could not be committed to projected state.");
+                    }
+                    foreach ((WorkerPlannedOperation planned, _) in successful)
+                    {
+                        if (planned.Operation.Kind == CalibreMutationOperationKind.RemoveFormat) removedFormats++;
+                        if (planned.Operation.Kind == CalibreMutationOperationKind.RemoveRecord)
+                        {
+                            if (plan.MergedRecordIds.Contains(planned.Operation.RecordId)) mergedRecords++;
+                            removedRecords++;
+                        }
+                    }
+                    completed += successful.Length;
+                }
+
+                if (!workerResult.IsSuccess)
+                {
+                    await MarkUncertainAsync("BULK_EXACT.WORKER_CHUNK_FAILED",
+                        "The persistent Calibre worker did not complete a mutation chunk unambiguously.",
+                        null).ConfigureAwait(false);
+                    issues.Add(Block("BULK_EXACT.WORKER_CHUNK_FAILED",
+                        "The persistent Calibre worker could not complete duplicate cleanup."));
+                    return Result(BulkExactDuplicateCleanupState.PartiallyCompleted,
+                        removedFormats, mergedRecords, removedRecords, plan.SkippedRecordCount);
+                }
+            }
+
+            LibraryStateSessionOutcome checkpoint = await libraryState.CheckpointAsync(
+                request.LibraryRoot, CancellationToken.None).ConfigureAwait(false);
+            if (!checkpoint.IsSuccess)
+                issues.Add(new("BULK_EXACT.CHECKPOINT_FAILED", ExecutionIssueSeverity.Warning,
+                    "Duplicate cleanup completed, but projected state checkpoint compaction was deferred."));
+            progress?.Report(new("Duplicate cleanup completed.", plan.TotalOperations, plan.TotalOperations));
+            return Result(BulkExactDuplicateCleanupState.Completed, removedFormats,
+                mergedRecords, removedRecords, plan.SkippedRecordCount);
+        }
     }
+
+    private static LibraryStateDelta CreateDelta(
+        LibraryStateGenerationId generationId,
+        LibraryStateRevision revision,
+        DateTimeOffset appliedAt,
+        WorkerPlannedOperation planned) => planned.Operation.Kind switch
+        {
+            CalibreMutationOperationKind.TransferFormat => new AddOrReplaceFormatLibraryStateDelta(
+                generationId, revision, planned.Operation.OperationId, appliedAt,
+                planned.Operation.TargetRecordId!.Value, planned.Operation.CanonicalFormat!,
+                planned.Operation.ExpectedFingerprint!, null),
+            CalibreMutationOperationKind.RemoveFormat => new RemoveFormatLibraryStateDelta(
+                generationId, revision, planned.Operation.OperationId, appliedAt,
+                planned.Operation.RecordId, planned.Operation.CanonicalFormat!,
+                planned.Removal!.Format.Fingerprint!),
+            CalibreMutationOperationKind.RemoveRecord => new RemoveRecordLibraryStateDelta(
+                generationId, revision, planned.Operation.OperationId, appliedAt,
+                planned.Operation.RecordId),
+            _ => throw new InvalidOperationException("The worker returned an unsupported operation."),
+        };
+
+    private static WorkerPlannedOperation[] BuildWorkerOperations(BulkPlan plan) =>
+    [
+        .. plan.Transfers.Where(value => value.NeedsAdd).Select(value => new WorkerPlannedOperation(
+            CalibreMutationOperation.TransferFormat(
+                $"bulk-add:{value.TargetRecordId.Value}:{value.SourceFormat.Format}",
+                value.SourceRecordId, value.TargetRecordId, value.SourceFormat.Format,
+                value.SourceFormat.Fingerprint!), null)),
+        .. plan.FormatRemovals.Select(value => new WorkerPlannedOperation(
+            CalibreMutationOperation.RemoveFormat(
+                $"bulk-remove-format:{value.RecordId.Value}:{value.Format.Format}",
+                value.RecordId, value.Format.Format), value)),
+        .. plan.RecordsToRemove.Select(value => new WorkerPlannedOperation(
+            CalibreMutationOperation.RemoveRecord($"bulk-remove-record:{value.Value}", value), null)),
+    ];
 
     private static BulkPlan BuildPlan(
         LibrarySnapshot snapshot,
@@ -346,6 +491,9 @@ public sealed class ExecuteBulkExactDuplicateCleanupUseCase(
         CalibreBookId TargetRecordId,
         BookFormat SourceFormat,
         bool NeedsAdd);
+    private sealed record WorkerPlannedOperation(
+        CalibreMutationOperation Operation,
+        FormatRemovalOperation? Removal);
     private sealed record BulkPlan(
         IReadOnlyList<TransferOperation> Transfers,
         IReadOnlyList<FormatRemovalOperation> FormatRemovals,

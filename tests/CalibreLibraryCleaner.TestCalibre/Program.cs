@@ -6,6 +6,54 @@ Control control = File.Exists(controlPath)
     ? JsonSerializer.Deserialize<Control>(File.ReadAllText(controlPath)) ?? new()
     : new();
 string version = control.Version;
+if (values is ["-e", _, "--", _, string libraryUuid])
+{
+    IReadOnlyList<string> capabilities = new List<string>
+    {
+        "transferFormat", "removeFormat", "removeRecord",
+    };
+    if (!string.IsNullOrWhiteSpace(control.LogPath))
+        File.AppendAllText(control.LogPath, JsonSerializer.Serialize(values) + Environment.NewLine);
+    WriteWorkerMessage(new
+    {
+        protocolVersion = "calibre-mutation-worker-protocol/1.0",
+        kind = "ready",
+        libraryUuid,
+        capabilities,
+    });
+    string? line;
+    while ((line = await Console.In.ReadLineAsync()) is not null)
+    {
+        using JsonDocument message = JsonDocument.Parse(line);
+        JsonElement root = message.RootElement;
+        string kind = root.GetProperty("kind").GetString()!;
+        if (kind == "shutdown")
+        {
+            WriteWorkerMessage(new
+            {
+                protocolVersion = "calibre-mutation-worker-protocol/1.0",
+                kind = "stopped",
+                mutationStarted = false,
+            });
+            return 0;
+        }
+        JsonElement operations = root.GetProperty("operations");
+        WriteWorkerMessage(new
+        {
+            protocolVersion = "calibre-mutation-worker-protocol/1.0",
+            kind = "chunkResult",
+            chunkId = root.GetProperty("chunkId").GetString(),
+            mutationStarted = true,
+            operationResults = operations.EnumerateArray().Select(operation => new
+            {
+                operationId = operation.GetProperty("operationId").GetString(),
+                kind = operation.GetProperty("kind").GetString(),
+                isSuccess = true,
+            }).ToArray(),
+        });
+    }
+    return 0;
+}
 if (values.SequenceEqual(["--version"]))
 {
     Console.WriteLine($"calibredb.exe (calibre {version})");
@@ -59,6 +107,12 @@ if (exportIndex >= 0)
 }
 
 return control.ExitCode;
+
+static void WriteWorkerMessage<T>(T message)
+{
+    Console.WriteLine(JsonSerializer.Serialize(message));
+    Console.Out.Flush();
+}
 
 internal sealed record Control(
     string Version = "9.11.0",

@@ -45,9 +45,21 @@ internal sealed class VersionedJsonLibraryStateStore(LibrarySnapshotStorageOptio
         string libraryRoot,
         LibraryStateDelta delta,
         LibraryState projectedState,
+        CancellationToken cancellationToken) => await AppendDeltaBatchAsync(
+        libraryRoot, [delta], projectedState, compactIfThresholdReached: true,
+        null, completeMutationIntent: false, cancellationToken).ConfigureAwait(false);
+
+    public async Task AppendDeltaBatchAsync(
+        string libraryRoot,
+        IReadOnlyList<LibraryStateDelta> deltas,
+        LibraryState projectedState,
+        bool compactIfThresholdReached,
+        string? mutationIntentId,
+        bool completeMutationIntent,
         CancellationToken cancellationToken)
     {
-        ArgumentNullException.ThrowIfNull(delta);
+        ArgumentNullException.ThrowIfNull(deltas);
+        if (deltas.Count == 0) throw new ArgumentException("At least one state delta is required.", nameof(deltas));
         ArgumentNullException.ThrowIfNull(projectedState);
         string canonical = Canonicalize(libraryRoot);
         string root = StorageRoot();
@@ -55,22 +67,31 @@ internal sealed class VersionedJsonLibraryStateStore(LibrarySnapshotStorageOptio
         StateManifest manifest = await ReadManifestAsync(root, key, cancellationToken).ConfigureAwait(false)
             ?? throw new InvalidOperationException("No persisted library-state baseline exists.");
         if (manifest.Status != LibraryStateStatus.Authoritative
-            || manifest.GenerationId != delta.GenerationId.Value
-            || manifest.Revision != delta.ExpectedRevision.Value
+            || deltas.Any(delta => delta is null || manifest.GenerationId != delta.GenerationId.Value)
+            || deltas.Select((delta, index) => delta.ExpectedRevision.Value == checked(manifest.Revision + index))
+                .Any(matches => !matches)
             || projectedState.GenerationId.Value != manifest.GenerationId
-            || projectedState.Revision.Value != checked(manifest.Revision + 1))
-            throw new InvalidOperationException("The persisted state manifest does not match the delta transition.");
+            || projectedState.Revision.Value != checked(manifest.Revision + deltas.Count))
+            throw new InvalidOperationException("The persisted state manifest does not match the delta batch transition.");
+        ValidateMutationIntent(manifest, deltas, mutationIntentId, completeMutationIntent);
 
-        DeltaPayload payload = ToPayload(delta);
-        string payloadJson = JsonSerializer.Serialize(payload, JsonOptions);
-        string digest = Hash($"{manifest.HeadDigest}\n{payloadJson}");
-        DeltaEvent entry = new(manifest.HeadDigest, digest, payload);
+        string head = manifest.HeadDigest;
+        StringBuilder journalAppend = new();
+        foreach (LibraryStateDelta delta in deltas)
+        {
+            DeltaPayload payload = ToPayload(delta);
+            string payloadJson = JsonSerializer.Serialize(payload, JsonOptions);
+            string digest = Hash($"{head}\n{payloadJson}");
+            DeltaEvent entry = new(head, digest, payload);
+            journalAppend.Append(JsonSerializer.Serialize(entry, JsonOptions)).Append('\n');
+            head = digest;
+        }
         string journalPath = Path.Combine(root, manifest.JournalFile);
-        byte[] line = Encoding.UTF8.GetBytes(JsonSerializer.Serialize(entry, JsonOptions) + "\n");
+        byte[] lines = Encoding.UTF8.GetBytes(journalAppend.ToString());
         await using (FileStream stream = new(journalPath, FileMode.Append, FileAccess.Write, FileShare.Read,
                          64 * 1024, FileOptions.Asynchronous | FileOptions.WriteThrough))
         {
-            await stream.WriteAsync(line, cancellationToken).ConfigureAwait(false);
+            await stream.WriteAsync(lines, cancellationToken).ConfigureAwait(false);
             stream.Flush(flushToDisk: true);
         }
 
@@ -78,14 +99,57 @@ internal sealed class VersionedJsonLibraryStateStore(LibrarySnapshotStorageOptio
         {
             Revision = projectedState.Revision.Value,
             ProjectedAtUtc = projectedState.ProjectedAtUtc,
-            HeadDigest = digest,
-            DeltaCount = checked(manifest.DeltaCount + 1),
+            HeadDigest = head,
+            DeltaCount = checked(manifest.DeltaCount + deltas.Count),
+            PendingMutationIntent = completeMutationIntent ? null : manifest.PendingMutationIntent,
         };
-        if (options.StateDeltaCompactionThreshold > 0
+        if (compactIfThresholdReached
+            && options.StateDeltaCompactionThreshold > 0
             && updated.DeltaCount >= options.StateDeltaCompactionThreshold)
-            await CompactAsync(root, key, updated, projectedState, cancellationToken).ConfigureAwait(false);
+            await CompactStateAsync(root, key, updated, projectedState, cancellationToken).ConfigureAwait(false);
         else
             await WriteManifestAsync(root, key, updated, cancellationToken).ConfigureAwait(false);
+    }
+
+    public async Task WriteMutationIntentAsync(
+        string libraryRoot,
+        LibraryStateMutationIntent intent,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(intent);
+        string canonical = Canonicalize(libraryRoot);
+        string root = StorageRoot();
+        string key = Key(canonical);
+        StateManifest manifest = await ReadManifestAsync(root, key, cancellationToken).ConfigureAwait(false)
+            ?? throw new InvalidOperationException("No persisted library-state baseline exists.");
+        if (manifest.Status != LibraryStateStatus.Authoritative
+            || manifest.PendingMutationIntent is not null
+            || manifest.GenerationId != intent.GenerationId.Value
+            || manifest.Revision != intent.ExpectedRevision.Value)
+            throw new InvalidOperationException("The persisted state manifest cannot accept the mutation intent.");
+        await WriteManifestAsync(root, key, manifest with { PendingMutationIntent = ToPayload(intent) }, cancellationToken)
+            .ConfigureAwait(false);
+    }
+
+    public async Task CompactAsync(
+        string libraryRoot,
+        LibraryState state,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(state);
+        string canonical = Canonicalize(libraryRoot);
+        string root = StorageRoot();
+        string key = Key(canonical);
+        StateManifest manifest = await ReadManifestAsync(root, key, cancellationToken).ConfigureAwait(false)
+            ?? throw new InvalidOperationException("No persisted library-state baseline exists.");
+        if (manifest.Status != LibraryStateStatus.Authoritative
+            || state.Status != LibraryStateStatus.Authoritative
+            || manifest.PendingMutationIntent is not null
+            || manifest.GenerationId != state.GenerationId.Value
+            || manifest.Revision != state.Revision.Value)
+            throw new InvalidOperationException("The persisted state manifest does not match the checkpoint state.");
+        if (manifest.DeltaCount > 0)
+            await CompactStateAsync(root, key, manifest, state, cancellationToken).ConfigureAwait(false);
     }
 
     public async Task WriteUncertaintyAsync(
@@ -145,6 +209,13 @@ internal sealed class VersionedJsonLibraryStateStore(LibrarySnapshotStorageOptio
                 LibraryStateUncertainty uncertainty = manifest.Uncertainty
                     ?? new("PERSISTED_STATE_UNCERTAIN", "The persisted state manifest is uncertain.", manifest.ProjectedAtUtc);
                 return state.MarkUncertain(uncertainty);
+            }
+            if (manifest.PendingMutationIntent is not null)
+            {
+                LibraryStateMutationIntent intent = FromPayload(manifest.PendingMutationIntent);
+                return state.MarkUncertain(new("MUTATION_INTENT_INCOMPLETE",
+                    "A persisted mutation intent has no unambiguous committed outcome.",
+                    intent.CreatedAtUtc, intent.IntentId));
             }
             return state;
         }
@@ -213,6 +284,38 @@ internal sealed class VersionedJsonLibraryStateStore(LibrarySnapshotStorageOptio
         new(size ?? throw new InvalidDataException("A persisted fingerprint has no size."),
             new(sha256 ?? throw new InvalidDataException("A persisted fingerprint has no digest.")));
 
+    private static void ValidateMutationIntent(
+        StateManifest manifest,
+        IReadOnlyList<LibraryStateDelta> deltas,
+        string? mutationIntentId,
+        bool completeMutationIntent)
+    {
+        if (mutationIntentId is null)
+        {
+            if (completeMutationIntent || manifest.PendingMutationIntent is not null)
+                throw new InvalidOperationException("A pending mutation intent blocks an unrelated delta batch.");
+            return;
+        }
+        MutationIntentPayload intent = manifest.PendingMutationIntent
+            ?? throw new InvalidOperationException("The committed mutation batch has no persisted intent.");
+        if (!string.Equals(intent.IntentId, mutationIntentId, StringComparison.Ordinal)
+            || intent.GenerationId != manifest.GenerationId
+            || intent.ExpectedRevision != manifest.Revision
+            || deltas.Count > intent.OperationIds.Length
+            || !deltas.Select(value => value.OperationId).SequenceEqual(
+                intent.OperationIds.Take(deltas.Count), StringComparer.Ordinal)
+            || completeMutationIntent && deltas.Count != intent.OperationIds.Length)
+            throw new InvalidOperationException("The committed mutation batch does not match its persisted intent.");
+    }
+
+    private static MutationIntentPayload ToPayload(LibraryStateMutationIntent intent) => new(
+        intent.IntentId, intent.GenerationId.Value, intent.ExpectedRevision.Value,
+        intent.OperationIds.ToArray(), intent.CreatedAtUtc);
+
+    private static LibraryStateMutationIntent FromPayload(MutationIntentPayload intent) => new(
+        intent.IntentId, new(intent.GenerationId), new(intent.ExpectedRevision),
+        intent.OperationIds, intent.CreatedAtUtc);
+
     private static async Task<LibrarySnapshot> ReadBaselineAsync(string path, CancellationToken cancellationToken)
     {
         byte[] bytes = await File.ReadAllBytesAsync(path, cancellationToken).ConfigureAwait(false);
@@ -239,7 +342,7 @@ internal sealed class VersionedJsonLibraryStateStore(LibrarySnapshotStorageOptio
         CancellationToken cancellationToken) => WriteAtomicAsync(
         Path.Combine(root, key + ManifestSuffix), JsonSerializer.SerializeToUtf8Bytes(manifest, JsonOptions), cancellationToken);
 
-    private static async Task CompactAsync(
+    private static async Task CompactStateAsync(
         string root,
         string key,
         StateManifest previous,
@@ -336,7 +439,15 @@ internal sealed class VersionedJsonLibraryStateStore(LibrarySnapshotStorageOptio
         string JournalFile,
         string HeadDigest,
         int DeltaCount,
-        LibraryStateUncertainty? Uncertainty);
+        LibraryStateUncertainty? Uncertainty,
+        MutationIntentPayload? PendingMutationIntent = null);
+
+    private sealed record MutationIntentPayload(
+        string IntentId,
+        Guid GenerationId,
+        long ExpectedRevision,
+        string[] OperationIds,
+        DateTimeOffset CreatedAtUtc);
 
     private sealed record DeltaEvent(string PreviousDigest, string Digest, DeltaPayload Payload);
 

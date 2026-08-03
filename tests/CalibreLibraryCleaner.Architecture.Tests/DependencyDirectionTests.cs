@@ -331,7 +331,7 @@ public sealed class DependencyDirectionTests
     }
 
     [Fact]
-    public void CalibreExecutionUsesOneDirectNoShellProcessBoundary()
+    public void ExternalWorkersUseDedicatedDirectNoShellProcessBoundaries()
     {
         string infrastructureRoot = Path.Combine(RepositoryRoot, "src", InfrastructureProject);
         string[] processSources = Directory.EnumerateFiles(infrastructureRoot, "*.cs", SearchOption.AllDirectories)
@@ -344,11 +344,20 @@ public sealed class DependencyDirectionTests
                     Path.Combine(RepositoryRoot, "src", project), "*.cs", SearchOption.AllDirectories))
                 .Select(File.ReadAllText));
 
-        processSources.Should().HaveCount(2);
+        processSources.Should().HaveCount(3);
         processSources.Should().Contain(path => path.EndsWith("DirectCalibreProcessRunner.cs", StringComparison.Ordinal));
         processSources.Should().Contain(path => path.EndsWith("IsolatedPdfInspector.cs", StringComparison.Ordinal));
+        processSources.Should().Contain(path => path.EndsWith("PersistentCalibreMutationWorkerFactory.cs", StringComparison.Ordinal));
         runner.Should().Contain("UseShellExecute = false").And.Contain("ArgumentList.Add")
             .And.Contain("mayTerminateOnCancellation");
+        string calibreWorker = File.ReadAllText(Path.Combine(
+            infrastructureRoot, "Calibre", "PersistentCalibreMutationWorkerFactory.cs"));
+        calibreWorker.Should().Contain("UseShellExecute = false")
+            .And.Contain("RedirectStandardInput = true")
+            .And.Contain("RedirectStandardOutput = true")
+            .And.Contain("Environment.Clear()")
+            .And.Contain("CLC_WORKER_TEMP_DIRECTORY")
+            .And.Contain("calibre_mutation_worker.py");
         string pdfRunner = File.ReadAllText(Path.Combine(infrastructureRoot, "Pdf", "IsolatedPdfInspector.cs"));
         pdfRunner.Should().Contain("UseShellExecute = false").And.Contain("ArgumentList.Add(\"--stdio\")")
             .And.Contain("RedirectStandardInput = true").And.Contain("RedirectStandardOutput = true")

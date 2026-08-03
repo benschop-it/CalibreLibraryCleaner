@@ -178,14 +178,7 @@ public static class LibraryStateDeltaPolicy
     {
         ArgumentNullException.ThrowIfNull(state);
         ArgumentNullException.ThrowIfNull(delta);
-        if (!state.IsAuthoritative)
-            throw new InvalidOperationException("Deltas cannot be applied while library state is uncertain.");
-        if (delta.GenerationId != state.GenerationId)
-            throw new InvalidOperationException("The delta belongs to a different library-state generation.");
-        if (delta.ExpectedRevision != state.Revision)
-            throw new InvalidOperationException("The delta expected a different library-state revision.");
-        if (delta.AppliedAtUtc < state.ProjectedAtUtc)
-            throw new InvalidOperationException("The delta predates the current projected state.");
+        ValidateTransition(state, delta, state.Revision, state.ProjectedAtUtc);
 
         LibrarySnapshot projected = delta switch
         {
@@ -200,6 +193,139 @@ public static class LibraryStateDeltaPolicy
         };
         return new(state.GenerationId, state.Revision.Next(), LibraryStateStatus.Authoritative,
             projected, delta.AppliedAtUtc);
+    }
+
+    public static LibraryState ApplyBatch(
+        LibraryState state,
+        IReadOnlyList<LibraryStateDelta> deltas)
+    {
+        ArgumentNullException.ThrowIfNull(state);
+        ArgumentNullException.ThrowIfNull(deltas);
+        if (deltas.Count == 0) throw new ArgumentException("At least one state delta is required.", nameof(deltas));
+        if (deltas.Any(delta => delta is not RemoveFormatLibraryStateDelta
+            and not RemoveRecordLibraryStateDelta
+            and not AddOrReplaceFormatLibraryStateDelta))
+        {
+            LibraryState sequential = state;
+            foreach (LibraryStateDelta delta in deltas) sequential = Apply(sequential, delta);
+            return sequential;
+        }
+
+        Dictionary<CalibreBookId, CalibreBook> books = state.Snapshot.Books.ToDictionary(value => value.Id);
+        HashSet<FormatAssociation> changedFormats = [];
+        HashSet<CalibreBookId> removedRecords = [];
+        LibraryStateRevision revision = state.Revision;
+        DateTimeOffset projectedAt = state.ProjectedAtUtc;
+        foreach (LibraryStateDelta delta in deltas)
+        {
+            ArgumentNullException.ThrowIfNull(delta);
+            ValidateTransition(state, delta, revision, projectedAt);
+            switch (delta)
+            {
+                case RemoveFormatLibraryStateDelta removeFormat:
+                    ApplyRemoveFormat(books, changedFormats, removeFormat);
+                    break;
+                case AddOrReplaceFormatLibraryStateDelta addOrReplace:
+                    ApplyAddOrReplaceFormat(books, changedFormats, addOrReplace);
+                    break;
+                case RemoveRecordLibraryStateDelta removeRecord:
+                    ApplyRemoveRecord(books, removedRecords, removeRecord);
+                    break;
+            }
+            revision = revision.Next();
+            projectedAt = delta.AppliedAtUtc;
+        }
+
+        CalibreBook[] projectedBooks = state.Snapshot.Books
+            .Where(value => books.ContainsKey(value.Id))
+            .Select(value => books[value.Id])
+            .ToArray();
+        ExactMetadataDuplicateGroup[] metadataGroups = state.Snapshot.ExactMetadataDuplicateGroups
+            .Select(group => group.Members.Any(removedRecords.Contains)
+                ? CreateMetadataGroup(group, group.Members.Where(value => !removedRecords.Contains(value)))
+                : group)
+            .Where(value => value is not null)
+            .Cast<ExactMetadataDuplicateGroup>()
+            .ToArray();
+        LibrarySnapshot snapshot = Project(state.Snapshot, projectedBooks,
+            state.Snapshot.Findings.Where(value => value.BookId is null
+                || !removedRecords.Contains(value.BookId.Value)
+                && (value.Format is null
+                    || !changedFormats.Contains(new(value.BookId.Value, value.Format)))),
+            ExactBinaryDuplicateDetector.Detect(projectedBooks),
+            metadataGroups,
+            state.Snapshot.EpubAssessments.Where(value => !removedRecords.Contains(value.CalibreBookId)
+                && !changedFormats.Contains(new(value.CalibreBookId, value.Format))),
+            state.Snapshot.PdfAssessments.Where(value => !removedRecords.Contains(value.CalibreBookId)
+                && !changedFormats.Contains(new(value.CalibreBookId, value.Format))));
+        return new(state.GenerationId, revision, LibraryStateStatus.Authoritative, snapshot, projectedAt);
+    }
+
+    private static void ValidateTransition(
+        LibraryState state,
+        LibraryStateDelta delta,
+        LibraryStateRevision expectedRevision,
+        DateTimeOffset projectedAt)
+    {
+        if (!state.IsAuthoritative)
+            throw new InvalidOperationException("Deltas cannot be applied while library state is uncertain.");
+        if (delta.GenerationId != state.GenerationId)
+            throw new InvalidOperationException("The delta belongs to a different library-state generation.");
+        if (delta.ExpectedRevision != expectedRevision)
+            throw new InvalidOperationException("The delta expected a different library-state revision.");
+        if (delta.AppliedAtUtc < projectedAt)
+            throw new InvalidOperationException("The delta predates the current projected state.");
+    }
+
+    private static void ApplyRemoveFormat(
+        Dictionary<CalibreBookId, CalibreBook> books,
+        HashSet<FormatAssociation> changedFormats,
+        RemoveFormatLibraryStateDelta delta)
+    {
+        if (!books.TryGetValue(delta.RecordId, out CalibreBook? current))
+            throw new InvalidOperationException("The format-removal record is not present in the authoritative state.");
+        BookFormat removed = current.Formats.SingleOrDefault(value =>
+            string.Equals(value.Format, delta.Format, StringComparison.Ordinal))
+            ?? throw new InvalidOperationException("The format-removal association is not present in the authoritative state.");
+        if (removed.Fingerprint != delta.ExpectedFingerprint)
+            throw new InvalidOperationException("The format-removal fingerprint does not match authoritative state.");
+        books[delta.RecordId] = CopyBook(current, current.Formats.Where(value => value != removed));
+        changedFormats.Add(new(delta.RecordId, delta.Format));
+    }
+
+    private static void ApplyAddOrReplaceFormat(
+        Dictionary<CalibreBookId, CalibreBook> books,
+        HashSet<FormatAssociation> changedFormats,
+        AddOrReplaceFormatLibraryStateDelta delta)
+    {
+        if (!books.TryGetValue(delta.RecordId, out CalibreBook? current))
+            throw new InvalidOperationException("The format target record is not present in authoritative state.");
+        BookFormat? existing = current.Formats.SingleOrDefault(value =>
+            string.Equals(value.Format, delta.Format, StringComparison.Ordinal));
+        if (existing?.Fingerprint != delta.ExpectedPreviousFingerprint)
+            throw new InvalidOperationException("The target format does not match the expected previous fingerprint.");
+        BookFormat projectedFormat = new(delta.Format, string.Empty, string.Empty,
+            FormatFileStatus.ProjectedPresent, delta.Fingerprint);
+        BookFormat[] formats = current.Formats
+            .Where(value => !string.Equals(value.Format, delta.Format, StringComparison.Ordinal))
+            .Append(projectedFormat)
+            .OrderBy(value => value.Format, StringComparer.Ordinal)
+            .ToArray();
+        books[delta.RecordId] = CopyBook(current, formats);
+        changedFormats.Add(new(delta.RecordId, delta.Format));
+    }
+
+    private static void ApplyRemoveRecord(
+        Dictionary<CalibreBookId, CalibreBook> books,
+        HashSet<CalibreBookId> removedRecords,
+        RemoveRecordLibraryStateDelta delta)
+    {
+        if (!books.TryGetValue(delta.RecordId, out CalibreBook? removed))
+            throw new InvalidOperationException("The record removal target is not present in the authoritative state.");
+        if (removed.Formats.Count != 0)
+            throw new InvalidOperationException("A record can be projected as removed only after all formats are absent.");
+        books.Remove(delta.RecordId);
+        removedRecords.Add(delta.RecordId);
     }
 
     private static LibrarySnapshot RemoveFormat(
@@ -447,4 +573,6 @@ public static class LibraryStateDeltaPolicy
         epubAssessments,
         consolidationRecommendations: [],
         pdfAssessments);
+
+    private readonly record struct FormatAssociation(CalibreBookId RecordId, string Format);
 }

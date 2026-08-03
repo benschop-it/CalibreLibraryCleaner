@@ -48,6 +48,119 @@ public sealed class VersionedJsonLibraryStateStoreTests
     }
 
     [Fact]
+    public async Task DeltaBatchReplaysEveryLogicalTransition()
+    {
+        using TemporaryDirectory directory = new();
+        InfrastructureExecutionFixture fixture = InfrastructureExecutionTestData.Create(directory.Path);
+        string cache = Path.Combine(directory.Path, "state-cache");
+        VersionedJsonLibraryStateStore store = new(new()
+        {
+            StorageRoot = cache,
+            StateDeltaCompactionThreshold = 2,
+        });
+        CalibreBook[] books = fixture.Snapshot.Books.Concat([
+            new(new(9001), "Empty 1", "Author", [new(new(9001), "Author", "Author")], [], [], "Empty 1"),
+            new(new(9002), "Empty 2", "Author", [new(new(9002), "Author", "Author")], [], [], "Empty 2"),
+        ]).ToArray();
+        LibrarySnapshot expanded = new(fixture.Snapshot.Identity, fixture.Snapshot.ScannedAt, books,
+            fixture.Snapshot.Findings, fixture.Snapshot.ExactBinaryDuplicateGroups,
+            fixture.Snapshot.ExactMetadataDuplicateGroups, fixture.Snapshot.EpubAssessments,
+            fixture.Snapshot.ConsolidationRecommendations, fixture.Snapshot.PdfAssessments);
+        LibraryState state = LibraryState.FromScan(expanded,
+            new(Guid.Parse("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee")));
+        await store.WriteBaselineAsync(state, CancellationToken.None);
+        LibraryStateDelta[] deltas =
+        [
+            new RemoveRecordLibraryStateDelta(state.GenerationId, state.Revision,
+                "remove:9001", state.ProjectedAtUtc.AddSeconds(1), new(9001)),
+            new RemoveRecordLibraryStateDelta(state.GenerationId, state.Revision.Next(),
+                "remove:9002", state.ProjectedAtUtc.AddSeconds(1), new(9002)),
+        ];
+        LibraryStateMutationIntent intent = new("chunk-1", state.GenerationId, state.Revision,
+            deltas.Select(value => value.OperationId), state.ProjectedAtUtc.AddSeconds(1));
+        await store.WriteMutationIntentAsync(expanded.Identity.LibraryRoot, intent, CancellationToken.None);
+        foreach (LibraryStateDelta delta in deltas) state = LibraryStateDeltaPolicy.Apply(state, delta);
+
+        await store.AppendDeltaBatchAsync(expanded.Identity.LibraryRoot, deltas, state,
+            compactIfThresholdReached: false, intent.IntentId, completeMutationIntent: true,
+            CancellationToken.None);
+        LibraryState? committed = await new VersionedJsonLibraryStateStore(new() { StorageRoot = cache })
+            .ReadAsync(expanded.Identity.LibraryRoot, CancellationToken.None);
+        committed!.Status.Should().Be(LibraryStateStatus.Authoritative);
+        Directory.GetFiles(cache, "*.checkpoint.json").Should().BeEmpty();
+        await store.CompactAsync(expanded.Identity.LibraryRoot, state, CancellationToken.None);
+        LibraryState? loaded = await new VersionedJsonLibraryStateStore(new() { StorageRoot = cache })
+            .ReadAsync(expanded.Identity.LibraryRoot, CancellationToken.None);
+
+        loaded.Should().BeEquivalentTo(state);
+        Directory.GetFiles(cache, "*.checkpoint.json").Should().ContainSingle();
+        File.ReadAllText(Directory.GetFiles(cache, "*.deltas.jsonl").Single()).Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task UnmatchedMutationIntentLoadsAsUncertain()
+    {
+        using TemporaryDirectory directory = new();
+        InfrastructureExecutionFixture fixture = InfrastructureExecutionTestData.Create(directory.Path);
+        string cache = Path.Combine(directory.Path, "state-cache");
+        VersionedJsonLibraryStateStore store = new(new() { StorageRoot = cache });
+        LibraryState state = LibraryState.FromScan(fixture.Snapshot,
+            new(Guid.Parse("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee")));
+        CalibreBook book = state.Snapshot.Books.First(value => value.Formats.Count > 0);
+        BookFormat format = book.Formats[0];
+        LibraryStateMutationIntent intent = new("chunk-1", state.GenerationId, state.Revision,
+            [$"remove:{book.Id.Value}:{format.Format}"], state.ProjectedAtUtc.AddSeconds(1));
+        await store.WriteBaselineAsync(state, CancellationToken.None);
+
+        await store.WriteMutationIntentAsync(state.Snapshot.Identity.LibraryRoot, intent, CancellationToken.None);
+        LibraryState? loaded = await new VersionedJsonLibraryStateStore(new() { StorageRoot = cache })
+            .ReadAsync(state.Snapshot.Identity.LibraryRoot, CancellationToken.None);
+
+        loaded!.Status.Should().Be(LibraryStateStatus.Uncertain);
+        loaded.Uncertainty!.Code.Should().Be("MUTATION_INTENT_INCOMPLETE");
+        loaded.Uncertainty.OperationId.Should().Be("chunk-1");
+    }
+
+    [Fact]
+    public async Task PartiallyCommittedMutationIntentReplaysPrefixAsUncertain()
+    {
+        using TemporaryDirectory directory = new();
+        InfrastructureExecutionFixture fixture = InfrastructureExecutionTestData.Create(directory.Path);
+        string cache = Path.Combine(directory.Path, "state-cache");
+        VersionedJsonLibraryStateStore store = new(new() { StorageRoot = cache });
+        CalibreBook[] books = fixture.Snapshot.Books.Concat([
+            new(new(9001), "Empty 1", "Author", [new(new(9001), "Author", "Author")], [], [], "Empty 1"),
+            new(new(9002), "Empty 2", "Author", [new(new(9002), "Author", "Author")], [], [], "Empty 2"),
+        ]).ToArray();
+        LibrarySnapshot expanded = new(fixture.Snapshot.Identity, fixture.Snapshot.ScannedAt, books,
+            fixture.Snapshot.Findings, fixture.Snapshot.ExactBinaryDuplicateGroups,
+            fixture.Snapshot.ExactMetadataDuplicateGroups, fixture.Snapshot.EpubAssessments,
+            fixture.Snapshot.ConsolidationRecommendations, fixture.Snapshot.PdfAssessments);
+        LibraryState state = LibraryState.FromScan(expanded,
+            new(Guid.Parse("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee")));
+        string[] operationIds = ["remove:9001", "remove:9002"];
+        LibraryStateMutationIntent intent = new("chunk-1", state.GenerationId, state.Revision,
+            operationIds, state.ProjectedAtUtc.AddSeconds(1));
+        await store.WriteBaselineAsync(state, CancellationToken.None);
+        await store.WriteMutationIntentAsync(expanded.Identity.LibraryRoot, intent, CancellationToken.None);
+        RemoveRecordLibraryStateDelta delta = new(state.GenerationId, state.Revision,
+            operationIds[0], state.ProjectedAtUtc.AddSeconds(1), new(9001));
+        state = LibraryStateDeltaPolicy.Apply(state, delta);
+
+        await store.AppendDeltaBatchAsync(expanded.Identity.LibraryRoot, [delta], state,
+            compactIfThresholdReached: false, intent.IntentId, completeMutationIntent: false,
+            CancellationToken.None);
+        LibraryState? loaded = await new VersionedJsonLibraryStateStore(new() { StorageRoot = cache })
+            .ReadAsync(expanded.Identity.LibraryRoot, CancellationToken.None);
+
+        loaded!.Status.Should().Be(LibraryStateStatus.Uncertain);
+        loaded.Revision.Value.Should().Be(1);
+        loaded.Snapshot.Books.Should().NotContain(value => value.Id == new CalibreBookId(9001));
+        loaded.Snapshot.Books.Should().Contain(value => value.Id == new CalibreBookId(9002));
+        loaded.Uncertainty!.Code.Should().Be("MUTATION_INTENT_INCOMPLETE");
+    }
+
+    [Fact]
     public async Task TamperedDeltaJournalLoadsAsUncertain()
     {
         using TemporaryDirectory directory = new();

@@ -12,6 +12,25 @@ public interface ILibraryStateStore
         LibraryState projectedState,
         CancellationToken cancellationToken);
 
+    Task AppendDeltaBatchAsync(
+        string libraryRoot,
+        IReadOnlyList<LibraryStateDelta> deltas,
+        LibraryState projectedState,
+        bool compactIfThresholdReached,
+        string? mutationIntentId,
+        bool completeMutationIntent,
+        CancellationToken cancellationToken);
+
+    Task WriteMutationIntentAsync(
+        string libraryRoot,
+        LibraryStateMutationIntent intent,
+        CancellationToken cancellationToken);
+
+    Task CompactAsync(
+        string libraryRoot,
+        LibraryState state,
+        CancellationToken cancellationToken);
+
     Task WriteUncertaintyAsync(
         string libraryRoot,
         LibraryState state,

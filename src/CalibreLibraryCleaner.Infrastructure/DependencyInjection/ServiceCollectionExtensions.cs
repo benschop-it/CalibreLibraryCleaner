@@ -44,6 +44,7 @@ public static class ServiceCollectionExtensions
         services.AddSingleton(new ExecutionStorageOptions());
         services.AddSingleton<DirectCalibreProcessRunner>();
         services.AddSingleton<ICalibreToolDiscovery, CalibreToolDiscovery>();
+        services.AddSingleton<ICalibreMutationWorkerFactory, PersistentCalibreMutationWorkerFactory>();
         services.AddSingleton<CalibreCommandGateway>();
         services.AddSingleton<ICalibreCommandGateway>(provider =>
             provider.GetRequiredService<CalibreCommandGateway>());

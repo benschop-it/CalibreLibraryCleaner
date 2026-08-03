@@ -100,6 +100,69 @@ public sealed class LibraryStateSessionTests
     }
 
     [Fact]
+    public async Task SuccessfulBatchPersistsAndPublishesOnlyFinalRevision()
+    {
+        ILibraryStateStore store = A.Fake<ILibraryStateStore>();
+        using LibraryStateSession session = new(store);
+        LibrarySnapshot snapshot = Snapshot("C:\\library");
+        LibraryState baseline = (await session.StartFromScanAsync(snapshot, CancellationToken.None)).State!;
+        List<LibraryState> published = [];
+        session.StateChanged += (_, eventArgs) => published.Add(eventArgs.State);
+        LibraryStateDelta[] deltas =
+        [
+            new RemoveFormatLibraryStateDelta(baseline.GenerationId, baseline.Revision,
+                "remove-format:2:EPUB", ScannedAt.AddSeconds(1), new(2), "EPUB", Fingerprint),
+            new RemoveRecordLibraryStateDelta(baseline.GenerationId, baseline.Revision.Next(),
+                "remove-record:2", ScannedAt.AddSeconds(1), new(2)),
+        ];
+
+        LibraryStateSessionOutcome outcome = await session.ApplyBatchAsync(
+            snapshot.Identity.LibraryRoot, deltas, CancellationToken.None);
+
+        outcome.IsSuccess.Should().BeTrue();
+        outcome.State!.Revision.Should().Be(new LibraryStateRevision(2));
+        published.Should().ContainSingle().Which.Should().BeSameAs(outcome.State);
+        A.CallTo(() => store.AppendDeltaBatchAsync(snapshot.Identity.LibraryRoot,
+            A<IReadOnlyList<LibraryStateDelta>>.That.Matches(value => value.Count == 2),
+            outcome.State, false, null, false,
+            A<CancellationToken>._)).MustHaveHappenedOnceExactly();
+        A.CallTo(() => store.AppendDeltaAsync(A<string>._, A<LibraryStateDelta>._,
+            A<LibraryState>._, A<CancellationToken>._)).MustNotHaveHappened();
+    }
+
+    [Fact]
+    public async Task MutationBatchPersistsIntentBeforeCompletedDeltaBatch()
+    {
+        ILibraryStateStore store = A.Fake<ILibraryStateStore>();
+        using LibraryStateSession session = new(store);
+        LibrarySnapshot snapshot = Snapshot("C:\\library");
+        LibraryState baseline = (await session.StartFromScanAsync(snapshot, CancellationToken.None)).State!;
+        LibraryStateDelta[] deltas =
+        [
+            new RemoveFormatLibraryStateDelta(baseline.GenerationId, baseline.Revision,
+                "remove-format:2:EPUB", ScannedAt.AddSeconds(1), new(2), "EPUB", Fingerprint),
+            new RemoveRecordLibraryStateDelta(baseline.GenerationId, baseline.Revision.Next(),
+                "remove-record:2", ScannedAt.AddSeconds(1), new(2)),
+        ];
+        LibraryStateMutationIntent intent = new("chunk-1", baseline.GenerationId, baseline.Revision,
+            deltas.Select(value => value.OperationId), ScannedAt.AddSeconds(1));
+
+        LibraryStateSessionOutcome began = await session.BeginMutationBatchAsync(
+            snapshot.Identity.LibraryRoot, intent, CancellationToken.None);
+        LibraryStateSessionOutcome applied = await session.ApplyMutationBatchAsync(
+            snapshot.Identity.LibraryRoot, intent.IntentId, deltas,
+            completeMutationIntent: true, CancellationToken.None);
+
+        began.IsSuccess.Should().BeTrue();
+        applied.IsSuccess.Should().BeTrue();
+        A.CallTo(() => store.WriteMutationIntentAsync(snapshot.Identity.LibraryRoot, intent,
+            A<CancellationToken>._)).MustHaveHappenedOnceExactly()
+            .Then(A.CallTo(() => store.AppendDeltaBatchAsync(snapshot.Identity.LibraryRoot,
+                A<IReadOnlyList<LibraryStateDelta>>._, applied.State!, false,
+                intent.IntentId, true, A<CancellationToken>._)).MustHaveHappenedOnceExactly());
+    }
+
+    [Fact]
     public async Task UncertaintyPersistenceFailureIsReportedAndRemainsBlockedInMemory()
     {
         ILibraryStateStore store = A.Fake<ILibraryStateStore>();

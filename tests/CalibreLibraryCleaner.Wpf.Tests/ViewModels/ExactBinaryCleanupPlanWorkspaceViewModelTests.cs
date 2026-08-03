@@ -49,8 +49,12 @@ public sealed class ExactBinaryCleanupPlanWorkspaceViewModelTests
             Guid.Parse("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee")));
         IClock clock = A.Fake<IClock>();
         A.CallTo(() => clock.GetUtcNow()).Returns(now.AddSeconds(1));
+        ICalibreMutationWorkerFactory workers = A.Fake<ICalibreMutationWorkerFactory>();
+        A.CallTo(() => workers.TryOpenAsync(A<OpenCalibreMutationWorkerRequest>._,
+                A<CancellationToken>._))
+            .Returns(new CalibreMutationWorkerOpenResult(null, "CONTROLLED_UNAVAILABLE", true));
         ExecuteBulkExactDuplicateCleanupUseCase useCase = new(stateSession, tools, commands,
-            A.Fake<IExactDuplicateFormatStaging>(), lease, ids, clock);
+            workers, A.Fake<IExactDuplicateFormatStaging>(), lease, ids, clock);
         ExactBinaryCleanupPlanWorkspaceViewModel viewModel = new(useCase);
         viewModel.UpdateContext(snapshot, [row]);
 

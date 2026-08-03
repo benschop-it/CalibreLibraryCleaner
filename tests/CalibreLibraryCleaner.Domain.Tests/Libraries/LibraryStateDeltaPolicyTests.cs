@@ -110,7 +110,40 @@ public sealed class LibraryStateDeltaPolicyTests
     }
 
     [Fact]
-    public void SixThousandDeltasProjectTenThousandRecordLibraryWithoutRescan()
+    public void ExactCleanupBatchIsEquivalentToSequentialProjection()
+    {
+        FormatFileFingerprint pdf = new(20, new(new string('b', 64)));
+        CalibreBook source = new(new(2), "Book", "Author", [new(new(2), "Author", "Author")], [],
+        [
+            Book(2).Formats.Single(),
+            new("PDF", "book", "Author/Book (2)/book.pdf", FormatFileStatus.Present,
+                pdf, new(pdf.SizeInBytes, ScannedAt, ScannedAt, 0)),
+        ], "Author/Book (2)");
+        LibrarySnapshot snapshot = new(
+            new("87f7ed1f-59a8-45a6-975a-7e06fd84780d", 27, "C:\\library"),
+            ScannedAt, [Book(1), source], [], ExactBinaryDuplicateDetector.Detect([Book(1), source]));
+        LibraryState baseline = LibraryState.FromScan(snapshot, Generation);
+        LibraryStateDelta[] deltas =
+        [
+            new AddOrReplaceFormatLibraryStateDelta(Generation, new(0), "add:1:PDF",
+                ScannedAt.AddSeconds(1), new(1), "PDF", pdf, null),
+            new RemoveFormatLibraryStateDelta(Generation, new(1), "remove:2:EPUB",
+                ScannedAt.AddSeconds(1), new(2), "EPUB", Duplicate),
+            new RemoveFormatLibraryStateDelta(Generation, new(2), "remove:2:PDF",
+                ScannedAt.AddSeconds(1), new(2), "PDF", pdf),
+            new RemoveRecordLibraryStateDelta(Generation, new(3), "remove-record:2",
+                ScannedAt.AddSeconds(1), new(2)),
+        ];
+        LibraryState sequential = baseline;
+        foreach (LibraryStateDelta delta in deltas) sequential = LibraryStateDeltaPolicy.Apply(sequential, delta);
+
+        LibraryState batched = LibraryStateDeltaPolicy.ApplyBatch(baseline, deltas);
+
+        batched.Should().BeEquivalentTo(sequential);
+    }
+
+    [Fact]
+    public void SixThousandDeltaBatchProjectsTenThousandRecordLibraryWithoutRescan()
     {
         const int recordCount = 10_000;
         const int removalCount = 6_000;
@@ -122,13 +155,13 @@ public sealed class LibraryStateDeltaPolicyTests
                 [], [], $"Author/Book {id}")),
             []);
         LibraryState state = LibraryState.FromScan(snapshot, Generation);
+        LibraryStateDelta[] deltas = Enumerable.Range(0, removalCount)
+            .Select(index => (LibraryStateDelta)new RemoveRecordLibraryStateDelta(
+                Generation, new(index), $"remove:{index + 1}", ScannedAt.AddSeconds(index + 1),
+                new(index + 1)))
+            .ToArray();
 
-        for (int index = 0; index < removalCount; index++)
-        {
-            state = LibraryStateDeltaPolicy.Apply(state, new RemoveRecordLibraryStateDelta(
-                Generation, state.Revision, $"remove:{index + 1}", ScannedAt.AddSeconds(index + 1),
-                new(index + 1)));
-        }
+        state = LibraryStateDeltaPolicy.ApplyBatch(state, deltas);
 
         state.Revision.Should().Be(new LibraryStateRevision(removalCount));
         state.Snapshot.Books.Should().HaveCount(recordCount - removalCount);

@@ -27,3 +27,17 @@ public interface ICalibreCommandGateway
         RemoveCalibreRecordRequest request,
         CancellationToken cancellationToken);
 }
+
+public interface ICalibreMutationWorkerFactory
+{
+    Task<CalibreMutationWorkerOpenResult> TryOpenAsync(
+        OpenCalibreMutationWorkerRequest request,
+        CancellationToken cancellationToken);
+}
+
+public interface ICalibreMutationWorkerSession : IAsyncDisposable
+{
+    Task<CalibreMutationChunkResult> ExecuteChunkAsync(
+        CalibreMutationChunkRequest request,
+        CancellationToken cancellationToken);
+}

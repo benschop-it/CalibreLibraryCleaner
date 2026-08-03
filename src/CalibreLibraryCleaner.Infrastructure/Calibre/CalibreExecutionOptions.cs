@@ -22,6 +22,9 @@ public sealed record CalibreExecutionOptions
         new HashSet<RecoveryCapability>();
     public TimeSpan ProbeTimeout { get; init; } = TimeSpan.FromSeconds(30);
     public TimeSpan ReadOnlyCommandTimeout { get; init; } = TimeSpan.FromMinutes(10);
+    public TimeSpan WorkerStartupTimeout { get; init; } = TimeSpan.FromSeconds(30);
+    public TimeSpan WorkerShutdownTimeout { get; init; } = TimeSpan.FromSeconds(10);
+    public int WorkerMaximumMessageBytes { get; init; } = 1_048_576;
     public int MaximumCapturedCharacters { get; init; } = 32_768;
     public string ControlledConfigDirectory { get; init; } = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),

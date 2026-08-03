@@ -122,6 +122,184 @@ public sealed class ExecuteBulkExactDuplicateCleanupUseCaseTests
             A<CancellationToken>._)).MustNotHaveHappened();
     }
 
+    [Fact]
+    public async Task BlockingWorkerPreflightDoesNotFallBackToCli()
+    {
+        CalibreBook keeper = Book(1, [Format(1, "EPUB", Duplicate)]);
+        CalibreBook source = Book(2, [Format(2, "EPUB", Duplicate)]);
+        Harness harness = await Harness.CreateAsync([keeper, source]);
+        A.CallTo(() => harness.Workers.TryOpenAsync(A<OpenCalibreMutationWorkerRequest>._,
+                A<CancellationToken>._))
+            .Returns(new CalibreMutationWorkerOpenResult(null, "CALIBRE_WORKER_IDENTITY_MISMATCH"));
+        ExactBinaryDuplicateGroup group = harness.Snapshot.ExactBinaryDuplicateGroups.Single();
+
+        BulkExactDuplicateCleanupResult result = await harness.ExecuteAsync(
+            [new(group.Id, group.Members.Single(value => value.BookId == keeper.Id))]);
+
+        result.State.Should().Be(BulkExactDuplicateCleanupState.PreflightFailed);
+        result.Issues.Should().Contain(value => value.Code == "BULK_EXACT.WORKER_PREFLIGHT_BLOCKED");
+        A.CallTo(() => harness.Commands.RemoveFormatAsync(
+            A<RemoveCalibreFormatRequest>._, A<CancellationToken>._)).MustNotHaveHappened();
+        A.CallTo(() => harness.Staging.StageAsync(A<CleanupExecutionId>._, A<string>._,
+            A<CalibreBookId>._, A<BookFormat>._, A<CancellationToken>._)).MustNotHaveHappened();
+    }
+
+    [Fact]
+    public async Task SuccessfulWorkerPrefixIsProjectedBeforeChunkBecomesUncertain()
+    {
+        CalibreBook keeper = Book(1, [Format(1, "EPUB", Duplicate)]);
+        CalibreBook source = Book(2,
+            [Format(2, "EPUB", Duplicate), Format(2, "PDF", Fingerprint('b', 20))]);
+        Harness harness = await Harness.CreateAsync([keeper, source]);
+        ICalibreMutationWorkerSession session = A.Fake<ICalibreMutationWorkerSession>();
+        A.CallTo(() => session.ExecuteChunkAsync(A<CalibreMutationChunkRequest>._,
+                A<CancellationToken>._))
+            .ReturnsLazily(call =>
+            {
+                CalibreMutationChunkRequest chunk = call.GetArgument<CalibreMutationChunkRequest>(0)!;
+                CalibreMutationOperation transfer = chunk.Operations[0];
+                return Task.FromResult(new CalibreMutationChunkResult(chunk.ChunkId, true,
+                [
+                    new(transfer.OperationId, transfer.Kind, true),
+                    .. chunk.Operations.Skip(1).Select(value => new CalibreMutationOperationResult(
+                        value.OperationId, value.Kind, false, "controlled_failure")),
+                ], "controlled_failure"));
+            });
+        A.CallTo(() => harness.Workers.TryOpenAsync(A<OpenCalibreMutationWorkerRequest>._,
+                A<CancellationToken>._))
+            .Returns(new CalibreMutationWorkerOpenResult(session, null));
+        ExactBinaryDuplicateGroup group = harness.Snapshot.ExactBinaryDuplicateGroups.Single();
+
+        BulkExactDuplicateCleanupResult result = await harness.ExecuteAsync(
+            [new(group.Id, group.Members.Single(value => value.BookId == keeper.Id))]);
+
+        result.State.Should().Be(BulkExactDuplicateCleanupState.PartiallyCompleted);
+        LibraryState final = harness.State.GetCurrent(harness.Snapshot.Identity.LibraryRoot)!;
+        final.Status.Should().Be(LibraryStateStatus.Uncertain);
+        final.Revision.Value.Should().Be(1);
+        final.Snapshot.Books.Single(value => value.Id == keeper.Id).Formats
+            .Should().Contain(value => value.Format == "PDF");
+        A.CallTo(() => harness.Commands.RemoveFormatAsync(
+            A<RemoveCalibreFormatRequest>._, A<CancellationToken>._)).MustNotHaveHappened();
+    }
+
+    [Fact]
+    public async Task PersistentWorkerUsesChunksOfAtMostOneHundredOperations()
+    {
+        CalibreBook[] books = Enumerable.Range(1, 101)
+            .Select(value => Book(value, [Format(value, "EPUB", Duplicate)]))
+            .ToArray();
+        Harness harness = await Harness.CreateAsync(books);
+        List<int> chunkSizes = [];
+        List<LibraryState> published = [];
+        harness.State.StateChanged += (_, eventArgs) => published.Add(eventArgs.State);
+        ICalibreMutationWorkerSession session = A.Fake<ICalibreMutationWorkerSession>();
+        A.CallTo(() => session.ExecuteChunkAsync(A<CalibreMutationChunkRequest>._,
+                A<CancellationToken>._))
+            .ReturnsLazily(call =>
+            {
+                CalibreMutationChunkRequest chunk = call.GetArgument<CalibreMutationChunkRequest>(0)!;
+                chunkSizes.Add(chunk.Operations.Count);
+                return Task.FromResult(new CalibreMutationChunkResult(chunk.ChunkId, true,
+                    chunk.Operations.Select(value => new CalibreMutationOperationResult(
+                        value.OperationId, value.Kind, true)).ToArray()));
+            });
+        A.CallTo(() => harness.Workers.TryOpenAsync(A<OpenCalibreMutationWorkerRequest>._,
+                A<CancellationToken>._))
+            .Returns(new CalibreMutationWorkerOpenResult(session, null));
+        ExactBinaryDuplicateGroup group = harness.Snapshot.ExactBinaryDuplicateGroups.Single();
+
+        BulkExactDuplicateCleanupResult result = await harness.ExecuteAsync(
+            [new(group.Id, group.Members.Single(value => value.BookId == new CalibreBookId(1)))]);
+
+        result.IsCompleted.Should().BeTrue();
+        result.RemovedFormatCount.Should().Be(100);
+        result.RemovedRecordCount.Should().Be(100);
+        chunkSizes.Should().Equal(100, 100);
+        published.Should().ContainSingle().Which.Revision.Value.Should().Be(200);
+        A.CallTo(() => harness.Store.WriteMutationIntentAsync(A<string>._,
+            A<LibraryStateMutationIntent>._, A<CancellationToken>._)).MustHaveHappenedTwiceExactly();
+        A.CallTo(() => harness.Store.AppendDeltaBatchAsync(A<string>._,
+            A<IReadOnlyList<LibraryStateDelta>>.That.Matches(value => value.Count == 100),
+            A<LibraryState>._, false, A<string>._, true,
+            A<CancellationToken>._)).MustHaveHappenedTwiceExactly();
+        A.CallTo(() => harness.Store.CompactAsync(A<string>._, A<LibraryState>._,
+            A<CancellationToken>._)).MustHaveHappenedOnceExactly();
+        A.CallTo(() => harness.Workers.TryOpenAsync(A<OpenCalibreMutationWorkerRequest>._,
+            A<CancellationToken>._)).MustHaveHappenedOnceExactly();
+    }
+
+    [Fact]
+    public async Task PersistentWorkerBypassesStagingAndCommandGateway()
+    {
+        CalibreBook keeper = Book(1, [Format(1, "EPUB", Duplicate)]);
+        CalibreBook source = Book(2,
+            [Format(2, "EPUB", Duplicate), Format(2, "PDF", Fingerprint('b', 20))]);
+        Harness harness = await Harness.CreateAsync([keeper, source]);
+        ICalibreMutationWorkerSession session = A.Fake<ICalibreMutationWorkerSession>();
+        A.CallTo(() => session.ExecuteChunkAsync(A<CalibreMutationChunkRequest>._,
+                A<CancellationToken>._))
+            .ReturnsLazily(call =>
+            {
+                CalibreMutationChunkRequest chunk = call.GetArgument<CalibreMutationChunkRequest>(0)!;
+                harness.Trace.AddRange(chunk.Operations.Select(value => $"worker:{value.Kind}"));
+                return Task.FromResult(new CalibreMutationChunkResult(chunk.ChunkId, true,
+                    chunk.Operations.Select(value => new CalibreMutationOperationResult(
+                        value.OperationId, value.Kind, true)).ToArray()));
+            });
+        A.CallTo(() => harness.Workers.TryOpenAsync(A<OpenCalibreMutationWorkerRequest>._,
+                A<CancellationToken>._))
+            .Returns(new CalibreMutationWorkerOpenResult(session, null));
+        ExactBinaryDuplicateGroup group = harness.Snapshot.ExactBinaryDuplicateGroups.Single();
+
+        BulkExactDuplicateCleanupResult result = await harness.ExecuteAsync(
+            [new(group.Id, group.Members.Single(value => value.BookId == keeper.Id))]);
+
+        result.IsCompleted.Should().BeTrue();
+        harness.Trace.Should().Equal("worker:TransferFormat", "worker:RemoveFormat",
+            "worker:RemoveFormat", "worker:RemoveRecord");
+        A.CallTo(() => harness.Staging.StageAsync(A<CleanupExecutionId>._, A<string>._,
+            A<CalibreBookId>._, A<BookFormat>._, A<CancellationToken>._)).MustNotHaveHappened();
+        A.CallTo(() => harness.Commands.AddOrReplaceFormatAsync(
+            A<AddOrReplaceCalibreFormatRequest>._, A<CancellationToken>._)).MustNotHaveHappened();
+        A.CallTo(() => harness.Commands.RemoveFormatAsync(
+            A<RemoveCalibreFormatRequest>._, A<CancellationToken>._)).MustNotHaveHappened();
+        A.CallTo(() => harness.Commands.RemoveRecordAsync(
+            A<RemoveCalibreRecordRequest>._, A<CancellationToken>._)).MustNotHaveHappened();
+    }
+
+    [Fact]
+    public async Task AmbiguousWorkerChunkMarksStateUncertainWithoutCliRetry()
+    {
+        CalibreBook keeper = Book(1, [Format(1, "EPUB", Duplicate)]);
+        CalibreBook source = Book(2, [Format(2, "EPUB", Duplicate)]);
+        Harness harness = await Harness.CreateAsync([keeper, source]);
+        ICalibreMutationWorkerSession session = A.Fake<ICalibreMutationWorkerSession>();
+        A.CallTo(() => session.ExecuteChunkAsync(A<CalibreMutationChunkRequest>._,
+                A<CancellationToken>._))
+            .ReturnsLazily(call =>
+            {
+                CalibreMutationChunkRequest chunk = call.GetArgument<CalibreMutationChunkRequest>(0)!;
+                return Task.FromResult(new CalibreMutationChunkResult(chunk.ChunkId, true,
+                    chunk.Operations.Select(value => new CalibreMutationOperationResult(
+                        value.OperationId, value.Kind, false, "controlled_failure")).ToArray(),
+                    "controlled_failure"));
+            });
+        A.CallTo(() => harness.Workers.TryOpenAsync(A<OpenCalibreMutationWorkerRequest>._,
+                A<CancellationToken>._))
+            .Returns(new CalibreMutationWorkerOpenResult(session, null));
+        ExactBinaryDuplicateGroup group = harness.Snapshot.ExactBinaryDuplicateGroups.Single();
+
+        BulkExactDuplicateCleanupResult result = await harness.ExecuteAsync(
+            [new(group.Id, group.Members.Single(value => value.BookId == keeper.Id))]);
+
+        result.State.Should().Be(BulkExactDuplicateCleanupState.PartiallyCompleted);
+        harness.State.GetCurrent(harness.Snapshot.Identity.LibraryRoot)!.Status
+            .Should().Be(LibraryStateStatus.Uncertain);
+        A.CallTo(() => harness.Commands.RemoveFormatAsync(
+            A<RemoveCalibreFormatRequest>._, A<CancellationToken>._)).MustNotHaveHappened();
+    }
+
     private sealed class Harness
     {
         private readonly ExecuteBulkExactDuplicateCleanupUseCase _useCase;
@@ -129,23 +307,29 @@ public sealed class ExecuteBulkExactDuplicateCleanupUseCaseTests
         private Harness(
             LibrarySnapshot snapshot,
             LibraryStateSession state,
+            ILibraryStateStore store,
             IExactDuplicateFormatStaging staging,
             ICalibreCommandGateway commands,
+            ICalibreMutationWorkerFactory workers,
             ExecuteBulkExactDuplicateCleanupUseCase useCase,
             List<string> trace)
         {
             Snapshot = snapshot;
             State = state;
+            Store = store;
             Staging = staging;
             Commands = commands;
+            Workers = workers;
             _useCase = useCase;
             Trace = trace;
         }
 
         public LibrarySnapshot Snapshot { get; }
         public LibraryStateSession State { get; }
+        public ILibraryStateStore Store { get; }
         public IExactDuplicateFormatStaging Staging { get; }
         public ICalibreCommandGateway Commands { get; }
+        public ICalibreMutationWorkerFactory Workers { get; }
         public List<string> Trace { get; }
 
         public static async Task<Harness> CreateAsync(CalibreBook[] books)
@@ -153,7 +337,8 @@ public sealed class ExecuteBulkExactDuplicateCleanupUseCaseTests
             LibrarySnapshot snapshot = new(
                 new("87f7ed1f-59a8-45a6-975a-7e06fd84780d", 27, "C:\\library"),
                 Now, books, [], ExactBinaryDuplicateDetector.Detect(books));
-            LibraryStateSession state = new();
+            ILibraryStateStore store = A.Fake<ILibraryStateStore>();
+            LibraryStateSession state = new(store);
             await state.StartFromScanAsync(snapshot, CancellationToken.None);
             List<string> trace = [];
             IExactDuplicateFormatStaging staging = A.Fake<IExactDuplicateFormatStaging>();
@@ -187,6 +372,10 @@ public sealed class ExecuteBulkExactDuplicateCleanupUseCaseTests
                     A<CancellationToken>._))
                 .Invokes(call => trace.Add($"remove-record:{call.GetArgument<RemoveCalibreRecordRequest>(0)!.RecordId.Value}"))
                 .Returns(Command("remove"));
+            ICalibreMutationWorkerFactory workers = A.Fake<ICalibreMutationWorkerFactory>();
+            A.CallTo(() => workers.TryOpenAsync(A<OpenCalibreMutationWorkerRequest>._,
+                    A<CancellationToken>._))
+                .Returns(new CalibreMutationWorkerOpenResult(null, "CONTROLLED_UNAVAILABLE", true));
             ICalibreToolDiscovery tools = A.Fake<ICalibreToolDiscovery>();
             CalibreToolDescriptor tool = new("C:\\Calibre2\\calibredb.exe",
                 new("C:\\Calibre2\\calibredb.exe", "9.11.0", new(new string('f', 64)),
@@ -204,8 +393,8 @@ public sealed class ExecuteBulkExactDuplicateCleanupUseCaseTests
             IClock clock = A.Fake<IClock>();
             A.CallTo(() => clock.GetUtcNow()).Returns(Now.AddSeconds(1));
             ExecuteBulkExactDuplicateCleanupUseCase useCase = new(state, tools, commands,
-                staging, lease, ids, clock);
-            return new(snapshot, state, staging, commands, useCase, trace);
+                workers, staging, lease, ids, clock);
+            return new(snapshot, state, store, staging, commands, workers, useCase, trace);
         }
 
         public Task<BulkExactDuplicateCleanupResult> ExecuteAsync(

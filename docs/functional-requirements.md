@@ -70,7 +70,9 @@ Exact-binary cleanup uses a separate plan body containing the automatically reta
 
 Execution must revalidate the plan against the current authoritative revision, back up content and metadata, use supported Calibre tooling, capture command output, durably apply the corresponding typed state delta, and retain audit history. Cleanup and recovery never scan or reload the library; only explicit Scan replaces projected state with observed state.
 
-Supported Calibre tooling includes capability-probed Calibre releases from 9.11.0 up to, but not including, 10.0.0. Required `calibredb` commands and options must be confirmed at runtime before mutation.
+Supported Calibre tooling includes capability-probed Calibre releases from 9.11.0 up to, but not including, 10.0.0. Required `calibredb` commands and options must be confirmed at runtime. Exact-duplicate bulk cleanup defaults to one persistent `calibre-debug` worker using Calibre's documented database API and typed chunks of at most 100 operations. Worker discovery must confirm the trusted sibling executable, fixed protocol, library identity, and required API capabilities before mutation. Calibre and other library writers must remain closed for the run. A worker failure after mutation starts marks state uncertain and cannot be retried through `calibredb`.
+
+Each worker chunk requires a durable write-ahead state intent. Its successful typed results are projected and journaled as one batch, with one state publication per complete cleanup and one final checkpoint compaction. An unmatched or partially completed intent reloads as uncertain and requires explicit Rescan.
 
 ## AI
 

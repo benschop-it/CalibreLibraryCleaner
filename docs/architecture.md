@@ -43,6 +43,8 @@ Must be asynchronous, cancellable, progress-reporting, bounded in parallelism, a
 
 Application owns the authoritative library-state session and persistence ports. Infrastructure owns the versioned baseline/checkpoint representation, append-only hash-chained delta journal, atomic state manifest, replay, and compaction under the user's local application-data directory. State artifacts are never written inside a Calibre library.
 
+Persistent-worker chunks write an atomic manifest intent before Calibre dispatch. A successful chunk appends every typed logical delta in one write-through journal write, advances the manifest once, and clears the matching intent atomically. Partial results append only the verified ordered prefix while retaining the intent; restart therefore loads uncertain. Exact-cleanup batches use indexed projection and one immutable snapshot per chunk, defer state publication for the worker lifetime, and compact one final checkpoint after successful completion.
+
 One explicit successful scan creates a new authoritative generation. Successful typed cleanup and recovery commands durably append and apply deterministic deltas; they never trigger catalog reads, hashing, ebook inspection, or targeted state scans. Replayed authoritative state remains mutation-eligible across restart until the user explicitly rescans.
 
 The application intentionally does not detect external library changes between explicit scans. Failed, ambiguous, interrupted, unpersistable, or unprojectable mutations mark the generation uncertain and block all mutation until explicit rescan.
@@ -73,6 +75,8 @@ Exact-binary cleanup uses a separate plan and compact executor because metadata-
 
 The normal Exact file duplicates workflow bypasses visible plan orchestration. WPF owns generated/editable keeper selections and one bulk command. Application builds one operation list, transfers complementary formats only to an unambiguous non-conflicting target, removes duplicate/source formats, and removes empty records. Infrastructure automatically stages transfer bytes outside the library and verifies their fingerprints. Technical plan/execution/recovery views are hidden from normal use.
 
+The default exact-duplicate mutation engine uses one persistent `calibre-debug` process and Calibre's documented database `Cache` API. Application owns versioned typed chunks of at most 100 operations. Infrastructure owns the fixed embedded script, strict bounded JSON-lines protocol, trusted sibling executable validation, and process lifecycle. The worker opens one Cache for the run, transfers verified formats, batches format removals, and batches empty-record removals. If worker startup or handshake fails before mutation, the existing typed `calibredb` gateway is the slower fallback. Any worker ambiguity after mutation starts marks projected state uncertain and cannot fall back or retry.
+
 ## Safe execution boundary
 
 Milestone 7 keeps cleanup plans immutable and introduces a separate execution
@@ -85,8 +89,9 @@ backup and journal files, execution leases, free-space checks, and crash
 reconciliation. WPF owns explicit confirmation, progress, safe-stop requests,
 and accurate terminal-state presentation.
 
-Every mutation uses direct `calibredb` invocation with a fixed executable and
-argument list. No shell, GUI automation, direct SQLite write, or managed-library
+General plan execution and recovery use direct `calibredb` invocation with a fixed executable and
+argument list. Exact-duplicate bulk cleanup defaults to the constrained persistent
+worker defined by ADR 0015. No shell, GUI automation, direct SQLite write, or managed-library
 filesystem write is permitted. The current authoritative revision revalidates
 the plan before mutation; successful commands are verified by durable typed deltas. Confirmation
 is bound to the canonical library root and operation graph. An application-local
