@@ -48,6 +48,29 @@ public sealed class VersionedJsonLibrarySnapshotStoreTests
     }
 
     [Fact]
+    public async Task ListReadsMetadataWithoutDeserializingBulkSnapshotPayload()
+    {
+        using TemporaryDirectory directory = new();
+        InfrastructureExecutionFixture fixture = InfrastructureExecutionTestData.Create(directory.Path);
+        string cacheRoot = Path.Combine(directory.Path, "cache");
+        VersionedJsonLibrarySnapshotStore store = new(new() { StorageRoot = cacheRoot });
+        await store.WriteAsync(fixture.Snapshot, CancellationToken.None);
+        string path = Directory.GetFiles(cacheRoot, "*.library-snapshot.json").Single();
+        string json = await File.ReadAllTextAsync(path);
+        int booksProperty = json.IndexOf("\"books\"", StringComparison.Ordinal);
+        booksProperty.Should().BePositive();
+        await File.WriteAllTextAsync(path, json[..booksProperty] + "\"books\": [not valid JSON");
+
+        IReadOnlyList<PersistedLibrarySnapshotInfo> listed = await store.ListAsync(CancellationToken.None);
+        Func<Task> load = async () => await store.ReadAsync(fixture.Snapshot.Identity.LibraryRoot, CancellationToken.None);
+
+        listed.Should().ContainSingle().Which.Should().Be(new PersistedLibrarySnapshotInfo(
+            Path.TrimEndingDirectorySeparator(Path.GetFullPath(fixture.Snapshot.Identity.LibraryRoot)),
+            fixture.Snapshot.ScannedAt));
+        await load.Should().ThrowAsync<InvalidDataException>();
+    }
+
+    [Fact]
     public async Task DeleteInvalidatesPersistedSnapshotForCanonicalLibraryPath()
     {
         using TemporaryDirectory directory = new();

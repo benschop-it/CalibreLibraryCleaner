@@ -46,7 +46,6 @@ public sealed class DependencyDirectionTests
             "Microsoft.Data.Sqlite",
             "Microsoft.Extensions.DependencyInjection",
             "Microsoft.Extensions.Hosting",
-            "Microsoft.Extensions.Logging",
             "System.Data.SQLite",
             "VersOne.Epub",
             "HtmlAgilityPack",
@@ -54,6 +53,11 @@ public sealed class DependencyDirectionTests
         ];
 
         string[] packageReferences = ReadItemNames(projectName, "PackageReference");
+
+        if (projectName == DomainProject)
+        {
+            forbiddenPackagePrefixes = [.. forbiddenPackagePrefixes, "Microsoft.Extensions.Logging"];
+        }
 
         packageReferences.Should().NotContain(
             packageName => forbiddenPackagePrefixes.Any(
@@ -259,28 +263,25 @@ public sealed class DependencyDirectionTests
     }
 
     [Fact]
-    public void CleanupPlanIntegrationAndInteractionBoundariesRemainConfined()
+    public void RemovedMutationSubsystemsRemainAbsent()
     {
         string domainSource = ReadSource(DomainProject, "Plans");
         string applicationSource = ReadSource(ApplicationProject, "Plans");
         string infrastructureSource = ReadSource(InfrastructureProject, "Plans");
-        string viewModelSource = ReadSource(WpfProject, "ViewModels");
-        string nonCompositionWpf = string.Join(Environment.NewLine,
-            Directory.EnumerateFiles(Path.Combine(RepositoryRoot, "src", WpfProject), "*.cs", SearchOption.AllDirectories)
-                .Where(path => !path.EndsWith("App.xaml.cs", StringComparison.Ordinal))
-                .Select(File.ReadAllText));
 
-        domainSource.Should().NotContain("System.Text.Json").And.NotContain("System.IO")
-            .And.NotContain("Microsoft.Data.Sqlite").And.NotContain("System.Windows");
-        applicationSource.Should().NotContain("System.Text.Json").And.NotContain("File.")
-            .And.NotContain("Directory.").And.NotContain("Microsoft.Win32");
-        viewModelSource.Should().NotContain("System.Text.Json").And.NotContain("File.")
-            .And.NotContain("Directory.").And.NotContain("Microsoft.Win32");
-        infrastructureSource.Should().Contain("System.Text.Json").And.Contain("FileStream");
-        nonCompositionWpf.Should().NotContain("CalibreLibraryCleaner.Infrastructure");
-        string upper = (domainSource + applicationSource + infrastructureSource).ToUpperInvariant();
-        upper.Should().NotContain("PROCESSSTARTINFO").And.NotContain("CALIBREDB")
-            .And.NotContain("RESTOREBACKUP");
+        domainSource.Should().BeEmpty();
+        applicationSource.Should().BeEmpty();
+        infrastructureSource.Should().BeEmpty();
+
+        string production = string.Join(Environment.NewLine,
+            new[] { DomainProject, ApplicationProject, InfrastructureProject, WpfProject }
+                .SelectMany(project => Directory.EnumerateFiles(
+                    Path.Combine(RepositoryRoot, "src", project), "*.cs", SearchOption.AllDirectories))
+                .Select(File.ReadAllText));
+        production.Should().NotContain("IExecutionBackupStore")
+            .And.NotContain("IExecutionJournalStore")
+            .And.NotContain("ICalibreCommandGateway")
+            .And.NotContain("RecoveryWorkspaceViewModel");
     }
 
     [Fact]
@@ -300,34 +301,15 @@ public sealed class DependencyDirectionTests
     }
 
     [Fact]
-    public void RecoveryCoreAndUiRespectLayerAndAutomationSafetyBoundaries()
+    public void RecoveryNamespacesRemainAbsent()
     {
         string domain = ReadSource(DomainProject, "Recoveries");
-        string application = ReadSource(ApplicationProject, "Recoveries")
-            + ReadSource(ApplicationProject, "Abstractions");
-        string viewModels = ReadSource(WpfProject, "ViewModels");
-        string production = string.Join(Environment.NewLine,
-            new[] { DomainProject, ApplicationProject, InfrastructureProject, WpfProject, PdfWorkerProject }
-                .SelectMany(project => Directory.EnumerateFiles(
-                    Path.Combine(RepositoryRoot, "src", project), "*.cs",
-                    SearchOption.AllDirectories))
-                .Select(File.ReadAllText));
+        string application = ReadSource(ApplicationProject, "Recoveries");
+        string infrastructure = ReadSource(InfrastructureProject, "Recovery");
 
-        domain.Should().NotContain("System.IO").And.NotContain("System.Text.Json")
-            .And.NotContain("Process").And.NotContain("Microsoft.Data.Sqlite")
-            .And.NotContain("System.Windows").And.NotContain("calibredb")
-            .And.NotContain("Microsoft.Extensions.");
-        application.Should().NotContain("System.IO").And.NotContain("System.Text.Json")
-            .And.NotContain("ProcessStartInfo").And.NotContain("File.")
-            .And.NotContain("Directory.Create").And.NotContain("Directory.Delete")
-            .And.NotContain("Directory.Move").And.NotContain("FileStream")
-            .And.NotContain("Microsoft.Data.Sqlite")
-            .And.NotContain("System.Windows");
-        viewModels.Should().NotContain("CalibreLibraryCleaner.Infrastructure")
-            .And.NotContain("System.IO").And.NotContain("ProcessStartInfo");
-        production.Should().NotContain("AutomaticRollback")
-            .And.NotContain("AutoResume").And.NotContain("RollbackRollback")
-            .And.NotContain("BulkRecovery");
+        domain.Should().BeEmpty();
+        application.Should().BeEmpty();
+        infrastructure.Should().BeEmpty();
     }
 
     [Fact]
@@ -453,17 +435,20 @@ public sealed class DependencyDirectionTests
     }
 
     [Fact]
-    public void CalibreMutationMappingIsFixedAndExcludesPermanentOrUndocumentedRollbackCommands()
+    public void CalibreMutationMappingIsConfinedToFixedWorkerProtocol()
     {
-        string gateway = File.ReadAllText(Path.Combine(
-            RepositoryRoot, "src", InfrastructureProject, "Calibre", "CalibreCommandGateway.cs"));
+        string worker = File.ReadAllText(Path.Combine(
+            RepositoryRoot, "src", InfrastructureProject, "Calibre", "calibre_mutation_worker.py"));
+        string factory = File.ReadAllText(Path.Combine(
+            RepositoryRoot, "src", InfrastructureProject, "Calibre", "PersistentCalibreMutationWorkerFactory.cs"));
 
-        gateway.Should().Contain("\"add_format\"").And.Contain("\"remove\"")
-            .And.Contain("\"export\"").And.Contain("\"remove_format\"")
-            .And.Contain("\"set_metadata\"").And.Contain("\"add\"");
-        gateway.Should().NotContain("--permanent")
+        worker.Should().Contain("transfer_format").And.Contain("remove_formats")
+            .And.Contain("remove_books");
+        (worker + factory).Should().NotContain("--permanent")
             .And.NotContain("restore_database").And.NotContain("backup_metadata")
             .And.NotContain("shell");
+        File.Exists(Path.Combine(RepositoryRoot, "src", InfrastructureProject,
+            "Calibre", "CalibreCommandGateway.cs")).Should().BeFalse();
     }
 
     [Fact]

@@ -145,7 +145,7 @@ public sealed class LibraryStateSessionTests
                 "remove-record:2", ScannedAt.AddSeconds(1), new(2)),
         ];
         LibraryStateMutationIntent intent = new("chunk-1", baseline.GenerationId, baseline.Revision,
-            deltas.Select(value => value.OperationId), ScannedAt.AddSeconds(1));
+            deltas.Length, ScannedAt.AddSeconds(1));
 
         LibraryStateSessionOutcome began = await session.BeginMutationBatchAsync(
             snapshot.Identity.LibraryRoot, intent, CancellationToken.None);

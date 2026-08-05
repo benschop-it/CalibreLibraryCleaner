@@ -15,6 +15,7 @@ public sealed class EpubAssessmentRowViewModel
         BookTitle = book?.Title ?? string.Empty;
         ExpectedRelativePath = assessment.ExpectedRelativePath;
         Status = assessment.Status.ToString();
+        ScoreSortValue = assessment.Score?.Value;
         Score = assessment.Status switch
         {
             AssessmentStatus.Unassessed => "Not scored — unassessed",
@@ -38,6 +39,7 @@ public sealed class EpubAssessmentRowViewModel
     public string ExpectedRelativePath { get; }
     public string Status { get; }
     public string Score { get; }
+    public int? ScoreSortValue { get; }
     public string Coverage { get; }
     public string Opened { get; }
     public string PackageParsed { get; }

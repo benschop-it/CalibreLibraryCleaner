@@ -24,7 +24,7 @@ The worker may perform only these exact-cleanup operations:
 
 One request contains at most 100 logical operations. Transfers precede dependent source removals, and record removals remain last. The worker verifies typed postconditions through the same Cache before acknowledging a chunk.
 
-`calibredb` remains a fallback only when worker discovery or handshake fails before the first mutation. After a worker starts mutation, any crash, timeout, protocol violation, malformed response, or unverifiable result marks projected state uncertain, stops execution, and requires explicit Rescan. The application never retries a possibly applied worker operation through another engine.
+There is no fallback mutation engine. Worker discovery or handshake failure stops before mutation. After a worker starts mutation, any crash, timeout, protocol violation, malformed response, or unverifiable result is logged, marks projected state uncertain, stops execution, and requires explicit Rescan.
 
 The compatible range remains `9.11.0 <= version < 10.0.0`. Discovery additionally probes `calibre-debug`, the protocol version, library identity, and required API methods. Calibre 10 or later requires a new compatibility decision.
 
@@ -34,9 +34,9 @@ Calibre GUI, Calibre server, and other known library writers must remain closed 
 
 - Thousands of process launches become one process launch and one Calibre cache initialization.
 - Native format and record removals are batched.
-- Complementary transfers no longer require application-local staging on the worker path.
+- Complementary transfers do not require application-local staging.
 - Direct SQL, direct managed-file mutation, arbitrary scripts, shell invocation, and non-Calibre Python remain prohibited.
-- Chunk intent/commit persistence and batch projection are required to preserve durable typed state without per-operation flush cost.
+- One bounded run marker and complete-chunk batch projection preserve durable typed state without per-operation flush cost.
 - Ambiguous chunk failure remains conservative and requires Rescan.
 
 ## Rejected alternatives

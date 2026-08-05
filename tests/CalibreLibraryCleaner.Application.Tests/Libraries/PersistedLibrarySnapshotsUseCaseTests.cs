@@ -32,6 +32,27 @@ public sealed class PersistedLibrarySnapshotsUseCaseTests
     }
 
     [Fact]
+    public async Task StateManifestListingSupersedesLegacySnapshotEntry()
+    {
+        ILibrarySnapshotStore snapshots = A.Fake<ILibrarySnapshotStore>();
+        ILibraryStateStore states = A.Fake<ILibraryStateStore>();
+        LibrarySnapshot snapshot = Snapshot();
+        DateTimeOffset projectedAt = snapshot.ScannedAt.AddMinutes(5);
+        A.CallTo(() => snapshots.ListAsync(A<CancellationToken>._))
+            .Returns([new(snapshot.Identity.LibraryRoot, snapshot.ScannedAt.AddDays(-1))]);
+        A.CallTo(() => states.ListAsync(A<CancellationToken>._)).Returns([
+            new(snapshot.Identity.LibraryRoot, snapshot.ScannedAt, projectedAt,
+                new(Guid.Parse("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee")), new(7),
+                LibraryStateStatus.Authoritative),
+        ]);
+        PersistedLibrarySnapshotsUseCase useCase = new(snapshots, states);
+
+        PersistedLibrarySnapshotListResult result = await useCase.ListAsync(CancellationToken.None);
+
+        result.Snapshots.Should().ContainSingle().Which.ScannedAt.Should().Be(snapshot.ScannedAt);
+    }
+
+    [Fact]
     public async Task StoreFailureBecomesSafeOutcome()
     {
         ILibrarySnapshotStore store = A.Fake<ILibrarySnapshotStore>();

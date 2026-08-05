@@ -5,10 +5,14 @@ using System.Text.Json;
 using CalibreLibraryCleaner.Application.Abstractions;
 using CalibreLibraryCleaner.Domain.Libraries;
 using CalibreLibraryCleaner.Infrastructure.Execution;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 
 namespace CalibreLibraryCleaner.Infrastructure.LibrarySnapshots;
 
-internal sealed class VersionedJsonLibraryStateStore(LibrarySnapshotStorageOptions options) : ILibraryStateStore
+internal sealed class VersionedJsonLibraryStateStore(
+    LibrarySnapshotStorageOptions options,
+    ILogger<VersionedJsonLibraryStateStore>? logger = null) : ILibraryStateStore
 {
     private const string SchemaVersion = "library-state/1.0";
     private const string ManifestSuffix = ".library-state.json";
@@ -18,6 +22,53 @@ internal sealed class VersionedJsonLibraryStateStore(LibrarySnapshotStorageOptio
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
         WriteIndented = false,
     };
+    private static readonly Action<ILogger, string, Exception?> LogPruneFailure = LoggerMessage.Define<string>(
+        LogLevel.Warning,
+        new EventId(1, "LibraryStateArtifactPruneFailed"),
+        "Could not prune unreferenced library state artifact {ArtifactName}.");
+    private readonly ILogger<VersionedJsonLibraryStateStore> _logger = logger
+        ?? NullLogger<VersionedJsonLibraryStateStore>.Instance;
+
+    public async Task<IReadOnlyList<PersistedLibraryStateInfo>> ListAsync(CancellationToken cancellationToken)
+    {
+        string root = StorageRoot();
+        if (!Directory.Exists(root)) return [];
+
+        List<PersistedLibraryStateInfo> states = [];
+        foreach (string path in Directory.EnumerateFiles(root, $"*{ManifestSuffix}", SearchOption.TopDirectoryOnly)
+                     .Order(StringComparer.Ordinal))
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            try
+            {
+                StateManifest manifest = await ReadManifestFileAsync(path, cancellationToken).ConfigureAwait(false);
+                string canonical = Canonicalize(manifest.LibraryRoot);
+                if (manifest.SchemaVersion != SchemaVersion
+                    || !string.Equals(Path.GetFileName(path), Key(canonical) + ManifestSuffix, StringComparison.Ordinal)
+                    || manifest.GenerationId == Guid.Empty
+                    || manifest.BaseRevision < 0
+                    || manifest.Revision < manifest.BaseRevision
+                    || manifest.DeltaCount < 0)
+                {
+                    continue;
+                }
+
+                states.Add(new(canonical, manifest.ScannedAtUtc, manifest.ProjectedAtUtc,
+                    new(manifest.GenerationId), new(manifest.Revision), manifest.Status));
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException
+                                               or JsonException or InvalidDataException or ArgumentException
+                                               or NotSupportedException or OverflowException)
+            {
+            }
+        }
+
+        return states.OrderBy(state => state.LibraryRoot, PathComparer).ToArray();
+    }
 
     public async Task WriteBaselineAsync(LibraryState state, CancellationToken cancellationToken)
     {
@@ -39,6 +90,7 @@ internal sealed class VersionedJsonLibraryStateStore(LibrarySnapshotStorageOptio
             LibraryStateStatus.Authoritative, state.Snapshot.ScannedAt, state.ProjectedAtUtc, state.ProjectedAtUtc,
             baselineName, journalName, EmptyDigest, 0, null);
         await WriteManifestAsync(root, key, manifest, cancellationToken).ConfigureAwait(false);
+        PruneUnreferencedStateFiles(root, key, manifest);
     }
 
     public async Task AppendDeltaAsync(
@@ -298,23 +350,24 @@ internal sealed class VersionedJsonLibraryStateStore(LibrarySnapshotStorageOptio
         }
         MutationIntentPayload intent = manifest.PendingMutationIntent
             ?? throw new InvalidOperationException("The committed mutation batch has no persisted intent.");
+        long committedCount = checked(manifest.Revision - intent.ExpectedRevision);
         if (!string.Equals(intent.IntentId, mutationIntentId, StringComparison.Ordinal)
             || intent.GenerationId != manifest.GenerationId
-            || intent.ExpectedRevision != manifest.Revision
-            || deltas.Count > intent.OperationIds.Length
-            || !deltas.Select(value => value.OperationId).SequenceEqual(
-                intent.OperationIds.Take(deltas.Count), StringComparer.Ordinal)
-            || completeMutationIntent && deltas.Count != intent.OperationIds.Length)
+            || committedCount < 0
+            || committedCount > intent.OperationCount
+            || deltas.Count > intent.OperationCount
+            || completeMutationIntent && committedCount + deltas.Count != intent.OperationCount
+            || !completeMutationIntent && committedCount + deltas.Count >= intent.OperationCount)
             throw new InvalidOperationException("The committed mutation batch does not match its persisted intent.");
     }
 
     private static MutationIntentPayload ToPayload(LibraryStateMutationIntent intent) => new(
         intent.IntentId, intent.GenerationId.Value, intent.ExpectedRevision.Value,
-        intent.OperationIds.ToArray(), intent.CreatedAtUtc);
+        intent.OperationCount, intent.CreatedAtUtc);
 
     private static LibraryStateMutationIntent FromPayload(MutationIntentPayload intent) => new(
         intent.IntentId, new(intent.GenerationId), new(intent.ExpectedRevision),
-        intent.OperationIds, intent.CreatedAtUtc);
+        intent.OperationCount, intent.CreatedAtUtc);
 
     private static async Task<LibrarySnapshot> ReadBaselineAsync(string path, CancellationToken cancellationToken)
     {
@@ -330,6 +383,13 @@ internal sealed class VersionedJsonLibraryStateStore(LibrarySnapshotStorageOptio
     {
         string path = Path.Combine(root, key + ManifestSuffix);
         if (!File.Exists(path)) return null;
+        return await ReadManifestFileAsync(path, cancellationToken).ConfigureAwait(false);
+    }
+
+    private static async Task<StateManifest> ReadManifestFileAsync(
+        string path,
+        CancellationToken cancellationToken)
+    {
         byte[] bytes = await File.ReadAllBytesAsync(path, cancellationToken).ConfigureAwait(false);
         return JsonSerializer.Deserialize<StateManifest>(bytes, JsonOptions)
             ?? throw new InvalidDataException("The library-state manifest is empty.");
@@ -342,7 +402,7 @@ internal sealed class VersionedJsonLibraryStateStore(LibrarySnapshotStorageOptio
         CancellationToken cancellationToken) => WriteAtomicAsync(
         Path.Combine(root, key + ManifestSuffix), JsonSerializer.SerializeToUtf8Bytes(manifest, JsonOptions), cancellationToken);
 
-    private static async Task CompactStateAsync(
+    private async Task CompactStateAsync(
         string root,
         string key,
         StateManifest previous,
@@ -365,13 +425,32 @@ internal sealed class VersionedJsonLibraryStateStore(LibrarySnapshotStorageOptio
             DeltaCount = 0,
         };
         await WriteManifestAsync(root, key, compacted, cancellationToken).ConfigureAwait(false);
-        DeleteSuperseded(Path.Combine(root, previous.BaselineFile), Path.Combine(root, checkpoint));
-        DeleteSuperseded(Path.Combine(root, previous.JournalFile), Path.Combine(root, journal));
+        PruneUnreferencedStateFiles(root, key, compacted);
     }
 
-    private static void DeleteSuperseded(string path, string replacement)
+    private void PruneUnreferencedStateFiles(string root, string key, StateManifest active)
     {
-        if (!string.Equals(path, replacement, StringComparison.Ordinal) && File.Exists(path)) File.Delete(path);
+        HashSet<string> retained = new(StringComparer.Ordinal)
+        {
+            active.BaselineFile,
+            active.JournalFile,
+        };
+        IEnumerable<string> candidates = Directory.EnumerateFiles(root, $"{key}.*.baseline.json", SearchOption.TopDirectoryOnly)
+            .Concat(Directory.EnumerateFiles(root, $"{key}.*.checkpoint.json", SearchOption.TopDirectoryOnly))
+            .Concat(Directory.EnumerateFiles(root, $"{key}.*.deltas.jsonl", SearchOption.TopDirectoryOnly));
+        foreach (string path in candidates)
+        {
+            string name = Path.GetFileName(path);
+            if (retained.Contains(name)) continue;
+            try
+            {
+                File.Delete(path);
+            }
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+            {
+                LogPruneFailure(_logger, name, exception);
+            }
+        }
     }
 
     private static async Task WriteAtomicAsync(string path, byte[] bytes, CancellationToken cancellationToken)
@@ -446,7 +525,7 @@ internal sealed class VersionedJsonLibraryStateStore(LibrarySnapshotStorageOptio
         string IntentId,
         Guid GenerationId,
         long ExpectedRevision,
-        string[] OperationIds,
+        int OperationCount,
         DateTimeOffset CreatedAtUtc);
 
     private sealed record DeltaEvent(string PreviousDigest, string Digest, DeltaPayload Payload);

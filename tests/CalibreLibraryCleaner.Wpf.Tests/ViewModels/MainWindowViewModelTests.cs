@@ -63,10 +63,43 @@ public sealed class MainWindowViewModelTests
         viewModel.StatusMessage.Should().Contain("authoritative projected state revision 7")
             .And.Contain("External Calibre changes require Rescan");
         viewModel.Books.Should().ContainSingle(value => value.Title == "Persisted Book");
+        A.CallTo(() => store.DeleteAsync(libraryRoot, A<CancellationToken>._))
+            .MustHaveHappenedOnceExactly();
     }
 
     [Fact]
-    public async Task SuccessfulScanPersistsLatestSnapshot()
+    public async Task LegacyDevelopmentSnapshotMigratesToStateBeforeDeletion()
+    {
+        const string libraryRoot = @"C:\Books";
+        ILibrarySnapshotStore store = A.Fake<ILibrarySnapshotStore>();
+        LibrarySnapshot snapshot = Snapshot(libraryRoot);
+        A.CallTo(() => store.ListAsync(A<CancellationToken>._))
+            .Returns([new(libraryRoot, snapshot.ScannedAt)]);
+        A.CallTo(() => store.ReadAsync(libraryRoot, A<CancellationToken>._)).Returns(snapshot);
+        ILibraryStateSession stateSession = A.Fake<ILibraryStateSession>();
+        A.CallTo(() => stateSession.LoadAsync(libraryRoot, A<CancellationToken>._))
+            .Returns(LibraryStateSessionOutcome.Failure(
+                "LIBRARY_STATE.NOT_FOUND", "No persisted authoritative library state exists."));
+        A.CallTo(() => stateSession.StartFromScanAsync(snapshot, A<CancellationToken>._))
+            .Returns(LibraryStateSessionOutcome.Success(LibraryState.FromScan(snapshot,
+                new(Guid.Parse("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee")))));
+        MainWindowViewModel viewModel = CreateViewModel(
+            A.Fake<ILibraryFolderPicker>(), out _, out _, out _, new(store), stateSession);
+
+        await viewModel.InitializeAsync();
+        viewModel.SelectedPersistedLibraryPath = libraryRoot;
+        await viewModel.LoadPersistedSnapshotCommand.ExecuteAsync(null);
+
+        viewModel.StatusMessage.Should().Contain("Migrated and loaded trusted development snapshot")
+            .And.Contain("authoritative projected state revision 0");
+        A.CallTo(() => stateSession.StartFromScanAsync(snapshot, A<CancellationToken>._))
+            .MustHaveHappenedOnceExactly();
+        A.CallTo(() => store.DeleteAsync(libraryRoot, A<CancellationToken>._))
+            .MustHaveHappenedOnceExactly();
+    }
+
+    [Fact]
+    public async Task SuccessfulScanPersistsStateWithoutWritingDuplicateSnapshot()
     {
         ILibraryFolderPicker picker = A.Fake<ILibraryFolderPicker>();
         ILibrarySnapshotStore store = A.Fake<ILibrarySnapshotStore>();
@@ -109,9 +142,8 @@ public sealed class MainWindowViewModelTests
         await viewModel.SelectLibraryCommand.ExecuteAsync(null);
         await viewModel.ScanCommand.ExecuteAsync(null);
 
-        A.CallTo(() => store.WriteAsync(
-            A<LibrarySnapshot>.That.Matches(value => value.Identity.LibraryRoot == "library"),
-            A<CancellationToken>._)).MustHaveHappenedOnceExactly();
+        A.CallTo(() => store.WriteAsync(A<LibrarySnapshot>._, A<CancellationToken>._))
+            .MustNotHaveHappened();
         A.CallTo(() => stateSession.StartFromScanAsync(
             A<LibrarySnapshot>.That.Matches(value => value.Identity.LibraryRoot == "library"),
             A<CancellationToken>._))

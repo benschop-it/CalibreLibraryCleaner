@@ -1,5 +1,4 @@
 using CalibreLibraryCleaner.Application.Abstractions;
-using CalibreLibraryCleaner.Application.Executions;
 using CalibreLibraryCleaner.Application.Libraries;
 using CalibreLibraryCleaner.Wpf.Services;
 using CalibreLibraryCleaner.Wpf.ViewModels;
@@ -20,13 +19,6 @@ public sealed class MainWindowTests
             try
             {
                 ILibraryPathResolver resolver = A.Fake<ILibraryPathResolver>();
-                CleanupExecutionWorkspaceViewModel cleanupExecutions = new(
-                    A.Fake<IPrepareCleanupExecution>(),
-                    A.Fake<IExecuteApprovedCleanupPlan>(),
-                    A.Fake<IExecutionHistoryStore>(),
-                    A.Fake<IExecutionBackupFolderPicker>(),
-                    A.Fake<ICleanupExecutionConfirmationService>(),
-                    A.Fake<IClock>());
                 MainWindowViewModel viewModel = new(
                     new ValidateLibraryUseCase(resolver),
                     new ScanLibraryUseCase(
@@ -35,8 +27,7 @@ public sealed class MainWindowTests
                         A.Fake<IFormatFileHasher>(),
                         A.Fake<IClock>(),
                         new()),
-                    A.Fake<ILibraryFolderPicker>(),
-                    cleanupExecutions: cleanupExecutions);
+                    A.Fake<ILibraryFolderPicker>());
                 MainWindow window = new(viewModel);
                 window.Show();
                 window.Close();

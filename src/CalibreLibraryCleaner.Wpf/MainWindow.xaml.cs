@@ -15,13 +15,12 @@ public partial class MainWindow : System.Windows.Window
     protected override void OnClosing(CancelEventArgs e)
     {
         if (DataContext is MainWindowViewModel viewModel
-            && (viewModel.CleanupExecutions?.IsBusy == true
-                || viewModel.Recoveries?.IsBusy == true))
+            && viewModel.ExactBinaryCleanupPlans?.IsBusy == true)
         {
             e.Cancel = true;
             MessageBox.Show(
-                "A cleanup or recovery workflow is still running. The application cannot close safely until it reaches and persists a terminal boundary. Use the safe stop action and wait for the terminal result.",
-                "Library workflow still running",
+                "Exact duplicate cleanup is still running. Wait for the current worker chunk and terminal result before closing the application.",
+                "Duplicate cleanup still running",
                 MessageBoxButton.OK,
                 MessageBoxImage.Warning);
             return;

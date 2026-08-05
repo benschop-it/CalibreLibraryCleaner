@@ -1,6 +1,6 @@
 # ADR 0007: Execute Cleanup Plans Through a Typed, Verified Calibre Boundary
 
-- Status: Accepted, amended by ADRs 0011, 0012, and 0014
+- Status: Superseded by ADR 0017
 - Date: 2026-07-19
 
 ## Context

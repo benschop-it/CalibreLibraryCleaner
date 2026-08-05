@@ -51,6 +51,7 @@ public sealed class EpubAssessmentRowViewModelTests
 
         row.Status.Should().Be("Unassessed");
         row.Score.Should().Be("Not scored — unassessed");
+        row.ScoreSortValue.Should().BeNull();
     }
 
     [Fact]
@@ -77,6 +78,7 @@ public sealed class EpubAssessmentRowViewModelTests
         row.Status.Should().Be("Completed");
         row.Coverage.Should().Be("FallbackReadable");
         row.Score.Should().Be("70 (fallback; max 70)");
+        row.ScoreSortValue.Should().Be(70);
         row.FeatureSummary.Should().Contain("Uncapped score: 89").And.Contain("Renderable evidence: Text");
     }
 }

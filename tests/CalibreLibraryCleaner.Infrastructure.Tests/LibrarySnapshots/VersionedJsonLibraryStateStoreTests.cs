@@ -10,6 +10,54 @@ namespace CalibreLibraryCleaner.Infrastructure.Tests.LibrarySnapshots;
 public sealed class VersionedJsonLibraryStateStoreTests
 {
     [Fact]
+    public async Task ListReadsManifestWithoutOpeningTheLargeBaseline()
+    {
+        using TemporaryDirectory directory = new();
+        InfrastructureExecutionFixture fixture = InfrastructureExecutionTestData.Create(directory.Path);
+        string cache = Path.Combine(directory.Path, "state-cache");
+        VersionedJsonLibraryStateStore store = new(new() { StorageRoot = cache });
+        LibraryState state = LibraryState.FromScan(fixture.Snapshot,
+            new(Guid.Parse("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee")));
+        await store.WriteBaselineAsync(state, CancellationToken.None);
+        File.Delete(Directory.GetFiles(cache, "*.baseline.json").Single());
+
+        IReadOnlyList<CalibreLibraryCleaner.Application.Abstractions.PersistedLibraryStateInfo> listed =
+            await store.ListAsync(CancellationToken.None);
+
+        listed.Should().ContainSingle().Which.Should().Be(
+            new CalibreLibraryCleaner.Application.Abstractions.PersistedLibraryStateInfo(
+            Path.TrimEndingDirectorySeparator(Path.GetFullPath(fixture.Snapshot.Identity.LibraryRoot)),
+            state.Snapshot.ScannedAt,
+            state.ProjectedAtUtc,
+            state.GenerationId,
+            state.Revision,
+            state.Status));
+    }
+
+    [Fact]
+    public async Task PublishingNewGenerationPrunesPreviousGenerationFiles()
+    {
+        using TemporaryDirectory directory = new();
+        InfrastructureExecutionFixture fixture = InfrastructureExecutionTestData.Create(directory.Path);
+        string cache = Path.Combine(directory.Path, "state-cache");
+        VersionedJsonLibraryStateStore store = new(new() { StorageRoot = cache });
+        LibraryState first = LibraryState.FromScan(fixture.Snapshot,
+            new(Guid.Parse("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee")));
+        LibraryState second = LibraryState.FromScan(fixture.Snapshot,
+            new(Guid.Parse("11111111-2222-3333-4444-555555555555")));
+        await store.WriteBaselineAsync(first, CancellationToken.None);
+
+        await store.WriteBaselineAsync(second, CancellationToken.None);
+
+        Directory.GetFiles(cache, "*.baseline.json").Should().ContainSingle()
+            .Which.Should().Contain("11111111222233334444555555555555");
+        Directory.GetFiles(cache, "*.deltas.jsonl").Should().ContainSingle()
+            .Which.Should().Contain("11111111222233334444555555555555");
+        (await store.ReadAsync(second.Snapshot.Identity.LibraryRoot, CancellationToken.None))
+            .Should().BeEquivalentTo(second);
+    }
+
+    [Fact]
     public async Task BaselineAndDeltasReplayAcrossStoreInstances()
     {
         using TemporaryDirectory directory = new();
@@ -77,7 +125,7 @@ public sealed class VersionedJsonLibraryStateStoreTests
                 "remove:9002", state.ProjectedAtUtc.AddSeconds(1), new(9002)),
         ];
         LibraryStateMutationIntent intent = new("chunk-1", state.GenerationId, state.Revision,
-            deltas.Select(value => value.OperationId), state.ProjectedAtUtc.AddSeconds(1));
+            deltas.Length, state.ProjectedAtUtc.AddSeconds(1));
         await store.WriteMutationIntentAsync(expanded.Identity.LibraryRoot, intent, CancellationToken.None);
         foreach (LibraryStateDelta delta in deltas) state = LibraryStateDeltaPolicy.Apply(state, delta);
 
@@ -109,7 +157,7 @@ public sealed class VersionedJsonLibraryStateStoreTests
         CalibreBook book = state.Snapshot.Books.First(value => value.Formats.Count > 0);
         BookFormat format = book.Formats[0];
         LibraryStateMutationIntent intent = new("chunk-1", state.GenerationId, state.Revision,
-            [$"remove:{book.Id.Value}:{format.Format}"], state.ProjectedAtUtc.AddSeconds(1));
+            1, state.ProjectedAtUtc.AddSeconds(1));
         await store.WriteBaselineAsync(state, CancellationToken.None);
 
         await store.WriteMutationIntentAsync(state.Snapshot.Identity.LibraryRoot, intent, CancellationToken.None);
@@ -140,7 +188,7 @@ public sealed class VersionedJsonLibraryStateStoreTests
             new(Guid.Parse("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee")));
         string[] operationIds = ["remove:9001", "remove:9002"];
         LibraryStateMutationIntent intent = new("chunk-1", state.GenerationId, state.Revision,
-            operationIds, state.ProjectedAtUtc.AddSeconds(1));
+            operationIds.Length, state.ProjectedAtUtc.AddSeconds(1));
         await store.WriteBaselineAsync(state, CancellationToken.None);
         await store.WriteMutationIntentAsync(expanded.Identity.LibraryRoot, intent, CancellationToken.None);
         RemoveRecordLibraryStateDelta delta = new(state.GenerationId, state.Revision,

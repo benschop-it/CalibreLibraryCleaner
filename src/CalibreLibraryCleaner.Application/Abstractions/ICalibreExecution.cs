@@ -1,4 +1,5 @@
 using CalibreLibraryCleaner.Application.Executions;
+using CalibreLibraryCleaner.Domain.Executions;
 
 namespace CalibreLibraryCleaner.Application.Abstractions;
 
@@ -9,23 +10,9 @@ public interface ICalibreToolDiscovery
         CancellationToken cancellationToken);
 }
 
-public interface ICalibreCommandGateway
+public interface ICleanupExecutionIdGenerator
 {
-    Task<CalibreCommandResult> ExportRecordAsync(
-        ExportCalibreRecordRequest request,
-        CancellationToken cancellationToken);
-
-    Task<CalibreCommandResult> AddOrReplaceFormatAsync(
-        AddOrReplaceCalibreFormatRequest request,
-        CancellationToken cancellationToken);
-
-    Task<CalibreCommandResult> RemoveFormatAsync(
-        RemoveCalibreFormatRequest request,
-        CancellationToken cancellationToken);
-
-    Task<CalibreCommandResult> RemoveRecordAsync(
-        RemoveCalibreRecordRequest request,
-        CancellationToken cancellationToken);
+    CleanupExecutionId Create();
 }
 
 public interface ICalibreMutationWorkerFactory

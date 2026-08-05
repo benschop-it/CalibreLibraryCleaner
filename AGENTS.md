@@ -18,13 +18,13 @@ Treat these documents as authoritative. For substantial work, create or update a
 - Never write directly to Calibre's `metadata.db`.
 - Open Calibre databases read-only during analysis.
 - Never rename, move, overwrite, or delete Calibre-managed files during analysis.
-- Never delete or replace a unique format without a verified backup.
-- Destructive actions require an immutable, explicitly approved cleanup plan.
-- Revalidate cleanup plans against the current authoritative projected revision immediately before execution.
+- Exact cleanup requires explicit per-run confirmation that the developer or user has a complete external library backup.
 - Prefer supported Calibre tooling for library mutations.
-- Verify every applied change by durably committing its typed state delta and preserve rollback information.
-- Only an explicit user scan may read and reanalyze the complete library; cleanup and recovery must not trigger scans.
+- Use only the fixed persistent `calibre-debug` mutation worker; do not add a direct-command fallback.
+- Durably commit typed projected-state deltas after complete successful worker chunks.
+- Only an explicit user scan may read and reanalyze the complete library; cleanup must not trigger scans.
 - A failed, ambiguous, interrupted, or unprojectable mutation marks state uncertain and blocks further mutation until explicit rescan.
+- Log mutation failures with structured technical context, but never book content.
 - AI recommendations must never directly trigger destructive actions.
 
 ## Architecture
@@ -73,7 +73,7 @@ Do not implement future roadmap items unless explicitly requested.
 
 Use xUnit, FakeItEasy, and FluentAssertions.
 
-Tests must cover successful behavior, invalid input, cancellation, missing files, malformed ebooks, duplicate conflicts, stale plans, safety invariants, and architecture boundaries. Never depend on the user's real Calibre library.
+Tests must cover successful behavior, invalid input, cancellation, missing files, malformed ebooks, duplicate conflicts, worker failures, state uncertainty, safety invariants, and architecture boundaries. Never depend on the user's real Calibre library.
 
 ## Standard commands
 

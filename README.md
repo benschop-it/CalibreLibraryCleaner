@@ -6,22 +6,20 @@ Visual Studio Code and GitHub Copilot Business.
 
 ## Current status
 
-Milestones 0 through 9 are implemented. The application can build immutable
-read-only snapshots, hash formats, detect exact binary and exact normalized
-metadata candidates, assess EPUB and PDF quality, generate and review
-recommendations and cleanup plans, execute narrowly supported plans through
-Calibre tooling, and produce verified recovery plans.
+The application can build immutable read-only analysis snapshots, hash formats,
+detect exact binary and exact normalized metadata candidates, assess EPUB and
+PDF quality, generate and review recommendations, and remove exact duplicates
+through a constrained persistent Calibre worker.
 
-Mutation and recovery capabilities remain fail-closed unless their exact
-Calibre profile has passed the caller-gated disposable-library qualification.
-Milestone 9 PDF assessment is analysis-only and does not affect retained-format
-selection, cleanup, execution, or recovery.
+Persisted analysis loading remains available during development because a full
+large-library scan can take approximately twenty minutes. Startup lists small
+state manifests; explicit Load restores the saved analysis without rescanning.
 
-Exact-binary groups can be cleaned independently of metadata candidates: select
-the one keeper row, approve deletion of every other group record, choose an
-external backup folder, prepare, and execute. The application backs up complete
-involved records and uses typed non-permanent Calibre record removal for every
-non-keeper ID.
+Exact-binary groups can be cleaned independently of metadata candidates. Review
+or override generated keeper rows, select Remove duplicates, and confirm that a
+complete external library backup exists. The application does not create or
+verify backups. It uses one persistent `calibre-debug` worker, logs failures,
+and requires Rescan after a failed or ambiguous mutation.
 
 The next planned roadmap milestone is Milestone 10 content fingerprints and
 comparisons, after completion of the outstanding Milestone 9 manual WPF

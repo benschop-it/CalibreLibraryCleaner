@@ -9,7 +9,8 @@ public sealed record ExactDuplicateKeeperSelection(
 
 public sealed record ExecuteBulkExactDuplicateCleanupRequest(
     string LibraryRoot,
-    IReadOnlyList<ExactDuplicateKeeperSelection> KeeperSelections);
+    IReadOnlyList<ExactDuplicateKeeperSelection> KeeperSelections,
+    bool ExternalBackupConfirmed);
 
 public enum BulkExactDuplicateCleanupState
 {

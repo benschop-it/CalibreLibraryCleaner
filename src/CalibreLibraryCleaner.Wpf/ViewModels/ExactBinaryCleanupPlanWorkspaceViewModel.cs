@@ -1,5 +1,6 @@
 using CalibreLibraryCleaner.Application.Executions;
 using CalibreLibraryCleaner.Domain.Libraries;
+using CalibreLibraryCleaner.Wpf.Services;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 
@@ -8,6 +9,7 @@ namespace CalibreLibraryCleaner.Wpf.ViewModels;
 public sealed class ExactBinaryCleanupPlanWorkspaceViewModel : ObservableObject
 {
     private readonly ExecuteBulkExactDuplicateCleanupUseCase _execute;
+    private readonly IExactDuplicateCleanupConfirmationService _confirmation;
     private LibrarySnapshot? _snapshot;
     private IReadOnlyList<ExactDuplicateGroupRowViewModel> _groups = [];
     private string _status = "Run a scan to find exact file duplicates.";
@@ -17,9 +19,11 @@ public sealed class ExactBinaryCleanupPlanWorkspaceViewModel : ObservableObject
     private bool _isBusy;
 
     public ExactBinaryCleanupPlanWorkspaceViewModel(
-        ExecuteBulkExactDuplicateCleanupUseCase execute)
+        ExecuteBulkExactDuplicateCleanupUseCase execute,
+        IExactDuplicateCleanupConfirmationService confirmation)
     {
         _execute = execute;
+        _confirmation = confirmation;
         RemoveDuplicatesCommand = new AsyncRelayCommand(RemoveDuplicatesAsync, CanRemoveDuplicates);
     }
 
@@ -83,6 +87,11 @@ public sealed class ExactBinaryCleanupPlanWorkspaceViewModel : ObservableObject
             .Where(value => value.IsCleanupEligible && value.RetainedMember is not null)
             .Select(value => new ExactDuplicateKeeperSelection(value.GroupId, value.RetainedMember!.Member))
             .ToArray();
+        if (!_confirmation.ConfirmExternalBackup(selections.Length))
+        {
+            Status = "Duplicate cleanup canceled. Confirm a complete external backup before retrying.";
+            return;
+        }
         IsBusy = true;
         ProgressPercentage = 0;
         ProgressMessage = string.Empty;
@@ -96,7 +105,8 @@ public sealed class ExactBinaryCleanupPlanWorkspaceViewModel : ObservableObject
                     : 100d * value.CompletedOperations / value.TotalOperations;
             });
             BulkExactDuplicateCleanupResult result = await _execute.ExecuteAsync(new(
-                _snapshot.Identity.LibraryRoot, selections), progress, CancellationToken.None).ConfigureAwait(true);
+                _snapshot.Identity.LibraryRoot, selections, ExternalBackupConfirmed: true),
+                progress, CancellationToken.None).ConfigureAwait(true);
             ResultSummary = $"Removed {result.RemovedFormatCount:N0} duplicate format(s), merged "
                 + $"{result.MergedRecordCount:N0} record(s), and deleted {result.RemovedRecordCount:N0} empty record(s)."
                 + (result.SkippedRecordCount > 0

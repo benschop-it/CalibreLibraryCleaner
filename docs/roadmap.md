@@ -24,57 +24,17 @@ Parser integration, cover/TOC/spine/resource/text checks, reproducible scores, a
 
 Choose metadata and format sources independently, warn about conflicts, support override, and export JSON.
 
-## Milestone 6 — Cleanup plans
+## Milestone 6 — Cleanup plans (superseded)
 
-Immutable plans, expected states, validation, approval, export/import. Still no mutation.
+The immutable cleanup-plan artifact and UI were implemented, then removed by ADR 0017. Recommendation review remains analysis-only; there is no general executable consolidation-plan workflow.
 
-Implemented as a separate `cleanup-plan/1.0` artifact with immutable semantic bodies, canonical hash-bound approval, terminal stale/blocked/revoked states, guarded external import/export, and WPF review. Backup creation, Calibre tooling, execution, and rollback remain Milestone 7 or later.
+## Milestone 7 — Safe execution (superseded)
 
-## Milestone 7 — Safe execution
+The general direct-command execution, application-created backup, journal, and history stack were implemented, then removed by ADR 0017. Exact binary cleanup now uses only the constrained persistent worker and requires per-run confirmation of a user-owned external backup.
 
-Calibre CLI discovery, verified backups, command execution, post-operation verification, and audit history.
+## Milestone 8 — Rollback (superseded)
 
-Implemented as a single-plan, serial, fail-closed execution workflow for the
-capability-probed Calibre 9.x Windows compatibility profile. The supported mutation
-mapping is limited to `add_format` additions/replacements and non-permanent
-`remove` of redundant source records, after an exclusive application lease,
-authoritative-revision plan validation, and a complete independently hash-verified external
-backup. Every mutation uses a direct no-shell process boundary and durably commits a typed state delta. Hash-chained journals, recovery-required
-reconciliation, safe-stop semantics, WPF confirmations, progress, and durable
-results are included. Automatic rollback, resume, retry, repair, bulk
-execution, metadata transfer, cover replacement, and standalone format removal
-remain unsupported.
-
-Post-implementation hardening binds confirmation to canonical root and operation
-graph, validates the current projected revision before every command, prevents verified
-executable/backup substitution, and persists an application-local recovery
-guard. Cover-bearing plans are blocked until cover bytes are modeled and can be
-verified exactly.
-
-The 9.11-or-newer Calibre 9.x cleanup runtime profile is enabled by default and still requires
-executable identity, a compatible version, command probes, authoritative state, and typed command
-mapping. Recovery capabilities remain independently disabled unless qualified.
-
-## Milestone 8 — Rollback
-
-Rollback plans, supported restore operations, verification, and history UI.
-
-Implemented as a single-execution, explicitly approved, reconciliation-driven
-recovery workflow. It strictly reverifies Milestone 7 source artifacts, uses
-the authoritative projected state, generates a canonical immutable recovery plan, preserves or
-blocks on unexpected current data, creates and verifies a separate current-state
-backup, restores constructively before separately confirmed destructive work,
-commits a typed delta after every successful command, verifies the final projected state, and persists
-hash-chained journals, append-only history, source-resolution links, and changed
-record-ID mappings. Cleanup and recovery share one lease domain. No direct
-database or managed-library filesystem mutation, shell invocation, automatic
-retry, resume, bulk recovery, or rollback-of-rollback is included.
-
-Calibre 9.x recovery mutation capabilities remain disabled by
-default until the opt-in disposable-library qualification passes per
-capability. Unsupported cover restoration and ambiguous or data-losing cases
-remain manual-intervention blockers.
-
+Automated reconciliation-driven recovery was implemented, then removed by ADR 0017. Mutation failures are logged, stop immediately, mark projected state Rescan-required, and rely on the user's external full-library backup for manual restoration if needed.
 ## Milestone 9 — PDF assessment
 
 Safe read-only PDF assessment with an isolated PdfPig worker, deterministic bounded sampling, separate explainable classification, PDF-specific findings-derived scoring, bounded text/image/metadata/identifier evidence, resource enforcement, progress/cancellation, and WPF presentation. PDF assessment does not rank retained PDFs or change cleanup, execution, or recovery behavior.

@@ -18,9 +18,9 @@ The Exact file duplicates tab provides:
 2. row selection to override that keeper;
 3. one `Remove duplicates` command covering all eligible groups.
 
-The button click authorizes the operation. No cleanup-plan, approval, backup-folder, preparation, or acknowledgement controls are shown.
+The button starts a per-run confirmation that a complete external library backup exists. No cleanup-plan, backup-folder, or preparation controls are shown, and the application does not create or verify the external backup.
 
-The bulk workflow uses only typed Calibre commands. It first stages complementary source formats in application-local temporary storage and verifies their fingerprints. It then:
+The bulk workflow uses only the typed persistent worker. It then:
 
 1. adds complementary formats to an unambiguous target record;
 2. removes non-retained exact format copies and transferred source formats;
@@ -28,16 +28,16 @@ The bulk workflow uses only typed Calibre commands. It first stages complementar
 
 A record selected as keeper in any group is never merged away. A non-keeper source is merged only when all remaining formats map to one target and no non-identical same-format conflict exists. Ambiguous or conflicting records remain unchanged and are reported in the result.
 
-Successful commands durably update projected state as defined by ADR 0012. Failed or ambiguous commands stop the workflow and mark state uncertain. The user's existing library backup is outside this per-run workflow; unique formats are removed only after a verified staged copy has been added to the target.
+Complete successful worker chunks durably update projected state as defined by ADR 0012. Failed or ambiguous chunks are logged, stop the workflow, and mark state uncertain. The user's existing library backup is outside this workflow.
 
 Technical cleanup-plan, cleanup-execution, and recovery tabs are hidden from the normal interface.
 
 ## Consequences
 
 - The primary workflow matches the product goal and scales across all exact groups.
-- Internal plan infrastructure may remain for diagnostics and historical compatibility but is not user-operated.
+- General plan, backup, execution-history, and recovery infrastructure is removed.
 - Some records can remain when automatic merging would overwrite conflicting content or has multiple possible targets.
-- Temporary transfer staging is automatic and deleted after execution.
+- Complementary transfers are fingerprint-verified by the persistent worker.
 
 ## Rejected alternatives
 

@@ -1,5 +1,3 @@
-using CalibreLibraryCleaner.Application.Recoveries;
-
 namespace CalibreLibraryCleaner.Infrastructure.Calibre;
 
 public sealed record CalibreExecutionOptions
@@ -17,9 +15,6 @@ public sealed record CalibreExecutionOptions
     public string MaximumExclusiveVersion { get; init; } = InitialMaximumExclusiveVersion;
     public string CapabilityProfile { get; init; } = InitialCapabilityProfile;
     public bool IsValidatedCompatibilityProfileEnabled { get; init; } = true;
-    public bool IsValidatedRecoveryProfileEnabled { get; init; }
-    public IReadOnlySet<RecoveryCapability> EnabledRecoveryCapabilities { get; init; } =
-        new HashSet<RecoveryCapability>();
     public TimeSpan ProbeTimeout { get; init; } = TimeSpan.FromSeconds(30);
     public TimeSpan ReadOnlyCommandTimeout { get; init; } = TimeSpan.FromMinutes(10);
     public TimeSpan WorkerStartupTimeout { get; init; } = TimeSpan.FromSeconds(30);

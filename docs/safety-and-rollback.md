@@ -1,122 +1,55 @@
-# Safety and Rollback
+# Safety and Failure Handling
 
 ## Analysis mode
 
-Allowed: read database and files, hash, parse, and create application-owned reports/cache outside the library.
+Analysis may read the Calibre database and managed files, hash and parse formats, and create application-owned reports or development cache artifacts outside the library.
 
-Forbidden: rename, move, overwrite, delete, change metadata, add formats, or create Calibre-managed files.
+Analysis must never write directly to `metadata.db`, rename or move Calibre-managed files, modify metadata, add or remove formats, or create files inside the selected library. EPUB and PDF inputs remain untrusted and are processed through the documented bounded read-only inspection paths. Book content is not logged.
 
-PDF assessment treats every document as untrusted. It validates root containment and rejects reparse points, opens read-only with restrictive sharing, checks the expected observation and SHA-256, and rechecks identity before returning. Signature/trailer, file, object, stream, page, sample, text, image, pixel, operation, dimension, metadata, XMP, outline, finding, protocol, wall-time, CPU, heap, and working-set bounds fail closed.
+## Persisted development state
 
-PDF parsing runs in a disposable per-file worker. The parent terminates the process tree on cancellation, timeout, CPU, or memory breach; Windows uses a kill-on-close single-process Job Object when available. Production code never invokes PDF action, hyperlink, attachment, rendering, image-decoding, OCR, network, or external-viewer APIs. Only bounded aggregates, short normalized fingerprints, short metadata, and validated identifiers survive; PDF text and embedded content are never logged.
+A successful explicit Scan creates one authoritative projected-state generation outside the library. During development, explicit Load may restore that state or migrate a strictly validated legacy snapshot without rescanning. This deliberately trusts development cache data and does not detect external Calibre changes.
 
-PDF findings and scores are analysis evidence only. They cannot approve or trigger cleanup, mutation, rollback, or recovery. Milestone 7 execution and Milestone 8 recovery behavior is unchanged.
+Startup listing reads only small manifests or bounded legacy metadata. A manifest references one active baseline/checkpoint and one active delta journal. New manifest publication is atomic and precedes deletion of unreferenced state files. Shutdown does not compact or write a large snapshot.
 
-Milestone 5 recommendation review JSON is an application-owned analysis artifact, not a cleanup plan. It may be written only to an explicitly selected existing directory outside the Calibre library, using a guarded temporary sibling and publish step. It contains generated/reviewed evidence and staleness, but no removal, command, approval, backup, mutation ordering, or expected pre-operation state. The exporter rejects the library root, descendants, and reparse-point destinations.
+## Exact duplicate cleanup
 
-## Plan validation
+Exact duplicate cleanup is the only mutation workflow. Before each run, the user confirms that a complete external backup of the Calibre library exists. The application does not create, inspect, or verify that backup.
 
-Before execution verify library identity, record existence, paths, file hashes, format state, target validity, conflicts, backup destination, and Calibre tool availability. Any mismatch invalidates the plan.
+The workflow:
 
-Milestone 6 records these expected states and backup requirements but performs no execution-time verification or backup. Cleanup plans are generated only from a current accepted or manually adjusted recommendation, remain non-executable, and may be approved or revoked only as immutable data. Imported plans are untrusted: schema, bounds, paths, graph coverage, lifecycle, and canonical hashes are validated, and current snapshot mismatch makes a plan stale. A readable future policy is retained only as blocked.
+1. requires authoritative projected state;
+2. deterministically builds keeper, transfer, format-removal, and empty-record-removal operations;
+3. discovers and validates the trusted Calibre installation;
+4. acquires one library mutation lease;
+5. opens one fixed persistent `calibre-debug` worker;
+6. writes one bounded cleanup-run marker;
+7. sends typed chunks of at most 100 operations;
+8. projects and durably journals only complete successful chunks; and
+9. writes one final checkpoint after complete success.
 
-Same-format exact-binary groups may produce an automatic format-cleanup plan. Generation retains the copy on the best-ranked record, explicitly lists every byte-identical format removal, and derives record removals only for records whose complete format sets are removed. Before mutation, the executor copies and rehashes every involved format, exports each complete record through Calibre, verifies OPF/cover/format coverage, and seals an external manifest. It then uses typed `calibredb remove_format` and non-permanent `calibredb remove`, committing one authoritative state delta after each successful command without rescanning. The bundle or the user's full library copy is the recovery source.
+Transfers precede dependent source removals. Exact duplicate/source formats are removed before records, and a record is removed only when projected empty. Ambiguous or conflicting records remain unchanged.
 
-The one-click exact-duplicate workflow defaults to one persistent `calibre-debug` worker using Calibre's documented database API. The fixed application-owned script has no direct SQL capability and accepts only typed transfer-format, remove-format, and non-permanent remove-record chunks of at most 100 operations. Calibre GUI, Calibre server, and other known writers must remain closed. Worker startup failure may use the existing CLI fallback before mutation; a crash, malformed response, timeout, or unverifiable result after mutation begins marks state uncertain and must never be retried through the fallback.
+The worker uses only Calibre's documented database `Cache` API through the fixed embedded script and strict JSON-lines protocol. Direct SQL, shell invocation, direct managed-file mutation, arbitrary Python, GUI automation, direct `calibredb` mutation commands, and mutation-engine fallback are prohibited.
 
-Before each worker chunk, the state manifest durably records its generation, expected revision, chunk identity, and ordered operation IDs. Successful ordered results are projected and hash-chain appended with one batch fsync and one manifest update. Complete success clears the intent; partial or ambiguous outcomes retain it and mark state uncertain. An unmatched intent always reloads uncertain after restart. Threshold compaction is deferred during the run and one checkpoint is written after successful completion.
+## Failure handling
 
-The application trusts unambiguous successful typed command results. Any failed, ambiguous, interrupted, unpersistable, or unprojectable mutation marks state uncertain and blocks all cleanup and recovery until explicit rescan. External Calibre changes are not detected automatically.
+Preflight, discovery, lease, worker startup, or handshake failure logs structured technical context and stops before mutation.
 
-The scan baseline remains available as the persisted library listing while a separate versioned state manifest and hash-chained delta journal track projected revisions. Explicit Rescan atomically replaces that generation. Cleanup and recovery never invalidate the baseline merely to force another scan.
+A failed, ambiguous, interrupted, unpersistable, or unprojectable mutation:
 
-Cleanup-plan import/export is explicit and restricted to `.cleanup-plan.json` files outside the physically resolved selected library. Export uses an external temporary sibling and publication step; import is bounded and read-only. Neither operation creates a plan, temporary file, cache, lock, or backup inside the library.
+1. logs the run ID, safe operation identifiers, worker failure code, and exception details without book content;
+2. stops immediately;
+3. does not retry, continue, invoke another engine, or infer a successful operation prefix;
+4. marks projected state uncertain/Rescan-required; and
+5. blocks later mutation until an explicit successful Scan creates a new generation.
 
-## Backup
+Cancellation before mutation is ordinary cancellation. After mutation starts, cancellation is observed only between worker chunks and follows the same uncertain-state rule if the outcome cannot be proven complete.
 
-Back up all formats, cover, exported metadata/OPF where available, original paths, hashes, sizes, timestamps, identifiers, plan, and execution log. Verify backup hashes before mutation.
+## Restoration
 
-## Execution order
+Automated rollback and recovery are not provided. If manual restoration is needed, the user restores from the externally maintained full-library backup using Calibre-supported procedures outside this application, then performs an explicit Scan before further cleanup.
 
-1. Acquire operation lock.
-2. Revalidate plan.
-3. Create and verify backup.
-4. Invoke supported Calibre operations.
-5. Capture output and exit status.
-6. Durably commit the typed state delta.
-7. Verify projected metadata, formats, and operation dependencies.
-8. Persist audit result.
+## Testing
 
-Milestone 7 execution now uses one explicit scan generation, a
-write-ahead mutation marker, constructive format operations, an explicit
-destructive gate, record removals last, and a durable projected delta after every
-successful Calibre command. A revision check, lease check, immutable plan/graph check, tool
-identity check, backup recheck, and confirmation check also run immediately
-before every command. The local recovery guard is durable before the first
-mutation marker. Only exact-profile typed `calibredb` operations are allowed.
-Cancellation after mutation starts is a safe-stop request between verified
-operations; the active Calibre process is never killed. Any uncertain partial
-state is durably marked `RecoveryRequired`.
-
-V1 does not hash cover content in the library snapshot. Therefore any plan
-whose involved records report a cover is unsupported and blocks before backup
-or mutation; cover preservation must not be inferred from presence alone.
-
-## Rollback
-
-Rollback is a first-class verified operation that restores records, metadata, formats, and covers through supported mechanisms. It must not rely only on `.caltrash`.
-
-Milestone 8 implements recovery as a separately generated and explicitly
-approved immutable plan. Eligibility strictly reloads and cross-checks the
-Milestone 7 cleanup plan, hash-chained journal, any journal-proven terminal
-summary, manifest, and every original backup item. Nonterminal source execution
-is recoverable without inventing a summary; an orphan summary without a
-terminal journal event is ignored. The authoritative projected state is reconciled
-against verified pre-state and durable execution progress. Unknown journal
-state, identity mismatch, ambiguity, unsupported capability, or potential
-silent data loss blocks recovery.
-
-Before mutation, recovery creates a distinct versioned backup of every current
-affected record. It contains raw current formats, strict Calibre exports,
-metadata, covers, inventory and fingerprints, the approved recovery plan, and
-new audit copies of the source plan, journal, summary, and original manifest.
-The original Milestone 7 bundle is opened read-only and never changed. Every
-new manifest entry and both manifest hashes are independently reverified.
-Affected semantic inventory and strict Calibre OPF exports must agree before
-the backup can authorize mutation.
-
-Recovery then executes in this order:
-
-1. Hold the shared cleanup/recovery lease and repeat source, tool, plan, and
-   projected-revision checks.
-2. Create and verify the current-state backup.
-3. Apply constructive operations serially through typed Calibre commands.
-4. Commit a typed delta after every successful command and verify projected hashes and semantic identity.
-5. Verify all constructive and preservation expectations.
-6. Obtain a separate confirmation bound to the exact destructive graph.
-7. Apply approved destructive operations last, without automatic retry.
-8. Perform final semantic verification, including unrelated and preserved data.
-9. Finalize every command-returned record-ID mapping with the verified formats
-   and identifiers, then persist the terminal journal, history, and resolution
-   link.
-
-An unsupported projected transition blocks semantic success. External Calibre changes are intentionally ignored until explicit Rescan. A successful typed command is trusted and must be followed by one durable projected delta; ambiguity marks state uncertain and blocks mutation.
-
-Cancellation before mutation is immediate. During backup it prevents mutation.
-After mutation begins it is a safe-stop request honored only after the active
-Calibre process finishes and its effect is scanned. Recovery never kills a
-mutation process, resumes automatically, retries destructive work, or performs
-a rollback of a rollback. `Recovered` requires final semantic success;
-constructive partial results report `PartiallyRecovered`, final mismatch reports
-`VerificationFailed`, and destructive or indeterminate failure reports
-`ManualInterventionRequired`.
-
-Cover restoration and every exact Calibre mutation capability remain disabled
-unless separately qualified. The production Calibre 9.x recovery profile is
-therefore fail-closed by default.
-
-## Concurrency
-
-Only one cleanup or recovery operation may hold the shared library-mutation
-lease at a time. Warn the user not to run Calibre or other library-mutating
-tools concurrently.
+Automated destructive tests use only synthetic or caller-marked disposable libraries. They never discover or mutate a default or personal Calibre library. Tests cover deterministic operation order, backup acknowledgement, lease exclusion, worker-only execution, bounded chunks, complete-chunk projection, structured failure logs, state uncertainty, restart replay, checkpointing, and explicit-Scan recovery of application state.

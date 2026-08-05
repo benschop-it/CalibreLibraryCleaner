@@ -4,6 +4,8 @@ namespace CalibreLibraryCleaner.Application.Abstractions;
 
 public interface ILibraryStateStore
 {
+    Task<IReadOnlyList<PersistedLibraryStateInfo>> ListAsync(CancellationToken cancellationToken);
+
     Task WriteBaselineAsync(LibraryState state, CancellationToken cancellationToken);
 
     Task AppendDeltaAsync(
@@ -38,3 +40,11 @@ public interface ILibraryStateStore
 
     Task<LibraryState?> ReadAsync(string libraryRoot, CancellationToken cancellationToken);
 }
+
+public sealed record PersistedLibraryStateInfo(
+    string LibraryRoot,
+    DateTimeOffset ScannedAt,
+    DateTimeOffset ProjectedAt,
+    LibraryStateGenerationId GenerationId,
+    LibraryStateRevision Revision,
+    LibraryStateStatus Status);

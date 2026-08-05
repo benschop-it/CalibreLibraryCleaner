@@ -46,7 +46,7 @@ internal sealed class PersistentCalibreMutationWorkerFactory(CalibreExecutionOpt
             string executable = Path.Combine(Path.GetDirectoryName(trustedCalibredb)!, "calibre-debug.exe");
             if (!File.Exists(executable)
                 || !ExecutionPathGuard.TryRejectReparsePoints(executable, true, out _))
-                return await FailAndDisposeAsync("CALIBRE_WORKER_NOT_FOUND", true).ConfigureAwait(false);
+                return await FailAndDisposeAsync("CALIBRE_WORKER_NOT_FOUND").ConfigureAwait(false);
             executableLock = new FileStream(executable, FileMode.Open, FileAccess.Read, FileShare.Read,
                 128 * 1024, FileOptions.Asynchronous | FileOptions.SequentialScan);
 
@@ -84,7 +84,7 @@ internal sealed class PersistentCalibreMutationWorkerFactory(CalibreExecutionOpt
                 return await FailAndDisposeAsync("CALIBRE_WORKER_IDENTITY_MISMATCH").ConfigureAwait(false);
             if (ready.FailureCode is not null
                 || !RequiredCapabilities.All(ready.Capabilities.Contains))
-                return await FailAndDisposeAsync("CALIBRE_WORKER_HANDSHAKE_FAILED", true).ConfigureAwait(false);
+                return await FailAndDisposeAsync("CALIBRE_WORKER_HANDSHAKE_FAILED").ConfigureAwait(false);
 
             PersistentCalibreMutationWorkerSession session = new(
                 process, trustedToolLock, executableLock, scriptLock, stderr, options);
@@ -96,7 +96,7 @@ internal sealed class PersistentCalibreMutationWorkerFactory(CalibreExecutionOpt
         }
         catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
         {
-            return await FailAndDisposeAsync("CALIBRE_WORKER_STARTUP_TIMEOUT", true).ConfigureAwait(false);
+            return await FailAndDisposeAsync("CALIBRE_WORKER_STARTUP_TIMEOUT").ConfigureAwait(false);
         }
         catch (InvalidDataException)
         {
@@ -107,12 +107,10 @@ internal sealed class PersistentCalibreMutationWorkerFactory(CalibreExecutionOpt
                                            or System.ComponentModel.Win32Exception
                                            or ArgumentException or NotSupportedException)
         {
-            return await FailAndDisposeAsync("CALIBRE_WORKER_STARTUP_FAILED", true).ConfigureAwait(false);
+            return await FailAndDisposeAsync("CALIBRE_WORKER_STARTUP_FAILED").ConfigureAwait(false);
         }
 
-        async Task<CalibreMutationWorkerOpenResult> FailAndDisposeAsync(
-            string failureCode,
-            bool isCliFallbackAllowed = false)
+        async Task<CalibreMutationWorkerOpenResult> FailAndDisposeAsync(string failureCode)
         {
             if (process is { HasExited: false })
             {
@@ -128,7 +126,7 @@ internal sealed class PersistentCalibreMutationWorkerFactory(CalibreExecutionOpt
             if (scriptLock is not null) await scriptLock.DisposeAsync().ConfigureAwait(false);
             if (executableLock is not null) await executableLock.DisposeAsync().ConfigureAwait(false);
             if (trustedToolLock is not null) await trustedToolLock.DisposeAsync().ConfigureAwait(false);
-            return Failed(failureCode, isCliFallbackAllowed);
+            return Failed(failureCode);
         }
     }
 
@@ -227,9 +225,7 @@ internal sealed class PersistentCalibreMutationWorkerFactory(CalibreExecutionOpt
         return false;
     }
 
-    private static CalibreMutationWorkerOpenResult Failed(
-        string failureCode,
-        bool isCliFallbackAllowed = false) => new(null, failureCode, isCliFallbackAllowed);
+    private static CalibreMutationWorkerOpenResult Failed(string failureCode) => new(null, failureCode);
 }
 
 internal sealed class PersistentCalibreMutationWorkerSession(

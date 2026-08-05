@@ -1,6 +1,6 @@
 # ADR 0006: Use Immutable, Non-Executable Cleanup Plan Artifacts
 
-- Status: Accepted
+- Status: Superseded by ADR 0017
 - Date: 2026-07-18
 
 ## Context

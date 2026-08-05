@@ -41,11 +41,11 @@ Must be asynchronous, cancellable, progress-reporting, bounded in parallelism, a
 
 ## Persistent library-state boundary
 
-Application owns the authoritative library-state session and persistence ports. Infrastructure owns the versioned baseline/checkpoint representation, append-only hash-chained delta journal, atomic state manifest, replay, and compaction under the user's local application-data directory. State artifacts are never written inside a Calibre library.
+Application owns the authoritative library-state session and persistence ports. Infrastructure owns the versioned baseline/checkpoint representation, append-only hash-chained delta journal, atomic state manifest, replay, compaction, and current-generation pruning under the user's local application-data directory. State artifacts are never written inside a Calibre library. Startup listing reads only small manifests; it never materializes a baseline, checkpoint, or journal.
 
-Persistent-worker chunks write an atomic manifest intent before Calibre dispatch. A successful chunk appends every typed logical delta in one write-through journal write, advances the manifest once, and clears the matching intent atomically. Partial results append only the verified ordered prefix while retaining the intent; restart therefore loads uncertain. Exact-cleanup batches use indexed projection and one immutable snapshot per chunk, defer state publication for the worker lifetime, and compact one final checkpoint after successful completion.
+One cleanup-run marker records the generation, starting revision, run identity, and total operation count before the first worker chunk. A complete successful chunk appends every typed logical delta in one write-through journal write and advances the manifest once. A failed or ambiguous chunk is not partially projected and leaves state uncertain. The marker clears only with the final successful chunk. Exact-cleanup batches defer state publication for the worker lifetime and compact one final checkpoint after successful completion.
 
-One explicit successful scan creates a new authoritative generation. Successful typed cleanup and recovery commands durably append and apply deterministic deltas; they never trigger catalog reads, hashing, ebook inspection, or targeted state scans. Replayed authoritative state remains mutation-eligible across restart until the user explicitly rescans.
+One explicit successful scan creates a new authoritative generation. Successful typed cleanup chunks durably append and apply deterministic deltas; they never trigger catalog reads, hashing, ebook inspection, or targeted state scans. Replayed authoritative state remains mutation-eligible across restart until the developer explicitly rescans. Existing development `.library-snapshot.json` files migrate on explicit Load and are removed only after state publication succeeds.
 
 The application intentionally does not detect external library changes between explicit scans. Failed, ambiguous, interrupted, unpersistable, or unprojectable mutations mark the generation uncertain and block all mutation until explicit rescan.
 
@@ -65,72 +65,15 @@ The worker opens one seekable read-only stream, reports the page header, accepts
 
 Domain owns immutable recommendation selections, reasons, warnings, decision strength, qualitative confidence, review values, and invariants. Application indexes completed Milestone 2â€“4 evidence, orchestrates deterministic generation, validates overrides, evaluates staleness, and owns the external export port. Infrastructure alone owns JSON parsing/serialization and guarded file publication outside the selected library. WPF owns session review interaction and file selection; ViewModels call Application use cases and do not write files. Recommendation review artifacts contain no cleanup-plan or mutation instructions.
 
-## Cleanup-plan boundary
+## Exact-cleanup boundary
 
-Domain owns immutable cleanup-plan bodies, expected library/record/format state, declarative retention and removal intentions, backup requirements, provenance, validation issues, canonical semantic hashes, and lifecycle transition rules. Application owns explicit generation from one current reviewed recommendation, current-snapshot validation, staleness, approval, revocation, and import/export orchestration. Infrastructure alone owns `cleanup-plan/1.0` JSON parsing/serialization and guarded external file storage. WPF owns review and confirmation interaction; ViewModels do not serialize or access files.
+WPF owns generated keeper presentation, explicit keeper overrides, per-run external-backup confirmation, progress, and terminal status. Application builds one deterministic operation sequence, acquires the library mutation lease, and orchestrates one persistent worker. Infrastructure owns trusted Calibre discovery, the fixed embedded worker script, strict bounded JSON-lines protocol, process lifecycle, and lease storage.
 
-Cleanup plans are non-executable data. Milestone 6 introduces no Calibre process, command, backup creator, lock, mutation, simulation, or rollback boundary.
+The worker uses Calibre's documented database `Cache` API through one `calibre-debug` process. It transfers fingerprint-verified complementary formats only to unambiguous non-conflicting targets, removes exact duplicate/source formats, and removes records that become empty. Requests contain at most 100 operations. No shell, direct SQLite write, direct managed-library filesystem mutation, arbitrary script, direct `calibredb` mutation gateway, or second mutation engine is permitted.
 
-Exact-binary cleanup uses a separate plan and compact executor because metadata-consolidation plans choose metadata and format sources for candidate books. Domain generates deterministic retained-copy decisions from the authoritative state; WPF presents those decisions but row selection does not change them. Application applies typed remove-format and empty-record deltas after successful commands without rescanning. Infrastructure creates a complete external bundle of raw formats and Calibre exports, seals a hash manifest, and appends the execution audit.
+Every run requires explicit confirmation that a complete external library backup exists. The application does not create, inspect, or verify that backup. A startup/preflight failure logs and stops before mutation. A failed, ambiguous, interrupted, unpersistable, or unprojectable mutation logs structured technical context, marks projected state uncertain, stops without retry or continuation, and blocks later mutation until explicit Rescan.
 
-The normal Exact file duplicates workflow bypasses visible plan orchestration. WPF owns generated/editable keeper selections and one bulk command. Application builds one operation list, transfers complementary formats only to an unambiguous non-conflicting target, removes duplicate/source formats, and removes empty records. Infrastructure automatically stages transfer bytes outside the library and verifies their fingerprints. Technical plan/execution/recovery views are hidden from normal use.
-
-The default exact-duplicate mutation engine uses one persistent `calibre-debug` process and Calibre's documented database `Cache` API. Application owns versioned typed chunks of at most 100 operations. Infrastructure owns the fixed embedded script, strict bounded JSON-lines protocol, trusted sibling executable validation, and process lifecycle. The worker opens one Cache for the run, transfers verified formats, batches format removals, and batches empty-record removals. If worker startup or handshake fails before mutation, the existing typed `calibredb` gateway is the slower fallback. Any worker ambiguity after mutation starts marks projected state uncertain and cannot fall back or retry.
-
-## Safe execution boundary
-
-Milestone 7 keeps cleanup plans immutable and introduces a separate execution
-aggregate. Domain owns lifecycle, operation dependencies, backup-manifest
-values, verification results, and recovery invariants. Application owns live
-preflight, backup sequencing, constructive/destructive gates, cancellation
-policy, and serial orchestration. Infrastructure alone owns Calibre discovery,
-the exact-version typed command mapping, direct process invocation, external
-backup and journal files, execution leases, free-space checks, and crash
-reconciliation. WPF owns explicit confirmation, progress, safe-stop requests,
-and accurate terminal-state presentation.
-
-General plan execution and recovery use direct `calibredb` invocation with a fixed executable and
-argument list. Exact-duplicate bulk cleanup defaults to the constrained persistent
-worker defined by ADR 0015. No shell, GUI automation, direct SQLite write, or managed-library
-filesystem write is permitted. The current authoritative revision revalidates
-the plan before mutation; successful commands are verified by durable typed deltas. Confirmation
-is bound to the canonical library root and operation graph. An application-local
-recovery guard precedes the first mutation marker, and reconciliation requires
-the terminal journal and immutable summary to agree. Plans with cover-bearing
-records fail closed because V1 does not model cover bytes. Milestone 7 does not
-implement rollback or resume.
-
-The Calibre command boundary accepts capability-compatible releases from 9.11.0 up to, but not including, 10.0.0. Discovery probes every required command and option; command invocation revalidates the actual version, executable hash, path, and `calibredb/windows/9.x` profile.
-
-## Verified recovery boundary
-
-Milestone 8 adds a separate recovery aggregate and never rewrites the source
-cleanup plan, execution journal, terminal summary, or original backup.
-Domain owns reconciliation classifications, semantic recovery identities,
-immutable recovery plans, dependency graphs, approval/revocation, execution
-lifecycle, record-ID mappings, and final-verification invariants. Application
-owns three-way reconciliation, plan generation, staleness, the two-backup gate,
-constructive-before-destructive ordering, safe-boundary cancellation, and
-semantic verification.
-
-Infrastructure strictly reads and rehashes Milestone 7 bundles, persists
-versioned recovery plans, creates and independently verifies a new current-state
-backup, stores hash-chained recovery journals and append-only history, and maps
-typed recovery requests onto the existing direct `calibredb` runner. Cleanup
-and recovery share one canonical library-mutation lease key. WPF owns
-single-execution selection, review, individual warning acknowledgement,
-approval, backup selection, destructive-phase confirmation, progress, safe-stop
-requests, ID-mapping display, and accurate terminal outcomes.
-
-Original and current-state backup generations must both verify before the first
-recovery mutation. Constructive commands are verified before the separately
-confirmed destructive phase; every command is followed by a complete fresh
-read-only scan. Changed Calibre numeric IDs are accepted only through a unique
-semantic scan delta and durable mapping. Unexpected current content is retained
-and backed up, restored into a separate record where safe, or blocks automation.
-The compatible Calibre 9.x recovery capability profile remains disabled by default until
-its opt-in disposable-library qualification passes per capability.
-
+General cleanup plans, application-created backup bundles, execution journals/history, and automated recovery are not part of the architecture. Recommendation review remains analysis-only and cannot trigger mutation.
 ## Errors
 
 Distinguish validation failures, read failures, missing-file findings, malformed-format findings, operation conflicts, process failures, verification failures, and unexpected faults.

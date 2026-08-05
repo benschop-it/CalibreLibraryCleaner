@@ -1,6 +1,6 @@
 # ADR 0008: Use Reconciliation-Based Verified Recovery
 
-- Status: Accepted
+- Status: Superseded by ADR 0017
 - Date: 2026-07-24
 
 ## Context

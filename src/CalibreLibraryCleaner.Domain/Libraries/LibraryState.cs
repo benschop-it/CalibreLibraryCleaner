@@ -61,32 +61,24 @@ public sealed record LibraryStateMutationIntent
         string intentId,
         LibraryStateGenerationId generationId,
         LibraryStateRevision expectedRevision,
-        IEnumerable<string> operationIds,
+        int operationCount,
         DateTimeOffset createdAtUtc)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(intentId);
         ArgumentNullException.ThrowIfNull(generationId);
-        ArgumentNullException.ThrowIfNull(operationIds);
-        string[] operations = operationIds.Select(value =>
-        {
-            ArgumentException.ThrowIfNullOrWhiteSpace(value);
-            if (value.Length > 256) throw new ArgumentException("A mutation operation ID is too long.", nameof(operationIds));
-            return value;
-        }).ToArray();
-        if (intentId.Length > 160 || operations.Length is < 1 or > 100
-            || operations.Distinct(StringComparer.Ordinal).Count() != operations.Length)
-            throw new ArgumentException("The mutation intent is invalid.", nameof(operationIds));
+        if (intentId.Length > 160 || operationCount < 1)
+            throw new ArgumentException("The mutation intent is invalid.", nameof(operationCount));
         IntentId = intentId;
         GenerationId = generationId;
         ExpectedRevision = expectedRevision;
-        OperationIds = Array.AsReadOnly(operations);
+        OperationCount = operationCount;
         CreatedAtUtc = createdAtUtc.ToUniversalTime();
     }
 
     public string IntentId { get; }
     public LibraryStateGenerationId GenerationId { get; }
     public LibraryStateRevision ExpectedRevision { get; }
-    public IReadOnlyList<string> OperationIds { get; }
+    public int OperationCount { get; }
     public DateTimeOffset CreatedAtUtc { get; }
 }
 

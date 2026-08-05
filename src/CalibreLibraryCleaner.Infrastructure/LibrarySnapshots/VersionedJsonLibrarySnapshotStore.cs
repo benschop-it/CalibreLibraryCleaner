@@ -1,8 +1,10 @@
+using System.Globalization;
 using System.Security.Cryptography;
 using System.Text;
 using CalibreLibraryCleaner.Application.Abstractions;
 using CalibreLibraryCleaner.Domain.Libraries;
 using CalibreLibraryCleaner.Infrastructure.Execution;
+using Newtonsoft.Json;
 
 namespace CalibreLibraryCleaner.Infrastructure.LibrarySnapshots;
 
@@ -23,13 +25,13 @@ internal sealed class VersionedJsonLibrarySnapshotStore(LibrarySnapshotStorageOp
                      .Order(StringComparer.Ordinal))
         {
             cancellationToken.ThrowIfCancellationRequested();
-            LibrarySnapshot? snapshot = await TryReadFileAsync(path, cancellationToken).ConfigureAwait(false);
+            PersistedLibrarySnapshotInfo? snapshot = await TryReadInfoAsync(path, cancellationToken).ConfigureAwait(false);
             if (snapshot is null)
             {
                 continue;
             }
 
-            string canonicalRoot = CanonicalizeLibraryRoot(snapshot.Identity.LibraryRoot);
+            string canonicalRoot = CanonicalizeLibraryRoot(snapshot.LibraryRoot);
             if (!string.Equals(Path.GetFileName(path), GetFileName(canonicalRoot), StringComparison.Ordinal))
             {
                 continue;
@@ -134,22 +136,238 @@ internal sealed class VersionedJsonLibrarySnapshotStore(LibrarySnapshotStorageOp
         return Task.CompletedTask;
     }
 
-    private async Task<LibrarySnapshot?> TryReadFileAsync(string path, CancellationToken cancellationToken)
+    private async Task<PersistedLibrarySnapshotInfo?> TryReadInfoAsync(
+        string path,
+        CancellationToken cancellationToken)
     {
         try
         {
-            return await ReadFileAsync(path, cancellationToken).ConfigureAwait(false);
+            return await ReadInfoAsync(path, cancellationToken).ConfigureAwait(false);
         }
         catch (OperationCanceledException)
         {
             throw;
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException
-                                           or InvalidDataException or ArgumentException or NotSupportedException)
+                                           or InvalidDataException or ArgumentException or NotSupportedException
+                                           or OverflowException)
         {
             return null;
         }
     }
+
+    private async Task<PersistedLibrarySnapshotInfo> ReadInfoAsync(
+        string path,
+        CancellationToken cancellationToken)
+    {
+        if (!ExecutionPathGuard.TryRejectReparsePoints(path, true, out _))
+        {
+            throw new IOException("The persisted snapshot is not a physical file.");
+        }
+
+        FileInfo info = new(path);
+        if (info.Length <= 0 || info.Length > options.MaximumSnapshotBytes)
+        {
+            throw new InvalidDataException("The persisted snapshot size is invalid.");
+        }
+
+        await using FileStream stream = new(
+            path,
+            FileMode.Open,
+            FileAccess.Read,
+            FileShare.Read,
+            4 * 1024,
+            FileOptions.Asynchronous | FileOptions.SequentialScan);
+        using StreamReader textReader = new(
+            stream,
+            new UTF8Encoding(false, true),
+            detectEncodingFromByteOrderMarks: true,
+            bufferSize: 4 * 1024,
+            leaveOpen: true);
+        using JsonTextReader jsonReader = new(textReader)
+        {
+            DateParseHandling = DateParseHandling.DateTimeOffset,
+            MaxDepth = 64,
+        };
+
+        try
+        {
+            await RequireTokenAsync(jsonReader, JsonToken.StartObject, cancellationToken).ConfigureAwait(false);
+            string? schemaVersion = null;
+            PersistedLibrarySnapshotInfo? snapshot = null;
+            while (await jsonReader.ReadAsync(cancellationToken).ConfigureAwait(false))
+            {
+                if (jsonReader.TokenType == JsonToken.EndObject)
+                {
+                    break;
+                }
+
+                string propertyName = RequirePropertyName(jsonReader);
+                await RequireValueAsync(jsonReader, cancellationToken).ConfigureAwait(false);
+                switch (propertyName)
+                {
+                    case "schemaVersion" when schemaVersion is null:
+                        schemaVersion = jsonReader.TokenType == JsonToken.String
+                            ? (string?)jsonReader.Value
+                            : throw new InvalidDataException("The persisted snapshot version is invalid.");
+                        break;
+                    case "snapshot" when snapshot is null:
+                        snapshot = await ReadSnapshotInfoAsync(jsonReader, cancellationToken).ConfigureAwait(false);
+                        break;
+                    default:
+                        throw new InvalidDataException("The persisted snapshot metadata is malformed.");
+                }
+
+                if (snapshot is not null && schemaVersion is not null)
+                {
+                    if (!string.Equals(schemaVersion, LibrarySnapshotJsonSerializer.SchemaVersion, StringComparison.Ordinal))
+                    {
+                        throw new InvalidDataException("The persisted library snapshot version is not supported.");
+                    }
+
+                    return snapshot;
+                }
+            }
+
+            throw new InvalidDataException("The persisted snapshot metadata is incomplete.");
+        }
+        catch (JsonException exception)
+        {
+            throw new InvalidDataException("The persisted snapshot metadata is malformed.", exception);
+        }
+    }
+
+    private static async Task<PersistedLibrarySnapshotInfo> ReadSnapshotInfoAsync(
+        JsonTextReader reader,
+        CancellationToken cancellationToken)
+    {
+        if (reader.TokenType != JsonToken.StartObject)
+        {
+            throw new InvalidDataException("The persisted snapshot body is invalid.");
+        }
+
+        string? libraryRoot = null;
+        DateTimeOffset? scannedAt = null;
+        HashSet<string> propertyNames = new(StringComparer.Ordinal);
+        while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
+        {
+            if (reader.TokenType == JsonToken.EndObject)
+            {
+                break;
+            }
+
+            string propertyName = RequirePropertyName(reader);
+            if (!propertyNames.Add(propertyName))
+            {
+                throw new InvalidDataException("The persisted snapshot metadata contains a duplicate property.");
+            }
+            await RequireValueAsync(reader, cancellationToken).ConfigureAwait(false);
+            switch (propertyName)
+            {
+                case "identity" when libraryRoot is null:
+                    libraryRoot = await ReadLibraryRootAsync(reader, cancellationToken).ConfigureAwait(false);
+                    break;
+                case "scannedAt" when scannedAt is null:
+                    scannedAt = ReadDateTimeOffset(reader);
+                    break;
+                default:
+                    throw new InvalidDataException("The persisted snapshot listing metadata is incomplete.");
+            }
+
+            if (libraryRoot is not null && scannedAt is not null)
+            {
+                return new(libraryRoot, scannedAt.Value);
+            }
+        }
+
+        throw new InvalidDataException("The persisted snapshot listing metadata is incomplete.");
+    }
+
+    private static async Task<string> ReadLibraryRootAsync(
+        JsonTextReader reader,
+        CancellationToken cancellationToken)
+    {
+        if (reader.TokenType != JsonToken.StartObject)
+        {
+            throw new InvalidDataException("The persisted snapshot identity is invalid.");
+        }
+
+        string? libraryRoot = null;
+        bool hasCalibreLibraryUuid = false;
+        bool hasSchemaVersion = false;
+        HashSet<string> propertyNames = new(StringComparer.Ordinal);
+        while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
+        {
+            if (reader.TokenType == JsonToken.EndObject)
+            {
+                break;
+            }
+
+            string propertyName = RequirePropertyName(reader);
+            if (!propertyNames.Add(propertyName))
+            {
+                throw new InvalidDataException("The persisted snapshot identity contains a duplicate property.");
+            }
+            await RequireValueAsync(reader, cancellationToken).ConfigureAwait(false);
+            switch (propertyName)
+            {
+                case "calibreLibraryUuid" when reader.TokenType == JsonToken.String
+                                                 && reader.Value is string uuid
+                                                 && !string.IsNullOrWhiteSpace(uuid):
+                    hasCalibreLibraryUuid = true;
+                    break;
+                case "schemaVersion" when reader.TokenType == JsonToken.Integer
+                                           && Convert.ToInt64(reader.Value, CultureInfo.InvariantCulture) > 0:
+                    hasSchemaVersion = true;
+                    break;
+                case "libraryRoot" when reader.TokenType == JsonToken.String:
+                    libraryRoot = (string?)reader.Value;
+                    break;
+                default:
+                    throw new InvalidDataException("The persisted snapshot identity is invalid.");
+            }
+        }
+
+        return !hasCalibreLibraryUuid || !hasSchemaVersion || string.IsNullOrWhiteSpace(libraryRoot)
+            ? throw new InvalidDataException("The persisted snapshot library root is missing.")
+            : libraryRoot;
+    }
+
+    private static DateTimeOffset ReadDateTimeOffset(JsonTextReader reader) => reader.Value switch
+    {
+        DateTimeOffset value => value,
+        DateTime value => new(value),
+        string value when DateTimeOffset.TryParse(
+            value,
+            CultureInfo.InvariantCulture,
+            DateTimeStyles.RoundtripKind,
+            out DateTimeOffset parsed) => parsed,
+        _ => throw new InvalidDataException("The persisted snapshot scan time is invalid."),
+    };
+
+    private static async Task RequireTokenAsync(
+        JsonTextReader reader,
+        JsonToken expected,
+        CancellationToken cancellationToken)
+    {
+        if (!await reader.ReadAsync(cancellationToken).ConfigureAwait(false) || reader.TokenType != expected)
+        {
+            throw new InvalidDataException("The persisted snapshot metadata is malformed.");
+        }
+    }
+
+    private static async Task RequireValueAsync(JsonTextReader reader, CancellationToken cancellationToken)
+    {
+        if (!await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
+        {
+            throw new InvalidDataException("The persisted snapshot metadata is incomplete.");
+        }
+    }
+
+    private static string RequirePropertyName(JsonTextReader reader) =>
+        reader.TokenType == JsonToken.PropertyName && reader.Value is string propertyName
+            ? propertyName
+            : throw new InvalidDataException("The persisted snapshot metadata is malformed.");
 
     private async Task<LibrarySnapshot> ReadFileAsync(string path, CancellationToken cancellationToken)
     {

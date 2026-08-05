@@ -3,14 +3,27 @@ using CalibreLibraryCleaner.Domain.Libraries;
 
 namespace CalibreLibraryCleaner.Application.Libraries;
 
-public sealed class PersistedLibrarySnapshotsUseCase(ILibrarySnapshotStore store)
+public sealed class PersistedLibrarySnapshotsUseCase(
+    ILibrarySnapshotStore store,
+    ILibraryStateStore? stateStore = null)
 {
     public async Task<PersistedLibrarySnapshotListResult> ListAsync(CancellationToken cancellationToken)
     {
         try
         {
             IReadOnlyList<PersistedLibrarySnapshotInfo> snapshots = await store.ListAsync(cancellationToken).ConfigureAwait(false);
-            return new(snapshots, null);
+            IReadOnlyList<PersistedLibraryStateInfo> states = stateStore is null
+                ? []
+                : await stateStore.ListAsync(cancellationToken).ConfigureAwait(false);
+            Dictionary<string, PersistedLibrarySnapshotInfo> byRoot = snapshots.ToDictionary(
+                snapshot => snapshot.LibraryRoot,
+                PathComparer);
+            foreach (PersistedLibraryStateInfo state in states)
+            {
+                byRoot[state.LibraryRoot] = new(state.LibraryRoot, state.ScannedAt);
+            }
+
+            return new(byRoot.Values.OrderBy(snapshot => snapshot.LibraryRoot, PathComparer).ToArray(), null);
         }
         catch (OperationCanceledException)
         {
@@ -88,6 +101,10 @@ public sealed class PersistedLibrarySnapshotsUseCase(ILibrarySnapshotStore store
             return new(false, "The persisted scan result could not be invalidated safely.");
         }
     }
+
+    private static StringComparer PathComparer => OperatingSystem.IsWindows()
+        ? StringComparer.OrdinalIgnoreCase
+        : StringComparer.Ordinal;
 }
 
 public sealed record PersistedLibrarySnapshotListResult(

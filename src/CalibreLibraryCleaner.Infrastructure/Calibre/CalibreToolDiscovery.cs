@@ -71,50 +71,11 @@ internal sealed partial class CalibreToolDiscovery(
                 return Failure("EXECUTION.CALIBRE_VERSION_UNSUPPORTED",
                     $"Supported Calibre versions are {options.MinimumSupportedVersion} or newer, but below {options.MaximumExclusiveVersion}.");
             productVersion = actualVersion;
-
-            Dictionary<string, string[]> probes = new(StringComparer.Ordinal)
-            {
-                ["global-help"] = ["--help"],
-                ["add-format-help"] = ["add_format", "--help"],
-                ["remove-format-help"] = ["remove_format", "--help"],
-                ["remove-help"] = ["remove", "--help"],
-                ["export-help"] = ["export", "--help"],
-            };
-            if (options.IsValidatedRecoveryProfileEnabled)
-            {
-                probes.Add("add-help", ["add", "--help"]);
-                probes.Add("set-metadata-help", ["set_metadata", "--help"]);
-            }
-            Dictionary<string, string> help = new(StringComparer.Ordinal);
-            foreach ((string name, string[] arguments) in probes)
-            {
-                CalibreCommandResult result = await processRunner.RunAsync(executable, libraryRoot, name, arguments,
-                    [executable], true, options.ProbeTimeout, cancellationToken).ConfigureAwait(false);
-                if (!result.IsSuccess)
-                {
-                    issues.Add(Block("EXECUTION.CALIBRE_CAPABILITY_PROBE_FAILED", "A required Calibre command help probe failed."));
-                    continue;
-                }
-                help[name] = result.SanitizedStandardOutput + "\n" + result.SanitizedStandardError;
-            }
-
-            if (!ContainsAll(help.GetValueOrDefault("global-help"), "--with-library")
-                || !ContainsAll(help.GetValueOrDefault("add-format-help"), "add_format", "--dont-replace")
-                || !ContainsAll(help.GetValueOrDefault("remove-format-help"), "remove_format")
-                || !ContainsAll(help.GetValueOrDefault("remove-help"), "remove", "--permanent")
-                || !ContainsAll(help.GetValueOrDefault("export-help"), "export", "--dont-save-extra-files",
-                    "--dont-update-metadata", "--to-dir", "--single-dir"))
-                issues.Add(Block("EXECUTION.CALIBRE_CAPABILITY_UNKNOWN", "The exact required documented Calibre commands and options could not be confirmed."));
-            if (options.IsValidatedRecoveryProfileEnabled
-                && (!ContainsAll(help.GetValueOrDefault("add-help"), "add", "--empty", "--title", "--authors")
-                    || !ContainsAll(help.GetValueOrDefault("set-metadata-help"), "set_metadata", "--field")))
-                issues.Add(Block("RECOVERY.CALIBRE_CAPABILITY_UNKNOWN",
-                    "The exact required recovery commands and options could not be confirmed."));
         }
 
         if (issues.Any(value => value.Severity == ExecutionIssueSeverity.BlockingError)) return new(null, issues);
         ExecutionToolIdentity identity = new(executable, productVersion, digest, options.CapabilityProfile);
-        CalibreToolDescriptor descriptor = new(executable, identity, Enum.GetValues<CalibreExecutionCapability>());
+        CalibreToolDescriptor descriptor = new(executable, identity);
         return new(descriptor, Array.AsReadOnly(issues.ToArray()));
     }
 
@@ -131,9 +92,6 @@ internal sealed partial class CalibreToolDiscovery(
         byte[] hash = await SHA256.HashDataAsync(stream, cancellationToken).ConfigureAwait(false);
         return new(Convert.ToHexString(hash).ToLowerInvariant());
     }
-
-    private static bool ContainsAll(string? text, params string[] values) => text is not null
-        && values.All(value => text.Contains(value, StringComparison.OrdinalIgnoreCase));
 
     private static CalibreToolDiscoveryResult Failure(string code, string explanation) => new(null, [Block(code, explanation)]);
     private static ExecutionIssue Block(string code, string explanation) => new(code, ExecutionIssueSeverity.BlockingError, explanation);

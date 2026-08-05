@@ -1,5 +1,4 @@
 using CalibreLibraryCleaner.Domain.Libraries;
-using CalibreLibraryCleaner.Domain.Plans;
 using FluentAssertions;
 using Xunit;
 
@@ -30,15 +29,4 @@ public sealed class BookFormatObservationTests
         action.Should().Throw<ArgumentException>();
     }
 
-    [Fact]
-    public void CleanupPlanExpectedFormatRejectsPathShapedStoredBasename()
-    {
-        FormatFileFingerprint fingerprint = new(5, new(new string('a', 64)));
-        FormatFileObservation observation = new(5, DateTimeOffset.UnixEpoch, DateTimeOffset.UnixEpoch, 0);
-
-        Action action = () => _ = new ExpectedFormatState(new(1), "EPUB", "C:\\private\\book",
-            "Author/Book (1)/book.epub", FormatFileStatus.Present, fingerprint, observation);
-
-        action.Should().Throw<ArgumentException>();
-    }
 }

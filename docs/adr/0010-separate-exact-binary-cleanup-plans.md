@@ -1,6 +1,6 @@
 # ADR 0010: Use Separate Plans for Single-Keeper Exact-Binary Consolidation
 
-- Status: Superseded by ADR 0011
+- Status: Superseded by ADRs 0011 and 0017
 - Date: 2026-08-01
 
 ## Context
