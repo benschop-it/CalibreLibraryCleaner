@@ -80,7 +80,7 @@ public sealed class RecommendationRowViewModelTests
     }
 
     [Fact]
-    public void FullySeparatedGroupDisplaysEveryRecordAsRetainedAndNoMetadataSource()
+    public void GroupWithoutGeneratedSourceKeepsFirstRecordAndStartsUnskipped()
     {
         CalibreBook[] books = [
             Book(1, [], new(languages: ["eng"])),
@@ -94,8 +94,10 @@ public sealed class RecommendationRowViewModelTests
 
         row.Members.Should().OnlyContain(value => value.IsRetainedSeparate);
         row.ReviewedMetadataSource.Should().BeNull();
-        row.KeeperMember.Should().BeNull();
-        row.Skip.Should().BeTrue();
+        row.KeeperMember.Should().BeSameAs(row.Members[0]);
+        row.KeeperRecordId.Should().Be(group.Members[0].Value);
+        row.Members.Should().ContainSingle(value => value.Action == "Keep");
+        row.Skip.Should().BeFalse();
     }
 
     [Fact]
@@ -113,6 +115,32 @@ public sealed class RecommendationRowViewModelTests
 
         row.FormatRows.Single().ReviewedSource!.Action.Should().Be("Unavailable");
         row.FormatRows.Single().SourceOptions.Should().Contain(value => value.Action == "MarkUnresolved");
+    }
+
+    [Fact]
+    public void MetadataMemberPrefersPresentEpubForViewer()
+    {
+        FormatFileFingerprint epubFingerprint = new(10, new(new string('a', 64)));
+        FormatFileFingerprint pdfFingerprint = new(20, new(new string('b', 64)));
+        CalibreBook[] books = [
+            Book(1,
+            [
+                Present("PDF", "one.pdf", pdfFingerprint),
+                new("AZW3", "missing", "missing.azw3", FormatFileStatus.Missing),
+                Present("EPUB", "one.epub", epubFingerprint),
+            ], new(languages: ["eng"])),
+            Book(2, [], new(languages: ["eng"])),
+        ];
+        ExactMetadataDuplicateGroup group = ExactMetadataDuplicateDetector.Detect(books).Single();
+        ConsolidationRecommendation generated = new ConsolidationRecommendationPolicy().Generate(
+            new("87f7ed1f-59a8-45a6-975a-7e06fd84780d", 27, "library"),
+            group, books, [], [], [], CancellationToken.None);
+
+        MetadataDuplicateGroupRowViewModel row = new(group, books.ToDictionary(value => value.Id), generated);
+        MetadataDuplicateMemberRowViewModel member = row.Members.Single(value => value.BookId == 1);
+
+        member.LaunchFormat.Should().Be("EPUB");
+        member.LaunchRelativePath.Should().Be("one.epub");
     }
 
     private static CalibreBook Book(long id, BookFormat[] formats, BookPublicationMetadata metadata) => new(

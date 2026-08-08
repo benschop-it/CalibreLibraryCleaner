@@ -22,6 +22,9 @@ non-keeper record. The application requires confirmation of a complete external
 library backup, uses one persistent `calibre-debug` worker, logs failures, and
 requires Rescan after a failed or ambiguous mutation.
 
+Double-click a member row in either duplicate tab to inspect the selected book
+in Calibre ebook viewer before choosing the keeper.
+
 The next planned roadmap milestone is Milestone 10 content fingerprints and
 comparisons, after completion of the outstanding Milestone 9 manual WPF
 acceptance.

@@ -326,12 +326,19 @@ public sealed class DependencyDirectionTests
                     Path.Combine(RepositoryRoot, "src", project), "*.cs", SearchOption.AllDirectories))
                 .Select(File.ReadAllText));
 
-        processSources.Should().HaveCount(3);
+        processSources.Should().HaveCount(4);
+        processSources.Should().Contain(path => path.EndsWith("CalibreEbookViewerLauncher.cs", StringComparison.Ordinal));
         processSources.Should().Contain(path => path.EndsWith("DirectCalibreProcessRunner.cs", StringComparison.Ordinal));
         processSources.Should().Contain(path => path.EndsWith("IsolatedPdfInspector.cs", StringComparison.Ordinal));
         processSources.Should().Contain(path => path.EndsWith("PersistentCalibreMutationWorkerFactory.cs", StringComparison.Ordinal));
         runner.Should().Contain("UseShellExecute = false").And.Contain("ArgumentList.Add")
             .And.Contain("mayTerminateOnCancellation");
+        string viewer = File.ReadAllText(Path.Combine(
+            infrastructureRoot, "Calibre", "CalibreEbookViewerLauncher.cs"));
+        viewer.Should().Contain("UseShellExecute = false")
+            .And.Contain("ArgumentList.Add(formatPath!)")
+            .And.Contain("TryValidateContainedRegularFile")
+            .And.NotContain("UseShellExecute = true");
         string calibreWorker = File.ReadAllText(Path.Combine(
             infrastructureRoot, "Calibre", "PersistentCalibreMutationWorkerFactory.cs"));
         calibreWorker.Should().Contain("UseShellExecute = false")

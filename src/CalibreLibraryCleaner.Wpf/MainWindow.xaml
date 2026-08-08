@@ -186,9 +186,10 @@
               </DataGrid.Columns>
             </DataGrid>
           </GroupBox>
-          <GroupBox Grid.Row="2" Margin="0,8,0,0" Header="Select the copy to keep for this group">
+          <GroupBox Grid.Row="2" Margin="0,8,0,0" Header="Select the copy to keep; double-click a row to open its book">
             <DataGrid ItemsSource="{Binding SelectedExactDuplicateMembers}"
                       SelectedItem="{Binding SelectedExactDuplicateMember}"
+                      MouseDoubleClick="ExactDuplicateMembersGrid_MouseDoubleClick"
                       AutoGenerateColumns="False"
                       IsReadOnly="True"
                       SelectionMode="Single"
@@ -252,9 +253,10 @@
               </DataGrid.Columns>
             </DataGrid>
           </GroupBox>
-          <GroupBox Grid.Row="2" Margin="0,8,0,0" Header="Select the record to keep for this group">
+          <GroupBox Grid.Row="2" Margin="0,8,0,0" Header="Select the record to keep; double-click a row to open its book">
             <DataGrid ItemsSource="{Binding SelectedMetadataDuplicateMembers}"
                       SelectedItem="{Binding SelectedMetadataDuplicateMember}"
+                      MouseDoubleClick="MetadataCandidateMembersGrid_MouseDoubleClick"
                       AutoGenerateColumns="False"
                       IsReadOnly="True"
                       SelectionMode="Single"
@@ -280,7 +282,8 @@
             </DataGrid>
           </GroupBox>
         </Grid>
-      </TabItem>      <TabItem Header="_EPUB assessments" AutomationProperties.Name="EPUB assessments">
+      </TabItem>
+      <TabItem Header="_EPUB assessments" AutomationProperties.Name="EPUB assessments">
         <Grid Margin="8">
           <Grid.RowDefinitions>
             <RowDefinition Height="2*" />

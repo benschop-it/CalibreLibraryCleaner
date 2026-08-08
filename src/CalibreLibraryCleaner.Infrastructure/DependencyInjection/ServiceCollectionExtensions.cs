@@ -40,6 +40,7 @@ public static class ServiceCollectionExtensions
         services.AddSingleton(new ExecutionStorageOptions());
         services.AddSingleton<DirectCalibreProcessRunner>();
         services.AddSingleton<ICalibreToolDiscovery, CalibreToolDiscovery>();
+        services.AddSingleton<IEbookViewerLauncher, CalibreEbookViewerLauncher>();
         services.AddSingleton<ICalibreMutationWorkerFactory, PersistentCalibreMutationWorkerFactory>();
         services.AddSingleton<ILibraryMutationLease, FileLibraryMutationLease>();
         services.AddSingleton<ICleanupExecutionIdGenerator, SystemCleanupExecutionIdGenerator>();

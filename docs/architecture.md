@@ -74,6 +74,12 @@ The worker uses Calibre's documented database `Cache` API through one `calibre-d
 Every run requires explicit confirmation that a complete external library backup exists. The application does not create, inspect, or verify that backup. A startup/preflight failure logs and stops before mutation. A failed, ambiguous, interrupted, unpersistable, or unprojectable mutation logs structured technical context, marks projected state uncertain, stops without retry or continuation, and blocks later mutation until explicit Rescan.
 
 General cleanup plans, application-created backup bundles, execution journals/history, and automated recovery are not part of the architecture.
+
+## External ebook viewer boundary
+
+WPF routes an explicit member-row double-click to an Application launcher port. Infrastructure resolves only the trusted `ebook-viewer.exe` sibling of the configured Calibre executable, validates the requested format as a physical regular file contained in the selected library, and starts the viewer with `UseShellExecute=false` and one argument-list item. The cleaner does not wait for, control, or infer state from the viewer process.
+
+Exact duplicate rows open their represented format. Metadata candidate rows choose the first present format in deterministic reading preference order: EPUB, AZW3, MOBI, PDF, then remaining formats alphabetically. Missing formats, unsafe paths, and missing/failed viewer launches return controlled errors and never affect cleanup selection or projected state.
 ## Errors
 
 Distinguish validation failures, read failures, missing-file findings, malformed-format findings, operation conflicts, process failures, verification failures, and unexpected faults.

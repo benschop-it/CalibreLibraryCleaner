@@ -310,12 +310,16 @@ public sealed class MainWindowViewModelTests
     public async Task SuccessfulScanDisplaysExactFileGroupMembers()
     {
         ILibraryFolderPicker picker = A.Fake<ILibraryFolderPicker>();
+        IEbookViewerLauncher viewer = A.Fake<IEbookViewerLauncher>();
+        A.CallTo(() => viewer.LaunchAsync(A<EbookViewerLaunchRequest>._, A<CancellationToken>._))
+            .Returns(EbookViewerLaunchResult.Success());
         A.CallTo(() => picker.PickFolder(A<string?>._)).Returns("library");
         MainWindowViewModel viewModel = CreateViewModel(
             picker,
             out ILibraryPathResolver resolver,
             out ICalibreMetadataReader reader,
-            out IFormatFileHasher hasher);
+            out IFormatFileHasher hasher,
+            ebookViewer: viewer);
         ValidatedLibraryLocation location = new("library", "database");
         A.CallTo(() => resolver.ValidateAsync("library", A<CancellationToken>._))
             .Returns(LibraryValidationOutcome.Success(location));
@@ -360,23 +364,34 @@ public sealed class MainWindowViewModelTests
         viewModel.ExactDuplicateGroups[0].RecordIdsToDelete.Should().Equal(new CalibreBookId(1));
 
         viewModel.SelectedExactDuplicateMember = first;
+        await viewModel.OpenSelectedExactDuplicateCommand.ExecuteAsync(null);
 
         viewModel.RetainedExactDuplicateMember.Should().BeSameAs(first);
         first.CleanupAction.Should().Be("Keep");
         second.CleanupAction.Should().Be("Remove format");
         viewModel.ExactDuplicateGroups[0].RecordIdsToDelete.Should().BeEmpty();
+        A.CallTo(() => viewer.LaunchAsync(
+            A<EbookViewerLaunchRequest>.That.Matches(value =>
+                value.LibraryRoot == "library"
+                && value.ExpectedRelativePath == first.ExpectedRelativePath),
+            A<CancellationToken>._)).MustHaveHappenedOnceExactly();
+        viewModel.StatusMessage.Should().Contain("Opened selected EPUB");
     }
 
     [Fact]
     public async Task MetadataGroupsSupportFilteringNavigationAndSessionDeferWithoutIntegrationCalls()
     {
         ILibraryFolderPicker picker = A.Fake<ILibraryFolderPicker>();
+        IEbookViewerLauncher viewer = A.Fake<IEbookViewerLauncher>();
+        A.CallTo(() => viewer.LaunchAsync(A<EbookViewerLaunchRequest>._, A<CancellationToken>._))
+            .Returns(EbookViewerLaunchResult.Success());
         A.CallTo(() => picker.PickFolder(A<string?>._)).Returns("library");
         MainWindowViewModel viewModel = CreateViewModel(
             picker,
             out ILibraryPathResolver resolver,
             out ICalibreMetadataReader reader,
-            out IFormatFileHasher hasher);
+            out IFormatFileHasher hasher,
+            ebookViewer: viewer);
         ValidatedLibraryLocation location = new("library", "database");
         A.CallTo(() => resolver.ValidateAsync("library", A<CancellationToken>._))
             .Returns(LibraryValidationOutcome.Success(location));
@@ -420,6 +435,12 @@ public sealed class MainWindowViewModelTests
         viewModel.SelectedMetadataDuplicateMember = alternateKeeper;
         alternateKeeper.Action.Should().Be("Keep");
         viewModel.SelectedMetadataDuplicateMembers.Should().ContainSingle(value => value.Action == "Keep");
+        await viewModel.OpenSelectedMetadataCandidateCommand.ExecuteAsync(null);
+        A.CallTo(() => viewer.LaunchAsync(
+            A<EbookViewerLaunchRequest>.That.Matches(value =>
+                value.LibraryRoot == "library"
+                && value.ExpectedRelativePath == alternateKeeper.LaunchRelativePath),
+            A<CancellationToken>._)).MustHaveHappenedOnceExactly();
         viewModel.NextMetadataDuplicateGroupCommand.Execute(null);
         viewModel.SelectedMetadataDuplicateGroup.NormalizedTitle.Should().Be("BETA BOOK");
         viewModel.PreviousMetadataDuplicateGroupCommand.Execute(null);
@@ -510,7 +531,8 @@ public sealed class MainWindowViewModelTests
         out ICalibreMetadataReader reader,
         out IFormatFileHasher hasher,
         PersistedLibrarySnapshotsUseCase? persistedSnapshots = null,
-        ILibraryStateSession? stateSession = null)
+        ILibraryStateSession? stateSession = null,
+        IEbookViewerLauncher? ebookViewer = null)
     {
         resolver = A.Fake<ILibraryPathResolver>();
         reader = A.Fake<ICalibreMetadataReader>();
@@ -520,6 +542,7 @@ public sealed class MainWindowViewModelTests
             new ValidateLibraryUseCase(resolver),
             new ScanLibraryUseCase(resolver, reader, hasher, clock, new()),
             picker,
+            ebookViewer: ebookViewer,
             persistedSnapshots: persistedSnapshots,
             libraryStateSession: stateSession);
     }

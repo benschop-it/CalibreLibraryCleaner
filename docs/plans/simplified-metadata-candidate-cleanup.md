@@ -9,7 +9,7 @@ Replace the review-heavy Metadata candidates tab with the same keeper-oriented i
 - Show normalized metadata groups with a session-scoped Skip checkbox.
 - Show member records beneath the selected group with generated Keep/Remove actions.
 - Select exactly one keeper by selecting a member row.
-- Seed the keeper from the generated metadata source; groups without one start skipped.
+- Seed the keeper from the generated metadata source; groups without one use the first deterministic member.
 - Keep the selected record's existing metadata unchanged.
 - Transfer complementary formats selected by the generated recommendation.
 - Resolve same-format conflicts in favor of the keeper and remove source alternatives.
@@ -95,7 +95,7 @@ WPF owns the transient Skip and keeper choices. Loading another scan/snapshot re
 ## Tests
 
 - Generated metadata source becomes the default keeper.
-- No generated source starts skipped.
+- No generated source keeps the first deterministic member and starts unskipped.
 - Selecting another member changes exactly one Keep action.
 - Skip excludes a group from the request.
 - Complementary selected format transfers before source removals.
@@ -126,7 +126,7 @@ dotnet list package --vulnerable --include-transitive
 
 ## Unresolved questions
 
-None. Ambiguous generated keeper groups default to Skip.
+None. Ambiguous generated keeper groups use the first deterministic member and start unskipped.
 
 ## Progress
 

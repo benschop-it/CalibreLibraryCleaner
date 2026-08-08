@@ -21,6 +21,7 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
     private readonly ExportRecommendationsUseCase? _exportRecommendations;
     private readonly IRecommendationExportFilePicker? _exportFilePicker;
     private readonly IClock? _clock;
+    private readonly IEbookViewerLauncher? _ebookViewer;
     private readonly PersistedLibrarySnapshotsUseCase? _persistedSnapshots;
     private readonly ILibraryStateSession? _libraryStateSession;
     private readonly SynchronizationContext? _uiContext;
@@ -67,6 +68,7 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
         ExportRecommendationsUseCase? exportRecommendations = null,
         IRecommendationExportFilePicker? exportFilePicker = null,
         IClock? clock = null,
+        IEbookViewerLauncher? ebookViewer = null,
         ExactBinaryCleanupPlanWorkspaceViewModel? exactBinaryCleanupPlans = null,
         MetadataCandidateCleanupWorkspaceViewModel? metadataCandidateCleanup = null,
         PersistedLibrarySnapshotsUseCase? persistedSnapshots = null,
@@ -78,6 +80,7 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
         _exportRecommendations = exportRecommendations;
         _exportFilePicker = exportFilePicker;
         _clock = clock;
+        _ebookViewer = ebookViewer;
         _persistedSnapshots = persistedSnapshots;
         _libraryStateSession = libraryStateSession;
         _uiContext = SynchronizationContext.Current;
@@ -100,6 +103,12 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
         CancelCommand = new RelayCommand(
             CancelScan,
             () => IsBusy && _scanCancellation is { IsCancellationRequested: false });
+        OpenSelectedExactDuplicateCommand = new AsyncRelayCommand(
+            OpenSelectedExactDuplicateAsync,
+            () => !IsBusy && _ebookViewer is not null && SelectedExactDuplicateMember is not null);
+        OpenSelectedMetadataCandidateCommand = new AsyncRelayCommand(
+            OpenSelectedMetadataCandidateAsync,
+            () => !IsBusy && _ebookViewer is not null && SelectedMetadataDuplicateMember is not null);
         NextMetadataDuplicateGroupCommand = new RelayCommand(
             () => MoveMetadataSelection(1),
             () => !IsBusy && _metadataDuplicateGroups.Count > 0);
@@ -176,6 +185,8 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
                 ScanCommand.NotifyCanExecuteChanged();
                 LoadPersistedSnapshotCommand.NotifyCanExecuteChanged();
                 CancelCommand.NotifyCanExecuteChanged();
+                OpenSelectedExactDuplicateCommand.NotifyCanExecuteChanged();
+                OpenSelectedMetadataCandidateCommand.NotifyCanExecuteChanged();
                 NextMetadataDuplicateGroupCommand.NotifyCanExecuteChanged();
                 PreviousMetadataDuplicateGroupCommand.NotifyCanExecuteChanged();
                 ToggleMetadataDuplicateDeferredCommand.NotifyCanExecuteChanged();
@@ -296,8 +307,9 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
         get => _selectedExactDuplicateMember;
         set
         {
-            if (!SetProperty(ref _selectedExactDuplicateMember, value) || value is null
-                || SelectedExactDuplicateGroup is null) return;
+            if (!SetProperty(ref _selectedExactDuplicateMember, value)) return;
+            OpenSelectedExactDuplicateCommand.NotifyCanExecuteChanged();
+            if (value is null || SelectedExactDuplicateGroup is null) return;
             SelectedExactDuplicateGroup.RetainedMember = value;
             OnPropertyChanged(nameof(RetainedExactDuplicateMember));
         }
@@ -336,8 +348,9 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
         get => _selectedMetadataDuplicateMember;
         set
         {
-            if (!SetProperty(ref _selectedMetadataDuplicateMember, value) || value is null
-                || SelectedMetadataDuplicateGroup is null) return;
+            if (!SetProperty(ref _selectedMetadataDuplicateMember, value)) return;
+            OpenSelectedMetadataCandidateCommand.NotifyCanExecuteChanged();
+            if (value is null || SelectedMetadataDuplicateGroup is null) return;
             SelectedMetadataDuplicateGroup.KeeperMember = value;
         }
     }
@@ -443,6 +456,10 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
     public IAsyncRelayCommand LoadPersistedSnapshotCommand { get; }
 
     public IRelayCommand CancelCommand { get; }
+
+    public IAsyncRelayCommand OpenSelectedExactDuplicateCommand { get; }
+
+    public IAsyncRelayCommand OpenSelectedMetadataCandidateCommand { get; }
 
     public IRelayCommand NextMetadataDuplicateGroupCommand { get; }
 
@@ -680,6 +697,52 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
         _scanCancellation?.Cancel();
         CancelCommand.NotifyCanExecuteChanged();
         StatusMessage = "Scan canceled. Waiting for the current read to stop...";
+    }
+
+    private Task OpenSelectedExactDuplicateAsync()
+    {
+        ExactDuplicateMemberRowViewModel? member = SelectedExactDuplicateMember;
+        return member is null
+            ? Task.CompletedTask
+            : OpenBookFormatAsync(member.ExpectedRelativePath, member.Format);
+    }
+
+    private Task OpenSelectedMetadataCandidateAsync()
+    {
+        MetadataDuplicateMemberRowViewModel? member = SelectedMetadataDuplicateMember;
+        if (member is null) return Task.CompletedTask;
+        if (member.LaunchRelativePath is null || member.LaunchFormat is null)
+        {
+            ErrorMessage = "The selected record has no present book format to open.";
+            ErrorAction = "Choose another record or rescan after restoring its format files.";
+            return Task.CompletedTask;
+        }
+        return OpenBookFormatAsync(member.LaunchRelativePath, member.LaunchFormat);
+    }
+
+    private async Task OpenBookFormatAsync(string expectedRelativePath, string format)
+    {
+        if (_ebookViewer is null || string.IsNullOrWhiteSpace(SelectedLibraryPath)) return;
+        ClearError();
+        try
+        {
+            EbookViewerLaunchResult result = await _ebookViewer.LaunchAsync(
+                new(SelectedLibraryPath, expectedRelativePath), CancellationToken.None).ConfigureAwait(true);
+            if (result.IsSuccess)
+            {
+                StatusMessage = $"Opened selected {format} in Calibre ebook viewer.";
+                return;
+            }
+
+            ErrorMessage = result.ErrorMessage ?? "The selected book could not be opened in Calibre ebook viewer.";
+            ErrorAction = result.ErrorCode == "EBOOK_VIEWER_NOT_FOUND"
+                ? "Install Calibre with ebook-viewer in the configured Calibre folder."
+                : "Verify that the selected format still exists, then rescan if necessary.";
+        }
+        catch (OperationCanceledException)
+        {
+            StatusMessage = "Opening the selected book was canceled.";
+        }
     }
 
     private void UpdateProgress(LibraryScanProgress progress)

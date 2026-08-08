@@ -62,6 +62,8 @@ and any resulting recommendation-policy changes begin in Milestone 10 or later.
 
 The user can navigate duplicate groups and compare records. Exact and metadata candidate groups present one generated keeper that can be changed by selecting another member. Metadata groups also expose a session-scoped Skip choice.
 
+Double-clicking a member in Exact file duplicates opens that exact format in Calibre ebook viewer. Double-clicking a Metadata candidate opens its preferred present format (EPUB, AZW3, MOBI, PDF, then another available format). Viewer launch is explicit, read-only, and reports unavailable files or viewer installation errors without changing review or cleanup state.
+
 ## Exact duplicate cleanup
 
 The Exact file duplicates workflow presents one generated keeper per group, allows explicit keeper overrides, and removes all eligible exact duplicates in one command. Before each run, the user confirms that a complete external library backup exists; the application does not create or verify backups.
@@ -74,7 +76,7 @@ Persisted analysis loading remains available during development. Startup lists o
 
 ## Metadata candidate cleanup
 
-The Metadata candidates workflow lists exact normalized title/author groups, selects the generated best metadata source as the default keeper, and allows the user to Skip a group or select another sole keeper. Groups without a generated metadata source start skipped. Choices reset when another scan or persisted snapshot is loaded.
+The Metadata candidates workflow lists exact normalized title/author groups, selects the generated best metadata source as the default keeper, and allows the user to Skip a group or select another sole keeper. Groups without a generated metadata source keep the first deterministic member. Every group starts unskipped. Choices reset when another scan or persisted snapshot is loaded.
 
 One command processes all unskipped groups after external-backup confirmation. The keeper retains its current metadata and formats. Generated selected complementary formats are transferred when absent from the keeper. Every format on every non-keeper is then removed and each empty non-keeper record is removed. If the keeper already has the same format, the keeper's file is retained even when the removed alternative is not byte-identical. An unresolved complementary source causes the group to be skipped before mutation.
 ## AI

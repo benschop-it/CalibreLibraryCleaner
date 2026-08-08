@@ -48,7 +48,8 @@ public sealed class MetadataDuplicateGroupRowViewModel : ObservableObject
                     book.PublicationMetadata.HasCover ? "Yes" : "No",
                     comparison is null
                         ? "Not ranked"
-                        : $"Core usable: {comparison.Vector.CoreUsable}; catalog integrity: {comparison.Vector.CatalogIntegrity}; conflicts: {comparison.Vector.ConflictCount}; completeness: {comparison.Vector.CompletenessCount}; consistency: {comparison.Vector.GroupConsistencyCount}; valid strong identifiers: {comparison.Vector.ValidStrongIdentifierCount}");
+                        : $"Core usable: {comparison.Vector.CoreUsable}; catalog integrity: {comparison.Vector.CatalogIntegrity}; conflicts: {comparison.Vector.ConflictCount}; completeness: {comparison.Vector.CompletenessCount}; consistency: {comparison.Vector.GroupConsistencyCount}; valid strong identifiers: {comparison.Vector.ValidStrongIdentifierCount}",
+                    book.Formats);
             })
             .ToArray());
         MetadataSourceOptions = new ReadOnlyCollection<RecommendationSourceOptionViewModel>(group.Members
@@ -61,8 +62,9 @@ public sealed class MetadataDuplicateGroupRowViewModel : ObservableObject
         }
         KeeperMember = recommendation?.MetadataSource is { } metadata
             ? Members.SingleOrDefault(value => value.BookId == metadata.SelectedBookId.Value)
-            : null;
-        Skip = KeeperMember is null;
+            : Members[0];
+        KeeperMember ??= Members[0];
+        Skip = false;
     }
 
     public ExactMetadataDuplicateGroupId GroupId { get; }

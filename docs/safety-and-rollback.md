@@ -6,6 +6,8 @@ Analysis may read the Calibre database and managed files, hash and parse formats
 
 Analysis must never write directly to `metadata.db`, rename or move Calibre-managed files, modify metadata, add or remove formats, or create files inside the selected library. EPUB and PDF inputs remain untrusted and are processed through the documented bounded read-only inspection paths. Book content is not logged.
 
+Explicit duplicate-row viewing may launch the trusted Calibre `ebook-viewer.exe`. The requested format must be a physical regular file contained in the selected library. Launch uses no shell and passes the physical path as one argument. Viewer launch does not alter projected state or authorize cleanup.
+
 ## Persisted development state
 
 A successful explicit Scan creates one authoritative projected-state generation outside the library. During development, explicit Load may restore that state or migrate a strictly validated legacy snapshot without rescanning. This deliberately trusts development cache data and does not detect external Calibre changes.

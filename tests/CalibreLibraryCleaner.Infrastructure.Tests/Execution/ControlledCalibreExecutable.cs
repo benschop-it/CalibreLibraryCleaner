@@ -24,6 +24,8 @@ internal sealed class ControlledCalibreExecutable : IDisposable
         File.Copy(appHost, ExecutablePath);
         DebugExecutablePath = Path.Combine(_directory.Path, "calibre-debug.exe");
         File.Copy(appHost, DebugExecutablePath);
+        ViewerExecutablePath = Path.Combine(_directory.Path, "ebook-viewer.exe");
+        File.Copy(appHost, ViewerExecutablePath);
         ConfigDirectory = Path.Combine(_directory.Path, "config");
         _controlPath = Path.Combine(_directory.Path, "calibre-test-control.json");
         Save();
@@ -31,6 +33,7 @@ internal sealed class ControlledCalibreExecutable : IDisposable
 
     public string ExecutablePath { get; }
     public string DebugExecutablePath { get; }
+    public string ViewerExecutablePath { get; }
     public string ConfigDirectory { get; }
     public string Root => _directory.Path;
 

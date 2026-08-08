@@ -1,3 +1,4 @@
+using CalibreLibraryCleaner.Domain.Libraries;
 using CommunityToolkit.Mvvm.ComponentModel;
 
 namespace CalibreLibraryCleaner.Wpf.ViewModels;
@@ -19,7 +20,8 @@ public sealed class MetadataDuplicateMemberRowViewModel : ObservableObject
         string languages = "",
         string series = "",
         string hasCover = "No",
-        string metadataQualityFacts = "Not ranked")
+        string metadataQualityFacts = "Not ranked",
+        IReadOnlyList<BookFormat>? bookFormats = null)
     {
         BookId = bookId;
         Title = title;
@@ -33,6 +35,13 @@ public sealed class MetadataDuplicateMemberRowViewModel : ObservableObject
         Series = series;
         HasCover = hasCover;
         MetadataQualityFacts = metadataQualityFacts;
+        BookFormat? launchFormat = (bookFormats ?? [])
+            .Where(value => value.FileStatus == FormatFileStatus.Present)
+            .OrderBy(value => FormatPreference(value.Format))
+            .ThenBy(value => value.Format, StringComparer.Ordinal)
+            .FirstOrDefault();
+        LaunchFormat = launchFormat?.Format;
+        LaunchRelativePath = launchFormat?.ExpectedRelativePath;
     }
 
     public long BookId { get; }
@@ -47,6 +56,8 @@ public sealed class MetadataDuplicateMemberRowViewModel : ObservableObject
     public string Series { get; }
     public string HasCover { get; }
     public string MetadataQualityFacts { get; }
+    public string? LaunchFormat { get; }
+    public string? LaunchRelativePath { get; }
     public string Action => IsKeeper ? "Keep" : "Remove";
 
     public bool IsKeeper
@@ -63,4 +74,13 @@ public sealed class MetadataDuplicateMemberRowViewModel : ObservableObject
         get => _isRetainedSeparate;
         set => SetProperty(ref _isRetainedSeparate, value);
     }
+
+    private static int FormatPreference(string format) => format switch
+    {
+        "EPUB" => 0,
+        "AZW3" => 1,
+        "MOBI" => 2,
+        "PDF" => 3,
+        _ => 4,
+    };
 }

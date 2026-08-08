@@ -27,3 +27,5 @@ Persistence tests prove metadata-only legacy listing, manifest-only state listin
 Infrastructure worker tests use only temporary caller-created disposable libraries and controlled executables. They validate trusted executable/script identity, fixed protocol messages, bounded I/O, writer-process rejection, handshake capabilities, cancellation/timeouts, and no direct SQLite or managed-file mutation. Ordinary automated tests never discover or use a default or personal Calibre library.
 
 WPF tests cover persisted development loading, exact keeper overrides, backup confirmation, progress/results, state uncertainty wording, XAML activation, and close protection during exact cleanup. Architecture tests prohibit recovery, cleanup-plan, app-backup/history, and direct mutation gateway boundaries from returning.
+
+Viewer tests use a controlled sibling executable and temporary synthetic library files. They prove exact one-argument launch, no-shell process configuration, trusted sibling discovery, containment/reparse validation, missing viewer/file outcomes, exact-row paths, metadata format preference, WPF command routing, and no cleanup-state mutation.

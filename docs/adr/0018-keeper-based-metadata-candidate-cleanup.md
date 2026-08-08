@@ -12,7 +12,7 @@ Exact normalized title and author sets are candidate evidence, not proof of iden
 
 ## Decision
 
-The Metadata candidates tab uses one generated keeper per group. The generated keeper is the recommendation policy's selected metadata source. A recommendation without a metadata source starts skipped. The user may select another member as the sole keeper and may independently Skip any group. Choices are session/snapshot-scoped.
+The Metadata candidates tab always starts with exactly one keeper and every Skip checkbox unchecked. The generated keeper is the recommendation policy's selected metadata source. When the policy does not select a metadata source, the first member in deterministic group order becomes the keeper. The user reviews that choice, may select another member as the sole keeper, and may independently Skip any group when no acceptable decision can be made. Choices are session/snapshot-scoped.
 
 One command processes every unskipped group. The selected keeper retains its existing metadata and existing formats unchanged. For each format absent from the keeper, the generated recommendation's selected present source is transferred to the keeper. If no selected present source exists, the group is skipped before mutation.
 
@@ -27,7 +27,7 @@ Cleanup uses the same trusted persistent `calibre-debug` worker, library mutatio
 - The keeper's metadata is never rewritten from another record.
 - Complementary formats can be consolidated onto the keeper.
 - Non-identical same-format alternatives on Remove records are intentionally deleted.
-- Ambiguous keeper or complementary format decisions default to Skip rather than guessing.
+- Ambiguous keeper decisions fall back to the first deterministic group member; unresolved complementary format decisions still skip the group at execution rather than guessing a source.
 - A complete external backup is essential because automated restoration is not provided.
 
 ## Rejected alternatives
