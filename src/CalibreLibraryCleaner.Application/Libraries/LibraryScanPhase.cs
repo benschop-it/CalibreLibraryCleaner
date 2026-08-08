@@ -16,6 +16,10 @@ public enum LibraryScanPhase
     AssessingPdfFormats,
     GroupingExactDuplicates,
     GroupingExactMetadataDuplicates,
+    BuildingMatchingProfiles,
+    GeneratingMatchingCandidates,
+    InspectingCandidateContent,
+    GroupingWorkLanguageCandidates,
     GeneratingConsolidationRecommendations,
     Completed,
 }

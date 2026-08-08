@@ -8,7 +8,7 @@ public sealed class EpubAssessmentEngine
 {
     private readonly int _baseline = 50;
 
-    public static AnalyzerVersion AnalyzerVersion { get; } = new("epub-inspector/1.0.4");
+    public static AnalyzerVersion AnalyzerVersion { get; } = new("epub-inspector/1.0.5");
     public static ScoringModelVersion ScoringModelVersion { get; } = new("epub-quality/1.0.3");
 
     public EpubAssessment Assess(

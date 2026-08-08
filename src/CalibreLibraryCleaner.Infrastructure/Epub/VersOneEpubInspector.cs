@@ -1,8 +1,11 @@
 using System.Buffers.Binary;
+using System.Diagnostics;
 using System.Globalization;
 using System.IO.Compression;
 using System.Security;
+using System.Security.Cryptography;
 using System.Text;
+using System.Text.RegularExpressions;
 using System.Xml;
 using System.Xml.Linq;
 using CalibreLibraryCleaner.Application.Abstractions;
@@ -10,6 +13,7 @@ using CalibreLibraryCleaner.Application.Assessments;
 using CalibreLibraryCleaner.Application.Libraries;
 using CalibreLibraryCleaner.Domain.Assessments;
 using CalibreLibraryCleaner.Domain.Libraries;
+using CalibreLibraryCleaner.Domain.Matching;
 using HtmlAgilityPack;
 using Microsoft.Extensions.Logging;
 using VersOne.Epub;
@@ -17,7 +21,9 @@ using VersOne.Epub.Options;
 
 namespace CalibreLibraryCleaner.Infrastructure.Epub;
 
-internal sealed class VersOneEpubInspector(ILogger<VersOneEpubInspector> logger) : IEpubInspector
+internal sealed partial class VersOneEpubInspector(ILogger<VersOneEpubInspector> logger) :
+    IEpubInspector,
+    IEpubContentSignatureInspector
 {
     private const int BufferSize = 128 * 1024;
     private const uint EndOfCentralDirectorySignature = 0x06054B50;
@@ -164,6 +170,313 @@ internal sealed class VersOneEpubInspector(ILogger<VersOneEpubInspector> logger)
         }
     }
 
+    public async Task<EpubContentSignatureResult> InspectContentSignatureAsync(
+        EpubContentSignatureRequest request,
+        IProgress<EpubContentSignatureProgress>? progress,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        cancellationToken.ThrowIfCancellationRequested();
+        EpubInspectionRequest source = request.Source;
+        long started = Stopwatch.GetTimestamp();
+        LogContentSignatureStarted(logger, source.Fingerprint.SizeInBytes,
+            request.SignatureLimits.MaximumTokenCount,
+            request.SignatureLimits.LandmarkCount,
+            request.SignatureLimits.TokensPerLandmark);
+        try
+        {
+            EnsureCurrentFile(source);
+            if (source.Observation.Length == 0)
+                return EpubContentSignatureResult.Failure(EpubContentSignatureProblemCode.CannotOpen);
+            if (source.Observation.Length > source.Limits.MaximumFileBytes)
+                return EpubContentSignatureResult.Failure(EpubContentSignatureProblemCode.LimitExceeded);
+
+            progress?.Report(new("Preflight", 0, null));
+            long preflightStarted = Stopwatch.GetTimestamp();
+            PreflightResult preflight = await PreflightAsync(source, cancellationToken).ConfigureAwait(false);
+            long preflightCompleted = Stopwatch.GetTimestamp();
+            if (preflight.Problem is not null)
+            {
+                LogContentSignatureFailed(logger, MapContentProblem(preflight.Problem.Code).ToString(),
+                    ElapsedMilliseconds(preflightStarted, preflightCompleted),
+                    ElapsedMilliseconds(started, preflightCompleted));
+                return EpubContentSignatureResult.Failure(MapContentProblem(preflight.Problem.Code));
+            }
+
+            EpubContentSignature? signature = await ReadContentSignatureAsync(
+                request, progress, cancellationToken).ConfigureAwait(false);
+            EnsureCurrentFile(source);
+            long completed = Stopwatch.GetTimestamp();
+            LogContentSignatureCompleted(logger,
+                signature is not null,
+                signature?.TotalTokenCount ?? 0,
+                signature?.SpineItemCount ?? 0,
+                signature?.SampledChapterCount ?? 0,
+                signature?.Landmarks.Count ?? 0,
+                ElapsedMilliseconds(preflightStarted, preflightCompleted),
+                ElapsedMilliseconds(preflightCompleted, completed),
+                ElapsedMilliseconds(started, completed));
+            return signature is null
+                ? EpubContentSignatureResult.Failure(EpubContentSignatureProblemCode.InsufficientText)
+                : EpubContentSignatureResult.Success(signature);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (FileChangedException)
+        {
+            return EpubContentSignatureResult.Failure(EpubContentSignatureProblemCode.ChangedDuringInspection);
+        }
+        catch (Exception exception) when (exception is FileNotFoundException or DirectoryNotFoundException
+            or UnauthorizedAccessException or SecurityException or IOException)
+        {
+            return EpubContentSignatureResult.Failure(EpubContentSignatureProblemCode.Unreadable);
+        }
+        catch (Exception exception) when (exception is InvalidDataException or XmlException or EpubReaderException)
+        {
+            return EpubContentSignatureResult.Failure(EpubContentSignatureProblemCode.PackageMalformed);
+        }
+        catch (NotSupportedException)
+        {
+            return EpubContentSignatureResult.Failure(EpubContentSignatureProblemCode.Unsupported);
+        }
+        catch (Exception exception) when (exception is OverflowException or InspectionLimitException)
+        {
+            return EpubContentSignatureResult.Failure(EpubContentSignatureProblemCode.LimitExceeded);
+        }
+    }
+
+    private async Task<EpubContentSignature?> ReadContentSignatureAsync(
+        EpubContentSignatureRequest request,
+        IProgress<EpubContentSignatureProgress>? progress,
+        CancellationToken token)
+    {
+        EpubInspectionRequest source = request.Source;
+        await using FileStream file = OpenRead(source.FullPath);
+        EnsureCurrentFile(source);
+        using CancellationCheckingStream guarded = new(file, token);
+        using ZipArchive archive = new(guarded, ZipArchiveMode.Read, leaveOpen: true);
+        Dictionary<string, ZipArchiveEntry> entries = archive.Entries
+            .ToDictionary(entry => NormalizeRequired(entry.FullName), StringComparer.Ordinal);
+        ReadBudget packageBudget = new(source.Limits.MaximumDeclaredUncompressedBytes);
+        XDocument container = await ReadXmlAsync(
+            entries["META-INF/container.xml"], source.Limits.MaximumXmlBytes, packageBudget, token).ConfigureAwait(false);
+        string? packageReference = container.Descendants()
+            .FirstOrDefault(element => element.Name.LocalName == "rootfile")?.Attribute("full-path")?.Value;
+        if (!EpubArchivePathResolver.TryNormalizeEntryName(packageReference, out string packagePath)
+            || !entries.TryGetValue(packagePath, out ZipArchiveEntry? packageEntry))
+            throw new InvalidDataException("Package path is invalid.");
+        XDocument package = await ReadXmlAsync(
+            packageEntry, source.Limits.MaximumXmlBytes, packageBudget, token).ConfigureAwait(false);
+        XElement root = package.Root ?? throw new InvalidDataException("Package root is missing.");
+        Dictionary<string, ManifestItem> manifest = [];
+        foreach (XElement item in root.Descendants().Where(element => element.Name.LocalName == "item"))
+        {
+            token.ThrowIfCancellationRequested();
+            string? id = item.Attribute("id")?.Value;
+            string? href = item.Attribute("href")?.Value;
+            if (string.IsNullOrWhiteSpace(id) || string.IsNullOrWhiteSpace(href)
+                || !EpubArchivePathResolver.TryResolve(packagePath, href, out string resolved))
+                continue;
+            manifest.TryAdd(id, new(resolved, item.Attribute("media-type")?.Value ?? string.Empty,
+                item.Attribute("properties")?.Value ?? string.Empty));
+        }
+
+        string[] spineIds = root.Descendants().Where(element => element.Name.LocalName == "itemref")
+            .Select(element => element.Attribute("idref")?.Value)
+            .Where(value => !string.IsNullOrWhiteSpace(value)).Select(value => value!)
+            .Take(source.Limits.MaximumSpineItems + 1).ToArray();
+        if (spineIds.Length == 0) return null;
+        if (spineIds.Length > source.Limits.MaximumSpineItems) throw new InspectionLimitException();
+        ZipArchiveEntry[] chapters = spineIds
+            .Select(id => manifest.TryGetValue(id, out ManifestItem? item)
+                && item.MediaType.Contains("html", StringComparison.OrdinalIgnoreCase)
+                && entries.TryGetValue(item.Path, out ZipArchiveEntry? chapter)
+                    ? chapter
+                    : null)
+            .Where(value => value is not null)
+            .Select(value => value!)
+            .ToArray();
+        if (chapters.Length == 0) return null;
+
+        long countingStarted = Stopwatch.GetTimestamp();
+        BottomKShingleCollector shingleCollector = new(64);
+        ChapterTokenSummary[] chapterSummaries = await CountChapterTokensAsync(
+            chapters,
+            source.Limits,
+            request.SignatureLimits.MaximumTokenCount,
+            shingleCollector,
+            progress,
+            token).ConfigureAwait(false);
+        long countingCompleted = Stopwatch.GetTimestamp();
+        long totalTokens = chapterSummaries.Sum(value => value.TokenCount);
+        if (totalTokens < request.SignatureLimits.TokensPerLandmark) return null;
+
+        LandmarkCollector[] collectors = CreateCollectors(totalTokens, request.SignatureLimits);
+        ChapterTokenSummary[] sampledChapters = chapterSummaries
+            .Where(chapter => collectors.Any(collector => collector.Intersects(
+                chapter.StartToken, chapter.TokenCount)))
+            .ToArray();
+        long samplingStarted = Stopwatch.GetTimestamp();
+        await SampleLandmarksAsync(
+            sampledChapters, source.Limits, collectors, progress, token).ConfigureAwait(false);
+        long samplingCompleted = Stopwatch.GetTimestamp();
+        ContentLandmarkSignature[] landmarks = collectors
+            .Where(value => value.DistinctTokenCount >= request.SignatureLimits.MinimumDistinctTokensPerLandmark)
+            .Select(value => value.CreateSignature())
+            .ToArray();
+        if (landmarks.Length == 0) return null;
+        LogContentSignatureExtraction(logger,
+            chapters.Length,
+            sampledChapters.Length,
+            totalTokens,
+            landmarks.Length,
+            ElapsedMilliseconds(countingStarted, countingCompleted),
+            ElapsedMilliseconds(samplingStarted, samplingCompleted));
+        return new(
+            source.Fingerprint,
+            totalTokens,
+            spineIds.Length,
+            sampledChapters.Length,
+            landmarks,
+            shingleMinHashes: shingleCollector.Values);
+    }
+
+    private static LandmarkCollector[] CreateCollectors(
+        long totalTokens,
+        EpubContentSignatureLimits limits)
+    {
+        long maximumStart = totalTokens - limits.TokensPerLandmark;
+        return Enumerable.Range(0, limits.LandmarkCount).Select(ordinal =>
+        {
+            long center = totalTokens * (ordinal + 1L) / (limits.LandmarkCount + 1L);
+            long start = Math.Clamp(center - (limits.TokensPerLandmark / 2L), 0, maximumStart);
+            return new LandmarkCollector(ordinal, start, limits.TokensPerLandmark);
+        }).ToArray();
+    }
+
+    private static async Task<ChapterTokenSummary[]> CountChapterTokensAsync(
+        ZipArchiveEntry[] chapters,
+        EpubInspectionLimits limits,
+        long maximumTokenCount,
+        BottomKShingleCollector shingleCollector,
+        IProgress<EpubContentSignatureProgress>? progress,
+        CancellationToken token)
+    {
+        ReadBudget readBudget = new(limits.MaximumDeclaredUncompressedBytes);
+        List<ChapterTokenSummary> summaries = new(chapters.Length);
+        long totalTokens = 0;
+        for (int index = 0; index < chapters.Length; index++)
+        {
+            token.ThrowIfCancellationRequested();
+            ZipArchiveEntry chapter = chapters[index];
+            if (chapter.Length > limits.MaximumChapterBytes) throw new InspectionLimitException();
+            progress?.Report(new("Counting", index, chapters.Length));
+            long chapterStart = totalTokens;
+            await VisitChapterVisibleTokensAsync(chapter, limits, readBudget, value =>
+            {
+                totalTokens = checked(totalTokens + 1);
+                if (totalTokens > maximumTokenCount) throw new InspectionLimitException();
+                shingleCollector.Add(value);
+            }, token).ConfigureAwait(false);
+            summaries.Add(new(chapter, chapterStart, totalTokens - chapterStart));
+        }
+        progress?.Report(new("Counting", chapters.Length, chapters.Length));
+        return summaries.ToArray();
+    }
+
+    private static async Task SampleLandmarksAsync(
+        ChapterTokenSummary[] chapters,
+        EpubInspectionLimits limits,
+        LandmarkCollector[] collectors,
+        IProgress<EpubContentSignatureProgress>? progress,
+        CancellationToken token)
+    {
+        ReadBudget readBudget = new(limits.MaximumDeclaredUncompressedBytes);
+        for (int index = 0; index < chapters.Length; index++)
+        {
+            token.ThrowIfCancellationRequested();
+            ChapterTokenSummary chapter = chapters[index];
+            progress?.Report(new("Sampling", index, chapters.Length));
+            long localTokenIndex = 0;
+            await VisitChapterVisibleTokensAsync(chapter.Entry, limits, readBudget, value =>
+            {
+                long globalTokenIndex = chapter.StartToken + localTokenIndex++;
+                foreach (LandmarkCollector collector in collectors)
+                    collector.TryAdd(globalTokenIndex, value);
+            }, token).ConfigureAwait(false);
+        }
+        progress?.Report(new("Sampling", chapters.Length, chapters.Length));
+    }
+
+    private static async Task VisitChapterVisibleTokensAsync(
+        ZipArchiveEntry chapter,
+        EpubInspectionLimits limits,
+        ReadBudget readBudget,
+        Action<string> visitor,
+        CancellationToken token)
+    {
+        string html = await ReadTextAsync(
+            chapter, limits.MaximumChapterBytes, readBudget, token).ConfigureAwait(false);
+        HtmlDocument document = LoadBoundedHtml(html, limits, token);
+        foreach (HtmlNode node in document.DocumentNode.SelectNodes("//script|//style|//nav")
+            ?? Enumerable.Empty<HtmlNode>())
+            node.Remove();
+        foreach (HtmlNode textNode in document.DocumentNode.DescendantsAndSelf()
+            .Where(value => value.NodeType == HtmlNodeType.Text))
+        {
+            token.ThrowIfCancellationRequested();
+            string visible = RemoveLineEndHyphenation(HtmlEntity.DeEntitize(textNode.InnerText));
+            foreach (string value in TokenizeVisibleText(visible, token)) visitor(value);
+        }
+    }
+
+    private static string RemoveLineEndHyphenation(string value) => LineEndHyphenationRegex().Replace(
+        value.Replace("\u00ad", string.Empty, StringComparison.Ordinal),
+        string.Empty);
+
+    [GeneratedRegex(
+        "(?<=\\p{L})-[ \\t]*[\\r\\n]+[ \\t]*(?=\\p{Ll})",
+        RegexOptions.CultureInvariant,
+        100)]
+    private static partial Regex LineEndHyphenationRegex();
+
+    private static IEnumerable<string> TokenizeVisibleText(string value, CancellationToken token)
+    {
+        StringBuilder current = new();
+        int index = 0;
+        string normalized = value.Normalize(NormalizationForm.FormC);
+        foreach (Rune rune in normalized.EnumerateRunes())
+        {
+            if ((index++ & 0x0FFF) == 0) token.ThrowIfCancellationRequested();
+            if (Rune.IsLetterOrDigit(rune))
+            {
+                Rune upper = Rune.ToUpperInvariant(rune);
+                if (upper.IsBmp) current.Append((char)upper.Value);
+                else current.Append(upper.ToString());
+                continue;
+            }
+            if (current.Length == 0) continue;
+            yield return current.ToString();
+            current.Clear();
+        }
+        if (current.Length > 0) yield return current.ToString();
+    }
+
+    private static EpubContentSignatureProblemCode MapContentProblem(EpubInspectionProblemCode code) => code switch
+    {
+        EpubInspectionProblemCode.CannotOpen => EpubContentSignatureProblemCode.CannotOpen,
+        EpubInspectionProblemCode.UnsafeArchive => EpubContentSignatureProblemCode.UnsafeArchive,
+        EpubInspectionProblemCode.PackageMalformed => EpubContentSignatureProblemCode.PackageMalformed,
+        EpubInspectionProblemCode.Unsupported => EpubContentSignatureProblemCode.Unsupported,
+        EpubInspectionProblemCode.Encrypted => EpubContentSignatureProblemCode.Encrypted,
+        EpubInspectionProblemCode.ChangedDuringInspection => EpubContentSignatureProblemCode.ChangedDuringInspection,
+        EpubInspectionProblemCode.LimitExceeded => EpubContentSignatureProblemCode.LimitExceeded,
+        EpubInspectionProblemCode.Unreadable => EpubContentSignatureProblemCode.Unreadable,
+        _ => throw new ArgumentOutOfRangeException(nameof(code)),
+    };
+
     private static bool IsUnclassifiedParserFailure(Exception exception) => exception is not (
         OperationCanceledException or
         FileChangedException or
@@ -181,6 +494,50 @@ internal sealed class VersOneEpubInspector(ILogger<VersOneEpubInspector> logger)
 
     private static bool HasRecoverablePackageDefect(IReadOnlyList<EpubInspectionProblem> problems) =>
         problems.Any(problem => problem.Code == EpubInspectionProblemCode.PackageMalformed);
+
+    private static long ElapsedMilliseconds(long started, long completed) =>
+        (long)Stopwatch.GetElapsedTime(started, completed).TotalMilliseconds;
+
+    [LoggerMessage(2, LogLevel.Debug,
+        "Candidate EPUB content inspection started. FileBytes={FileBytes}, MaximumTokens={MaximumTokens}, LandmarkCount={LandmarkCount}, TokensPerLandmark={TokensPerLandmark}.")]
+    private static partial void LogContentSignatureStarted(
+        ILogger logger,
+        long fileBytes,
+        long maximumTokens,
+        int landmarkCount,
+        int tokensPerLandmark);
+
+    [LoggerMessage(3, LogLevel.Debug,
+        "Candidate EPUB content extraction completed. SpineChapters={SpineChapters}, SampledChapters={SampledChapters}, TotalTokens={TotalTokens}, Landmarks={Landmarks}, CountingMilliseconds={CountingMilliseconds}, SamplingMilliseconds={SamplingMilliseconds}.")]
+    private static partial void LogContentSignatureExtraction(
+        ILogger logger,
+        int spineChapters,
+        int sampledChapters,
+        long totalTokens,
+        int landmarks,
+        long countingMilliseconds,
+        long samplingMilliseconds);
+
+    [LoggerMessage(4, LogLevel.Debug,
+        "Candidate EPUB content inspection completed. Success={Success}, TotalTokens={TotalTokens}, SpineItems={SpineItems}, SampledChapters={SampledChapters}, Landmarks={Landmarks}, PreflightMilliseconds={PreflightMilliseconds}, ExtractionMilliseconds={ExtractionMilliseconds}, TotalMilliseconds={TotalMilliseconds}.")]
+    private static partial void LogContentSignatureCompleted(
+        ILogger logger,
+        bool success,
+        long totalTokens,
+        int spineItems,
+        int sampledChapters,
+        int landmarks,
+        long preflightMilliseconds,
+        long extractionMilliseconds,
+        long totalMilliseconds);
+
+    [LoggerMessage(5, LogLevel.Debug,
+        "Candidate EPUB content inspection failed with {ProblemCode}. PreflightMilliseconds={PreflightMilliseconds}, TotalMilliseconds={TotalMilliseconds}.")]
+    private static partial void LogContentSignatureFailed(
+        ILogger logger,
+        string problemCode,
+        long preflightMilliseconds,
+        long totalMilliseconds);
 
     private static async Task<PreflightResult> PreflightAsync(EpubInspectionRequest request, CancellationToken token)
     {
@@ -1550,6 +1907,11 @@ internal sealed class VersOneEpubInspector(ILogger<VersOneEpubInspector> logger)
 
     private static HtmlDocument LoadBoundedHtml(string html, EpubInspectionLimits limits, CancellationToken token)
     {
+        if (html.Length > limits.MaximumHtmlCharacters)
+        {
+            throw new InspectionLimitException();
+        }
+
         int tagMarkers = 0;
         for (int index = 0; index < html.Length; index++)
         {
@@ -1742,6 +2104,7 @@ internal sealed class VersOneEpubInspector(ILogger<VersOneEpubInspector> logger)
     private sealed record FallbackEntry(string Name, ZipArchiveEntry Entry, CentralDirectoryEntry Central);
     private readonly record struct LocalMediaInspection(bool Found, bool LimitExceeded, int InspectedCount);
     private sealed record ManifestItem(string Path, string MediaType, string Properties);
+    private sealed record ChapterTokenSummary(ZipArchiveEntry Entry, long StartToken, long TokenCount);
     private sealed record PreflightResult(
         IReadOnlyList<string> EntryNames,
         EpubInspectionProblem? Problem,
@@ -1755,6 +2118,104 @@ internal sealed class VersOneEpubInspector(ILogger<VersOneEpubInspector> logger)
                 [],
                 new(code, explanation, IssueCode: issueCode, AllowsFallbackInspection: allowsFallbackInspection),
                 []);
+    }
+    private sealed class LandmarkCollector(int ordinal, long startToken, int tokenCount)
+    {
+        private readonly string[] _tokens = new string[tokenCount];
+        private int _count;
+
+        public int DistinctTokenCount => _tokens.Take(_count).Distinct(StringComparer.Ordinal).Count();
+
+        public bool Intersects(long otherStartToken, long otherTokenCount) =>
+            otherTokenCount > 0
+            && startToken < otherStartToken + otherTokenCount
+            && startToken + tokenCount > otherStartToken;
+
+        public void TryAdd(long tokenIndex, string value)
+        {
+            if (tokenIndex < startToken || tokenIndex >= startToken + tokenCount) return;
+            _tokens[checked((int)(tokenIndex - startToken))] = value;
+            _count++;
+        }
+
+        public ContentLandmarkSignature CreateSignature()
+        {
+            if (_count != tokenCount) throw new InvalidOperationException("A landmark window is incomplete.");
+            return new(
+                ordinal,
+                startToken,
+                tokenCount,
+                DistinctTokenCount,
+                HashTokens(relaxed: false),
+                HashTokens(relaxed: true));
+        }
+
+        private Sha256Digest HashTokens(bool relaxed)
+        {
+            using IncrementalHash hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
+            Span<byte> length = stackalloc byte[sizeof(int)];
+            foreach (string token in _tokens)
+            {
+                string value = relaxed ? Relax(token) : token;
+                byte[] bytes = Encoding.UTF8.GetBytes(value);
+                BinaryPrimitives.WriteInt32BigEndian(length, bytes.Length);
+                hash.AppendData(length);
+                hash.AppendData(bytes);
+            }
+            return new(Convert.ToHexString(hash.GetHashAndReset()));
+        }
+
+        private static string Relax(string value)
+        {
+            StringBuilder result = new();
+            foreach (Rune rune in value.Normalize(NormalizationForm.FormD).EnumerateRunes())
+            {
+                UnicodeCategory category = Rune.GetUnicodeCategory(rune);
+                if (category is not (UnicodeCategory.NonSpacingMark
+                    or UnicodeCategory.SpacingCombiningMark
+                    or UnicodeCategory.EnclosingMark))
+                    result.Append(rune.ToString());
+            }
+            return result.ToString().Normalize(NormalizationForm.FormC);
+        }
+    }
+    private sealed class BottomKShingleCollector(int maximumValues)
+    {
+        private const int ShingleTokenCount = 5;
+        private const ulong OffsetBasis = 14695981039346656037;
+        private const ulong Prime = 1099511628211;
+        private readonly Queue<ulong> _window = new(ShingleTokenCount);
+        private readonly SortedSet<ulong> _values = [];
+
+        public IReadOnlyList<ulong> Values => _values.ToArray();
+
+        public void Add(string token)
+        {
+            _window.Enqueue(HashToken(token));
+            if (_window.Count > ShingleTokenCount) _window.Dequeue();
+            if (_window.Count < ShingleTokenCount) return;
+            ulong hash = OffsetBasis;
+            foreach (ulong value in _window)
+            {
+                hash ^= value;
+                hash *= Prime;
+                hash ^= value >> 32;
+                hash *= Prime;
+            }
+            _values.Add(hash);
+            if (_values.Count > maximumValues) _values.Remove(_values.Max);
+        }
+
+        private static ulong HashToken(string token)
+        {
+            ulong hash = OffsetBasis;
+            foreach (char character in token)
+            {
+                hash ^= character;
+                hash *= Prime;
+            }
+            return hash;
+        }
     }
     private sealed class FileChangedException : Exception;
     private sealed class InspectionLimitException : Exception;

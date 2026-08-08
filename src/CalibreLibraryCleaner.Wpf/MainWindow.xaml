@@ -283,6 +283,65 @@
           </GroupBox>
         </Grid>
       </TabItem>
+      <TabItem Header="E_xpanded candidates" AutomationProperties.Name="Expanded review-only candidates">
+        <Grid Margin="8">
+          <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+            <RowDefinition Height="*" />
+          </Grid.RowDefinitions>
+          <TextBlock Grid.Row="0"
+                     Margin="0,0,0,8"
+                     FontWeight="Bold"
+                     Text="{Binding ExpandedCandidateSummary}"
+                     TextWrapping="Wrap" />
+          <GroupBox Grid.Row="1" Header="Work-language groups">
+            <DataGrid ItemsSource="{Binding ExpandedCandidateGroups}"
+                      SelectedItem="{Binding SelectedExpandedCandidateGroup}"
+                      AutoGenerateColumns="False"
+                      IsReadOnly="True"
+                      SelectionMode="Single"
+                      EnableRowVirtualization="True"
+                      EnableColumnVirtualization="True"
+                      VirtualizingPanel.VirtualizationMode="Recycling"
+                      AutomationProperties.Name="Expanded work-language candidate groups">
+              <DataGrid.Columns>
+                <DataGridTextColumn Width="95" Header="Eligibility" Binding="{Binding Eligibility}" />
+                <DataGridTextColumn Width="90" Header="Language" Binding="{Binding Language}" />
+                <DataGridTextColumn Width="100" Header="Confidence" Binding="{Binding Confidence}" />
+                <DataGridTextColumn Width="75" Header="Records" Binding="{Binding RecordCount}" />
+                <DataGridTextColumn Width="120" Header="Anchors" Binding="{Binding AnchorRecordIds}" />
+                <DataGridTextColumn Width="3*" Header="Evidence" Binding="{Binding Evidence}" />
+                <DataGridTextColumn Width="2*" Header="Contradictions" Binding="{Binding Contradictions}" />
+                <DataGridTextColumn Width="3*" Header="Content evidence" Binding="{Binding ContentEvidence}" />
+              </DataGrid.Columns>
+            </DataGrid>
+          </GroupBox>
+          <GroupBox Grid.Row="2" Margin="0,8,0,0" Header="Members; double-click a row to open its book">
+            <DataGrid ItemsSource="{Binding SelectedExpandedCandidateMembers}"
+                      SelectedItem="{Binding SelectedExpandedCandidateMember}"
+                      MouseDoubleClick="ExpandedCandidateMembersGrid_MouseDoubleClick"
+                      AutoGenerateColumns="False"
+                      IsReadOnly="True"
+                      SelectionMode="Single"
+                      SelectionUnit="FullRow"
+                      EnableRowVirtualization="True"
+                      EnableColumnVirtualization="True"
+                      VirtualizingPanel.VirtualizationMode="Recycling"
+                      AutomationProperties.Name="Members in selected expanded candidate group">
+              <DataGrid.Columns>
+                <DataGridTextColumn Width="90" Header="Role" Binding="{Binding Role}" />
+                <DataGridTextColumn Width="75" Header="Record ID" Binding="{Binding BookId}" />
+                <DataGridTextColumn Width="2*" Header="Title" Binding="{Binding Title}" />
+                <DataGridTextColumn Width="2*" Header="Authors" Binding="{Binding Authors}" />
+                <DataGridTextColumn Width="100" Header="Languages" Binding="{Binding Languages}" />
+                <DataGridTextColumn Width="*" Header="Series/index" Binding="{Binding Series}" />
+                <DataGridTextColumn Width="2*" Header="Formats/status" Binding="{Binding Formats}" />
+              </DataGrid.Columns>
+            </DataGrid>
+          </GroupBox>
+        </Grid>
+      </TabItem>
       <TabItem Header="_EPUB assessments" AutomationProperties.Name="EPUB assessments">
         <Grid Margin="8">
           <Grid.RowDefinitions>

@@ -20,7 +20,8 @@ public sealed record EpubInspectionLimits(
     int MaximumReadableCharacters = 20_000_000,
     int MaximumCompressionRatio = 200,
     int MaximumAggregateCompressionRatio = 100,
-    int MaximumHtmlNodes = 200_000,
+    int MaximumHtmlCharacters = 2_000_000,
+    int MaximumHtmlNodes = 50_000,
     int MaximumHtmlDepth = 256)
 {
     public static EpubInspectionLimits V1 { get; } = new();
@@ -208,4 +209,10 @@ public sealed record EpubAssessmentTarget(
     FormatFileFingerprint? Fingerprint,
     FormatFileObservation? Observation);
 
-public sealed record EpubAssessmentProgress(int CompletedFiles, int TotalFiles, string CurrentRelativePath, string Stage);
+public sealed record EpubAssessmentProgress(
+    int CompletedFiles,
+    int TotalFiles,
+    string CurrentRelativePath,
+    string Stage,
+    int ActiveFiles = 0,
+    string ActiveStageSummary = "");

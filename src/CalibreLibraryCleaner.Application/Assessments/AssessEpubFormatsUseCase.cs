@@ -1,11 +1,21 @@
+using System.Diagnostics;
+using System.Globalization;
 using CalibreLibraryCleaner.Application.Abstractions;
 using CalibreLibraryCleaner.Domain.Assessments;
 using CalibreLibraryCleaner.Domain.Libraries;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 
 namespace CalibreLibraryCleaner.Application.Assessments;
 
-public sealed class AssessEpubFormatsUseCase(IEpubInspector inspector, EpubAssessmentEngine engine)
+public sealed partial class AssessEpubFormatsUseCase(
+    IEpubInspector inspector,
+    EpubAssessmentEngine engine,
+    ILogger<AssessEpubFormatsUseCase>? logger = null)
 {
+    private readonly ILogger<AssessEpubFormatsUseCase> _logger = logger
+        ?? NullLogger<AssessEpubFormatsUseCase>.Instance;
+
     public async Task<IReadOnlyList<EpubAssessment>> ExecuteAsync(
         IReadOnlyList<EpubAssessmentTarget> allTargets,
         int maxConcurrency,
@@ -24,14 +34,16 @@ public sealed class AssessEpubFormatsUseCase(IEpubInspector inspector, EpubAsses
             .ThenBy(target => target.ExpectedRelativePath, StringComparer.Ordinal)
             .ToArray();
         EpubAssessment?[] results = new EpubAssessment?[targets.Length];
-        int completed = 0;
-        object progressGate = new();
-        progress?.Report(new(0, targets.Length, string.Empty, "Starting"));
+        EpubProgressCoordinator progressCoordinator = new(progress, targets.Length);
 
         ParallelOptions options = new() { MaxDegreeOfParallelism = maxConcurrency, CancellationToken = cancellationToken };
         await Parallel.ForEachAsync(Enumerable.Range(0, targets.Length), options, async (index, token) =>
         {
             EpubAssessmentTarget target = targets[index];
+            progressCoordinator.Start(index, SafePath(target));
+            long started = Stopwatch.GetTimestamp();
+            LogAssessmentStarted(_logger, target.BookId.Value, target.Fingerprint?.SizeInBytes ?? 0,
+                index + 1, targets.Length);
             EpubInspectionResult inspection;
             if (target.FileStatus != FormatFileStatus.Present)
             {
@@ -65,12 +77,24 @@ public sealed class AssessEpubFormatsUseCase(IEpubInspector inspector, EpubAsses
                     target.Observation,
                     limits);
                 IProgress<EpubInspectionProgress>? inspectionProgress = progress is null
-                    ? null
-                    : new InlineInspectionProgress(value => progress.Report(new(
-                        Volatile.Read(ref completed),
-                        targets.Length,
-                        SafePath(target),
-                        value.Stage)));
+                    ? new InlineInspectionProgress(value => LogAssessmentStage(
+                        _logger,
+                        target.BookId.Value,
+                        value.Stage,
+                        value.CompletedUnits,
+                        value.TotalUnits ?? 0,
+                        ElapsedMilliseconds(started, Stopwatch.GetTimestamp())))
+                    : new InlineInspectionProgress(value =>
+                    {
+                        LogAssessmentStage(
+                            _logger,
+                            target.BookId.Value,
+                            value.Stage,
+                            value.CompletedUnits,
+                            value.TotalUnits ?? 0,
+                            ElapsedMilliseconds(started, Stopwatch.GetTimestamp()));
+                        progressCoordinator.ReportStage(index, SafePath(target), FormatInspectionStage(value));
+                    });
                 try
                 {
                     inspection = await inspector.InspectAsync(request, inspectionProgress, token).ConfigureAwait(false);
@@ -87,11 +111,25 @@ public sealed class AssessEpubFormatsUseCase(IEpubInspector inspector, EpubAsses
 
             token.ThrowIfCancellationRequested();
             results[index] = engine.Assess(target.BookId, SafePath(target), target.Fingerprint, inspection, token);
-            lock (progressGate)
-            {
-                int count = ++completed;
-                progress?.Report(new(count, targets.Length, SafePath(target), "Complete"));
-            }
+            long elapsedMilliseconds = ElapsedMilliseconds(started, Stopwatch.GetTimestamp());
+            LogAssessmentCompleted(
+                _logger,
+                target.BookId.Value,
+                inspection.Coverage.ToString(),
+                inspection.Problems.Count > 0 ? inspection.Problems[0].Code.ToString() : "None",
+                inspection.ManifestItemCount,
+                inspection.SpineItemCount,
+                inspection.ChapterCount,
+                inspection.ReadableCharacterCount,
+                elapsedMilliseconds);
+            if (elapsedMilliseconds >= 5_000)
+                LogSlowAssessment(
+                    _logger,
+                    target.BookId.Value,
+                    target.Fingerprint?.SizeInBytes ?? 0,
+                    inspection.Coverage.ToString(),
+                    elapsedMilliseconds);
+            progressCoordinator.Complete(index, SafePath(target));
         }).ConfigureAwait(false);
 
         cancellationToken.ThrowIfCancellationRequested();
@@ -101,6 +139,13 @@ public sealed class AssessEpubFormatsUseCase(IEpubInspector inspector, EpubAsses
     private static string SafePath(EpubAssessmentTarget target) => string.IsNullOrWhiteSpace(target.ExpectedRelativePath)
         ? $"invalid-path/book-{target.BookId.Value}.epub"
         : target.ExpectedRelativePath.Replace('\\', '/');
+
+    private static string FormatInspectionStage(EpubInspectionProgress progress) => progress.TotalUnits is > 0
+        ? $"{progress.Stage} {progress.CompletedUnits:N0} of {progress.TotalUnits.Value:N0}"
+        : progress.Stage;
+
+    private static long ElapsedMilliseconds(long started, long completed) =>
+        (long)Stopwatch.GetElapsedTime(started, completed).TotalMilliseconds;
 
     private static void ValidateLimits(EpubInspectionLimits limits)
     {
@@ -124,6 +169,7 @@ public sealed class AssessEpubFormatsUseCase(IEpubInspector inspector, EpubAsses
             limits.MaximumReadableCharacters,
             limits.MaximumCompressionRatio,
             limits.MaximumAggregateCompressionRatio,
+            limits.MaximumHtmlCharacters,
             limits.MaximumHtmlNodes,
             limits.MaximumHtmlDepth,
         ];
@@ -142,6 +188,124 @@ public sealed class AssessEpubFormatsUseCase(IEpubInspector inspector, EpubAsses
     {
         public void Report(EpubInspectionProgress value) => report(value);
     }
+
+    private sealed class EpubProgressCoordinator
+    {
+        private static readonly TimeSpan MinimumUpdateInterval = TimeSpan.FromMilliseconds(500);
+        private readonly IProgress<EpubAssessmentProgress>? _progress;
+        private readonly int _totalFiles;
+        private readonly object _gate = new();
+        private readonly Dictionary<int, string> _activeStages = [];
+        private int _completedFiles;
+        private long _lastReport = Stopwatch.GetTimestamp();
+        private string _lastSummary = string.Empty;
+
+        public EpubProgressCoordinator(IProgress<EpubAssessmentProgress>? progress, int totalFiles)
+        {
+            _progress = progress;
+            _totalFiles = totalFiles;
+            _progress?.Report(new(0, totalFiles, string.Empty, "Starting"));
+        }
+
+        public void Start(int index, string relativePath)
+        {
+            lock (_gate)
+            {
+                _activeStages[index] = "Starting";
+                Report(relativePath, "Starting", force: _activeStages.Count == 1);
+            }
+        }
+
+        public void ReportStage(int index, string relativePath, string stage)
+        {
+            lock (_gate)
+            {
+                _activeStages[index] = stage;
+                Report(relativePath, stage, force: _activeStages.Count == 1);
+            }
+        }
+
+        public void Complete(int index, string relativePath)
+        {
+            lock (_gate)
+            {
+                _activeStages.Remove(index);
+                _completedFiles++;
+                Report(relativePath, "Complete", force: true);
+            }
+        }
+
+        private void Report(string relativePath, string stage, bool force)
+        {
+            if (_progress is null) return;
+            long now = Stopwatch.GetTimestamp();
+            string summary = string.Join(", ", _activeStages.Values
+                .Select(BaseStage)
+                .GroupBy(value => value, StringComparer.Ordinal)
+                .OrderBy(value => value.Key, StringComparer.Ordinal)
+                .Select(group => $"{group.Key}: {group.Count().ToString(CultureInfo.InvariantCulture)}"));
+            bool summaryChanged = !string.Equals(summary, _lastSummary, StringComparison.Ordinal);
+            if (!force && !summaryChanged
+                && Stopwatch.GetElapsedTime(_lastReport, now) < MinimumUpdateInterval)
+                return;
+            _lastReport = now;
+            _lastSummary = summary;
+            _progress.Report(new(
+                _completedFiles,
+                _totalFiles,
+                _activeStages.Count <= 1 ? relativePath : string.Empty,
+                stage,
+                _activeStages.Count,
+                summary));
+        }
+
+        private static string BaseStage(string stage)
+        {
+            int separator = stage.IndexOf(' ');
+            return separator < 0 ? stage : stage[..separator];
+        }
+    }
+
+    [LoggerMessage(300, LogLevel.Debug,
+        "EPUB assessment started. RecordId={RecordId}, FileBytes={FileBytes}, FileIndex={FileIndex}, TotalFiles={TotalFiles}.")]
+    private static partial void LogAssessmentStarted(
+        ILogger logger,
+        long recordId,
+        long fileBytes,
+        int fileIndex,
+        int totalFiles);
+
+    [LoggerMessage(301, LogLevel.Debug,
+        "EPUB assessment stage. RecordId={RecordId}, Stage={Stage}, CompletedUnits={CompletedUnits}, TotalUnits={TotalUnits}, ElapsedMilliseconds={ElapsedMilliseconds}.")]
+    private static partial void LogAssessmentStage(
+        ILogger logger,
+        long recordId,
+        string stage,
+        int completedUnits,
+        int totalUnits,
+        long elapsedMilliseconds);
+
+    [LoggerMessage(302, LogLevel.Debug,
+        "EPUB assessment completed. RecordId={RecordId}, Coverage={Coverage}, ProblemCode={ProblemCode}, ManifestItems={ManifestItems}, SpineItems={SpineItems}, Chapters={Chapters}, ReadableCharacters={ReadableCharacters}, TotalMilliseconds={TotalMilliseconds}.")]
+    private static partial void LogAssessmentCompleted(
+        ILogger logger,
+        long recordId,
+        string coverage,
+        string problemCode,
+        int manifestItems,
+        int spineItems,
+        int chapters,
+        int readableCharacters,
+        long totalMilliseconds);
+
+    [LoggerMessage(303, LogLevel.Warning,
+        "Slow EPUB assessment detected. RecordId={RecordId}, FileBytes={FileBytes}, Coverage={Coverage}, TotalMilliseconds={TotalMilliseconds}.")]
+    private static partial void LogSlowAssessment(
+        ILogger logger,
+        long recordId,
+        long fileBytes,
+        string coverage,
+        long totalMilliseconds);
 }
 
 internal sealed class EpubTargetAssessmentException(string relativePath, Exception innerException)

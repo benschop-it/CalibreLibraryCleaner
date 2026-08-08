@@ -20,6 +20,9 @@ public partial class MainWindow : System.Windows.Window
     private void MetadataCandidateMembersGrid_MouseDoubleClick(object sender, MouseButtonEventArgs e) =>
         RouteRowDoubleClick(sender, e, viewModel => viewModel.OpenSelectedMetadataCandidateCommand);
 
+    private void ExpandedCandidateMembersGrid_MouseDoubleClick(object sender, MouseButtonEventArgs e) =>
+        RouteRowDoubleClick(sender, e, viewModel => viewModel.OpenSelectedExpandedCandidateCommand);
+
     private void RouteRowDoubleClick(
         object sender,
         MouseButtonEventArgs e,

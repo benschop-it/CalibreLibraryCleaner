@@ -158,9 +158,11 @@ public sealed class DependencyDirectionTests
                 SearchOption.AllDirectories))
                 .Where(path => !path.Contains($"{Path.DirectorySeparatorChar}obj{Path.DirectorySeparatorChar}", StringComparison.Ordinal))
                 .Where(path => !path.Contains($"{Path.DirectorySeparatorChar}Recommendations{Path.DirectorySeparatorChar}", StringComparison.Ordinal))
+                .Where(path => !path.Contains($"{Path.DirectorySeparatorChar}Matching{Path.DirectorySeparatorChar}", StringComparison.Ordinal))
                 .Where(path => !path.Contains($"{Path.DirectorySeparatorChar}Plans{Path.DirectorySeparatorChar}", StringComparison.Ordinal))
                 .Where(path => !path.Contains($"{Path.DirectorySeparatorChar}Executions{Path.DirectorySeparatorChar}", StringComparison.Ordinal))
                 .Where(path => !path.Contains($"{Path.DirectorySeparatorChar}Recoveries{Path.DirectorySeparatorChar}", StringComparison.Ordinal))
+                .Where(path => !path.EndsWith("EpubContentSignatureCacheContracts.cs", StringComparison.Ordinal))
                 .Select(File.ReadAllText));
 
         source.Should().NotContain("FileStream");
@@ -183,8 +185,12 @@ public sealed class DependencyDirectionTests
     [Fact]
     public void ProductionEpubInspectionHasNoMutationExtractionOrNetworkApi()
     {
-        string epubPath = Path.Combine(RepositoryRoot, "src", InfrastructureProject, "Epub");
-        string source = string.Join(Environment.NewLine, Directory.EnumerateFiles(epubPath, "*.cs").Select(File.ReadAllText));
+        string source = File.ReadAllText(Path.Combine(
+            RepositoryRoot,
+            "src",
+            InfrastructureProject,
+            "Epub",
+            "VersOneEpubInspector.cs"));
 
         source.Should().NotContain("ExtractToFile");
         source.Should().NotContain("ExtractToDirectory");

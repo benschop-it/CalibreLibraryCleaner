@@ -39,9 +39,21 @@ Exact metadata groups remain separate from exact binary file groups. A pair can 
 
 Milestone 5 consumes these existing collections without changing either group definition. Recommendations may use exact-binary membership to choose among byte-identical same-format alternatives and exact-metadata groups as their review scope. Exact equality remains file-level evidence only; it cannot hide a unique/unavailable/unresolved format or establish content/edition equivalence for a non-identical file.
 
+## Expanded work-language candidates
+
+An explicit scan first builds conservative canonical author identities from catalog and OPF creator variants. Punctuation, spacing, comma order, initials, and compatible full given-name expansions are normalized: for example `J. K. Rowling`, `J.K.Rowling`, `Joanne K. Rowling`, `Joanne Kathleen Rowling`, and `Rowling, J.K.` share `ROWLING|JK`. Expanded given names must not conflict, so `Joanne Kathleen Rowling` and `John Kevin Rowling` remain distinct even though both abbreviate to `J.K. Rowling`.
+
+Work candidates are searched only inside compatible author identities. Author similarity alone is insufficient; a pair also requires title overlap, a validated/embedded identifier, compatible series/index, or exact binary evidence. Inverted indexes suppress broad author buckets, retain at most 20 mutual ordinary candidates per record, and stop inferred discovery if unique pairs exceed `min(200,000, 10 * record count)`. Exact detectors and IDs are unchanged.
+
+Only retained ambiguous pairs request EPUB content evidence. The inspector reuses the existing read-only archive/path/observation boundary, removes script/style/navigation content, and creates 12 distributed windows of at most 64 normalized tokens plus a 64-value bottom-k shingle sketch. Cache entries are keyed by file fingerprint and all algorithm/resource versions, contain hashes/counts only, and live outside the library. Added front matter can match through the sketch without retaining prose.
+
+Pair decisions retain explicit evidence and contradiction codes. Known language, author-expansion, series-index, and different-content contradictions reject edges. Every non-binary inferred relation requires equivalent/high-similarity EPUB content evidence; unavailable or ambiguous content never forms a final group. Anchor edges seed components, complete-component author/language contradictions are checked before union, and final `WorkLanguageCandidateGroup` values are partitioned by known catalog/OPF language (otherwise `und`). They are always `ReviewOnly`.
+
+The Expanded candidates tab exposes confidence, language, anchors, reason codes, content counts, and viewer opening. It has no cleanup command and inferred group IDs are not accepted by mutation contracts.
+
 ## Content fingerprints (Milestone 10)
 
-Traverse spine order, extract visible text, decode entities, normalize Unicode and whitespace, calculate strict and punctuation-insensitive hashes, and retain chapter count and text length. Use multiple signals rather than one hash.
+EPUB candidate content uses the bounded hash-only signatures above. Content-language detection and PDF cross-document fingerprints remain future work.
 
 PDF fingerprints must disclose whether all pages or a deterministic bounded
 sample contributed. Sampled evidence cannot establish whole-document equality.

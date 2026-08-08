@@ -63,6 +63,8 @@ different editions, languages, translations, abridgements, illustrated works,
 or scan variants as interchangeable; does not automatically select a retained
 format; and does not alter cleanup, execution, or recovery authority.
 
+Implemented first slice: candidate-only EPUB visible-text signatures with 12 bounded hash landmarks, a bounded shifted-text sketch, fingerprint/version cache, and symmetric review evidence. PDF cross-document signatures remain pending.
+
 ## Milestone 11 — Expanded duplicate discovery
 
 Add strong normalized identifier candidate groups and conservative fuzzy
@@ -71,6 +73,8 @@ matching. Combine independent binary, metadata, identifier, and content signals
 as explainable evidence while preserving each signal's provenance and
 confidence. Fuzzy candidates remain manual-review work and never authorize
 automatic deletion.
+
+Implemented local deterministic first slice under ADR 0019: bounded indexed candidate generation, explicit contradictions, constrained stable-anchor clustering, language partition from catalog/OPF evidence, persisted review-only groups, scan progress/metrics, and a separate WPF tab. Content-language detection and optional enrichment remain pending calibration.
 
 ## Milestone 12 — Visual and metadata review
 

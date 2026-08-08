@@ -53,6 +53,20 @@ The application intentionally does not detect external library changes between e
 
 Application owns the provider-neutral `IEpubInspector` contract, inspection limits/results, deterministic scoring engine, and bounded orchestration. Infrastructure alone owns ZIP, XML, HTML, image-header, filesystem, and VersOne/Html Agility Pack types. EPUB files are preflighted and opened read-only, content is never extracted or fetched, expected untrusted-input failures become structured inspection problems, and the final snapshot is published only after all assessments complete.
 
+Ordinary EPUB assessment rejects decoded HTML above 2,000,000 characters and documents above 50,000 HTML elements before/around DOM traversal. This protects the in-process non-cooperative HTML parser from monolithic dictionary/reference chapters that can otherwise monopolize a scan worker for minutes. Such files remain in the snapshot with incomplete coverage and a controlled `LimitExceeded` warning; they do not fail the scan. Progress reports content/fallback chapter units, and structured diagnostics report record ID, file bytes, stage units, technical counts, total time, and warnings for assessments taking at least five seconds without logging paths or content. The resource-profile change is versioned as `epub-inspector/1.0.5`.
+
+## Expanded matching boundary
+
+Domain owns bounded metadata profiles, canonical candidate pairs, fixed-point evidence/contradictions, hash-only EPUB signatures, symmetric comparison, constrained clustering, review-only work-language groups, and matching run summaries. Application owns candidate-only demand planning, fingerprint/version cache ports, bounded concurrency, progress, and explicit-scan orchestration. Infrastructure reuses the safe EPUB boundary to produce transient visible-text tokens but returns only hashes/counts; its atomic disposable cache is outside the library and contains no paths or prose.
+
+Author identity is the first ordinary-candidate boundary. Canonical aliases use normalized family name plus positional given-name initials and non-conflicting full expansions; comma-order and punctuation differences do not create separate authors. Work candidates are searched only inside compatible author identities and require independent title, identifier, series/index, or binary evidence. Author similarity alone never proposes a work.
+
+Only non-binary work candidates with two usable EPUB targets request content, and equivalent/high-similarity content is required before final grouping. Known languages partition final work groups; complete-component author, language, series, and content contradictions block union. Weak/unavailable evidence never merges. Projected mutations never rerun matching; they discard inferred evidence and require explicit Rescan. Inferred groups never enter cleanup requests.
+
+The signature cache validates its complete storage-root ancestor chain because any ancestor reparse point can redirect an apparently safe path. Once that controlled root is validated, immediate cache children use leaf-only checks. Cache writes are atomic but intentionally non-durable because cache loss affects only performance. Pruning runs once after a resolver batch, not after each entry.
+
+Matching diagnostics use structured logs without paths or book metadata. Information events report pair/fingerprint demand, periodic completion, aggregate cache/inspection/write/prune time, and cache size/pruning. Debug events report each fingerprint and EPUB preflight/counting/sampling timing. The WPF host enables Debug for `CalibreLibraryCleaner.Application.Matching` and `CalibreLibraryCleaner.Infrastructure.Epub`; these events appear in the debugger output. The UI status also reports fingerprint ordinal and current preflight/counting/sampling chapter progress.
+
 ## PDF inspection boundary
 
 Application owns the provider-neutral `IPdfInspector` contract, deterministic page sampling, classification, scoring, progress, cancellation, and bounded library orchestration. Infrastructure alone owns PdfPig 0.1.15, PDF tokens/filters, read-only file handles, SHA-256 revalidation, the versioned JSON protocol, and worker-process containment. WPF deploys a fixed sibling worker executable; paths are protocol data, never process arguments. Each file gets a fresh worker with a cleared environment, managed-heap limit, Windows Job Object where available, and parent wall-time, CPU, and working-set watchdogs.
@@ -79,7 +93,7 @@ General cleanup plans, application-created backup bundles, execution journals/hi
 
 WPF routes an explicit member-row double-click to an Application launcher port. Infrastructure resolves only the trusted `ebook-viewer.exe` sibling of the configured Calibre executable, validates the requested format as a physical regular file contained in the selected library, and starts the viewer with `UseShellExecute=false` and one argument-list item. The cleaner does not wait for, control, or infer state from the viewer process.
 
-Exact duplicate rows open their represented format. Metadata candidate rows choose the first present format in deterministic reading preference order: EPUB, AZW3, MOBI, PDF, then remaining formats alphabetically. Missing formats, unsafe paths, and missing/failed viewer launches return controlled errors and never affect cleanup selection or projected state.
+Exact duplicate rows open their represented format. Metadata and expanded-candidate rows choose the first present format in deterministic reading preference order: EPUB, AZW3, MOBI, PDF, then remaining formats alphabetically. Missing formats, unsafe paths, and missing/failed viewer launches return controlled errors and never affect cleanup selection or projected state.
 ## Errors
 
 Distinguish validation failures, read failures, missing-file findings, malformed-format findings, operation conflicts, process failures, verification failures, and unexpected faults.

@@ -2,8 +2,10 @@ using CalibreLibraryCleaner.Application.Abstractions;
 using CalibreLibraryCleaner.Application.Assessments;
 using CalibreLibraryCleaner.Application.Assessments.Pdf;
 using CalibreLibraryCleaner.Application.Libraries;
+using CalibreLibraryCleaner.Application.Matching;
 using CalibreLibraryCleaner.Domain.Assessments;
 using CalibreLibraryCleaner.Domain.Libraries;
+using CalibreLibraryCleaner.Domain.Matching;
 using FakeItEasy;
 using FluentAssertions;
 using Xunit;
@@ -12,6 +14,60 @@ namespace CalibreLibraryCleaner.Application.Tests.Libraries;
 
 public sealed class ScanLibraryUseCaseTests
 {
+    [Fact]
+    public async Task ExplicitScanPublishesReviewOnlyExpandedGroupsAndProgress()
+    {
+        TestContext context = CreateContext(CreateCatalog(bookCount: 2, sameMetadata: true));
+        A.CallTo(() => context.Hasher.HashAsync(
+                A<IReadOnlyList<FormatHashRequest>>._,
+                A<int>._,
+                A<IProgress<FormatHashProgress>?>._,
+                A<CancellationToken>._))
+            .ReturnsLazily(call => Task.FromResult<IReadOnlyList<FormatHashResult>>(
+                call.GetArgument<IReadOnlyList<FormatHashRequest>>(0)!
+                    .Select(request => Successful(request.Sequence, new(
+                        request.Sequence + 4,
+                        new(new string((char)('a' + request.Sequence), 64)))))
+                    .ToArray()));
+        IEpubContentSignatureInspector inspector = A.Fake<IEpubContentSignatureInspector>();
+        IEpubContentSignatureCache cache = A.Fake<IEpubContentSignatureCache>();
+        A.CallTo(() => inspector.InspectContentSignatureAsync(
+            A<EpubContentSignatureRequest>._,
+            A<IProgress<EpubContentSignatureProgress>?>._,
+            A<CancellationToken>._))
+            .ReturnsLazily(call => Task.FromResult(EpubContentSignatureResult.Success(
+            MatchingSignature(call.GetArgument<EpubContentSignatureRequest>(0)!.Source.Fingerprint))));
+        DiscoverWorkLanguageCandidatesUseCase discovery = new(
+            new ResolveCandidateContentSignaturesUseCase(inspector, cache));
+        ScanLibraryUseCase useCase = new(
+            context.Resolver,
+            context.Reader,
+            context.Hasher,
+            context.Clock,
+            new(),
+            discoverWorkLanguageCandidates: discovery);
+        List<LibraryScanProgress> progress = [];
+
+        LibraryScanOutcome outcome = await useCase.ExecuteAsync(
+            "C:/Library", new InlineProgress(progress.Add), CancellationToken.None);
+
+        outcome.IsSuccess.Should().BeTrue();
+        outcome.Snapshot!.WorkLanguageCandidateGroups.Should().ContainSingle();
+        outcome.Snapshot.WorkLanguageCandidateGroups[0].CleanupEligibility.Should()
+            .Be(WorkLanguageCleanupEligibility.ReviewOnly);
+        outcome.Snapshot.MatchingRunSummary.Status.Should().Be(MatchingEvidenceStatus.Available);
+        progress.Select(value => value.Phase).Should().Contain([
+            LibraryScanPhase.BuildingMatchingProfiles,
+            LibraryScanPhase.GeneratingMatchingCandidates,
+            LibraryScanPhase.InspectingCandidateContent,
+            LibraryScanPhase.GroupingWorkLanguageCandidates,
+        ]);
+        A.CallTo(() => inspector.InspectContentSignatureAsync(
+            A<EpubContentSignatureRequest>._,
+            A<IProgress<EpubContentSignatureProgress>?>._,
+            A<CancellationToken>._)).MustHaveHappenedTwiceExactly();
+    }
+
     [Fact]
     public async Task SuccessfulPdfAssessmentIsAssociatedStoredAndReportedWithoutEnteringRecommendations()
     {
@@ -426,6 +482,19 @@ public sealed class ScanLibraryUseCaseTests
         sequence,
         fingerprint,
         new FormatFileObservation(fingerprint.SizeInBytes, DateTimeOffset.UnixEpoch, DateTimeOffset.UnixEpoch, 0));
+
+    private static EpubContentSignature MatchingSignature(FormatFileFingerprint fingerprint) => new(
+        fingerprint,
+        1_000,
+        1,
+        1,
+        Enumerable.Range(0, 12).Select(index => new ContentLandmarkSignature(
+            index,
+            index * 70,
+            64,
+            32,
+            new(new string('d', 64)),
+            new(new string('e', 64)))));
 
     private static TestContext CreateContext(CalibreCatalogRecord catalog)
     {

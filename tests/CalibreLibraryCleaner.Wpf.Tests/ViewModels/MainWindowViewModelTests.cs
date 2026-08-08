@@ -4,6 +4,7 @@ using CalibreLibraryCleaner.Application.Abstractions;
 using CalibreLibraryCleaner.Application.Assessments;
 using CalibreLibraryCleaner.Application.Libraries;
 using CalibreLibraryCleaner.Domain.Libraries;
+using CalibreLibraryCleaner.Domain.Matching;
 using CalibreLibraryCleaner.Domain.Recommendations;
 using CalibreLibraryCleaner.Infrastructure.DependencyInjection;
 using CalibreLibraryCleaner.Wpf.Services;
@@ -38,6 +39,39 @@ public sealed class MainWindowViewModelTests
         viewModel.SelectedLibraryPath.Should().Be(libraryRoot);
         viewModel.Books.Should().ContainSingle(book => book.Title == "Persisted Book");
         viewModel.StatusMessage.Should().Contain("Loaded persisted scan").And.Contain("may be stale");
+        viewModel.ExpandedCandidateSummary.Should().Contain("Run a fresh scan");
+    }
+
+    [Fact]
+    public async Task PersistedExpandedGroupsRemainReviewOnlyAndOpenSelectedMember()
+    {
+        const string libraryRoot = "C:\\Books";
+        ILibrarySnapshotStore store = A.Fake<ILibrarySnapshotStore>();
+        IEbookViewerLauncher viewer = A.Fake<IEbookViewerLauncher>();
+        LibrarySnapshot snapshot = ExpandedSnapshot(libraryRoot);
+        A.CallTo(() => store.ListAsync(A<CancellationToken>._))
+            .Returns([new(libraryRoot, snapshot.ScannedAt)]);
+        A.CallTo(() => store.ReadAsync(libraryRoot, A<CancellationToken>._)).Returns(snapshot);
+        A.CallTo(() => viewer.LaunchAsync(A<EbookViewerLaunchRequest>._, A<CancellationToken>._))
+            .Returns(EbookViewerLaunchResult.Success());
+        MainWindowViewModel viewModel = CreateViewModel(
+            A.Fake<ILibraryFolderPicker>(), out _, out _, out _, new(store), ebookViewer: viewer);
+
+        await viewModel.InitializeAsync();
+        viewModel.SelectedPersistedLibraryPath = libraryRoot;
+        await viewModel.LoadPersistedSnapshotCommand.ExecuteAsync(null);
+
+        viewModel.ExpandedCandidateGroups.Should().ContainSingle();
+        viewModel.ExpandedCandidateGroups[0].Eligibility.Should().Be("Review only");
+        viewModel.ExpandedCandidateSummary.Should().Contain("1 expanded review-only groups");
+        viewModel.SelectedExpandedCandidateMembers.Should().HaveCount(2);
+        viewModel.SelectedExpandedCandidateMember = viewModel.SelectedExpandedCandidateMembers[1];
+        await viewModel.OpenSelectedExpandedCandidateCommand.ExecuteAsync(null);
+        A.CallTo(() => viewer.LaunchAsync(
+            A<EbookViewerLaunchRequest>.That.Matches(value =>
+                value.LibraryRoot == libraryRoot
+                && value.ExpectedRelativePath == "Author/Second.epub"),
+            A<CancellationToken>._)).MustHaveHappenedOnceExactly();
     }
 
     [Fact]
@@ -65,6 +99,42 @@ public sealed class MainWindowViewModelTests
         viewModel.Books.Should().ContainSingle(value => value.Title == "Persisted Book");
         A.CallTo(() => store.DeleteAsync(libraryRoot, A<CancellationToken>._))
             .MustHaveHappenedOnceExactly();
+    }
+
+    [Fact]
+    public async Task PersistedLoadShowsProgressBeforeStateDeserializationCompletes()
+    {
+        const string libraryRoot = "C:\\Books";
+        ILibrarySnapshotStore store = A.Fake<ILibrarySnapshotStore>();
+        LibrarySnapshot snapshot = Snapshot(libraryRoot);
+        A.CallTo(() => store.ListAsync(A<CancellationToken>._))
+            .Returns([new(libraryRoot, snapshot.ScannedAt)]);
+        ILibraryStateSession stateSession = A.Fake<ILibraryStateSession>();
+        TaskCompletionSource<LibraryStateSessionOutcome> pendingLoad = new(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        A.CallTo(() => stateSession.LoadAsync(libraryRoot, A<CancellationToken>._))
+            .Returns(pendingLoad.Task);
+        MainWindowViewModel viewModel = CreateViewModel(
+            A.Fake<ILibraryFolderPicker>(), out _, out _, out _, new(store), stateSession);
+        await viewModel.InitializeAsync();
+        viewModel.SelectedPersistedLibraryPath = libraryRoot;
+
+        Task load = viewModel.LoadPersistedSnapshotCommand.ExecuteAsync(null);
+        await WaitUntilAsync(() => viewModel.StatusMessage == "Loading saved library analysis...");
+
+        viewModel.IsBusy.Should().BeTrue();
+        viewModel.IsProgressIndeterminate.Should().BeTrue();
+        viewModel.ProgressPercentage.Should().Be(0);
+        viewModel.Books.Should().BeEmpty();
+
+        pendingLoad.SetResult(LibraryStateSessionOutcome.Success(new(
+            new(Guid.Parse("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee")),
+            new(7), LibraryStateStatus.Authoritative, snapshot, snapshot.ScannedAt.AddMinutes(1))));
+        await load;
+
+        viewModel.IsProgressIndeterminate.Should().BeFalse();
+        viewModel.ProgressPercentage.Should().Be(100);
+        viewModel.Books.Should().ContainSingle();
     }
 
     [Fact]
@@ -190,13 +260,25 @@ public sealed class MainWindowViewModelTests
                 A<CancellationToken>._))
             .Returns(Task.FromResult<IReadOnlyList<FormatHashResult>>(
                 [FormatHashResult.Failure(0, FormatHashResultStatus.Missing, "FileNotFound")]));
+        (bool IsIndeterminate, double Percentage)? preparingProgress = null;
+        viewModel.PropertyChanged += (_, eventArgs) =>
+        {
+            if (eventArgs.PropertyName == nameof(MainWindowViewModel.StatusMessage)
+                && viewModel.StatusMessage.StartsWith("Preparing ", StringComparison.Ordinal))
+            {
+                preparingProgress = (viewModel.IsProgressIndeterminate, viewModel.ProgressPercentage);
+            }
+        };
 
         await viewModel.SelectLibraryCommand.ExecuteAsync(null);
         await viewModel.ScanCommand.ExecuteAsync(null);
 
+        preparingProgress.Should().Be((true, 0d));
         viewModel.Books.Should().ContainSingle();
         viewModel.SelectedFormats.Should().ContainSingle(format => format.Status == "Missing");
         viewModel.StatusMessage.Should().Contain("1 missing format files");
+        viewModel.IsProgressIndeterminate.Should().BeFalse();
+        viewModel.ProgressPercentage.Should().Be(100);
         viewModel.ExactDuplicateSummary.Should().Contain("No exact file duplicate groups");
     }
 
@@ -552,6 +634,59 @@ public sealed class MainWindowViewModelTests
         new DateTimeOffset(2026, 8, 1, 12, 0, 0, TimeSpan.Zero),
         [new(new(1), "Persisted Book", "Author", [new(new(1), "Author", "Author")], [], [], "Author/Persisted Book (1)")],
         []);
+
+    private static LibrarySnapshot ExpandedSnapshot(string libraryRoot)
+    {
+        FormatFileFingerprint firstFingerprint = new(1_024, new(new string('a', 64)));
+        FormatFileFingerprint secondFingerprint = new(2_048, new(new string('b', 64)));
+        CalibreBook first = ExpandedBook(1, "First", "Author/First.epub", firstFingerprint);
+        CalibreBook second = ExpandedBook(2, "Second", "Author/Second.epub", secondFingerprint);
+        WorkLanguageCandidateGroup group = WorkLanguageCandidateGroup.Create(
+            "en",
+            [first.Id, second.Id],
+            [first.Id],
+            WorkLanguageCandidateConfidence.Strong,
+            [new("MATCH.CONTENT.EQUIVALENT", CandidateEvidenceStrength.Anchor)],
+            contentComparison: new(1, 1, 0, 0, 0, 0));
+        return new(
+            new("87f7ed1f-59a8-45a6-975a-7e06fd84780d", 27, libraryRoot),
+            new DateTimeOffset(2026, 8, 1, 12, 0, 0, TimeSpan.Zero),
+            [first, second],
+            [],
+            workLanguageCandidateGroups: [group],
+            matchingRunSummary: new(
+                MatchingPolicyVersion.V1,
+                MatchingEvidenceStatus.Available,
+                2,
+                2,
+                1,
+                0,
+                2,
+                0,
+                1,
+                1,
+                0));
+    }
+
+    private static CalibreBook ExpandedBook(
+        long id,
+        string title,
+        string relativePath,
+        FormatFileFingerprint fingerprint) => new(
+        new(id),
+        title,
+        "Author",
+        [new(new(id), "Author", "Author")],
+        [],
+        [new(
+            "EPUB",
+            title,
+            relativePath,
+            FormatFileStatus.Present,
+            fingerprint,
+            new(fingerprint.SizeInBytes, DateTimeOffset.UnixEpoch, DateTimeOffset.UnixEpoch, 0))],
+        "Author",
+        new(languages: ["eng"]));
 
     private static FormatHashResult Successful(int sequence, FormatFileFingerprint fingerprint) => FormatHashResult.Success(
         sequence,

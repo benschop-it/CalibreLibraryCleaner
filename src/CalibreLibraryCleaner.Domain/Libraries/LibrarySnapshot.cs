@@ -2,6 +2,7 @@ using System.Collections.ObjectModel;
 using CalibreLibraryCleaner.Domain.Assessments;
 using CalibreLibraryCleaner.Domain.Duplicates;
 using CalibreLibraryCleaner.Domain.Findings;
+using CalibreLibraryCleaner.Domain.Matching;
 using CalibreLibraryCleaner.Domain.Recommendations;
 
 namespace CalibreLibraryCleaner.Domain.Libraries;
@@ -17,7 +18,9 @@ public sealed record LibrarySnapshot
         IEnumerable<ExactMetadataDuplicateGroup>? exactMetadataDuplicateGroups = null,
         IEnumerable<EpubAssessment>? epubAssessments = null,
         IEnumerable<ConsolidationRecommendation>? consolidationRecommendations = null,
-        IEnumerable<PdfAssessment>? pdfAssessments = null)
+        IEnumerable<PdfAssessment>? pdfAssessments = null,
+        IEnumerable<WorkLanguageCandidateGroup>? workLanguageCandidateGroups = null,
+        BookMatchingRunSummary? matchingRunSummary = null)
     {
         ArgumentNullException.ThrowIfNull(identity);
         ArgumentNullException.ThrowIfNull(books);
@@ -79,6 +82,29 @@ public sealed record LibrarySnapshot
         }
 
         ConsolidationRecommendations = new ReadOnlyCollection<ConsolidationRecommendation>(orderedRecommendations);
+        WorkLanguageCandidateGroup[] orderedCandidateGroups = (workLanguageCandidateGroups ?? [])
+            .OrderBy(value => value.Language, StringComparer.Ordinal)
+            .ThenBy(value => value.Id.Value, StringComparer.Ordinal)
+            .ToArray();
+        HashSet<CalibreBookId> currentBookIds = Books.Select(value => value.Id).ToHashSet();
+        if (orderedCandidateGroups.Select(value => value.Id).Distinct().Count() != orderedCandidateGroups.Length
+            || orderedCandidateGroups.SelectMany(value => value.Members).Any(value => !currentBookIds.Contains(value))
+            || orderedCandidateGroups.SelectMany(value => value.Members)
+                .GroupBy(value => value).Any(group => group.Count() > 1))
+        {
+            throw new ArgumentException(
+                "Work-language candidate groups must be unique, disjoint, and reference current books.",
+                nameof(workLanguageCandidateGroups));
+        }
+
+        WorkLanguageCandidateGroups = new ReadOnlyCollection<WorkLanguageCandidateGroup>(orderedCandidateGroups);
+        MatchingRunSummary = matchingRunSummary ?? BookMatchingRunSummary.Unavailable(Books.Count);
+        if (MatchingRunSummary.RecordCount != Books.Count
+            || MatchingRunSummary.InferredGroupCount != WorkLanguageCandidateGroups.Count)
+        {
+            throw new ArgumentException(
+                "The matching run summary does not match the snapshot.", nameof(matchingRunSummary));
+        }
     }
 
     public LibraryIdentity Identity { get; }
@@ -98,4 +124,8 @@ public sealed record LibrarySnapshot
     public IReadOnlyList<PdfAssessment> PdfAssessments { get; }
 
     public IReadOnlyList<ConsolidationRecommendation> ConsolidationRecommendations { get; }
+
+    public IReadOnlyList<WorkLanguageCandidateGroup> WorkLanguageCandidateGroups { get; }
+
+    public BookMatchingRunSummary MatchingRunSummary { get; }
 }

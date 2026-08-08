@@ -8,7 +8,8 @@ Visual Studio Code and GitHub Copilot Business.
 
 The application can build immutable read-only analysis snapshots, hash formats,
 detect exact binary and exact normalized metadata candidates, assess EPUB and
-PDF quality, generate recommendations, and consolidate exact or metadata
+PDF quality, generate bounded local work-language candidates with candidate-only
+EPUB hash evidence, generate recommendations, and consolidate exact or metadata
 duplicate groups through a constrained persistent Calibre worker.
 
 Persisted analysis loading remains available during development because a full
@@ -22,12 +23,14 @@ non-keeper record. The application requires confirmation of a complete external
 library backup, uses one persistent `calibre-debug` worker, logs failures, and
 requires Rescan after a failed or ambiguous mutation.
 
-Double-click a member row in either duplicate tab to inspect the selected book
-in Calibre ebook viewer before choosing the keeper.
+The Expanded candidates tab is review-only: inferred groups expose language,
+confidence, anchors, reason codes, and bounded content evidence but cannot enter
+cleanup. Double-click a member row in any duplicate/candidate tab to inspect the
+selected book in Calibre ebook viewer.
 
-The next planned roadmap milestone is Milestone 10 content fingerprints and
-comparisons, after completion of the outstanding Milestone 9 manual WPF
-acceptance.
+Candidate-only EPUB fingerprints and local expanded discovery are implemented.
+PDF cross-document fingerprints, calibrated content-language detection, and
+optional online/model enrichment remain later roadmap work.
 
 ## Development
 

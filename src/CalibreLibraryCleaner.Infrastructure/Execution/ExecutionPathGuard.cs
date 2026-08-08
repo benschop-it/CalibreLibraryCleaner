@@ -109,6 +109,57 @@ internal static class ExecutionPathGuard
     }
 
     public static bool TryRejectReparsePoints(string path, bool leafExists, out string? reason)
+        => TryRejectReparsePoints(path, leafExists, out reason, out _);
+
+    public static bool TryRejectReparsePoints(
+        string path,
+        bool leafExists,
+        out string? reason,
+        out ReparsePointCheckMetrics metrics)
+    {
+        reason = null;
+        metrics = default;
+        string full;
+        try { full = Path.GetFullPath(path); }
+        catch (Exception exception) when (exception is ArgumentException or NotSupportedException or PathTooLongException)
+        {
+            reason = "The path cannot be canonicalized.";
+            return false;
+        }
+
+        string? current = leafExists ? full : Path.GetDirectoryName(full);
+        int segmentsChecked = 0;
+        while (!string.IsNullOrWhiteSpace(current) && (Directory.Exists(current) || File.Exists(current)))
+        {
+            try
+            {
+                segmentsChecked++;
+                if ((File.GetAttributes(current) & FileAttributes.ReparsePoint) != 0)
+                {
+                    metrics = new(segmentsChecked);
+                    reason = "Symbolic links and junctions are not accepted at execution boundaries.";
+                    return false;
+                }
+            }
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+            {
+                metrics = new(segmentsChecked);
+                reason = "The path cannot be inspected safely.";
+                return false;
+            }
+
+            DirectoryInfo? parent = Directory.GetParent(current);
+            current = parent?.FullName;
+        }
+
+        metrics = new(segmentsChecked);
+        return true;
+    }
+
+    public static bool TryRejectReparsePointLeaf(
+        string path,
+        bool leafExists,
+        out string? reason)
     {
         reason = null;
         string full;
@@ -119,29 +170,27 @@ internal static class ExecutionPathGuard
             return false;
         }
 
-        string? current = leafExists ? full : Path.GetDirectoryName(full);
-        while (!string.IsNullOrWhiteSpace(current) && (Directory.Exists(current) || File.Exists(current)))
+        if (!leafExists) return true;
+        if (!Directory.Exists(full) && !File.Exists(full))
         {
-            try
-            {
-                if ((File.GetAttributes(current) & FileAttributes.ReparsePoint) != 0)
-                {
-                    reason = "Symbolic links and junctions are not accepted at execution boundaries.";
-                    return false;
-                }
-            }
-            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
-            {
-                reason = "The path cannot be inspected safely.";
-                return false;
-            }
-
-            DirectoryInfo? parent = Directory.GetParent(current);
-            current = parent?.FullName;
+            reason = "The path no longer exists.";
+            return false;
         }
 
-        return true;
+        try
+        {
+            if ((File.GetAttributes(full) & FileAttributes.ReparsePoint) == 0) return true;
+            reason = "Symbolic links and junctions are not accepted at execution boundaries.";
+            return false;
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            reason = "The path cannot be inspected safely.";
+            return false;
+        }
     }
+
+    public readonly record struct ReparsePointCheckMetrics(int SegmentsChecked);
 
     private static bool IsSameOrContained(string root, string path) =>
         string.Equals(root, path, StringComparison.OrdinalIgnoreCase) || IsContained(root, path);

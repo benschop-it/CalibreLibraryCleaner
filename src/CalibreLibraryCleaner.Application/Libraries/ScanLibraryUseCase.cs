@@ -1,11 +1,13 @@
 using CalibreLibraryCleaner.Application.Abstractions;
 using CalibreLibraryCleaner.Application.Assessments;
 using CalibreLibraryCleaner.Application.Assessments.Pdf;
+using CalibreLibraryCleaner.Application.Matching;
 using CalibreLibraryCleaner.Application.Recommendations;
 using CalibreLibraryCleaner.Domain.Assessments;
 using CalibreLibraryCleaner.Domain.Duplicates;
 using CalibreLibraryCleaner.Domain.Findings;
 using CalibreLibraryCleaner.Domain.Libraries;
+using CalibreLibraryCleaner.Domain.Matching;
 using CalibreLibraryCleaner.Domain.Recommendations;
 
 namespace CalibreLibraryCleaner.Application.Libraries;
@@ -18,7 +20,8 @@ public sealed class ScanLibraryUseCase(
     LibraryAnalysisOptions options,
     AssessEpubFormatsUseCase? assessEpubFormats = null,
     GenerateConsolidationRecommendationsUseCase? generateRecommendations = null,
-    AssessPdfFormatsUseCase? assessPdfFormats = null)
+    AssessPdfFormatsUseCase? assessPdfFormats = null,
+    DiscoverWorkLanguageCandidatesUseCase? discoverWorkLanguageCandidates = null)
 {
     public async Task<LibraryScanOutcome> ExecuteAsync(
         string? candidatePath,
@@ -137,12 +140,12 @@ public sealed class ScanLibraryUseCase(
         List<CalibreBook> books = preparedBooks
             .Select(book => MapBook(book, resultsBySequence, findings, cancellationToken))
             .ToList();
+        List<EpubAssessmentTarget> epubTargets = CreateEpubTargets(preparedBooks, requests, resultsBySequence);
         IReadOnlyList<EpubAssessment> epubAssessments = [];
         if (assessEpubFormats is not null)
         {
             try
             {
-                List<EpubAssessmentTarget> epubTargets = CreateEpubTargets(preparedBooks, requests, resultsBySequence);
                 IProgress<EpubAssessmentProgress>? epubProgress = progress is null ? null : new EpubProgressAdapter(progress);
                 epubAssessments = await assessEpubFormats.ExecuteAsync(
                     epubTargets,
@@ -225,6 +228,49 @@ public sealed class ScanLibraryUseCase(
             1,
             "Exact metadata duplicates grouped"));
 
+        IReadOnlyList<WorkLanguageCandidateGroup> workLanguageGroups = [];
+        BookMatchingRunSummary matchingSummary = BookMatchingRunSummary.Unavailable(books.Count);
+        if (discoverWorkLanguageCandidates is not null)
+        {
+            try
+            {
+                IProgress<WorkLanguageDiscoveryProgress>? matchingProgress = progress is null
+                    ? null
+                    : new MatchingProgressAdapter(progress);
+                WorkLanguageDiscoveryResult matching = await discoverWorkLanguageCandidates.ExecuteAsync(
+                    books,
+                    epubAssessments,
+                    epubTargets,
+                    options.MaxContentSignatureConcurrency,
+                    matchingProgress,
+                    cancellationToken).ConfigureAwait(false);
+                workLanguageGroups = matching.Groups;
+                matchingSummary = matching.Summary;
+                if (matching.LimitExceeded)
+                {
+                    findings.Add(new(
+                        "MATCHING.CANDIDATE_LIMIT_EXCEEDED",
+                        FindingSeverity.Warning,
+                        "Expanded duplicate discovery stopped at its configured candidate limit.",
+                        "Review exact results and retry after improving unusually broad metadata."));
+                }
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch
+            {
+                workLanguageGroups = [];
+                matchingSummary = BookMatchingRunSummary.Unavailable(books.Count);
+                findings.Add(new(
+                    "MATCHING.DISCOVERY_UNAVAILABLE",
+                    FindingSeverity.Warning,
+                    "Expanded duplicate discovery could not complete reliably.",
+                    "Exact analysis is still available. Retry the scan to refresh expanded candidates."));
+            }
+        }
+
         Dictionary<FindingKey, LibraryFinding> uniqueFindings = [];
         foreach (LibraryFinding finding in findings)
         {
@@ -249,7 +295,9 @@ public sealed class ScanLibraryUseCase(
             exactBinaryGroups,
             exactMetadataGroups,
             epubAssessments,
-            pdfAssessments: pdfAssessments);
+            pdfAssessments: pdfAssessments,
+            workLanguageCandidateGroups: workLanguageGroups,
+            matchingRunSummary: matchingSummary);
         IReadOnlyList<ConsolidationRecommendation> recommendations;
         try
         {
@@ -284,7 +332,9 @@ public sealed class ScanLibraryUseCase(
             exactMetadataGroups,
             epubAssessments,
             recommendations,
-            pdfAssessments);
+            pdfAssessments,
+            workLanguageGroups,
+            matchingSummary);
         cancellationToken.ThrowIfCancellationRequested();
         progress?.Report(new(LibraryScanPhase.Completed, 1, 1, "Scan complete"));
         return LibraryScanOutcome.Success(snapshot);
@@ -549,9 +599,9 @@ public sealed class ScanLibraryUseCase(
             LibraryScanPhase.AssessingEpubFormats,
             value.CompletedFiles,
             value.TotalFiles,
-            string.IsNullOrWhiteSpace(value.CurrentRelativePath)
-                ? $"Assessing EPUB files: {value.CompletedFiles} of {value.TotalFiles} complete"
-                : $"Assessing EPUB files: {value.CompletedFiles} of {value.TotalFiles} complete — {value.Stage}: {value.CurrentRelativePath}"));
+            value.ActiveFiles == 0
+                ? $"Assessing EPUB files: {value.CompletedFiles:N0} of {value.TotalFiles:N0} complete"
+                : $"Assessing EPUB files: {value.CompletedFiles:N0} of {value.TotalFiles:N0} complete; {value.ActiveFiles:N0} active ({value.ActiveStageSummary})"));
     }
 
     private sealed class PdfProgressAdapter(IProgress<LibraryScanProgress> progress) : IProgress<PdfAssessmentProgress>
@@ -563,6 +613,31 @@ public sealed class ScanLibraryUseCase(
             string.IsNullOrWhiteSpace(value.CurrentRelativePath)
                 ? $"Assessing PDF files: {value.CompletedFiles} of {value.TotalFiles} complete"
                 : $"Assessing PDF files: {value.CompletedFiles} of {value.TotalFiles} complete — {value.Stage}: {value.CurrentRelativePath}"));
+    }
+
+    private sealed class MatchingProgressAdapter(IProgress<LibraryScanProgress> progress) :
+        IProgress<WorkLanguageDiscoveryProgress>
+    {
+        public void Report(WorkLanguageDiscoveryProgress value)
+        {
+            (LibraryScanPhase phase, string message) = value.Phase switch
+            {
+                WorkLanguageDiscoveryPhase.BuildingProfiles =>
+                    (LibraryScanPhase.BuildingMatchingProfiles, "Building canonical author identities"),
+                WorkLanguageDiscoveryPhase.GeneratingCandidates =>
+                    (LibraryScanPhase.GeneratingMatchingCandidates, "Searching for duplicate works within author groups"),
+                WorkLanguageDiscoveryPhase.InspectingContent =>
+                    (LibraryScanPhase.InspectingCandidateContent, "Confirming candidate books with EPUB content evidence"),
+                WorkLanguageDiscoveryPhase.Clustering =>
+                    (LibraryScanPhase.GroupingWorkLanguageCandidates, "Publishing confirmed work-language groups"),
+                _ => throw new ArgumentOutOfRangeException(nameof(value)),
+            };
+            progress.Report(new(
+                phase,
+                value.Completed,
+                value.Total,
+                string.IsNullOrWhiteSpace(value.Detail) ? message : $"{message}: {value.Detail}"));
+        }
     }
 
     private sealed class RecommendationProgressAdapter(IProgress<LibraryScanProgress> progress) : IProgress<RecommendationGenerationProgress>

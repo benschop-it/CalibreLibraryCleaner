@@ -24,7 +24,7 @@ public sealed class EpubAssessmentTests
 
         assessment.Score!.Value.Value.Should().Be(100);
         assessment.Findings.Sum(finding => finding.ScoreAdjustment).Should().Be(100);
-        assessment.AnalyzerVersion.Value.Should().Be("epub-inspector/1.0.4");
+        assessment.AnalyzerVersion.Value.Should().Be("epub-inspector/1.0.5");
         assessment.ScoringModelVersion.Value.Should().Be("epub-quality/1.0.3");
     }
 
@@ -453,6 +453,72 @@ public sealed class EpubAssessmentTests
     }
 
     [Fact]
+    public async Task ChapterProgressIncludesCompletedAndTotalUnits()
+    {
+        IEpubInspector inspector = A.Fake<IEpubInspector>();
+        A.CallTo(() => inspector.InspectAsync(
+                A<EpubInspectionRequest>._,
+                A<IProgress<EpubInspectionProgress>?>._,
+                A<CancellationToken>._))
+            .ReturnsLazily(call =>
+            {
+                EpubInspectionRequest request = call.GetArgument<EpubInspectionRequest>(0)!;
+                call.GetArgument<IProgress<EpubInspectionProgress>?>(1)?.Report(new("Content", 3, 10));
+                return Task.FromResult(Healthy(request.BookId, request.ExpectedRelativePath));
+            });
+        List<EpubAssessmentProgress> updates = [];
+        AssessEpubFormatsUseCase useCase = new(inspector, new());
+        EpubAssessmentTarget target = new(
+            new CalibreBookId(1), "EPUB", "Book.epub", "root", "book",
+            FormatFileStatus.Present, Fingerprint, Observation);
+
+        await useCase.ExecuteAsync(
+            [target], 1, EpubInspectionLimits.V1, new InlineProgress(updates.Add), CancellationToken.None);
+
+        updates.Should().Contain(update =>
+            update.Stage == "Content 3 of 10"
+            && update.CurrentRelativePath == "Book.epub");
+    }
+
+    [Fact]
+    public async Task ConcurrentWorkersReportStableAggregateStagesWithoutAlternatingPaths()
+    {
+        IEpubInspector inspector = A.Fake<IEpubInspector>();
+        TaskCompletionSource bothEntered = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        TaskCompletionSource bothReportedContent = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        int entered = 0;
+        int reportedContent = 0;
+        A.CallTo(() => inspector.InspectAsync(
+                A<EpubInspectionRequest>._,
+                A<IProgress<EpubInspectionProgress>?>._,
+                A<CancellationToken>._))
+            .ReturnsLazily(async call =>
+            {
+                if (Interlocked.Increment(ref entered) == 2) bothEntered.SetResult();
+                await bothEntered.Task;
+                call.GetArgument<IProgress<EpubInspectionProgress>?>(1)?.Report(new("Content", 3, 10));
+                if (Interlocked.Increment(ref reportedContent) == 2) bothReportedContent.SetResult();
+                await bothReportedContent.Task;
+                EpubInspectionRequest request = call.GetArgument<EpubInspectionRequest>(0)!;
+                return Healthy(request.BookId, request.ExpectedRelativePath);
+            });
+        EpubAssessmentTarget[] targets =
+        [
+            new(new(1), "EPUB", "German-Dutch.epub", "root", "one", FormatFileStatus.Present, Fingerprint, Observation),
+            new(new(2), "EPUB", "Dutch-German.epub", "root", "two", FormatFileStatus.Present, Fingerprint, Observation),
+        ];
+        ConcurrentQueue<EpubAssessmentProgress> updates = new();
+
+        await new AssessEpubFormatsUseCase(inspector, new()).ExecuteAsync(
+            targets, 2, EpubInspectionLimits.V1, new InlineProgress(updates.Enqueue), CancellationToken.None);
+
+        updates.Should().Contain(value =>
+            value.ActiveFiles == 2
+            && value.ActiveStageSummary == "Content: 2"
+            && value.CurrentRelativePath == string.Empty);
+    }
+
+    [Fact]
     public async Task InvalidLimitsAreRejectedBeforeInspection()
     {
         IEpubInspector inspector = A.Fake<IEpubInspector>();
@@ -462,9 +528,12 @@ public sealed class EpubAssessmentTests
             [], 1, EpubInspectionLimits.V1 with { MaximumArchiveEntries = 0 }, null, CancellationToken.None);
         Func<Task> excessiveEvidence = async () => await useCase.ExecuteAsync(
             [], 1, EpubInspectionLimits.V1 with { MaximumEvidencePerRule = 101 }, null, CancellationToken.None);
+        Func<Task> invalidHtmlCharacters = async () => await useCase.ExecuteAsync(
+            [], 1, EpubInspectionLimits.V1 with { MaximumHtmlCharacters = 0 }, null, CancellationToken.None);
 
         await act.Should().ThrowAsync<ArgumentOutOfRangeException>();
         await excessiveEvidence.Should().ThrowAsync<ArgumentOutOfRangeException>();
+        await invalidHtmlCharacters.Should().ThrowAsync<ArgumentOutOfRangeException>();
     }
 
     private static EpubInspectionResult Healthy(CalibreBookId bookId, string path) => new(

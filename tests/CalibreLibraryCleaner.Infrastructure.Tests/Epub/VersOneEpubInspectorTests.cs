@@ -1153,6 +1153,25 @@ public sealed class VersOneEpubInspectorTests
     }
 
     [Fact]
+    public async Task DecodedHtmlCharacterLimitStopsMonolithicDictionaryChapterBeforeDomParsing()
+    {
+        using TemporaryDirectory directory = new();
+        string path = Path.Combine(directory.Path, "Dictionary.epub");
+        SyntheticEpubBuilder.CreateFromEntries(path, StandardEntries(
+            chapter: $"<html><body><p>{new string('x', 100_000)}</p></body></html>"));
+        EpubInspectionRequest request = await CreateRequestAsync(path);
+        using ServiceProvider provider = TestServices.CreateProvider();
+
+        EpubInspectionResult result = await provider.GetRequiredService<IEpubInspector>().InspectAsync(
+            request with { Limits = EpubInspectionLimits.V1 with { MaximumHtmlCharacters = 10_000 } },
+            null,
+            CancellationToken.None);
+
+        result.Problems.Should().ContainSingle(problem => problem.Code == EpubInspectionProblemCode.LimitExceeded);
+        result.Coverage.Should().Be(EpubAssessmentCoverage.Incomplete);
+    }
+
+    [Fact]
     public async Task OversizedOptionalCssIsReportedAsTruncationWithoutAFalseBrokenReference()
     {
         using TemporaryDirectory directory = new();

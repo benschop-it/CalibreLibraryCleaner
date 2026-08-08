@@ -3,6 +3,7 @@ using CalibreLibraryCleaner.Application.Assessments;
 using CalibreLibraryCleaner.Application.Assessments.Pdf;
 using CalibreLibraryCleaner.Application.Executions;
 using CalibreLibraryCleaner.Application.Libraries;
+using CalibreLibraryCleaner.Application.Matching;
 using CalibreLibraryCleaner.Application.Recommendations;
 using CalibreLibraryCleaner.Domain.Recommendations;
 using CalibreLibraryCleaner.Infrastructure.DependencyInjection;
@@ -10,6 +11,7 @@ using CalibreLibraryCleaner.Wpf.Services;
 using CalibreLibraryCleaner.Wpf.ViewModels;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
 
 namespace CalibreLibraryCleaner.Wpf;
 
@@ -25,6 +27,15 @@ public partial class App : System.Windows.Application
         System.Text.Encoding.RegisterProvider(System.Text.CodePagesEncodingProvider.Instance);
 
         HostApplicationBuilder builder = Host.CreateApplicationBuilder();
+        builder.Logging.AddFilter(
+            "CalibreLibraryCleaner.Application.Matching",
+            LogLevel.Debug);
+        builder.Logging.AddFilter(
+            "CalibreLibraryCleaner.Application.Assessments",
+            LogLevel.Debug);
+        builder.Logging.AddFilter(
+            "CalibreLibraryCleaner.Infrastructure.Epub",
+            LogLevel.Debug);
         builder.Services.AddCalibreLibraryInfrastructure();
         builder.Services.AddSingleton<ValidateLibraryUseCase>();
         builder.Services.AddSingleton<EpubAssessmentEngine>();
@@ -35,6 +46,8 @@ public partial class App : System.Windows.Application
         builder.Services.AddSingleton<AssessPdfFormatsUseCase>();
         builder.Services.AddSingleton<ConsolidationRecommendationPolicy>();
         builder.Services.AddSingleton<GenerateConsolidationRecommendationsUseCase>();
+        builder.Services.AddSingleton<ResolveCandidateContentSignaturesUseCase>();
+        builder.Services.AddSingleton<DiscoverWorkLanguageCandidatesUseCase>();
         builder.Services.AddSingleton<ScanLibraryUseCase>();
         builder.Services.AddSingleton<ILibraryStateSession, LibraryStateSession>();
         builder.Services.AddSingleton<PersistedLibrarySnapshotsUseCase>();

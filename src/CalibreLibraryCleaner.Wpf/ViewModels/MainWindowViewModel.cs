@@ -6,6 +6,7 @@ using CalibreLibraryCleaner.Application.Libraries;
 using CalibreLibraryCleaner.Application.Recommendations;
 using CalibreLibraryCleaner.Domain.Duplicates;
 using CalibreLibraryCleaner.Domain.Libraries;
+using CalibreLibraryCleaner.Domain.Matching;
 using CalibreLibraryCleaner.Domain.Recommendations;
 using CalibreLibraryCleaner.Wpf.Services;
 using CommunityToolkit.Mvvm.ComponentModel;
@@ -29,6 +30,7 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
     private readonly BulkObservableCollection<string> _persistedLibraryPaths = [];
     private readonly BulkObservableCollection<ExactDuplicateGroupRowViewModel> _exactDuplicateGroups = [];
     private readonly BulkObservableCollection<MetadataDuplicateGroupRowViewModel> _metadataDuplicateGroups = [];
+    private readonly BulkObservableCollection<ExpandedCandidateGroupRowViewModel> _expandedCandidateGroups = [];
     private readonly BulkObservableCollection<EpubAssessmentRowViewModel> _epubAssessments = [];
     private readonly BulkObservableCollection<EpubAssessmentFindingRowViewModel> _epubFindings = [];
     private readonly BulkObservableCollection<PdfAssessmentRowViewModel> _pdfAssessments = [];
@@ -43,6 +45,7 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
     private string _errorAction = string.Empty;
     private string _exactDuplicateSummary = "No exact file duplicate groups have been found.";
     private string _metadataDuplicateSummary = "No exact metadata candidate groups have been found.";
+    private string _expandedCandidateSummary = "Run a fresh scan to discover expanded candidates.";
     private string _metadataDuplicateFilterText = string.Empty;
     private MetadataDuplicateFilterMode _metadataDuplicateFilterMode;
     private bool _isBusy;
@@ -53,6 +56,8 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
     private ExactDuplicateMemberRowViewModel? _selectedExactDuplicateMember;
     private MetadataDuplicateGroupRowViewModel? _selectedMetadataDuplicateGroup;
     private MetadataDuplicateMemberRowViewModel? _selectedMetadataDuplicateMember;
+    private ExpandedCandidateGroupRowViewModel? _selectedExpandedCandidateGroup;
+    private ExpandedCandidateMemberRowViewModel? _selectedExpandedCandidateMember;
     private EpubAssessmentRowViewModel? _selectedEpubAssessment;
     private EpubFindingFilterMode _epubFindingFilterMode;
     private PdfAssessmentRowViewModel? _selectedPdfAssessment;
@@ -93,6 +98,8 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
         ExactDuplicateGroups = new ReadOnlyObservableCollection<ExactDuplicateGroupRowViewModel>(_exactDuplicateGroups);
         MetadataDuplicateGroups = new ReadOnlyObservableCollection<MetadataDuplicateGroupRowViewModel>(
             _metadataDuplicateGroups);
+        ExpandedCandidateGroups = new ReadOnlyObservableCollection<ExpandedCandidateGroupRowViewModel>(
+            _expandedCandidateGroups);
         EpubAssessments = new ReadOnlyObservableCollection<EpubAssessmentRowViewModel>(_epubAssessments);
         EpubFindings = new ReadOnlyObservableCollection<EpubAssessmentFindingRowViewModel>(_epubFindings);
         PdfAssessments = new ReadOnlyObservableCollection<PdfAssessmentRowViewModel>(_pdfAssessments);
@@ -109,6 +116,9 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
         OpenSelectedMetadataCandidateCommand = new AsyncRelayCommand(
             OpenSelectedMetadataCandidateAsync,
             () => !IsBusy && _ebookViewer is not null && SelectedMetadataDuplicateMember is not null);
+        OpenSelectedExpandedCandidateCommand = new AsyncRelayCommand(
+            OpenSelectedExpandedCandidateAsync,
+            () => !IsBusy && _ebookViewer is not null && SelectedExpandedCandidateMember is not null);
         NextMetadataDuplicateGroupCommand = new RelayCommand(
             () => MoveMetadataSelection(1),
             () => !IsBusy && _metadataDuplicateGroups.Count > 0);
@@ -187,6 +197,7 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
                 CancelCommand.NotifyCanExecuteChanged();
                 OpenSelectedExactDuplicateCommand.NotifyCanExecuteChanged();
                 OpenSelectedMetadataCandidateCommand.NotifyCanExecuteChanged();
+                OpenSelectedExpandedCandidateCommand.NotifyCanExecuteChanged();
                 NextMetadataDuplicateGroupCommand.NotifyCanExecuteChanged();
                 PreviousMetadataDuplicateGroupCommand.NotifyCanExecuteChanged();
                 ToggleMetadataDuplicateDeferredCommand.NotifyCanExecuteChanged();
@@ -214,6 +225,8 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
     public ReadOnlyObservableCollection<ExactDuplicateGroupRowViewModel> ExactDuplicateGroups { get; }
 
     public ReadOnlyObservableCollection<MetadataDuplicateGroupRowViewModel> MetadataDuplicateGroups { get; }
+
+    public ReadOnlyObservableCollection<ExpandedCandidateGroupRowViewModel> ExpandedCandidateGroups { get; }
 
     public ReadOnlyObservableCollection<EpubAssessmentRowViewModel> EpubAssessments { get; }
 
@@ -244,6 +257,12 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
     {
         get => _metadataDuplicateSummary;
         private set => SetProperty(ref _metadataDuplicateSummary, value);
+    }
+
+    public string ExpandedCandidateSummary
+    {
+        get => _expandedCandidateSummary;
+        private set => SetProperty(ref _expandedCandidateSummary, value);
     }
 
     public string MetadataDuplicateFilterText
@@ -355,6 +374,32 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
         }
     }
 
+    public ExpandedCandidateGroupRowViewModel? SelectedExpandedCandidateGroup
+    {
+        get => _selectedExpandedCandidateGroup;
+        set
+        {
+            if (SetProperty(ref _selectedExpandedCandidateGroup, value))
+            {
+                OnPropertyChanged(nameof(SelectedExpandedCandidateMembers));
+                SelectedExpandedCandidateMember = value is { Members.Count: > 0 } ? value.Members[0] : null;
+            }
+        }
+    }
+
+    public IReadOnlyList<ExpandedCandidateMemberRowViewModel> SelectedExpandedCandidateMembers =>
+        SelectedExpandedCandidateGroup?.Members ?? [];
+
+    public ExpandedCandidateMemberRowViewModel? SelectedExpandedCandidateMember
+    {
+        get => _selectedExpandedCandidateMember;
+        set
+        {
+            if (SetProperty(ref _selectedExpandedCandidateMember, value))
+                OpenSelectedExpandedCandidateCommand.NotifyCanExecuteChanged();
+        }
+    }
+
     public IReadOnlyList<RecommendationFormatRowViewModel> SelectedRecommendationFormats =>
         SelectedMetadataDuplicateGroup?.FormatRows ?? [];
 
@@ -461,6 +506,8 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
 
     public IAsyncRelayCommand OpenSelectedMetadataCandidateCommand { get; }
 
+    public IAsyncRelayCommand OpenSelectedExpandedCandidateCommand { get; }
+
     public IRelayCommand NextMetadataDuplicateGroupCommand { get; }
 
     public IRelayCommand PreviousMetadataDuplicateGroupCommand { get; }
@@ -502,8 +549,8 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
     private async Task ApplyProjectedStateAsync(LibraryState state)
     {
         if (!PathsEqual(SelectedLibraryPath, state.Snapshot.Identity.LibraryRoot)) return;
-        SnapshotPresentation presentation = await Task.Run(
-            () => CreatePresentation(state.Snapshot, CancellationToken.None)).ConfigureAwait(true);
+        SnapshotPresentation presentation = await PreparePresentationAsync(
+            state.Snapshot, CancellationToken.None).ConfigureAwait(true);
         LibraryState? latest = _libraryStateSession?.GetCurrent(state.Snapshot.Identity.LibraryRoot);
         if (latest?.GenerationId != state.GenerationId || latest.Revision != state.Revision) return;
         ApplySnapshot(state.Snapshot, presentation, state.IsAuthoritative);
@@ -568,10 +615,8 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
                         ErrorAction = "Retry the scan before running cleanup or recovery.";
                     }
                 }
-                SnapshotPresentation presentation = await Task.Run(
-                        () => CreatePresentation(outcome.Snapshot!, _scanCancellation.Token),
-                        _scanCancellation.Token)
-                    .ConfigureAwait(true);
+                SnapshotPresentation presentation = await PreparePresentationAsync(
+                    outcome.Snapshot!, _scanCancellation.Token).ConfigureAwait(true);
                 ApplySnapshot(outcome.Snapshot!, presentation);
                 if (_persistedSnapshots is not null && statePersisted)
                 {
@@ -610,6 +655,10 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
 
         IsBusy = true;
         ClearError();
+        ProgressPercentage = 0;
+        IsProgressIndeterminate = true;
+        StatusMessage = "Loading saved library analysis...";
+        await Task.Yield();
         try
         {
             if (_libraryStateSession is not null)
@@ -620,8 +669,8 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
                 if (stateLoad.IsSuccess)
                 {
                     LibraryState state = stateLoad.State!;
-                    SnapshotPresentation projectedPresentation = await Task.Run(
-                        () => CreatePresentation(state.Snapshot, CancellationToken.None)).ConfigureAwait(true);
+                    SnapshotPresentation projectedPresentation = await PreparePresentationAsync(
+                        state.Snapshot, CancellationToken.None).ConfigureAwait(true);
                     SelectedLibraryPath = state.Snapshot.Identity.LibraryRoot;
                     ApplySnapshot(state.Snapshot, projectedPresentation, state.IsAuthoritative);
                     StatusMessage = state.IsAuthoritative
@@ -678,8 +727,8 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
                 }
                 await RefreshPersistedLibraryPathsAsync(CancellationToken.None).ConfigureAwait(true);
             }
-            SnapshotPresentation presentation = await Task.Run(
-                () => CreatePresentation(snapshot, CancellationToken.None)).ConfigureAwait(true);
+            SnapshotPresentation presentation = await PreparePresentationAsync(
+                snapshot, CancellationToken.None).ConfigureAwait(true);
             SelectedLibraryPath = snapshot.Identity.LibraryRoot;
             ApplySnapshot(snapshot, presentation, isFreshScan: migratedState?.IsAuthoritative == true);
             StatusMessage = migratedState is null
@@ -688,6 +737,7 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
         }
         finally
         {
+            IsProgressIndeterminate = false;
             IsBusy = false;
         }
     }
@@ -714,6 +764,19 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
         if (member.LaunchRelativePath is null || member.LaunchFormat is null)
         {
             ErrorMessage = "The selected record has no present book format to open.";
+            ErrorAction = "Choose another record or rescan after restoring its format files.";
+            return Task.CompletedTask;
+        }
+        return OpenBookFormatAsync(member.LaunchRelativePath, member.LaunchFormat);
+    }
+
+    private Task OpenSelectedExpandedCandidateAsync()
+    {
+        ExpandedCandidateMemberRowViewModel? member = SelectedExpandedCandidateMember;
+        if (member is null) return Task.CompletedTask;
+        if (member.LaunchRelativePath is null || member.LaunchFormat is null)
+        {
+            ErrorMessage = "The selected expanded candidate has no present book format to open.";
             ErrorAction = "Choose another record or rescan after restoring its format files.";
             return Task.CompletedTask;
         }
@@ -754,6 +817,19 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
             : progress.Phase == LibraryScanPhase.Completed ? 100 : 0;
     }
 
+    private async Task<SnapshotPresentation> PreparePresentationAsync(
+        LibrarySnapshot snapshot,
+        CancellationToken cancellationToken)
+    {
+        ProgressPercentage = 0;
+        IsProgressIndeterminate = true;
+        StatusMessage = $"Preparing {snapshot.Books.Count:N0} books and analysis results for display...";
+        await Task.Yield();
+        return await Task.Run(
+            () => CreatePresentation(snapshot, cancellationToken),
+            cancellationToken).ConfigureAwait(true);
+    }
+
     private static SnapshotPresentation CreatePresentation(
         LibrarySnapshot snapshot,
         CancellationToken cancellationToken)
@@ -788,6 +864,14 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
             metadataGroups[index] = new(metadataGroup, booksById, recommendation);
         }
 
+        ExpandedCandidateGroupRowViewModel[] expandedGroups = new ExpandedCandidateGroupRowViewModel[
+            snapshot.WorkLanguageCandidateGroups.Count];
+        for (int index = 0; index < snapshot.WorkLanguageCandidateGroups.Count; index++)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            expandedGroups[index] = new(snapshot.WorkLanguageCandidateGroups[index], booksById);
+        }
+
         EpubAssessmentRowViewModel[] epubAssessments = new EpubAssessmentRowViewModel[snapshot.EpubAssessments.Count];
         for (int index = 0; index < snapshot.EpubAssessments.Count; index++)
         {
@@ -816,7 +900,7 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
             }
         }
 
-        return new(books, groups, metadataGroups, epubAssessments, pdfAssessments, missingCount);
+        return new(books, groups, metadataGroups, expandedGroups, epubAssessments, pdfAssessments, missingCount);
     }
 
     private void ApplySnapshot(
@@ -865,13 +949,26 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
         _allMetadataDuplicateGroups = presentation.MetadataGroups;
         ApplyMetadataDuplicateFilter();
         MetadataCandidateCleanup?.UpdateContext(isFreshScan ? snapshot : null, _allMetadataDuplicateGroups);
+        _expandedCandidateGroups.ReplaceAll(presentation.ExpandedGroups);
+        SelectedExpandedCandidateGroup = _expandedCandidateGroups.FirstOrDefault();
+        ExpandedCandidateSummary = snapshot.MatchingRunSummary.Status switch
+        {
+            MatchingEvidenceStatus.Unavailable =>
+                "Expanded matching evidence is unavailable for this snapshot. Run a fresh scan to generate it.",
+            MatchingEvidenceStatus.Stale =>
+                "Expanded matching evidence is stale after library changes. Run a fresh scan to regenerate it.",
+            _ when presentation.ExpandedGroups.Count == 0 =>
+                $"No expanded work-language candidate groups were found from {snapshot.MatchingRunSummary.RetainedPairCount:N0} retained pairs.",
+            _ =>
+                $"{presentation.ExpandedGroups.Count:N0} expanded review-only groups from {snapshot.MatchingRunSummary.RetainedPairCount:N0} retained pairs; {snapshot.MatchingRunSummary.ContentSignaturesRequested:N0} content signatures requested.",
+        };
         _epubAssessments.ReplaceAll(presentation.EpubAssessments);
         SelectedEpubAssessment = _epubAssessments.FirstOrDefault();
         _pdfAssessments.ReplaceAll(presentation.PdfAssessments);
         SelectedPdfAssessment = _pdfAssessments.FirstOrDefault();
         StatusMessage = snapshot.Books.Count == 0
             ? "Scan complete. The library contains no books."
-            : $"Scan complete: {snapshot.Books.Count} books, {snapshot.ExactBinaryDuplicateGroups.Count} exact file duplicate groups, {snapshot.ExactMetadataDuplicateGroups.Count} exact metadata candidate groups, {presentation.MissingCount} missing format files.";
+            : $"Scan complete: {snapshot.Books.Count} books, {snapshot.ExactBinaryDuplicateGroups.Count} exact file duplicate groups, {snapshot.ExactMetadataDuplicateGroups.Count} exact metadata candidate groups, {snapshot.WorkLanguageCandidateGroups.Count} expanded review-only groups, {presentation.MissingCount} missing format files.";
         IsProgressIndeterminate = false;
         ProgressPercentage = 100;
         ExportRecommendationsCommand.NotifyCanExecuteChanged();
@@ -1183,6 +1280,7 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
         IReadOnlyList<BookRowViewModel> Books,
         IReadOnlyList<ExactDuplicateGroupRowViewModel> Groups,
         IReadOnlyList<MetadataDuplicateGroupRowViewModel> MetadataGroups,
+        IReadOnlyList<ExpandedCandidateGroupRowViewModel> ExpandedGroups,
         IReadOnlyList<EpubAssessmentRowViewModel> EpubAssessments,
         IReadOnlyList<PdfAssessmentRowViewModel> PdfAssessments,
         int MissingCount);

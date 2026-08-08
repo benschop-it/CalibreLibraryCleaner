@@ -16,6 +16,8 @@ Generate synthetic temporary Calibre-style libraries for empty, valid, binary du
 
 PDF coverage includes digital text, image-only scan evidence, existing text layers, mixed/illustrated content, metadata/outline variants, valid/invalid ISBN evidence, encryption/password-required, zero/truncated/non-PDF/malformed/zero-page inputs, resource families, deterministic sampling/classification/scoring/finding order, penalty caps, disqualification, worker timeout/cancellation/no-orphan behavior, bounded concurrency, prohibited network/action/attachment/OCR/image-decode APIs, no full-text retention or content logging, read-only library manifests, and parser-type architecture boundaries.
 
+EPUB coverage includes monolithic dictionary/reference chapters, decoded-HTML and DOM-node ceilings before expensive traversal, controlled incomplete `LimitExceeded` results, chapter/candidate progress units, per-file timing diagnostics, slow-file warnings, cancellation between parser stages, and no paths/content in logs.
+
 ## Safety assertions
 
 Analysis must not modify database bytes, file timestamps, names, or contents and must not create files inside the library.
@@ -29,3 +31,5 @@ Infrastructure worker tests use only temporary caller-created disposable librari
 WPF tests cover persisted development loading, exact keeper overrides, backup confirmation, progress/results, state uncertainty wording, XAML activation, and close protection during exact cleanup. Architecture tests prohibit recovery, cleanup-plan, app-backup/history, and direct mutation gateway boundaries from returning.
 
 Viewer tests use a controlled sibling executable and temporary synthetic library files. They prove exact one-argument launch, no-shell process configuration, trusted sibling discovery, containment/reparse validation, missing viewer/file outcomes, exact-row paths, metadata format preference, WPF command routing, and no cleanup-state mutation.
+
+Expanded-matching tests cover generic Unicode/identifier/language normalization, deterministic mutual top-20 retention, decisive-edge preservation, broad-bucket suppression, global fail-closed limits, cancellation, 20,000-record scale, candidate-only demand, fingerprint deduplication, cache reuse/corruption/cancellation, no-prose cache JSON, 12 by 64-token landmarks, script/style/navigation exclusion, diacritic-relaxed hashes, shifted front matter, symmetric comparison, language/series/content contradictions, weak-chain blocking, stable-anchor attachment, review-only snapshot persistence, progress, WPF presentation, and viewer routing.

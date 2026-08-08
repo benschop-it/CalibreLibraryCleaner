@@ -32,7 +32,11 @@ public static class ServiceCollectionExtensions
         services.AddSingleton(new LibrarySnapshotStorageOptions());
         services.AddSingleton<ILibrarySnapshotStore, VersionedJsonLibrarySnapshotStore>();
         services.AddSingleton<ILibraryStateStore, VersionedJsonLibraryStateStore>();
-        services.AddSingleton<IEpubInspector, VersOneEpubInspector>();
+        services.AddSingleton<VersOneEpubInspector>();
+        services.AddSingleton<IEpubInspector>(provider => provider.GetRequiredService<VersOneEpubInspector>());
+        services.AddSingleton<IEpubContentSignatureInspector>(provider => provider.GetRequiredService<VersOneEpubInspector>());
+        services.AddSingleton(new EpubContentSignatureCacheOptions());
+        services.AddSingleton<IEpubContentSignatureCache, FileEpubContentSignatureCache>();
         services.AddSingleton(new PdfWorkerOptions());
         services.AddSingleton<IPdfInspector, IsolatedPdfInspector>();
         services.AddSingleton<IRecommendationExporter, VersionedJsonRecommendationExporter>();
