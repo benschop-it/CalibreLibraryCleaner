@@ -413,6 +413,13 @@ public sealed class MainWindowViewModelTests
         viewModel.StatusMessage.Should().Contain("2 exact metadata candidate groups");
         viewModel.MetadataDuplicateSummary.Should().Contain("2 of 2 metadata candidate groups visible");
         viewModel.SelectedMetadataDuplicateGroup!.NormalizedTitle.Should().Be("ALPHA:BOOK");
+        viewModel.SelectedMetadataDuplicateMember.Should().BeSameAs(
+            viewModel.SelectedMetadataDuplicateGroup.KeeperMember);
+        MetadataDuplicateMemberRowViewModel alternateKeeper = viewModel.SelectedMetadataDuplicateMembers
+            .Single(value => !value.IsKeeper);
+        viewModel.SelectedMetadataDuplicateMember = alternateKeeper;
+        alternateKeeper.Action.Should().Be("Keep");
+        viewModel.SelectedMetadataDuplicateMembers.Should().ContainSingle(value => value.Action == "Keep");
         viewModel.NextMetadataDuplicateGroupCommand.Execute(null);
         viewModel.SelectedMetadataDuplicateGroup.NormalizedTitle.Should().Be("BETA BOOK");
         viewModel.PreviousMetadataDuplicateGroupCommand.Execute(null);

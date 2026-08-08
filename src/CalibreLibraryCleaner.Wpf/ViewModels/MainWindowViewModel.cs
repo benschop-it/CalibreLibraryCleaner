@@ -51,6 +51,7 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
     private ExactDuplicateGroupRowViewModel? _selectedExactDuplicateGroup;
     private ExactDuplicateMemberRowViewModel? _selectedExactDuplicateMember;
     private MetadataDuplicateGroupRowViewModel? _selectedMetadataDuplicateGroup;
+    private MetadataDuplicateMemberRowViewModel? _selectedMetadataDuplicateMember;
     private EpubAssessmentRowViewModel? _selectedEpubAssessment;
     private EpubFindingFilterMode _epubFindingFilterMode;
     private PdfAssessmentRowViewModel? _selectedPdfAssessment;
@@ -67,6 +68,7 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
         IRecommendationExportFilePicker? exportFilePicker = null,
         IClock? clock = null,
         ExactBinaryCleanupPlanWorkspaceViewModel? exactBinaryCleanupPlans = null,
+        MetadataCandidateCleanupWorkspaceViewModel? metadataCandidateCleanup = null,
         PersistedLibrarySnapshotsUseCase? persistedSnapshots = null,
         ILibraryStateSession? libraryStateSession = null)
     {
@@ -82,6 +84,7 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
         if (_libraryStateSession is not null)
             _libraryStateSession.StateChanged += OnLibraryStateChanged;
         ExactBinaryCleanupPlans = exactBinaryCleanupPlans;
+        MetadataCandidateCleanup = metadataCandidateCleanup;
         Books = new ReadOnlyObservableCollection<BookRowViewModel>(_books);
         PersistedLibraryPaths = new ReadOnlyObservableCollection<string>(_persistedLibraryPaths);
         ExactDuplicateGroups = new ReadOnlyObservableCollection<ExactDuplicateGroupRowViewModel>(_exactDuplicateGroups);
@@ -211,6 +214,8 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
 
     public ExactBinaryCleanupPlanWorkspaceViewModel? ExactBinaryCleanupPlans { get; }
 
+    public MetadataCandidateCleanupWorkspaceViewModel? MetadataCandidateCleanup { get; }
+
     public IReadOnlyList<EpubFindingFilterMode> EpubFindingFilterModes { get; } = Enum.GetValues<EpubFindingFilterMode>();
 
     public IReadOnlyList<EpubFindingFilterMode> PdfFindingFilterModes { get; } = Enum.GetValues<EpubFindingFilterMode>();
@@ -316,6 +321,7 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
                 OnPropertyChanged(nameof(SelectedMetadataSourceOptions));
                 OnPropertyChanged(nameof(ReviewedMetadataSource));
                 OnPropertyChanged(nameof(StaleOverrideSummary));
+                SelectedMetadataDuplicateMember = value?.KeeperMember;
                 ToggleMetadataDuplicateDeferredCommand.NotifyCanExecuteChanged();
                 NotifyRecommendationCommands();
             }
@@ -324,6 +330,17 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
 
     public IReadOnlyList<MetadataDuplicateMemberRowViewModel> SelectedMetadataDuplicateMembers =>
         SelectedMetadataDuplicateGroup?.Members ?? [];
+
+    public MetadataDuplicateMemberRowViewModel? SelectedMetadataDuplicateMember
+    {
+        get => _selectedMetadataDuplicateMember;
+        set
+        {
+            if (!SetProperty(ref _selectedMetadataDuplicateMember, value) || value is null
+                || SelectedMetadataDuplicateGroup is null) return;
+            SelectedMetadataDuplicateGroup.KeeperMember = value;
+        }
+    }
 
     public IReadOnlyList<RecommendationFormatRowViewModel> SelectedRecommendationFormats =>
         SelectedMetadataDuplicateGroup?.FormatRows ?? [];
@@ -784,6 +801,7 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
         }
         _allMetadataDuplicateGroups = presentation.MetadataGroups;
         ApplyMetadataDuplicateFilter();
+        MetadataCandidateCleanup?.UpdateContext(isFreshScan ? snapshot : null, _allMetadataDuplicateGroups);
         _epubAssessments.ReplaceAll(presentation.EpubAssessments);
         SelectedEpubAssessment = _epubAssessments.FirstOrDefault();
         _pdfAssessments.ReplaceAll(presentation.PdfAssessments);

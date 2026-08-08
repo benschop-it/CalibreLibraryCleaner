@@ -11,6 +11,8 @@ public sealed class MetadataDuplicateGroupRowViewModel : ObservableObject
 {
     private ReviewedConsolidationRecommendation? _reviewed;
     private RecommendationSourceOptionViewModel? _reviewedMetadataSource;
+    private MetadataDuplicateMemberRowViewModel? _keeperMember;
+    private bool _skip;
 
     public MetadataDuplicateGroupRowViewModel(
         ExactMetadataDuplicateGroup group,
@@ -57,6 +59,10 @@ public sealed class MetadataDuplicateGroupRowViewModel : ObservableObject
         {
             SetReviewed(ApplyRecommendationOverrideUseCase.Reset(recommendation));
         }
+        KeeperMember = recommendation?.MetadataSource is { } metadata
+            ? Members.SingleOrDefault(value => value.BookId == metadata.SelectedBookId.Value)
+            : null;
+        Skip = KeeperMember is null;
     }
 
     public ExactMetadataDuplicateGroupId GroupId { get; }
@@ -79,6 +85,27 @@ public sealed class MetadataDuplicateGroupRowViewModel : ObservableObject
     public bool IsDeferred => _reviewed?.ReviewStatus == RecommendationReviewStatus.Deferred;
     public ReviewedConsolidationRecommendation? Reviewed => _reviewed;
     public string StaleOverrideSummary => DescribeStaleOverride(_reviewed?.StaleOverride);
+
+    public MetadataDuplicateMemberRowViewModel? KeeperMember
+    {
+        get => _keeperMember;
+        set
+        {
+            if (value is not null && !Members.Contains(value))
+                throw new ArgumentException("The keeper must belong to this metadata group.", nameof(value));
+            if (!SetProperty(ref _keeperMember, value)) return;
+            foreach (MetadataDuplicateMemberRowViewModel member in Members) member.IsKeeper = member == value;
+            OnPropertyChanged(nameof(KeeperRecordId));
+        }
+    }
+
+    public long? KeeperRecordId => KeeperMember?.BookId;
+
+    public bool Skip
+    {
+        get => _skip;
+        set => SetProperty(ref _skip, value);
+    }
 
     public RecommendationSourceOptionViewModel? ReviewedMetadataSource
     {

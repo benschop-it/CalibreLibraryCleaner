@@ -8,18 +8,19 @@ Visual Studio Code and GitHub Copilot Business.
 
 The application can build immutable read-only analysis snapshots, hash formats,
 detect exact binary and exact normalized metadata candidates, assess EPUB and
-PDF quality, generate and review recommendations, and remove exact duplicates
-through a constrained persistent Calibre worker.
+PDF quality, generate recommendations, and consolidate exact or metadata
+duplicate groups through a constrained persistent Calibre worker.
 
 Persisted analysis loading remains available during development because a full
 large-library scan can take approximately twenty minutes. Startup lists small
 state manifests; explicit Load restores the saved analysis without rescanning.
 
-Exact-binary groups can be cleaned independently of metadata candidates. Review
-or override generated keeper rows, select Remove duplicates, and confirm that a
-complete external library backup exists. The application does not create or
-verify backups. It uses one persistent `calibre-debug` worker, logs failures,
-and requires Rescan after a failed or ambiguous mutation.
+Exact-binary and metadata candidate groups both use generated keeper rows that
+can be overridden by selecting another member. Metadata groups can be skipped;
+processing transfers generated complementary formats and removes every
+non-keeper record. The application requires confirmation of a complete external
+library backup, uses one persistent `calibre-debug` worker, logs failures, and
+requires Rescan after a failed or ambiguous mutation.
 
 The next planned roadmap milestone is Milestone 10 content fingerprints and
 comparisons, after completion of the outstanding Milestone 9 manual WPF

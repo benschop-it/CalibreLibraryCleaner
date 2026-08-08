@@ -5,6 +5,7 @@ namespace CalibreLibraryCleaner.Wpf.ViewModels;
 public sealed class MetadataDuplicateMemberRowViewModel : ObservableObject
 {
     private bool _isRetainedSeparate;
+    private bool _isKeeper;
 
     public MetadataDuplicateMemberRowViewModel(
         long bookId,
@@ -46,6 +47,16 @@ public sealed class MetadataDuplicateMemberRowViewModel : ObservableObject
     public string Series { get; }
     public string HasCover { get; }
     public string MetadataQualityFacts { get; }
+    public string Action => IsKeeper ? "Keep" : "Remove";
+
+    public bool IsKeeper
+    {
+        get => _isKeeper;
+        internal set
+        {
+            if (SetProperty(ref _isKeeper, value)) OnPropertyChanged(nameof(Action));
+        }
+    }
 
     public bool IsRetainedSeparate
     {

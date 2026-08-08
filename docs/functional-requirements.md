@@ -60,7 +60,7 @@ and any resulting recommendation-policy changes begin in Milestone 10 or later.
 
 ## Review workflow
 
-The user can navigate groups, compare records, inspect findings and covers, open files externally, accept or override recommendations, defer groups, and filter by confidence or issue.
+The user can navigate duplicate groups and compare records. Exact and metadata candidate groups present one generated keeper that can be changed by selecting another member. Metadata groups also expose a session-scoped Skip choice.
 
 ## Exact duplicate cleanup
 
@@ -71,6 +71,12 @@ Cleanup uses one trusted persistent `calibre-debug` worker with typed chunks of 
 Worker startup or preflight failure logs and stops before mutation. Any failed, ambiguous, interrupted, unpersistable, or unprojectable mutation logs structured technical context, marks state uncertain, stops without retry or continuation, and blocks later mutation until explicit Rescan. There is no direct-command fallback or automated recovery.
 
 Persisted analysis loading remains available during development. Startup lists only small state manifests; explicit Load restores the saved analysis without scanning. Legacy snapshot files migrate into state on explicit Load. New scans and checkpoints retain only the active state generation.
+
+## Metadata candidate cleanup
+
+The Metadata candidates workflow lists exact normalized title/author groups, selects the generated best metadata source as the default keeper, and allows the user to Skip a group or select another sole keeper. Groups without a generated metadata source start skipped. Choices reset when another scan or persisted snapshot is loaded.
+
+One command processes all unskipped groups after external-backup confirmation. The keeper retains its current metadata and formats. Generated selected complementary formats are transferred when absent from the keeper. Every format on every non-keeper is then removed and each empty non-keeper record is removed. If the keeper already has the same format, the keeper's file is retained even when the removed alternative is not byte-identical. An unresolved complementary source causes the group to be skipped before mutation.
 ## AI
 
 Optional AI may assist with ambiguous metadata or edition comparison. It must include provenance and may not directly authorize destructive operations.

@@ -12,9 +12,9 @@ A successful explicit Scan creates one authoritative projected-state generation 
 
 Startup listing reads only small manifests or bounded legacy metadata. A manifest references one active baseline/checkpoint and one active delta journal. New manifest publication is atomic and precedes deletion of unreferenced state files. Shutdown does not compact or write a large snapshot.
 
-## Exact duplicate cleanup
+## Duplicate cleanup
 
-Exact duplicate cleanup is the only mutation workflow. Before each run, the user confirms that a complete external backup of the Calibre library exists. The application does not create, inspect, or verify that backup.
+Exact duplicate and metadata candidate cleanup are the only mutation workflows. Before each run, the user confirms that a complete external backup of the Calibre library exists. The application does not create, inspect, or verify that backup.
 
 The workflow:
 
@@ -28,7 +28,7 @@ The workflow:
 8. projects and durably journals only complete successful chunks; and
 9. writes one final checkpoint after complete success.
 
-Transfers precede dependent source removals. Exact duplicate/source formats are removed before records, and a record is removed only when projected empty. Ambiguous or conflicting records remain unchanged.
+Transfers precede dependent source removals. Formats are removed before records, and a record is removed only when projected empty. Exact cleanup leaves ambiguous or conflicting records unchanged. Metadata cleanup is explicitly keeper-authoritative: same-format alternatives on Remove records are deleted even when not byte-identical, while unresolved complementary sources skip the group before mutation.
 
 The worker uses only Calibre's documented database `Cache` API through the fixed embedded script and strict JSON-lines protocol. Direct SQL, shell invocation, direct managed-file mutation, arbitrary Python, GUI automation, direct `calibredb` mutation commands, and mutation-engine fallback are prohibited.
 

@@ -40,12 +40,16 @@ public partial class App : System.Windows.Application
         builder.Services.AddSingleton<PersistedLibrarySnapshotsUseCase>();
         builder.Services.AddSingleton<ExportRecommendationsUseCase>();
         builder.Services.AddSingleton<ExecuteBulkExactDuplicateCleanupUseCase>();
+        builder.Services.AddSingleton<ExecuteBulkMetadataCandidateCleanupUseCase>();
         builder.Services.AddSingleton(new LibraryAnalysisOptions());
         builder.Services.AddSingleton<ILibraryFolderPicker, OpenFolderDialogLibraryFolderPicker>();
         builder.Services.AddSingleton<IRecommendationExportFilePicker, SaveFileDialogRecommendationExportFilePicker>();
         builder.Services.AddSingleton<IExactDuplicateCleanupConfirmationService,
             MessageBoxExactDuplicateCleanupConfirmationService>();
+        builder.Services.AddSingleton<IMetadataCandidateCleanupConfirmationService,
+            MessageBoxMetadataCandidateCleanupConfirmationService>();
         builder.Services.AddSingleton<ExactBinaryCleanupPlanWorkspaceViewModel>();
+        builder.Services.AddSingleton<MetadataCandidateCleanupWorkspaceViewModel>();
         builder.Services.AddSingleton<MainWindowViewModel>();
         builder.Services.AddSingleton<MainWindow>();
         _host = builder.Build();

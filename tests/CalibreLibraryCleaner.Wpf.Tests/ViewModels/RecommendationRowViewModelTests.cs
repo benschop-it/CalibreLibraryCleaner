@@ -37,6 +37,16 @@ public sealed class RecommendationRowViewModelTests
         row.WarningRows.Should().Contain(value => value.Code == "FORMAT.NO_DECLARED_FORMATS");
         row.Members.Should().OnlyContain(value => value.MetadataQualityFacts != "Not ranked");
         row.Recommendation.Should().BeSameAs(generated);
+        row.KeeperRecordId.Should().Be(generated.MetadataSource!.SelectedBookId.Value);
+        row.Members.Should().ContainSingle(value => value.Action == "Keep");
+        row.Skip.Should().BeFalse();
+
+        MetadataDuplicateMemberRowViewModel alternate = row.Members.Single(value => !value.IsKeeper);
+        row.KeeperMember = alternate;
+
+        alternate.Action.Should().Be("Keep");
+        row.Members.Single(value => value != alternate).Action.Should().Be("Remove");
+        row.KeeperRecordId.Should().Be(alternate.BookId);
     }
 
     [Fact]
@@ -84,6 +94,8 @@ public sealed class RecommendationRowViewModelTests
 
         row.Members.Should().OnlyContain(value => value.IsRetainedSeparate);
         row.ReviewedMetadataSource.Should().BeNull();
+        row.KeeperMember.Should().BeNull();
+        row.Skip.Should().BeTrue();
     }
 
     [Fact]

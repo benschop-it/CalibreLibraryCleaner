@@ -61,19 +61,19 @@ The worker opens one seekable read-only stream, reports the page header, accepts
 
 `FormatAssessment` is the shared result/identity core. `EpubAssessment` and `PdfAssessment` add format-specific feature semantics. PDF classification is separately versioned and never feeds the score. PDF assessments are a separate `LibrarySnapshot` collection and are not inputs to recommendations, cleanup plans, execution, or recovery.
 
-## Recommendation and review-export boundary
+## Recommendation boundary
 
-Domain owns immutable recommendation selections, reasons, warnings, decision strength, qualitative confidence, review values, and invariants. Application indexes completed Milestone 2â€“4 evidence, orchestrates deterministic generation, validates overrides, evaluates staleness, and owns the external export port. Infrastructure alone owns JSON parsing/serialization and guarded file publication outside the selected library. WPF owns session review interaction and file selection; ViewModels call Application use cases and do not write files. Recommendation review artifacts contain no cleanup-plan or mutation instructions.
+Domain owns immutable recommendation selections, reasons, warnings, decision strength, qualitative confidence, and invariants. Application indexes completed Milestone 2–4 evidence and orchestrates deterministic generation. Metadata candidate cleanup uses the generated metadata source as its default keeper and generated selected format sources for complementary transfers; user keeper/Skip choices remain transient WPF state.
 
-## Exact-cleanup boundary
+## Duplicate-cleanup boundary
 
 WPF owns generated keeper presentation, explicit keeper overrides, per-run external-backup confirmation, progress, and terminal status. Application builds one deterministic operation sequence, acquires the library mutation lease, and orchestrates one persistent worker. Infrastructure owns trusted Calibre discovery, the fixed embedded worker script, strict bounded JSON-lines protocol, process lifecycle, and lease storage.
 
-The worker uses Calibre's documented database `Cache` API through one `calibre-debug` process. It transfers fingerprint-verified complementary formats only to unambiguous non-conflicting targets, removes exact duplicate/source formats, and removes records that become empty. Requests contain at most 100 operations. No shell, direct SQLite write, direct managed-library filesystem mutation, arbitrary script, direct `calibredb` mutation gateway, or second mutation engine is permitted.
+The worker uses Calibre's documented database `Cache` API through one `calibre-debug` process. Exact cleanup transfers fingerprint-verified complementary formats only to unambiguous non-conflicting targets. Metadata cleanup transfers generated complementary sources to the selected keeper, removes every format from non-keepers, and removes the emptied records. When the metadata keeper already has a format, its file wins even when a removed alternative is not byte-identical. Requests contain at most 100 operations. No shell, direct SQLite write, direct managed-library filesystem mutation, arbitrary script, direct `calibredb` mutation gateway, or second mutation engine is permitted.
 
 Every run requires explicit confirmation that a complete external library backup exists. The application does not create, inspect, or verify that backup. A startup/preflight failure logs and stops before mutation. A failed, ambiguous, interrupted, unpersistable, or unprojectable mutation logs structured technical context, marks projected state uncertain, stops without retry or continuation, and blocks later mutation until explicit Rescan.
 
-General cleanup plans, application-created backup bundles, execution journals/history, and automated recovery are not part of the architecture. Recommendation review remains analysis-only and cannot trigger mutation.
+General cleanup plans, application-created backup bundles, execution journals/history, and automated recovery are not part of the architecture.
 ## Errors
 
 Distinguish validation failures, read failures, missing-file findings, malformed-format findings, operation conflicts, process failures, verification failures, and unexpected faults.
