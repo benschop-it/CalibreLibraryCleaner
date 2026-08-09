@@ -81,7 +81,7 @@ Domain owns immutable recommendation selections, reasons, warnings, decision str
 
 ## Duplicate-cleanup boundary
 
-WPF owns generated keeper presentation, explicit keeper overrides, per-run external-backup confirmation, progress, and terminal status. Application builds one deterministic operation sequence, acquires the library mutation lease, and orchestrates one persistent worker. Infrastructure owns trusted Calibre discovery, the fixed embedded worker script, strict bounded JSON-lines protocol, process lifecycle, and lease storage.
+WPF owns generated keeper presentation for exact, metadata, and cleanup-eligible expanded groups, explicit keeper overrides, per-run external-backup confirmation, progress, and terminal status. Application builds one deterministic operation sequence, acquires the library mutation lease, and orchestrates one persistent worker. Infrastructure owns trusted Calibre discovery, the fixed embedded worker script, strict bounded JSON-lines protocol, process lifecycle, and lease storage.
 
 The worker uses Calibre's documented database `Cache` API through one `calibre-debug` process. Exact cleanup transfers fingerprint-verified complementary formats only to unambiguous non-conflicting targets. Metadata cleanup transfers generated complementary sources to the selected keeper, removes every format from non-keepers, and removes the emptied records. When the metadata keeper already has a format, its file wins even when a removed alternative is not byte-identical. Requests contain at most 100 operations. No shell, direct SQLite write, direct managed-library filesystem mutation, arbitrary script, direct `calibredb` mutation gateway, or second mutation engine is permitted.
 

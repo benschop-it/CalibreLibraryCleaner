@@ -101,6 +101,73 @@ public sealed class ExecuteBulkMetadataCandidateCleanupUseCaseTests
             A<CancellationToken>._)).MustNotHaveHappened();
     }
 
+    [Fact]
+    public async Task MissingRecommendationsDoNotSkipSameFormatCleanup()
+    {
+        CalibreBook keeper = Book(1, [Format(1, "EPUB", 'a')]);
+        CalibreBook source = Book(2, [Format(2, "EPUB", 'b')]);
+        Harness harness = await Harness.CreateAsync([keeper, source], includeRecommendations: false);
+        ExactMetadataDuplicateGroup group = harness.Snapshot.ExactMetadataDuplicateGroups.Single();
+
+        BulkMetadataCandidateCleanupResult result = await harness.ExecuteAsync([
+            new(group.Id, keeper.Id, Skip: false),
+        ]);
+
+        result.IsCompleted.Should().BeTrue(string.Join("; ", result.Issues.Select(value => value.Code)));
+        result.SkippedGroupCount.Should().Be(0);
+        harness.OperationTrace.Should().Equal(
+            "RemoveFormat:2::EPUB",
+            "RemoveRecord:2::");
+    }
+
+    [Fact]
+    public async Task MissingRecommendationsUseSoleComplementarySource()
+    {
+        CalibreBook keeper = Book(1, [Format(1, "EPUB", 'a')]);
+        CalibreBook source = Book(2, [Format(2, "PDF", 'b')]);
+        Harness harness = await Harness.CreateAsync([keeper, source], includeRecommendations: false);
+        ExactMetadataDuplicateGroup group = harness.Snapshot.ExactMetadataDuplicateGroups.Single();
+
+        BulkMetadataCandidateCleanupResult result = await harness.ExecuteAsync([
+            new(group.Id, keeper.Id, Skip: false),
+        ]);
+
+        result.IsCompleted.Should().BeTrue(string.Join("; ", result.Issues.Select(value => value.Code)));
+        result.TransferredFormatCount.Should().Be(1);
+        result.SkippedGroupCount.Should().Be(0);
+    }
+
+    [Fact]
+    public async Task ProjectedKeeperFormatIsAcceptedButProjectedRemoveSourceIsRejected()
+    {
+        CalibreBook projectedKeeper = Book(1, [ProjectedFormat(1, "EPUB", 'a')]);
+        CalibreBook observedSource = Book(2, [Format(2, "EPUB", 'b')]);
+        Harness accepted = await Harness.CreateAsync(
+            [projectedKeeper, observedSource], includeRecommendations: false);
+        ExactMetadataDuplicateGroup acceptedGroup = accepted.Snapshot.ExactMetadataDuplicateGroups.Single();
+
+        BulkMetadataCandidateCleanupResult acceptedResult = await accepted.ExecuteAsync([
+            new(acceptedGroup.Id, projectedKeeper.Id, Skip: false),
+        ]);
+
+        acceptedResult.IsCompleted.Should().BeTrue();
+        acceptedResult.SkippedGroupCount.Should().Be(0);
+
+        CalibreBook observedKeeper = Book(1, [Format(1, "EPUB", 'a')]);
+        CalibreBook projectedSource = Book(2, [ProjectedFormat(2, "EPUB", 'b')]);
+        Harness rejected = await Harness.CreateAsync(
+            [observedKeeper, projectedSource], includeRecommendations: false);
+        ExactMetadataDuplicateGroup rejectedGroup = rejected.Snapshot.ExactMetadataDuplicateGroups.Single();
+
+        BulkMetadataCandidateCleanupResult rejectedResult = await rejected.ExecuteAsync([
+            new(rejectedGroup.Id, observedKeeper.Id, Skip: false),
+        ]);
+
+        rejectedResult.State.Should().Be(BulkMetadataCandidateCleanupState.NothingToDo);
+        rejectedResult.Issues.Should().ContainSingle(value =>
+            value.Code == "BULK_METADATA.PHYSICAL_FACTS_INCOMPLETE");
+    }
+
     private static CalibreBook Book(long id, IEnumerable<BookFormat> formats) => new(
         new(id), "Shared Book", "Author", [new(new(id), "Author", "Author")],
         [new("isbn", $"97803064061{id:D2}")], formats, $"Author/Shared Book ({id})",
@@ -112,6 +179,11 @@ public sealed class ExecuteBulkMetadataCandidateCleanupUseCaseTests
         FormatFileStatus.Present,
         new(10, new(new string(digest, 64))),
         new(10, Now, Now, 0));
+
+    private static BookFormat ProjectedFormat(long recordId, string format, char digest) => new(
+        format, "book", $"Author/Shared Book ({recordId})/book.{format.ToLowerInvariant()}",
+        FormatFileStatus.ProjectedPresent,
+        new(10, new(new string(digest, 64))));
 
     private sealed class Harness
     {
@@ -136,14 +208,26 @@ public sealed class ExecuteBulkMetadataCandidateCleanupUseCaseTests
         public ICalibreMutationWorkerFactory Workers { get; }
         public List<string> OperationTrace { get; }
 
-        public static async Task<Harness> CreateAsync(CalibreBook[] books)
+        public static async Task<Harness> CreateAsync(
+            CalibreBook[] books,
+            bool includeRecommendations = true)
         {
             LibraryIdentity identity = new(
                 "87f7ed1f-59a8-45a6-975a-7e06fd84780d", 27, "C:\\library");
             ExactMetadataDuplicateGroup group = ExactMetadataDuplicateDetector.Detect(books).Single();
-            ConsolidationRecommendation recommendation = new ConsolidationRecommendationPolicy().Generate(
-                identity, group, books, [], [], [], CancellationToken.None);
-            LibrarySnapshot snapshot = new(identity, Now, books, [], [], [group], [], [recommendation]);
+            ConsolidationRecommendation[] recommendations = includeRecommendations
+                ? [new ConsolidationRecommendationPolicy().Generate(
+                    identity, group, books, [], [], [], CancellationToken.None)]
+                : [];
+            LibrarySnapshot snapshot = new(
+                identity,
+                Now,
+                books,
+                [],
+                [],
+                [group],
+                [],
+                recommendations);
             ILibraryStateStore store = A.Fake<ILibraryStateStore>();
             LibraryStateSession state = new(store);
             await state.StartFromScanAsync(snapshot, CancellationToken.None);

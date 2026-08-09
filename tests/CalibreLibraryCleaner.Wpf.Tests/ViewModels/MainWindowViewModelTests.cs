@@ -43,7 +43,7 @@ public sealed class MainWindowViewModelTests
     }
 
     [Fact]
-    public async Task PersistedExpandedGroupsRemainReviewOnlyAndOpenSelectedMember()
+    public async Task PersistedExpandedGroupsShowKeeperActionsAndOpenSelectedMember()
     {
         const string libraryRoot = "C:\\Books";
         ILibrarySnapshotStore store = A.Fake<ILibrarySnapshotStore>();
@@ -62,10 +62,13 @@ public sealed class MainWindowViewModelTests
         await viewModel.LoadPersistedSnapshotCommand.ExecuteAsync(null);
 
         viewModel.ExpandedCandidateGroups.Should().ContainSingle();
-        viewModel.ExpandedCandidateGroups[0].Eligibility.Should().Be("Review only");
-        viewModel.ExpandedCandidateSummary.Should().Contain("1 expanded review-only groups");
+        viewModel.ExpandedCandidateGroups[0].Eligibility.Should().Be("Cleanup eligible");
+        viewModel.ExpandedCandidateSummary.Should().Contain("1 expanded content-confirmed groups");
         viewModel.SelectedExpandedCandidateMembers.Should().HaveCount(2);
+        viewModel.SelectedExpandedCandidateMembers.Should().ContainSingle(value => value.Action == "Keep");
         viewModel.SelectedExpandedCandidateMember = viewModel.SelectedExpandedCandidateMembers[1];
+        viewModel.SelectedExpandedCandidateMembers[1].Action.Should().Be("Keep");
+        viewModel.SelectedExpandedCandidateMembers[0].Action.Should().Be("Remove");
         await viewModel.OpenSelectedExpandedCandidateCommand.ExecuteAsync(null);
         A.CallTo(() => viewer.LaunchAsync(
             A<EbookViewerLaunchRequest>.That.Matches(value =>

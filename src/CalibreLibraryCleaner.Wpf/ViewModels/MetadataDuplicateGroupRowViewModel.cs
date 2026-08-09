@@ -60,10 +60,12 @@ public sealed class MetadataDuplicateGroupRowViewModel : ObservableObject
         {
             SetReviewed(ApplyRecommendationOverrideUseCase.Reset(recommendation));
         }
+        MetadataCandidateRetentionDecision fallbackRetention = MetadataCandidateRetentionPolicy.Select(
+            group.Members.Select(value => books[value]));
         KeeperMember = recommendation?.MetadataSource is { } metadata
             ? Members.SingleOrDefault(value => value.BookId == metadata.SelectedBookId.Value)
-            : Members[0];
-        KeeperMember ??= Members[0];
+            : Members.Single(value => value.BookId == fallbackRetention.KeeperBookId.Value);
+        KeeperMember ??= Members.Single(value => value.BookId == fallbackRetention.KeeperBookId.Value);
         Skip = false;
     }
 

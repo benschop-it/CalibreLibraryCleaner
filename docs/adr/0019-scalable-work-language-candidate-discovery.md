@@ -1,6 +1,6 @@
 # ADR 0019: Use Bounded Work-Language Candidate Discovery
 
-- Status: Accepted
+- Status: Amended
 - Date: 2026-08-08
 - Amends: ADR 0012, ADR 0016, ADR 0018
 
@@ -14,7 +14,7 @@ EPUB package metadata is already inspected for every EPUB, but sampled content e
 
 Keep exact-binary and exact-normalized-metadata groups unchanged as independent evidence and cleanup authority. Add a separate versioned work-language candidate discovery pipeline that runs before inferred groups are published.
 
-The first delivery is local, deterministic, offline, explainable, and review-only. Inferred groups cannot enter cleanup request contracts.
+The first delivery is local, deterministic, offline, and explainable. Initially inferred groups were review-only. Product acceptance on 2026-08-09 amended this decision: final groups may enter a dedicated expanded-candidate cleanup workflow only when every non-binary relation is confirmed by equivalent/high-similarity content evidence, known-language partitioning and complete-component contradictions have passed, and the user explicitly selects one keeper and confirms a complete external backup for that run.
 
 The pipeline:
 
@@ -32,7 +32,11 @@ Weak fuzzy edges may rank or display possible relations but never merge componen
 
 Content signatures store only hashes, compact similarity signatures, token counts, language/coverage facts, and safe problem codes. They never store or log sentences or recoverable prose.
 
-Existing snapshots load with inferred evidence unavailable. Only explicit Scan creates or refreshes inferred evidence. State projection may remove or mark inferred evidence stale but never opens files or reruns discovery.
+Existing snapshots load with inferred evidence unavailable. Only explicit Scan creates or refreshes inferred evidence. State projection removes inferred cleanup eligibility after any mutation and never opens files or reruns discovery.
+
+Expanded cleanup is separate from exact-metadata cleanup. A deterministic retention policy proposes one keeper from assessed format quality, present-format coverage, metadata quality, validated identifiers, cover evidence, and record-ID tie-breaking. The user may override that keeper. The fixed persistent Calibre worker transfers complementary formats, removes every format from non-keepers, and removes the empty non-keeper records. Existing same-format content on the selected keeper wins; automatic cross-record metadata rewriting is not part of this amendment.
+
+Title/author normalization of the surviving record requires a separate future decision and worker protocol extension. Metadata quality and format quality may select different source records, so cleanup must not silently copy metadata from the retained format record.
 
 Online work lookup, multilingual embeddings, and local LLM adjudication are deferred to separate opt-in decisions after local deterministic precision, recall, performance, and cache behavior are measured.
 
@@ -42,7 +46,7 @@ Online work lookup, multilingual embeddings, and local LLM adjudication are defe
 - Dutch and English translations can share a future work relation while remaining separate language groups.
 - Expensive content reads scale with bounded ambiguous candidates, not total library size squared.
 - Exact grouping IDs and cleanup behavior remain stable.
-- Inferred groups require review and cannot authorize deletion in this milestone.
+- Content-confirmed final groups can be processed only through explicit keeper selection, per-run external-backup confirmation, authoritative projected state, and the existing fail-closed worker boundary.
 - Cold scans may perform additional bounded EPUB reads; warm scans reuse a no-prose cache.
 - Snapshot and state schemas gain optional inferred evidence and matching-run summaries.
 - Algorithm, normalization, landmark, cache, and resource-profile versions become part of persisted provenance.

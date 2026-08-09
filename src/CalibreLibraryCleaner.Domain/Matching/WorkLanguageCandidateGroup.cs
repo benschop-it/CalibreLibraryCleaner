@@ -31,13 +31,15 @@ public enum MatchingEvidenceStatus
 public enum WorkLanguageCleanupEligibility
 {
     ReviewOnly,
+    ExplicitKeeperCleanup,
 }
 
 public sealed record MatchingPolicyVersion
 {
     public static MatchingPolicyVersion V1 { get; } = new("work-language-matching/1.0.0");
     public static MatchingPolicyVersion V2 { get; } = new("work-language-matching/1.1.0");
-    public static MatchingPolicyVersion Current => V2;
+    public static MatchingPolicyVersion V3 { get; } = new("work-language-matching/1.2.0");
+    public static MatchingPolicyVersion Current => V3;
 
     public MatchingPolicyVersion(string value)
     {
@@ -164,7 +166,12 @@ public sealed record WorkLanguageCandidateGroup
         ContentComparison = contentComparison.Validate();
         PolicyVersion = policyVersion;
         EvidenceStatus = evidenceStatus;
-        CleanupEligibility = WorkLanguageCleanupEligibility.ReviewOnly;
+        CleanupEligibility = policyVersion == MatchingPolicyVersion.V3
+            && ContentComparison.ComparedPairCount > 0
+            && ContentComparison.EquivalentPairCount + ContentComparison.HighSimilarityPairCount
+                == ContentComparison.ComparedPairCount
+            ? WorkLanguageCleanupEligibility.ExplicitKeeperCleanup
+            : WorkLanguageCleanupEligibility.ReviewOnly;
     }
 
     public WorkLanguageCandidateGroupId Id { get; }

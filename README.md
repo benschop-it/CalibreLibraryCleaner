@@ -23,10 +23,11 @@ non-keeper record. The application requires confirmation of a complete external
 library backup, uses one persistent `calibre-debug` worker, logs failures, and
 requires Rescan after a failed or ambiguous mutation.
 
-The Expanded candidates tab is review-only: inferred groups expose language,
-confidence, anchors, reason codes, and bounded content evidence but cannot enter
-cleanup. Double-click a member row in any duplicate/candidate tab to inspect the
-selected book in Calibre ebook viewer.
+The Expanded candidates tab presents content-confirmed same-work/same-language
+groups with a generated sole keeper, Keep/Remove actions, Skip, evidence, and
+explicit backup-confirmed cleanup. It does not rewrite title or author metadata.
+Double-click a member row in any duplicate/candidate tab to inspect the selected
+book in Calibre ebook viewer.
 
 Candidate-only EPUB fingerprints and local expanded discovery are implemented.
 PDF cross-document fingerprints, calibrated content-language detection, and

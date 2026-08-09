@@ -15,7 +15,7 @@ namespace CalibreLibraryCleaner.Application.Tests.Libraries;
 public sealed class ScanLibraryUseCaseTests
 {
     [Fact]
-    public async Task ExplicitScanPublishesReviewOnlyExpandedGroupsAndProgress()
+    public async Task ExplicitScanPublishesCleanupEligibleExpandedGroupsAndProgress()
     {
         TestContext context = CreateContext(CreateCatalog(bookCount: 2, sameMetadata: true));
         A.CallTo(() => context.Hasher.HashAsync(
@@ -54,7 +54,7 @@ public sealed class ScanLibraryUseCaseTests
         outcome.IsSuccess.Should().BeTrue();
         outcome.Snapshot!.WorkLanguageCandidateGroups.Should().ContainSingle();
         outcome.Snapshot.WorkLanguageCandidateGroups[0].CleanupEligibility.Should()
-            .Be(WorkLanguageCleanupEligibility.ReviewOnly);
+            .Be(WorkLanguageCleanupEligibility.ExplicitKeeperCleanup);
         outcome.Snapshot.MatchingRunSummary.Status.Should().Be(MatchingEvidenceStatus.Available);
         progress.Select(value => value.Phase).Should().Contain([
             LibraryScanPhase.BuildingMatchingProfiles,

@@ -76,6 +76,7 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
         IEbookViewerLauncher? ebookViewer = null,
         ExactBinaryCleanupPlanWorkspaceViewModel? exactBinaryCleanupPlans = null,
         MetadataCandidateCleanupWorkspaceViewModel? metadataCandidateCleanup = null,
+        ExpandedCandidateCleanupWorkspaceViewModel? expandedCandidateCleanup = null,
         PersistedLibrarySnapshotsUseCase? persistedSnapshots = null,
         ILibraryStateSession? libraryStateSession = null)
     {
@@ -93,6 +94,7 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
             _libraryStateSession.StateChanged += OnLibraryStateChanged;
         ExactBinaryCleanupPlans = exactBinaryCleanupPlans;
         MetadataCandidateCleanup = metadataCandidateCleanup;
+        ExpandedCandidateCleanup = expandedCandidateCleanup;
         Books = new ReadOnlyObservableCollection<BookRowViewModel>(_books);
         PersistedLibraryPaths = new ReadOnlyObservableCollection<string>(_persistedLibraryPaths);
         ExactDuplicateGroups = new ReadOnlyObservableCollection<ExactDuplicateGroupRowViewModel>(_exactDuplicateGroups);
@@ -239,6 +241,8 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
     public ExactBinaryCleanupPlanWorkspaceViewModel? ExactBinaryCleanupPlans { get; }
 
     public MetadataCandidateCleanupWorkspaceViewModel? MetadataCandidateCleanup { get; }
+
+    public ExpandedCandidateCleanupWorkspaceViewModel? ExpandedCandidateCleanup { get; }
 
     public IReadOnlyList<EpubFindingFilterMode> EpubFindingFilterModes { get; } = Enum.GetValues<EpubFindingFilterMode>();
 
@@ -395,8 +399,10 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
         get => _selectedExpandedCandidateMember;
         set
         {
-            if (SetProperty(ref _selectedExpandedCandidateMember, value))
-                OpenSelectedExpandedCandidateCommand.NotifyCanExecuteChanged();
+            if (!SetProperty(ref _selectedExpandedCandidateMember, value)) return;
+            OpenSelectedExpandedCandidateCommand.NotifyCanExecuteChanged();
+            if (value is null || SelectedExpandedCandidateGroup is null) return;
+            SelectedExpandedCandidateGroup.KeeperMember = value;
         }
     }
 
@@ -866,10 +872,18 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
 
         ExpandedCandidateGroupRowViewModel[] expandedGroups = new ExpandedCandidateGroupRowViewModel[
             snapshot.WorkLanguageCandidateGroups.Count];
+        Dictionary<WorkLanguageCandidateGroupId, ExpandedCandidateRetentionDecision> expandedRetention =
+            ExpandedCandidateRetentionPolicy.Select(
+                snapshot.WorkLanguageCandidateGroups,
+                snapshot.Books,
+                snapshot.EpubAssessments,
+                snapshot.PdfAssessments,
+                cancellationToken).ToDictionary(value => value.GroupId);
         for (int index = 0; index < snapshot.WorkLanguageCandidateGroups.Count; index++)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            expandedGroups[index] = new(snapshot.WorkLanguageCandidateGroups[index], booksById);
+            WorkLanguageCandidateGroup group = snapshot.WorkLanguageCandidateGroups[index];
+            expandedGroups[index] = new(group, booksById, expandedRetention[group.Id]);
         }
 
         EpubAssessmentRowViewModel[] epubAssessments = new EpubAssessmentRowViewModel[snapshot.EpubAssessments.Count];
@@ -951,6 +965,7 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
         MetadataCandidateCleanup?.UpdateContext(isFreshScan ? snapshot : null, _allMetadataDuplicateGroups);
         _expandedCandidateGroups.ReplaceAll(presentation.ExpandedGroups);
         SelectedExpandedCandidateGroup = _expandedCandidateGroups.FirstOrDefault();
+        ExpandedCandidateCleanup?.UpdateContext(isFreshScan ? snapshot : null, _expandedCandidateGroups);
         ExpandedCandidateSummary = snapshot.MatchingRunSummary.Status switch
         {
             MatchingEvidenceStatus.Unavailable =>
@@ -960,7 +975,7 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
             _ when presentation.ExpandedGroups.Count == 0 =>
                 $"No expanded work-language candidate groups were found from {snapshot.MatchingRunSummary.RetainedPairCount:N0} retained pairs.",
             _ =>
-                $"{presentation.ExpandedGroups.Count:N0} expanded review-only groups from {snapshot.MatchingRunSummary.RetainedPairCount:N0} retained pairs; {snapshot.MatchingRunSummary.ContentSignaturesRequested:N0} content signatures requested.",
+                $"{presentation.ExpandedGroups.Count:N0} expanded content-confirmed groups from {snapshot.MatchingRunSummary.RetainedPairCount:N0} retained pairs; {snapshot.MatchingRunSummary.ContentSignaturesRequested:N0} content signatures requested.",
         };
         _epubAssessments.ReplaceAll(presentation.EpubAssessments);
         SelectedEpubAssessment = _epubAssessments.FirstOrDefault();

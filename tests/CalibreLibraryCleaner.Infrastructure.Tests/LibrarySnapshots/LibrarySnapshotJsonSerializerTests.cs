@@ -104,7 +104,7 @@ public sealed class LibrarySnapshotJsonSerializerTests
         read.Snapshot!.WorkLanguageCandidateGroups.Should().ContainSingle().Which
             .Should().BeEquivalentTo(group);
         read.Snapshot.WorkLanguageCandidateGroups[0].CleanupEligibility
-            .Should().Be(WorkLanguageCleanupEligibility.ReviewOnly);
+            .Should().Be(WorkLanguageCleanupEligibility.ExplicitKeeperCleanup);
         read.Snapshot.MatchingRunSummary.Should().BeEquivalentTo(summary);
         LibrarySnapshotJsonSerializer.Serialize(read.Snapshot).Should().Equal(serialized);
     }

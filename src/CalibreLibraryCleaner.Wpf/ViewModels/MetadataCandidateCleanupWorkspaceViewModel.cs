@@ -118,9 +118,15 @@ public sealed class MetadataCandidateCleanupWorkspaceViewModel : ObservableObjec
             ResultSummary = $"Transferred {result.TransferredFormatCount:N0} complementary format(s), removed "
                 + $"{result.RemovedFormatCount:N0} source format(s), and deleted {result.RemovedRecordCount:N0} source record(s)."
                 + (result.SkippedGroupCount > 0 ? $" {result.SkippedGroupCount:N0} group(s) were skipped." : string.Empty);
-            Status = result.IsCompleted
-                ? "Metadata candidate cleanup completed."
-                : string.Join(" ", result.Issues.Select(value => $"{value.Code}: {value.Explanation}"));
+            string issueSummary = string.Join(" ", result.Issues
+                .GroupBy(value => (value.Code, value.Explanation))
+                .Select(group => $"{group.Key.Code} ({group.Count():N0}): {group.Key.Explanation}"));
+            Status = result.Issues.Count > 0
+                ? (result.IsCompleted ? "Metadata candidate cleanup completed with skipped groups. " : string.Empty)
+                    + issueSummary
+                : result.IsCompleted
+                    ? "Metadata candidate cleanup completed."
+                    : "Metadata candidate cleanup did not complete.";
         }
         finally
         {

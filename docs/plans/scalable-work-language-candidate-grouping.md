@@ -28,7 +28,8 @@ The first delivery must remain generic, deterministic, local-first, explainable,
 
 ## Out of scope
 
-- Destructive cleanup of inferred work-language groups.
+- Automatic cleanup without explicit keeper review and per-run external-backup confirmation.
+- Automatic title/author rewriting of the selected keeper.
 - Replacing or weakening exact binary grouping.
 - Changing exact-normalized-metadata group meaning or IDs.
 - Running sampled content extraction for records that have no retained candidate pair.
@@ -805,7 +806,8 @@ The following are implementation calibration questions, not blockers for the arc
 - [x] Phase 1 profile normalization and bounded cheap candidate generation completed.
 - [x] Local deterministic matching implementation completed.
 - [x] Candidate-only content evidence completed.
-- [x] Constrained grouping and review-only WPF completed.
+- [x] Constrained grouping and expanded WPF completed.
+- [ ] Dedicated content-confirmed expanded cleanup completed.
 - [ ] Complete verification and measured acceptance completed.
 
 ## Final outcome

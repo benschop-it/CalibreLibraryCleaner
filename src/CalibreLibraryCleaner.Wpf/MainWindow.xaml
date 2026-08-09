@@ -283,41 +283,53 @@
           </GroupBox>
         </Grid>
       </TabItem>
-      <TabItem Header="E_xpanded candidates" AutomationProperties.Name="Expanded review-only candidates">
+      <TabItem Header="E_xpanded candidates" AutomationProperties.Name="Expanded content-confirmed candidates">
         <Grid Margin="8">
           <Grid.RowDefinitions>
             <RowDefinition Height="Auto" />
             <RowDefinition Height="*" />
             <RowDefinition Height="*" />
           </Grid.RowDefinitions>
-          <TextBlock Grid.Row="0"
-                     Margin="0,0,0,8"
-                     FontWeight="Bold"
-                     Text="{Binding ExpandedCandidateSummary}"
-                     TextWrapping="Wrap" />
+          <StackPanel Grid.Row="0" Margin="0,0,0,8">
+            <TextBlock FontWeight="Bold"
+                       Text="{Binding ExpandedCandidateSummary}"
+                       TextWrapping="Wrap" />
+            <TextBlock Margin="0,4,0,0"
+                       Text="Select the sole keeper in each content-confirmed group. Other records are removed after complementary formats are transferred; metadata is not rewritten."
+                       TextWrapping="Wrap" />
+            <StackPanel Margin="0,8,0,0" DataContext="{Binding ExpandedCandidateCleanup}">
+              <Button HorizontalAlignment="Left" Padding="12,6" Content="_Process expanded candidates"
+                      Command="{Binding ProcessCandidatesCommand}" />
+              <TextBlock Margin="0,5,0,0" Text="{Binding Status}" FontWeight="Bold" TextWrapping="Wrap" />
+              <ProgressBar Height="14" Margin="0,5,0,0" Minimum="0" Maximum="100" Value="{Binding ProgressPercentage, Mode=OneWay}" />
+              <TextBlock Margin="0,3,0,0" Text="{Binding ProgressMessage}" TextWrapping="Wrap" />
+              <TextBlock Margin="0,3,0,0" Text="{Binding ResultSummary}" FontWeight="Bold" TextWrapping="Wrap" />
+            </StackPanel>
+          </StackPanel>
           <GroupBox Grid.Row="1" Header="Work-language groups">
             <DataGrid ItemsSource="{Binding ExpandedCandidateGroups}"
                       SelectedItem="{Binding SelectedExpandedCandidateGroup}"
                       AutoGenerateColumns="False"
-                      IsReadOnly="True"
                       SelectionMode="Single"
+                      CanUserAddRows="False"
                       EnableRowVirtualization="True"
                       EnableColumnVirtualization="True"
                       VirtualizingPanel.VirtualizationMode="Recycling"
                       AutomationProperties.Name="Expanded work-language candidate groups">
               <DataGrid.Columns>
-                <DataGridTextColumn Width="95" Header="Eligibility" Binding="{Binding Eligibility}" />
-                <DataGridTextColumn Width="90" Header="Language" Binding="{Binding Language}" />
-                <DataGridTextColumn Width="100" Header="Confidence" Binding="{Binding Confidence}" />
-                <DataGridTextColumn Width="75" Header="Records" Binding="{Binding RecordCount}" />
-                <DataGridTextColumn Width="120" Header="Anchors" Binding="{Binding AnchorRecordIds}" />
-                <DataGridTextColumn Width="3*" Header="Evidence" Binding="{Binding Evidence}" />
-                <DataGridTextColumn Width="2*" Header="Contradictions" Binding="{Binding Contradictions}" />
-                <DataGridTextColumn Width="3*" Header="Content evidence" Binding="{Binding ContentEvidence}" />
+                <DataGridCheckBoxColumn Width="70" Header="Skip" Binding="{Binding Skip, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+                <DataGridTextColumn IsReadOnly="True" Width="95" Header="Eligibility" Binding="{Binding Eligibility}" />
+                <DataGridTextColumn IsReadOnly="True" Width="90" Header="Language" Binding="{Binding Language}" />
+                <DataGridTextColumn IsReadOnly="True" Width="100" Header="Confidence" Binding="{Binding Confidence}" />
+                <DataGridTextColumn IsReadOnly="True" Width="75" Header="Records" Binding="{Binding RecordCount}" />
+                <DataGridTextColumn IsReadOnly="True" Width="90" Header="Keeper ID" Binding="{Binding KeeperRecordId}" />
+                <DataGridTextColumn IsReadOnly="True" Width="3*" Header="Evidence" Binding="{Binding Evidence}" />
+                <DataGridTextColumn IsReadOnly="True" Width="2*" Header="Contradictions" Binding="{Binding Contradictions}" />
+                <DataGridTextColumn IsReadOnly="True" Width="3*" Header="Content evidence" Binding="{Binding ContentEvidence}" />
               </DataGrid.Columns>
             </DataGrid>
           </GroupBox>
-          <GroupBox Grid.Row="2" Margin="0,8,0,0" Header="Members; double-click a row to open its book">
+          <GroupBox Grid.Row="2" Margin="0,8,0,0" Header="Select the record to keep; double-click a row to open its book">
             <DataGrid ItemsSource="{Binding SelectedExpandedCandidateMembers}"
                       SelectedItem="{Binding SelectedExpandedCandidateMember}"
                       MouseDoubleClick="ExpandedCandidateMembersGrid_MouseDoubleClick"
@@ -330,13 +342,14 @@
                       VirtualizingPanel.VirtualizationMode="Recycling"
                       AutomationProperties.Name="Members in selected expanded candidate group">
               <DataGrid.Columns>
-                <DataGridTextColumn Width="90" Header="Role" Binding="{Binding Role}" />
+                <DataGridTextColumn Width="90" Header="Action" Binding="{Binding Action}" />
                 <DataGridTextColumn Width="75" Header="Record ID" Binding="{Binding BookId}" />
                 <DataGridTextColumn Width="2*" Header="Title" Binding="{Binding Title}" />
                 <DataGridTextColumn Width="2*" Header="Authors" Binding="{Binding Authors}" />
                 <DataGridTextColumn Width="100" Header="Languages" Binding="{Binding Languages}" />
                 <DataGridTextColumn Width="*" Header="Series/index" Binding="{Binding Series}" />
                 <DataGridTextColumn Width="2*" Header="Formats/status" Binding="{Binding Formats}" />
+                <DataGridTextColumn Width="3*" Header="Keeper ranking" Binding="{Binding RetentionFacts}" />
               </DataGrid.Columns>
             </DataGrid>
           </GroupBox>

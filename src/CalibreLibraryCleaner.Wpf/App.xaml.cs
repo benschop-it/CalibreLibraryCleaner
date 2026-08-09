@@ -54,6 +54,7 @@ public partial class App : System.Windows.Application
         builder.Services.AddSingleton<ExportRecommendationsUseCase>();
         builder.Services.AddSingleton<ExecuteBulkExactDuplicateCleanupUseCase>();
         builder.Services.AddSingleton<ExecuteBulkMetadataCandidateCleanupUseCase>();
+        builder.Services.AddSingleton<ExecuteBulkExpandedCandidateCleanupUseCase>();
         builder.Services.AddSingleton(new LibraryAnalysisOptions());
         builder.Services.AddSingleton<ILibraryFolderPicker, OpenFolderDialogLibraryFolderPicker>();
         builder.Services.AddSingleton<IRecommendationExportFilePicker, SaveFileDialogRecommendationExportFilePicker>();
@@ -61,8 +62,11 @@ public partial class App : System.Windows.Application
             MessageBoxExactDuplicateCleanupConfirmationService>();
         builder.Services.AddSingleton<IMetadataCandidateCleanupConfirmationService,
             MessageBoxMetadataCandidateCleanupConfirmationService>();
+        builder.Services.AddSingleton<IExpandedCandidateCleanupConfirmationService,
+            MessageBoxExpandedCandidateCleanupConfirmationService>();
         builder.Services.AddSingleton<ExactBinaryCleanupPlanWorkspaceViewModel>();
         builder.Services.AddSingleton<MetadataCandidateCleanupWorkspaceViewModel>();
+        builder.Services.AddSingleton<ExpandedCandidateCleanupWorkspaceViewModel>();
         builder.Services.AddSingleton<MainWindowViewModel>();
         builder.Services.AddSingleton<MainWindow>();
         _host = builder.Build();
