@@ -33,6 +33,24 @@ public sealed partial class ExecuteCompositeCleanupUseCase(
             request.ExactSelections,
             request.MetadataSelections,
             request.ExpandedSelections);
+        LogPlanBuilt(
+            _logger,
+            request.ExactSelections.Count,
+            request.ExactSelections.Count(value => value.Skip),
+            request.MetadataSelections.Count,
+            request.MetadataSelections.Count(value => value.Skip),
+            request.ExpandedSelections.Count,
+            request.ExpandedSelections.Count(value => value.Skip),
+            state.Snapshot.WorkLanguageCandidateGroups.Count,
+            state.Snapshot.WorkLanguageCandidateGroups.Count(value =>
+                value.CleanupEligibility != Domain.Matching.WorkLanguageCleanupEligibility.ExplicitKeeperCleanup),
+            plan.Summary.ExactSelectionCount,
+            plan.Summary.MetadataSelectionCount,
+            plan.Summary.ExpandedSelectionCount,
+            plan.Summary.SkippedSelectionCount,
+            plan.Summary.ReconciledKeeperCount,
+            plan.Summary.TotalOperationCount,
+            plan.Conflicts.Count);
         return new(plan.Conflicts.Count == 0 ? plan.Summary : null, plan.Conflicts);
     }
 
@@ -279,6 +297,26 @@ public sealed partial class ExecuteCompositeCleanupUseCase(
     [LoggerMessage(62, LogLevel.Information,
         "Cleanup all {ExecutionId} completed {OperationCount} operations.")]
     private static partial void LogCleanupCompleted(ILogger logger, string executionId, int operationCount);
+
+    [LoggerMessage(63, LogLevel.Information,
+        "Cleanup all plan built. Requested exact={RequestedExact} (user skipped={SkippedExact}), metadata={RequestedMetadata} (user skipped={SkippedMetadata}), expanded={RequestedExpanded} (user skipped={SkippedExpanded}); available expanded={AvailableExpanded}, expanded to be reviewed={ToBeReviewedExpanded}; planned exact={PlannedExact}, metadata={PlannedMetadata}, expanded={PlannedExpanded}, preflight skipped={PreflightSkipped}, generated keepers reconciled={ReconciledKeepers}, operations={OperationCount}, conflicts={ConflictCount}.")]
+    private static partial void LogPlanBuilt(
+        ILogger logger,
+        int requestedExact,
+        int skippedExact,
+        int requestedMetadata,
+        int skippedMetadata,
+        int requestedExpanded,
+        int skippedExpanded,
+        int availableExpanded,
+        int toBeReviewedExpanded,
+        int plannedExact,
+        int plannedMetadata,
+        int plannedExpanded,
+        int preflightSkipped,
+        int reconciledKeepers,
+        int operationCount,
+        int conflictCount);
 
     private sealed record WorkerPlannedOperation(
         CalibreMutationOperation Operation,

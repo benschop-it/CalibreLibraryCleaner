@@ -7,7 +7,8 @@ namespace CalibreLibraryCleaner.Application.Executions;
 public sealed record MetadataCandidateCleanupSelection(
     ExactMetadataDuplicateGroupId GroupId,
     CalibreBookId? KeeperBookId,
-    bool Skip);
+    bool Skip,
+    bool KeeperWasOverridden = false);
 
 public sealed record ExecuteBulkMetadataCandidateCleanupRequest(
     string LibraryRoot,

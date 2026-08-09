@@ -15,6 +15,9 @@ duplicate groups through a constrained persistent Calibre worker.
 Persisted analysis loading remains available during development because a full
 large-library scan can take approximately twenty minutes. Startup lists small
 state manifests; explicit Load restores the saved analysis without rescanning.
+Explicit Scan still SHA-256 hashes every file, but unchanged EPUB/PDF assessments
+are reused from authoritative state when fingerprints and analyzer versions match.
+Repeat scans should therefore avoid most archive parsing and PDF worker startup.
 
 Exact-binary and metadata candidate groups both use generated keeper rows that
 can be overridden by selecting another member. Metadata groups can be skipped;
@@ -37,6 +40,14 @@ until they are corrected.
 Candidate-only EPUB fingerprints and local expanded discovery are implemented.
 PDF cross-document fingerprints, calibrated content-language detection, and
 optional online/model enrichment remain later roadmap work.
+
+## Diagnostics
+
+Application and scan diagnostics are written through Serilog to
+`%LOCALAPPDATA%\CalibreLibraryCleaner\logs\calibre-library-cleaner-*.log`.
+Logs roll daily and at 25 MB, retain the most recent 20 files, and flush buffered
+events to disk every second so completed and failed scans can be investigated
+after the application closes.
 
 ## Development
 

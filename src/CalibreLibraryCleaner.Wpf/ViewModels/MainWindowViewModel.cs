@@ -390,7 +390,7 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
             if (SetProperty(ref _selectedExpandedCandidateGroup, value))
             {
                 OnPropertyChanged(nameof(SelectedExpandedCandidateMembers));
-                SelectedExpandedCandidateMember = value is { Members.Count: > 0 } ? value.Members[0] : null;
+                SelectedExpandedCandidateMember = value?.KeeperMember;
             }
         }
     }
@@ -992,7 +992,7 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
         SelectedPdfAssessment = _pdfAssessments.FirstOrDefault();
         StatusMessage = snapshot.Books.Count == 0
             ? "Scan complete. The library contains no books."
-            : $"Scan complete: {snapshot.Books.Count} books, {snapshot.ExactBinaryDuplicateGroups.Count} exact file duplicate groups, {snapshot.ExactMetadataDuplicateGroups.Count} exact metadata candidate groups, {snapshot.WorkLanguageCandidateGroups.Count} expanded review-only groups, {presentation.MissingCount} missing format files.";
+            : $"Scan complete: {snapshot.Books.Count} books, {snapshot.ExactBinaryDuplicateGroups.Count} exact file duplicate groups, {snapshot.ExactMetadataDuplicateGroups.Count} exact metadata candidate groups, {snapshot.WorkLanguageCandidateGroups.Count} expanded candidate groups, {presentation.MissingCount} missing format files.";
         IsProgressIndeterminate = false;
         ProgressPercentage = 100;
         ExportRecommendationsCommand.NotifyCanExecuteChanged();

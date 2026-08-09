@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using CalibreLibraryCleaner.Application.Abstractions;
 using CalibreLibraryCleaner.Application.Assessments;
 using CalibreLibraryCleaner.Application.Assessments.Pdf;
@@ -9,10 +10,12 @@ using CalibreLibraryCleaner.Domain.Findings;
 using CalibreLibraryCleaner.Domain.Libraries;
 using CalibreLibraryCleaner.Domain.Matching;
 using CalibreLibraryCleaner.Domain.Recommendations;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 
 namespace CalibreLibraryCleaner.Application.Libraries;
 
-public sealed class ScanLibraryUseCase(
+public sealed partial class ScanLibraryUseCase(
     ILibraryPathResolver pathResolver,
     ICalibreMetadataReader metadataReader,
     IFormatFileHasher formatFileHasher,
@@ -21,14 +24,20 @@ public sealed class ScanLibraryUseCase(
     AssessEpubFormatsUseCase? assessEpubFormats = null,
     GenerateConsolidationRecommendationsUseCase? generateRecommendations = null,
     AssessPdfFormatsUseCase? assessPdfFormats = null,
-    DiscoverWorkLanguageCandidatesUseCase? discoverWorkLanguageCandidates = null)
+    DiscoverWorkLanguageCandidatesUseCase? discoverWorkLanguageCandidates = null,
+    ILibraryStateSession? libraryStateSession = null,
+    ILogger<ScanLibraryUseCase>? logger = null)
 {
+    private readonly ILogger<ScanLibraryUseCase> _logger = logger
+        ?? NullLogger<ScanLibraryUseCase>.Instance;
+
     public async Task<LibraryScanOutcome> ExecuteAsync(
         string? candidatePath,
         IProgress<LibraryScanProgress>? progress,
         CancellationToken cancellationToken,
         bool includePdfAssessments = true)
     {
+        long scanStarted = Stopwatch.GetTimestamp();
         cancellationToken.ThrowIfCancellationRequested();
         progress?.Report(new(LibraryScanPhase.Validating, 0, 1, "Validating library"));
         LibraryValidationOutcome validation = await pathResolver
@@ -39,6 +48,17 @@ public sealed class ScanLibraryUseCase(
             return LibraryScanOutcome.Failure(validation.Error!);
         }
 
+        ValidatedLibraryLocation validatedLocation = validation.Location!;
+        LibraryState? previousState = libraryStateSession?.GetCurrent(validatedLocation.LibraryRoot);
+        if (previousState is null && libraryStateSession is not null)
+        {
+            LibraryStateSessionOutcome load = await libraryStateSession.LoadAsync(
+                validatedLocation.LibraryRoot, cancellationToken).ConfigureAwait(false);
+            if (load.IsSuccess) previousState = load.State;
+        }
+        LibrarySnapshot? previousSnapshot = previousState?.IsAuthoritative == true
+            ? previousState.Snapshot
+            : null;
         progress?.Report(new(LibraryScanPhase.Validating, 1, 1, "Library validated"));
         CalibreCatalogReadOutcome readOutcome = await metadataReader
             .ReadAsync(validation.Location!, progress, cancellationToken)
@@ -49,6 +69,7 @@ public sealed class ScanLibraryUseCase(
         }
 
         CalibreCatalogRecord catalog = readOutcome.Catalog!;
+        long catalogReadCompleted = Stopwatch.GetTimestamp();
         List<LibraryFinding> findings = catalog.Issues
             .OrderBy(issue => issue.BookId)
             .ThenBy(issue => issue.Code, StringComparer.Ordinal)
@@ -102,6 +123,7 @@ public sealed class ScanLibraryUseCase(
 
             preparedBooks.Add(new(bookRecord, formats));
         }
+        long resolutionCompleted = Stopwatch.GetTimestamp();
 
         IReadOnlyList<FormatHashResult> hashResults;
         try
@@ -135,24 +157,39 @@ public sealed class ScanLibraryUseCase(
                 "The ebook hashing results were incomplete.",
                 "Retry the scan. If the problem continues, inspect the application log."));
         }
+        long hashingCompleted = Stopwatch.GetTimestamp();
 
         Dictionary<int, FormatHashResult> resultsBySequence = hashResults.ToDictionary(result => result.Sequence);
         List<CalibreBook> books = preparedBooks
             .Select(book => MapBook(book, resultsBySequence, findings, cancellationToken))
             .ToList();
         List<EpubAssessmentTarget> epubTargets = CreateEpubTargets(preparedBooks, requests, resultsBySequence);
+        EpubAssessmentReuseResult epubReuse = AssessmentReusePolicy.PartitionEpub(
+            previousSnapshot, epubTargets);
         IReadOnlyList<EpubAssessment> epubAssessments = [];
         if (assessEpubFormats is not null)
         {
             try
             {
-                IProgress<EpubAssessmentProgress>? epubProgress = progress is null ? null : new EpubProgressAdapter(progress);
-                epubAssessments = await assessEpubFormats.ExecuteAsync(
-                    epubTargets,
-                    options.MaxEpubAssessmentConcurrency,
-                    EpubInspectionLimits.V1,
-                    epubProgress,
-                    cancellationToken).ConfigureAwait(false);
+                progress?.Report(new(
+                    LibraryScanPhase.AssessingEpubFormats,
+                    epubReuse.Reused.Count,
+                    epubTargets.Count,
+                    $"Assessing EPUB files: {epubReuse.Reused.Count:N0} reused; {epubReuse.FreshTargets.Count:N0} require inspection"));
+                IProgress<EpubAssessmentProgress>? epubProgress = progress is null ? null : new EpubProgressAdapter(
+                    progress, epubReuse.Reused.Count, epubTargets.Count);
+                IReadOnlyList<EpubAssessment> fresh = epubReuse.FreshTargets.Count == 0
+                    ? []
+                    : await assessEpubFormats.ExecuteAsync(
+                        epubReuse.FreshTargets,
+                        options.MaxEpubAssessmentConcurrency,
+                        EpubInspectionLimits.V1,
+                        epubProgress,
+                        cancellationToken).ConfigureAwait(false);
+                epubAssessments = epubReuse.Reused.Concat(fresh)
+                    .OrderBy(value => value.CalibreBookId.Value)
+                    .ThenBy(value => value.ExpectedRelativePath, StringComparer.Ordinal)
+                    .ToArray();
             }
             catch (OperationCanceledException)
             {
@@ -173,20 +210,39 @@ public sealed class ScanLibraryUseCase(
                     "This does not show that another tool changed the library. Retry the scan; if it fails again, report the technical reason."));
             }
         }
+        long epubCompleted = Stopwatch.GetTimestamp();
 
         IReadOnlyList<PdfAssessment> pdfAssessments = [];
+        int reusedPdfCount = 0;
+        int pdfTargetCount = 0;
         if (includePdfAssessments && assessPdfFormats is not null)
         {
             try
             {
                 List<PdfAssessmentTarget> pdfTargets = CreatePdfTargets(preparedBooks, requests, resultsBySequence);
-                IProgress<PdfAssessmentProgress>? pdfProgress = progress is null ? null : new PdfProgressAdapter(progress);
-                pdfAssessments = await assessPdfFormats.ExecuteAsync(
-                    pdfTargets,
-                    options.MaxPdfAssessmentConcurrency,
-                    PdfInspectionLimits.V1,
-                    pdfProgress,
-                    cancellationToken).ConfigureAwait(false);
+                pdfTargetCount = pdfTargets.Count;
+                PdfAssessmentReuseResult pdfReuse = AssessmentReusePolicy.PartitionPdf(
+                    previousSnapshot, pdfTargets);
+                reusedPdfCount = pdfReuse.Reused.Count;
+                progress?.Report(new(
+                    LibraryScanPhase.AssessingPdfFormats,
+                    pdfReuse.Reused.Count,
+                    pdfTargets.Count,
+                    $"Assessing PDF files: {pdfReuse.Reused.Count:N0} reused; {pdfReuse.FreshTargets.Count:N0} require inspection"));
+                IProgress<PdfAssessmentProgress>? pdfProgress = progress is null ? null : new PdfProgressAdapter(
+                    progress, pdfReuse.Reused.Count, pdfTargets.Count);
+                IReadOnlyList<PdfAssessment> fresh = pdfReuse.FreshTargets.Count == 0
+                    ? []
+                    : await assessPdfFormats.ExecuteAsync(
+                        pdfReuse.FreshTargets,
+                        options.MaxPdfAssessmentConcurrency,
+                        PdfInspectionLimits.V1,
+                        pdfProgress,
+                        cancellationToken).ConfigureAwait(false);
+                pdfAssessments = pdfReuse.Reused.Concat(fresh)
+                    .OrderBy(value => value.CalibreBookId.Value)
+                    .ThenBy(value => value.ExpectedRelativePath, StringComparer.Ordinal)
+                    .ToArray();
             }
             catch (OperationCanceledException)
             {
@@ -200,6 +256,7 @@ public sealed class ScanLibraryUseCase(
                     "Close tools changing the library and retry the scan."));
             }
         }
+        long pdfCompleted = Stopwatch.GetTimestamp();
 
         cancellationToken.ThrowIfCancellationRequested();
         progress?.Report(new(LibraryScanPhase.GroupingExactDuplicates, 0, 1, "Grouping exact file duplicates"));
@@ -270,6 +327,7 @@ public sealed class ScanLibraryUseCase(
                     "Exact analysis is still available. Retry the scan to refresh expanded candidates."));
             }
         }
+        long matchingCompleted = Stopwatch.GetTimestamp();
 
         Dictionary<FindingKey, LibraryFinding> uniqueFindings = [];
         foreach (LibraryFinding finding in findings)
@@ -336,6 +394,23 @@ public sealed class ScanLibraryUseCase(
             workLanguageGroups,
             matchingSummary);
         cancellationToken.ThrowIfCancellationRequested();
+        long completed = Stopwatch.GetTimestamp();
+        LogScanCompleted(
+            _logger,
+            catalog.Books.Count,
+            requests.Count,
+            epubTargets.Count,
+            epubReuse.Reused.Count,
+            pdfTargetCount,
+            reusedPdfCount,
+            ElapsedMilliseconds(scanStarted, catalogReadCompleted),
+            ElapsedMilliseconds(catalogReadCompleted, resolutionCompleted),
+            ElapsedMilliseconds(resolutionCompleted, hashingCompleted),
+            ElapsedMilliseconds(hashingCompleted, epubCompleted),
+            ElapsedMilliseconds(epubCompleted, pdfCompleted),
+            ElapsedMilliseconds(pdfCompleted, matchingCompleted),
+            ElapsedMilliseconds(matchingCompleted, completed),
+            ElapsedMilliseconds(scanStarted, completed));
         progress?.Report(new(LibraryScanPhase.Completed, 1, 1, "Scan complete"));
         return LibraryScanOutcome.Success(snapshot);
     }
@@ -593,26 +668,32 @@ public sealed class ScanLibraryUseCase(
         }
     }
 
-    private sealed class EpubProgressAdapter(IProgress<LibraryScanProgress> progress) : IProgress<EpubAssessmentProgress>
+    private sealed class EpubProgressAdapter(
+        IProgress<LibraryScanProgress> progress,
+        int reusedFiles,
+        int totalFiles) : IProgress<EpubAssessmentProgress>
     {
         public void Report(EpubAssessmentProgress value) => progress.Report(new(
             LibraryScanPhase.AssessingEpubFormats,
-            value.CompletedFiles,
-            value.TotalFiles,
+            reusedFiles + value.CompletedFiles,
+            totalFiles,
             value.ActiveFiles == 0
-                ? $"Assessing EPUB files: {value.CompletedFiles:N0} of {value.TotalFiles:N0} complete"
-                : $"Assessing EPUB files: {value.CompletedFiles:N0} of {value.TotalFiles:N0} complete; {value.ActiveFiles:N0} active ({value.ActiveStageSummary})"));
+                ? $"Assessing EPUB files: {reusedFiles + value.CompletedFiles:N0} of {totalFiles:N0} complete ({reusedFiles:N0} reused)"
+                : $"Assessing EPUB files: {reusedFiles + value.CompletedFiles:N0} of {totalFiles:N0} complete; {value.ActiveFiles:N0} active ({value.ActiveStageSummary}); {reusedFiles:N0} reused"));
     }
 
-    private sealed class PdfProgressAdapter(IProgress<LibraryScanProgress> progress) : IProgress<PdfAssessmentProgress>
+    private sealed class PdfProgressAdapter(
+        IProgress<LibraryScanProgress> progress,
+        int reusedFiles,
+        int totalFiles) : IProgress<PdfAssessmentProgress>
     {
         public void Report(PdfAssessmentProgress value) => progress.Report(new(
             LibraryScanPhase.AssessingPdfFormats,
-            value.CompletedFiles,
-            value.TotalFiles,
+            reusedFiles + value.CompletedFiles,
+            totalFiles,
             string.IsNullOrWhiteSpace(value.CurrentRelativePath)
-                ? $"Assessing PDF files: {value.CompletedFiles} of {value.TotalFiles} complete"
-                : $"Assessing PDF files: {value.CompletedFiles} of {value.TotalFiles} complete — {value.Stage}: {value.CurrentRelativePath}"));
+                ? $"Assessing PDF files: {reusedFiles + value.CompletedFiles:N0} of {totalFiles:N0} complete ({reusedFiles:N0} reused)"
+                : $"Assessing PDF files: {reusedFiles + value.CompletedFiles:N0} of {totalFiles:N0} complete — {value.Stage}: {value.CurrentRelativePath}; {reusedFiles:N0} reused"));
     }
 
     private sealed class MatchingProgressAdapter(IProgress<LibraryScanProgress> progress) :
@@ -648,4 +729,26 @@ public sealed class ScanLibraryUseCase(
             value.TotalGroups,
             $"Generating consolidation recommendations: {value.CompletedGroups} of {value.TotalGroups} complete"));
     }
+
+    private static long ElapsedMilliseconds(long started, long completed) =>
+        (long)Stopwatch.GetElapsedTime(started, completed).TotalMilliseconds;
+
+    [LoggerMessage(400, LogLevel.Information,
+        "Library scan completed. Books={BookCount}, Formats={FormatCount}, EpubTargets={EpubTargets}, ReusedEpubAssessments={ReusedEpubAssessments}, PdfTargets={PdfTargets}, ReusedPdfAssessments={ReusedPdfAssessments}, CatalogMilliseconds={CatalogMilliseconds}, ResolutionMilliseconds={ResolutionMilliseconds}, HashingMilliseconds={HashingMilliseconds}, EpubMilliseconds={EpubMilliseconds}, PdfMilliseconds={PdfMilliseconds}, MatchingMilliseconds={MatchingMilliseconds}, RecommendationAndPublicationMilliseconds={RecommendationAndPublicationMilliseconds}, TotalMilliseconds={TotalMilliseconds}.")]
+    private static partial void LogScanCompleted(
+        ILogger logger,
+        int bookCount,
+        int formatCount,
+        int epubTargets,
+        int reusedEpubAssessments,
+        int pdfTargets,
+        int reusedPdfAssessments,
+        long catalogMilliseconds,
+        long resolutionMilliseconds,
+        long hashingMilliseconds,
+        long epubMilliseconds,
+        long pdfMilliseconds,
+        long matchingMilliseconds,
+        long recommendationAndPublicationMilliseconds,
+        long totalMilliseconds);
 }

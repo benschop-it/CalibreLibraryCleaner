@@ -14,7 +14,7 @@ EPUB package metadata is already inspected for every EPUB, but sampled content e
 
 Keep exact-binary and exact-normalized-metadata groups unchanged as independent evidence and cleanup authority. Add a separate versioned work-language candidate discovery pipeline that runs before inferred groups are published.
 
-The first delivery is local, deterministic, offline, and explainable. Initially inferred groups were review-only. Product acceptance on 2026-08-09 amended this decision: final groups may enter a dedicated expanded-candidate cleanup workflow only when every non-binary relation is confirmed by equivalent/high-similarity content evidence, known-language partitioning and complete-component contradictions have passed, and the user explicitly selects one keeper and confirms a complete external backup for that run.
+The first delivery is local, deterministic, offline, and explainable. Initially inferred groups were review-only. Product acceptance on 2026-08-09 first added a high-confidence cleanup path and then clarified the intended high-throughput behavior: every published Expanded candidate group is included in cleanup by default. Groups meeting the strongest evidence criteria display `Cleanup eligible`; all others display `To be reviewed` as an advisory indication that manual inspection would be wise. Both types use the deterministic generated keeper, allow keeper override and Skip, and otherwise follow the same cleanup path. Cleanup still requires authoritative state and confirmation of a complete external backup.
 
 The pipeline:
 
@@ -46,7 +46,7 @@ Online work lookup, multilingual embeddings, and local LLM adjudication are defe
 - Dutch and English translations can share a future work relation while remaining separate language groups.
 - Expensive content reads scale with bounded ambiguous candidates, not total library size squared.
 - Exact grouping IDs and cleanup behavior remain stable.
-- Content-confirmed final groups can be processed only through explicit keeper selection, per-run external-backup confirmation, authoritative projected state, and the existing fail-closed worker boundary.
+- Published final groups are processed by default with a generated keeper; the user can override the keeper or Skip. Per-run external-backup confirmation, authoritative projected state, and the existing fail-closed worker boundary remain mandatory.
 - Cold scans may perform additional bounded EPUB reads; warm scans reuse a no-prose cache.
 - Snapshot and state schemas gain optional inferred evidence and matching-run summaries.
 - Algorithm, normalization, landmark, cache, and resource-profile versions become part of persisted provenance.

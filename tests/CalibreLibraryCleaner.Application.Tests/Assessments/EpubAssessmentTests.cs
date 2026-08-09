@@ -519,6 +519,34 @@ public sealed class EpubAssessmentTests
     }
 
     [Fact]
+    public void IdenticalFingerprintReusesEpubAssessmentAndRebindsAssociation()
+    {
+        EpubAssessment previousAssessment = new EpubAssessmentEngine().Assess(
+            new(1), "Old.epub", Fingerprint, Healthy(new(1), "Old.epub"));
+        LibrarySnapshot previous = new(
+            new("87f7ed1f-59a8-45a6-975a-7e06fd84780d", 27, "C:\\Library"),
+            DateTimeOffset.UnixEpoch,
+            [new(new(1), "Book", "Author", [new(new(1), "Author", "Author")], [], [], "Author/Book")],
+            [],
+            epubAssessments: [previousAssessment]);
+        EpubAssessmentTarget target = new(
+            new(2), "EPUB", "New.epub", "C:\\Library", "C:\\Library\\New.epub",
+            FormatFileStatus.Present, Fingerprint, Observation);
+
+        EpubAssessmentReuseResult result = AssessmentReusePolicy.PartitionEpub(previous, [target]);
+
+        result.FreshTargets.Should().BeEmpty();
+        result.Reused.Should().ContainSingle().Which.Should().Match<EpubAssessment>(value =>
+            value.CalibreBookId == new CalibreBookId(2)
+            && value.ExpectedRelativePath == "New.epub"
+            && value.Features == previousAssessment.Features);
+        AssessmentReusePolicy.PartitionEpub(previous, [target with
+        {
+            Fingerprint = new(10, new(new string('b', 64))),
+        }]).FreshTargets.Should().ContainSingle();
+    }
+
+    [Fact]
     public async Task InvalidLimitsAreRejectedBeforeInspection()
     {
         IEpubInspector inspector = A.Fake<IEpubInspector>();

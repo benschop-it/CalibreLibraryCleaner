@@ -62,13 +62,19 @@ public sealed class MainWindowViewModelTests
         await viewModel.LoadPersistedSnapshotCommand.ExecuteAsync(null);
 
         viewModel.ExpandedCandidateGroups.Should().ContainSingle();
-        viewModel.ExpandedCandidateGroups[0].Eligibility.Should().Be("Cleanup eligible");
+        viewModel.ExpandedCandidateGroups[0].Eligibility.Should().Be("To be reviewed");
+        viewModel.ExpandedCandidateGroups[0].RequiresReview.Should().BeTrue();
+        viewModel.ExpandedCandidateGroups[0].Skip.Should().BeFalse();
         viewModel.ExpandedCandidateSummary.Should().Contain("1 expanded content-confirmed groups");
         viewModel.SelectedExpandedCandidateMembers.Should().HaveCount(2);
-        viewModel.SelectedExpandedCandidateMembers.Should().ContainSingle(value => value.Action == "Keep");
-        viewModel.SelectedExpandedCandidateMember = viewModel.SelectedExpandedCandidateMembers[1];
+        viewModel.SelectedExpandedCandidateGroup!.KeeperRecordId.Should().Be(2);
+        viewModel.SelectedExpandedCandidateMember!.BookId.Should().Be(2);
         viewModel.SelectedExpandedCandidateMembers[1].Action.Should().Be("Keep");
         viewModel.SelectedExpandedCandidateMembers[0].Action.Should().Be("Remove");
+        viewModel.SelectedExpandedCandidateMember = viewModel.SelectedExpandedCandidateMembers[0];
+        viewModel.SelectedExpandedCandidateMembers[0].Action.Should().Be("Keep");
+        viewModel.SelectedExpandedCandidateMembers[1].Action.Should().Be("Remove");
+        viewModel.SelectedExpandedCandidateMember = viewModel.SelectedExpandedCandidateMembers[1];
         await viewModel.OpenSelectedExpandedCandidateCommand.ExecuteAsync(null);
         A.CallTo(() => viewer.LaunchAsync(
             A<EbookViewerLaunchRequest>.That.Matches(value =>
@@ -643,14 +649,14 @@ public sealed class MainWindowViewModelTests
         FormatFileFingerprint firstFingerprint = new(1_024, new(new string('a', 64)));
         FormatFileFingerprint secondFingerprint = new(2_048, new(new string('b', 64)));
         CalibreBook first = ExpandedBook(1, "First", "Author/First.epub", firstFingerprint);
-        CalibreBook second = ExpandedBook(2, "Second", "Author/Second.epub", secondFingerprint);
+        CalibreBook second = ExpandedBook(2, "Second", "Author/Second.epub", secondFingerprint, hasCover: true);
         WorkLanguageCandidateGroup group = WorkLanguageCandidateGroup.Create(
             "en",
             [first.Id, second.Id],
             [first.Id],
             WorkLanguageCandidateConfidence.Strong,
-            [new("MATCH.CONTENT.EQUIVALENT", CandidateEvidenceStrength.Anchor)],
-            contentComparison: new(1, 1, 0, 0, 0, 0));
+            [new("MATCH.CONTENT.AMBIGUOUS", CandidateEvidenceStrength.Supporting)],
+            contentComparison: new(1, 0, 0, 1, 0, 0));
         return new(
             new("87f7ed1f-59a8-45a6-975a-7e06fd84780d", 27, libraryRoot),
             new DateTimeOffset(2026, 8, 1, 12, 0, 0, TimeSpan.Zero),
@@ -675,7 +681,8 @@ public sealed class MainWindowViewModelTests
         long id,
         string title,
         string relativePath,
-        FormatFileFingerprint fingerprint) => new(
+        FormatFileFingerprint fingerprint,
+        bool hasCover = false) => new(
         new(id),
         title,
         "Author",
@@ -689,7 +696,7 @@ public sealed class MainWindowViewModelTests
             fingerprint,
             new(fingerprint.SizeInBytes, DateTimeOffset.UnixEpoch, DateTimeOffset.UnixEpoch, 0))],
         "Author",
-        new(languages: ["eng"]));
+        new(languages: ["eng"], hasCover: hasCover));
 
     private static FormatHashResult Successful(int sequence, FormatFileFingerprint fingerprint) => FormatHashResult.Success(
         sequence,

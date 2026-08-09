@@ -58,6 +58,8 @@ public sealed record CompositeCleanupPlanSummary(
     int ExactSelectionCount,
     int MetadataSelectionCount,
     int ExpandedSelectionCount,
+    int SkippedSelectionCount,
+    int ReconciledKeeperCount,
     int TransferCount,
     int FormatRemovalCount,
     int RecordRemovalCount,

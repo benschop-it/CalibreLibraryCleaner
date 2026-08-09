@@ -7,7 +7,8 @@ namespace CalibreLibraryCleaner.Application.Executions;
 public sealed record ExpandedCandidateCleanupSelection(
     WorkLanguageCandidateGroupId GroupId,
     CalibreBookId? KeeperBookId,
-    bool Skip);
+    bool Skip,
+    bool KeeperWasOverridden = false);
 
 public sealed record ExecuteBulkExpandedCandidateCleanupRequest(
     string LibraryRoot,

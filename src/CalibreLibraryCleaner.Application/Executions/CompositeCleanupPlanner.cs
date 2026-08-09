@@ -32,54 +32,49 @@ internal static class CompositeCleanupPlanner
         ArgumentNullException.ThrowIfNull(exactSelections);
         ArgumentNullException.ThrowIfNull(metadataSelections);
         ArgumentNullException.ThrowIfNull(expandedSelections);
-        List<CompositeCleanupConflict> conflicts = [];
+        CompositeRecordConsolidationPlan consolidation = CompositeRecordConsolidationPlanner.Build(
+            snapshot, exactSelections, metadataSelections, expandedSelections);
+        ExactDuplicateKeeperSelection[] reconciledExactSelections = ReconcileExactSelections(
+            snapshot, exactSelections, consolidation);
+        List<CompositeCleanupConflict> conflicts = [.. consolidation.Conflicts];
         List<ExecutionIssue> exactIssues = [];
-        List<ExecutionIssue> metadataIssues = [];
-        List<ExecutionIssue> expandedIssues = [];
         ExecuteBulkExactDuplicateCleanupUseCase.BulkPlan exact =
-            ExecuteBulkExactDuplicateCleanupUseCase.BuildPlan(snapshot, exactSelections, exactIssues);
-        ExecuteBulkMetadataCandidateCleanupUseCase.MetadataCleanupPlan metadata =
-            ExecuteBulkMetadataCandidateCleanupUseCase.BuildPlan(snapshot, metadataSelections, metadataIssues);
-        ExecuteBulkExpandedCandidateCleanupUseCase.ExpandedCleanupPlan expanded =
-            ExecuteBulkExpandedCandidateCleanupUseCase.BuildPlan(snapshot, expandedSelections, expandedIssues);
-        AddCategoryIssues(conflicts, CompositeCleanupCategory.Exact, exactIssues);
-        AddCategoryIssues(conflicts, CompositeCleanupCategory.Metadata, metadataIssues);
-        AddCategoryIssues(conflicts, CompositeCleanupCategory.Expanded, expandedIssues);
-
-        Dictionary<CalibreBookId, CalibreBookId> recordTargets = [];
-        AddRecordTargets(snapshot, metadataSelections, expanded: false, recordTargets, conflicts);
-        AddRecordTargets(snapshot, expandedSelections, expanded: true, recordTargets, conflicts);
+            ExecuteBulkExactDuplicateCleanupUseCase.BuildPlan(snapshot, reconciledExactSelections, exactIssues);
+        HashSet<CalibreBookId> consolidatedRemovals = consolidation.RecordsToRemove.ToHashSet();
 
         List<CompositeTransferIntent> transfers =
         [
+            .. consolidation.Transfers,
             .. exact.Transfers.Where(value => value.NeedsAdd)
+                .Where(value => !consolidatedRemovals.Contains(value.SourceRecordId))
                 .Select(value => new CompositeTransferIntent(
-                    value.SourceRecordId, value.TargetRecordId, value.SourceFormat)),
-            .. metadata.Transfers.Select(value => new CompositeTransferIntent(
-                value.SourceRecordId, value.TargetRecordId, value.SourceFormat)),
-            .. expanded.Transfers.Select(value => new CompositeTransferIntent(
-                value.SourceRecordId, value.TargetRecordId, value.SourceFormat)),
+                    value.SourceRecordId,
+                    consolidation.SurvivorByRecord.GetValueOrDefault(value.TargetRecordId, value.TargetRecordId),
+                    value.SourceFormat))
+                .Where(value => value.SourceRecordId != value.TargetRecordId)
+                .Where(value => !TargetAlreadyHasFormat(snapshot, consolidation, value)),
         ];
         List<CompositeFormatRemovalIntent> removals =
         [
+            .. consolidation.FormatRemovals,
             .. exact.FormatRemovals.Select(value => new CompositeFormatRemovalIntent(
-                value.RecordId, value.Format)),
-            .. metadata.FormatRemovals.Select(value => new CompositeFormatRemovalIntent(
-                value.RecordId, value.Format)),
-            .. expanded.FormatRemovals.Select(value => new CompositeFormatRemovalIntent(
-                value.RecordId, value.Format)),
+                value.RecordId, value.Format))
+                .Where(value => !consolidatedRemovals.Contains(value.RecordId)),
         ];
         HashSet<CalibreBookId> recordsToRemove =
         [
+            .. consolidation.RecordsToRemove,
             .. exact.RecordsToRemove,
-            .. metadata.RecordsToRemove,
-            .. expanded.RecordsToRemove,
         ];
-        HashSet<CalibreBookId> keeperRecords = exactSelections.Where(value => !value.Skip)
-            .Select(value => value.RetainedMember.BookId)
-            .Concat(metadataSelections.Where(value => !value.Skip && value.KeeperBookId is not null)
+        HashSet<CalibreBookId> keeperRecords = consolidation.SurvivorByRecord.Values
+            .Concat(exactSelections
+            .Where(value => !value.Skip && value.KeeperWasOverridden)
+            .Select(value => value.RetainedMember.BookId))
+            .Concat(metadataSelections.Where(value =>
+                    !value.Skip && value.KeeperWasOverridden && value.KeeperBookId is not null)
                 .Select(value => value.KeeperBookId!.Value))
-            .Concat(expandedSelections.Where(value => !value.Skip && value.KeeperBookId is not null)
+            .Concat(expandedSelections.Where(value =>
+                    !value.Skip && value.KeeperWasOverridden && value.KeeperBookId is not null)
                 .Select(value => value.KeeperBookId!.Value))
             .ToHashSet();
 
@@ -88,7 +83,8 @@ internal static class CompositeCleanupPlanner
                 "A record selected as Keep in one view is selected for removal in another view.",
                 [keeper]));
 
-        HashSet<FormatKey> retainedAssociations = exactSelections.Where(value => !value.Skip)
+        HashSet<FormatKey> retainedAssociations = exactSelections.Where(value =>
+            !value.Skip && value.KeeperWasOverridden)
             .Select(value => new FormatKey(
                 value.RetainedMember.BookId,
                 value.RetainedMember.Format))
@@ -107,7 +103,7 @@ internal static class CompositeCleanupPlanner
                 conflicts.Add(Conflict("COMPOSITE.SOURCE_MULTIPLE_TARGETS",
                     "One source format is selected for transfer to different keeper records.",
                     [group.Key.RecordId, .. targets], group.Key.Format));
-            if (recordTargets.TryGetValue(group.Key.RecordId, out CalibreBookId expected)
+            if (consolidation.SurvivorByRecord.TryGetValue(group.Key.RecordId, out CalibreBookId expected)
                 && targets.Any(value => value != expected))
                 conflicts.Add(Conflict("COMPOSITE.TRANSFER_KEEPER_MISMATCH",
                     "A source record is assigned to one keeper but a format transfer targets another keeper.",
@@ -162,8 +158,10 @@ internal static class CompositeCleanupPlanner
         CalibreBookId[] orderedRecords = recordsToRemove.OrderBy(value => value.Value).ToArray();
         CompositeCleanupPlanSummary summary = new(
             exactSelections.Count(value => !value.Skip),
-            metadataSelections.Count(value => !value.Skip),
-            expandedSelections.Count(value => !value.Skip),
+            consolidation.MetadataSelectionCount,
+            consolidation.ExpandedSelectionCount,
+            consolidation.SkippedSelectionCount + exactIssues.Count,
+            consolidation.ReconciledKeeperCount,
             orderedTransfers.Length,
             orderedRemovals.Length,
             orderedRecords.Length,
@@ -178,65 +176,44 @@ internal static class CompositeCleanupPlanner
                 .ThenBy(value => value.RecordIds.Count == 0 ? 0 : value.RecordIds[0].Value).ToArray()));
     }
 
-    private static void AddRecordTargets(
+    private static ExactDuplicateKeeperSelection[] ReconcileExactSelections(
         LibrarySnapshot snapshot,
-        IReadOnlyList<MetadataCandidateCleanupSelection> selections,
-        bool expanded,
-        Dictionary<CalibreBookId, CalibreBookId> targets,
-        List<CompositeCleanupConflict> conflicts)
+        IReadOnlyList<ExactDuplicateKeeperSelection> selections,
+        CompositeRecordConsolidationPlan consolidation)
     {
-        if (expanded) throw new ArgumentException("The metadata overload cannot process expanded selections.");
-        Dictionary<Domain.Duplicates.ExactMetadataDuplicateGroupId, Domain.Duplicates.ExactMetadataDuplicateGroup> groups =
-            snapshot.ExactMetadataDuplicateGroups.ToDictionary(value => value.Id);
-        foreach (MetadataCandidateCleanupSelection selection in selections.Where(value =>
-            !value.Skip && value.KeeperBookId is not null && groups.ContainsKey(value.GroupId)))
-            AddGroupTargets(groups[selection.GroupId].Members, selection.KeeperBookId!.Value,
-                targets, conflicts, CompositeCleanupCategory.Metadata);
-    }
-
-    private static void AddRecordTargets(
-        LibrarySnapshot snapshot,
-        IReadOnlyList<ExpandedCandidateCleanupSelection> selections,
-        bool expanded,
-        Dictionary<CalibreBookId, CalibreBookId> targets,
-        List<CompositeCleanupConflict> conflicts)
-    {
-        if (!expanded) throw new ArgumentException("The expanded overload requires expanded=true.");
-        Dictionary<Domain.Matching.WorkLanguageCandidateGroupId, Domain.Matching.WorkLanguageCandidateGroup> groups =
-            snapshot.WorkLanguageCandidateGroups.ToDictionary(value => value.Id);
-        foreach (ExpandedCandidateCleanupSelection selection in selections.Where(value =>
-            !value.Skip && value.KeeperBookId is not null && groups.ContainsKey(value.GroupId)))
-            AddGroupTargets(groups[selection.GroupId].Members, selection.KeeperBookId!.Value,
-                targets, conflicts, CompositeCleanupCategory.Expanded);
-    }
-
-    private static void AddGroupTargets(
-        IReadOnlyList<CalibreBookId> members,
-        CalibreBookId keeper,
-        Dictionary<CalibreBookId, CalibreBookId> targets,
-        List<CompositeCleanupConflict> conflicts,
-        CompositeCleanupCategory category)
-    {
-        foreach (CalibreBookId member in members.Where(value => value != keeper))
+        Dictionary<Domain.Duplicates.ExactBinaryDuplicateGroupId, Domain.Duplicates.ExactBinaryDuplicateGroup> groups =
+            snapshot.ExactBinaryDuplicateGroups.ToDictionary(value => value.Id);
+        HashSet<CalibreBookId> removed = consolidation.RecordsToRemove.ToHashSet();
+        return selections.Select(selection =>
         {
-            if (targets.TryGetValue(member, out CalibreBookId existing) && existing != keeper)
-                conflicts.Add(new("COMPOSITE.RECORD_MULTIPLE_KEEPERS", category,
-                    "An overlapping record is assigned to different keeper records.",
-                    [member, existing, keeper]));
-            else
-                targets[member] = keeper;
-        }
+            if (selection.Skip
+                || selection.KeeperWasOverridden
+                || !groups.TryGetValue(selection.GroupId, out Domain.Duplicates.ExactBinaryDuplicateGroup? group))
+                return selection;
+            Domain.Duplicates.ExactBinaryDuplicateMember? replacement = group.Members
+                .Where(value => consolidation.SurvivorByRecord.TryGetValue(value.BookId, out CalibreBookId survivor)
+                    && survivor == value.BookId)
+                .OrderBy(value => value.BookId.Value)
+                .ThenBy(value => value.ExpectedRelativePath, StringComparer.Ordinal)
+                .FirstOrDefault();
+            replacement ??= group.Members
+                .Where(value => !removed.Contains(value.BookId))
+                .OrderBy(value => value.BookId.Value)
+                .ThenBy(value => value.ExpectedRelativePath, StringComparer.Ordinal)
+                .FirstOrDefault();
+            return replacement is null ? selection : selection with { RetainedMember = replacement };
+        }).ToArray();
     }
 
-    private static void AddCategoryIssues(
-        List<CompositeCleanupConflict> conflicts,
-        CompositeCleanupCategory category,
-        IEnumerable<ExecutionIssue> issues)
-    {
-        foreach (ExecutionIssue issue in issues)
-            conflicts.Add(new($"COMPOSITE.{issue.Code}", category, issue.Explanation,
-                issue.RecordId is null ? [] : [issue.RecordId.Value], issue.Format));
-    }
+    private static bool TargetAlreadyHasFormat(
+        LibrarySnapshot snapshot,
+        CompositeRecordConsolidationPlan consolidation,
+        CompositeTransferIntent transfer) => snapshot.Books
+            .Single(value => value.Id == transfer.TargetRecordId)
+            .Formats.Any(value => value.Format == transfer.SourceFormat.Format)
+        || consolidation.Transfers.Any(value =>
+            value.TargetRecordId == transfer.TargetRecordId
+            && value.SourceFormat.Format == transfer.SourceFormat.Format);
 
     private static void SimulateFinalInventory(
         LibrarySnapshot snapshot,

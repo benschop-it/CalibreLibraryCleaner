@@ -333,7 +333,15 @@
                       VirtualizingPanel.VirtualizationMode="Recycling"
                       AutomationProperties.Name="Expanded work-language candidate groups">
               <DataGrid.Columns>
-                <DataGridCheckBoxColumn Width="70" Header="Skip" Binding="{Binding Skip, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+                <DataGridTemplateColumn Width="70" Header="Skip">
+                  <DataGridTemplateColumn.CellTemplate>
+                    <DataTemplate>
+                      <CheckBox HorizontalAlignment="Center"
+                                VerticalAlignment="Center"
+                                IsChecked="{Binding Skip, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+                    </DataTemplate>
+                  </DataGridTemplateColumn.CellTemplate>
+                </DataGridTemplateColumn>
                 <DataGridTextColumn IsReadOnly="True" Width="95" Header="Eligibility" Binding="{Binding Eligibility}" />
                 <DataGridTextColumn IsReadOnly="True" Width="90" Header="Language" Binding="{Binding Language}" />
                 <DataGridTextColumn IsReadOnly="True" Width="100" Header="Confidence" Binding="{Binding Confidence}" />

@@ -61,9 +61,14 @@ public sealed class CompositeCleanupWorkspaceViewModel : ObservableObject
         int exact = ExactSelections().Count(value => !value.Skip);
         int metadata = MetadataSelections().Count(value => !value.Skip);
         int expanded = ExpandedSelections().Count(value => !value.Skip);
+        int expandedToReview = _expandedGroups.Count(value => !value.Skip && value.RequiresReview);
         Status = snapshot is null
             ? "Run or load authoritative state from one completed scan before Cleanup all."
-            : $"Reviewed selections ready: {exact:N0} exact, {metadata:N0} metadata, {expanded:N0} expanded. Conflicts are checked before backup confirmation or mutation.";
+            : $"Selections ready: {exact:N0} exact, {metadata:N0} metadata, {expanded:N0} expanded."
+                + (expandedToReview > 0
+                    ? $" {expandedToReview:N0} expanded group(s) are marked to be reviewed but will be processed unless skipped."
+                    : string.Empty)
+                + " Conflicts are checked before backup confirmation or mutation.";
         CleanupAllCommand.NotifyCanExecuteChanged();
     }
 
@@ -133,21 +138,23 @@ public sealed class CompositeCleanupWorkspaceViewModel : ObservableObject
     private ExactDuplicateKeeperSelection[] ExactSelections() => _exactGroups
         .Where(value => value.IsCleanupEligible && value.RetainedMember is not null)
         .Select(value => new ExactDuplicateKeeperSelection(
-            value.GroupId, value.RetainedMember!.Member, value.Skip))
+            value.GroupId, value.RetainedMember!.Member, value.Skip, value.KeeperWasOverridden))
         .ToArray();
 
     private MetadataCandidateCleanupSelection[] MetadataSelections() => _metadataGroups
         .Select(value => new MetadataCandidateCleanupSelection(
             value.GroupId,
             value.KeeperMember is null ? null : new CalibreBookId(value.KeeperMember.BookId),
-            value.Skip))
+            value.Skip,
+            value.KeeperWasOverridden))
         .ToArray();
 
     private ExpandedCandidateCleanupSelection[] ExpandedSelections() => _expandedGroups
         .Select(value => new ExpandedCandidateCleanupSelection(
             new(value.GroupId),
             value.KeeperMember is null ? null : new CalibreBookId(value.KeeperMember.BookId),
-            value.Skip))
+            value.Skip,
+            value.KeeperWasOverridden))
         .ToArray();
 
     private static string DescribeConflicts(
@@ -156,14 +163,19 @@ public sealed class CompositeCleanupWorkspaceViewModel : ObservableObject
     {
         Dictionary<CalibreBookId, CalibreBook> books = snapshot.Books.ToDictionary(value => value.Id);
         StringBuilder message = new("Cleanup all found incompatible reviewed selections. No mutation was started.\n\n");
-        foreach (CompositeCleanupConflict conflict in conflicts.Take(50))
+        foreach (IGrouping<(CompositeCleanupCategory Category, string Code, string Description, string? Format), CompositeCleanupConflict> group
+            in conflicts.GroupBy(value => (value.Category, value.Code, value.Description, value.Format)).Take(50))
         {
-            string records = string.Join(", ", conflict.RecordIds.Select(id =>
+            CompositeCleanupConflict conflict = group.First();
+            CalibreBookId[] recordIds = group.SelectMany(value => value.RecordIds).Distinct()
+                .OrderBy(value => value.Value).Take(20).ToArray();
+            string records = string.Join(", ", recordIds.Select(id =>
                 books.TryGetValue(id, out CalibreBook? book)
                     ? $"{id.Value.ToString(CultureInfo.InvariantCulture)} ({book.Title})"
                     : id.Value.ToString(CultureInfo.InvariantCulture)));
             message.Append("• ").Append(conflict.Category).Append(" / ").Append(conflict.Code)
                 .Append(": ").Append(conflict.Description);
+            if (group.Count() > 1) message.Append(" Affected selections: ").Append(group.Count()).Append('.');
             if (records.Length > 0) message.Append(" Records: ").Append(records).Append('.');
             if (conflict.Format is not null) message.Append(" Format: ").Append(conflict.Format).Append('.');
             message.AppendLine().AppendLine();

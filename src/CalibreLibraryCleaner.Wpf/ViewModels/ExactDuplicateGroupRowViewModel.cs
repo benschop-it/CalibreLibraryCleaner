@@ -67,6 +67,7 @@ public sealed class ExactDuplicateGroupRowViewModel : ObservableObject
         {
             if (value is null || !Members.Contains(value) || !IsCleanupEligible) return;
             if (!SetProperty(ref _retainedMember, value)) return;
+            KeeperWasOverridden = true;
             foreach (ExactDuplicateMemberRowViewModel member in Members)
                 member.IsRetained = member == value;
             OnPropertyChanged(nameof(RecordIdsToDelete));
@@ -74,6 +75,8 @@ public sealed class ExactDuplicateGroupRowViewModel : ObservableObject
     }
 
     public bool IsCleanupEligible { get; }
+
+    public bool KeeperWasOverridden { get; private set; }
 
     public bool Skip
     {

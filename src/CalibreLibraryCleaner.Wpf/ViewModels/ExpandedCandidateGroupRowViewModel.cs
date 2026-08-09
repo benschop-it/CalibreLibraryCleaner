@@ -20,9 +20,8 @@ public sealed class ExpandedCandidateGroupRowViewModel : ObservableObject
         GroupId = group.Id.Value;
         Language = group.Language == "und" ? "Unknown" : group.Language;
         Confidence = group.Confidence.ToString();
-        Eligibility = group.CleanupEligibility == WorkLanguageCleanupEligibility.ExplicitKeeperCleanup
-            ? "Cleanup eligible"
-            : "Review only";
+        RequiresReview = group.CleanupEligibility != WorkLanguageCleanupEligibility.ExplicitKeeperCleanup;
+        Eligibility = RequiresReview ? "To be reviewed" : "Cleanup eligible";
         RecordCount = group.Members.Count;
         AnchorRecordIds = string.Join(", ", group.AnchorMembers.Select(value => value.Value));
         Evidence = string.Join(", ", group.Evidence.Select(value => value.Code));
@@ -38,12 +37,14 @@ public sealed class ExpandedCandidateGroupRowViewModel : ObservableObject
                 : throw new ArgumentException("An expanded candidate member is missing from the snapshot.", nameof(books)))
             .ToArray());
         KeeperMember = Members.Single(value => value.BookId == retention.KeeperBookId.Value);
+        KeeperWasOverridden = false;
     }
 
     public string GroupId { get; }
     public string Language { get; }
     public string Confidence { get; }
     public string Eligibility { get; }
+    public bool RequiresReview { get; }
     public int RecordCount { get; }
     public string AnchorRecordIds { get; }
     public string Evidence { get; }
@@ -59,12 +60,15 @@ public sealed class ExpandedCandidateGroupRowViewModel : ObservableObject
             if (value is not null && !Members.Contains(value))
                 throw new ArgumentException("The keeper must belong to this expanded group.", nameof(value));
             if (!SetProperty(ref _keeperMember, value)) return;
+            KeeperWasOverridden = true;
             foreach (ExpandedCandidateMemberRowViewModel member in Members) member.IsKeeper = member == value;
             OnPropertyChanged(nameof(KeeperRecordId));
         }
     }
 
     public long? KeeperRecordId => KeeperMember?.BookId;
+
+    public bool KeeperWasOverridden { get; private set; }
 
     public bool Skip
     {

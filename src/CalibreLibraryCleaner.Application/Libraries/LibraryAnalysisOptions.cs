@@ -4,18 +4,21 @@ public sealed record LibraryAnalysisOptions
 {
     public LibraryAnalysisOptions(
         int maxHashConcurrency = 4,
-        int maxEpubAssessmentConcurrency = 2,
+        int? maxEpubAssessmentConcurrency = null,
         int maxPdfAssessmentConcurrency = 2,
         int maxContentSignatureConcurrency = 4)
     {
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(maxHashConcurrency);
-        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(maxEpubAssessmentConcurrency);
+        int epubConcurrency = maxEpubAssessmentConcurrency
+            ?? Math.Clamp(Environment.ProcessorCount / 2, 2, 4);
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(epubConcurrency);
+        ArgumentOutOfRangeException.ThrowIfGreaterThan(epubConcurrency, 4);
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(maxPdfAssessmentConcurrency);
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(maxContentSignatureConcurrency);
         ArgumentOutOfRangeException.ThrowIfGreaterThan(maxPdfAssessmentConcurrency, 8);
         ArgumentOutOfRangeException.ThrowIfGreaterThan(maxContentSignatureConcurrency, 4);
         MaxHashConcurrency = maxHashConcurrency;
-        MaxEpubAssessmentConcurrency = maxEpubAssessmentConcurrency;
+        MaxEpubAssessmentConcurrency = epubConcurrency;
         MaxPdfAssessmentConcurrency = maxPdfAssessmentConcurrency;
         MaxContentSignatureConcurrency = maxContentSignatureConcurrency;
     }

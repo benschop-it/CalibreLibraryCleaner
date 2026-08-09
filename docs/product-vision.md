@@ -12,7 +12,7 @@ Provide a local-first, safe, explainable workflow that finds duplicates, assesse
 
 - Safety over aggressive automation.
 - Every score and recommendation is explainable.
-- Automatic action only for very high-confidence cases.
+- Process assessed cleanup candidates by default after presenting uncertainty, keeper, and Skip controls for efficient user review.
 - Reversibility for every destructive operation.
 - No direct database mutation.
 - Core analysis works without cloud services.

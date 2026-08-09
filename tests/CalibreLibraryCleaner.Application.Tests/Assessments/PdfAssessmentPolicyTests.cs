@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using CalibreLibraryCleaner.Application.Abstractions;
+using CalibreLibraryCleaner.Application.Assessments;
 using CalibreLibraryCleaner.Application.Assessments.Pdf;
 using CalibreLibraryCleaner.Application.Libraries;
 using CalibreLibraryCleaner.Domain.Assessments;
@@ -533,6 +534,51 @@ public sealed class PdfAssessmentPolicyTests
             A<Func<PdfDocumentHeaderFacts, CancellationToken, ValueTask<IReadOnlyList<int>>>>._,
             A<IProgress<PdfInspectionProgress>?>._,
             A<CancellationToken>._)).MustNotHaveHappened();
+    }
+
+    [Fact]
+    public void IdenticalFingerprintReusesPdfAssessmentButOldAnalyzerForcesFreshInspection()
+    {
+        PdfAssessment previousAssessment = new PdfAssessmentEngine(new()).Assess(
+            new(1), "Old.pdf", Fingerprint,
+            Result(1, [Page(1, "digital")], path: "Old.pdf"), Observation);
+        LibrarySnapshot previous = new(
+            new("87f7ed1f-59a8-45a6-975a-7e06fd84780d", 27, "C:\\Library"),
+            DateTimeOffset.UnixEpoch,
+            [new(new(1), "Book", "Author", [new(new(1), "Author", "Author")], [], [], "Author/Book")],
+            [],
+            pdfAssessments: [previousAssessment]);
+        PdfAssessmentTarget target = new(
+            new(2), "PDF", "New.pdf", "C:\\Library", "C:\\Library\\New.pdf",
+            FormatFileStatus.Present, Fingerprint, Observation);
+
+        PdfAssessmentReuseResult reused = AssessmentReusePolicy.PartitionPdf(previous, [target]);
+
+        reused.FreshTargets.Should().BeEmpty();
+        reused.Reused.Should().ContainSingle().Which.Should().Match<PdfAssessment>(value =>
+            value.CalibreBookId == new CalibreBookId(2)
+            && value.ExpectedRelativePath == "New.pdf"
+            && value.ObservedObservation == Observation);
+
+        FormatAssessment oldResult = new(
+            previousAssessment.CalibreBookId,
+            "PDF",
+            previousAssessment.ExpectedRelativePath,
+            Fingerprint,
+            previousAssessment.Status,
+            previousAssessment.Score,
+            new("pdf-inspector/0.9.0"),
+            previousAssessment.ScoringModelVersion,
+            previousAssessment.Findings,
+            PdfAssessment.V1Components,
+            Observation);
+        LibrarySnapshot oldSnapshot = new(
+            previous.Identity,
+            previous.ScannedAt,
+            previous.Books,
+            [],
+            pdfAssessments: [new(oldResult, previousAssessment.Features)]);
+        AssessmentReusePolicy.PartitionPdf(oldSnapshot, [target]).FreshTargets.Should().ContainSingle();
     }
 
     private static PdfInspectionResult Result(

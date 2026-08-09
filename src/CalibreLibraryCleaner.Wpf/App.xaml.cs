@@ -12,6 +12,7 @@ using CalibreLibraryCleaner.Wpf.ViewModels;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using Serilog;
 
 namespace CalibreLibraryCleaner.Wpf;
 
@@ -26,16 +27,16 @@ public partial class App : System.Windows.Application
         // global and idempotent; the infrastructure layer registers it too.
         System.Text.Encoding.RegisterProvider(System.Text.CodePagesEncodingProvider.Instance);
 
+        Log.Logger = ApplicationLogging.CreateLogger();
+        Log.Information(
+            "Application logging initialized. LogDirectory={LogDirectory}, RetainedFiles={RetainedFiles}, FileSizeLimitBytes={FileSizeLimitBytes}, FlushIntervalSeconds={FlushIntervalSeconds}.",
+            ApplicationLogging.DefaultLogDirectory,
+            ApplicationLogging.RetainedFileCountLimit,
+            ApplicationLogging.FileSizeLimitBytes,
+            ApplicationLogging.FlushInterval.TotalSeconds);
         HostApplicationBuilder builder = Host.CreateApplicationBuilder();
-        builder.Logging.AddFilter(
-            "CalibreLibraryCleaner.Application.Matching",
-            LogLevel.Debug);
-        builder.Logging.AddFilter(
-            "CalibreLibraryCleaner.Application.Assessments",
-            LogLevel.Debug);
-        builder.Logging.AddFilter(
-            "CalibreLibraryCleaner.Infrastructure.Epub",
-            LogLevel.Debug);
+        builder.Logging.ClearProviders();
+        builder.Services.AddSerilog(Log.Logger, dispose: false);
         builder.Services.AddCalibreLibraryInfrastructure();
         builder.Services.AddSingleton<ValidateLibraryUseCase>();
         builder.Services.AddSingleton<EpubAssessmentEngine>();
@@ -78,18 +79,36 @@ public partial class App : System.Windows.Application
 
     protected override async void OnStartup(System.Windows.StartupEventArgs e)
     {
-        base.OnStartup(e);
-        await _host.StartAsync().ConfigureAwait(true);
-        await _host.Services.GetRequiredService<MainWindowViewModel>()
-            .InitializeAsync(CancellationToken.None)
-            .ConfigureAwait(true);
-        _host.Services.GetRequiredService<MainWindow>().Show();
+        try
+        {
+            base.OnStartup(e);
+            await _host.StartAsync().ConfigureAwait(true);
+            await _host.Services.GetRequiredService<MainWindowViewModel>()
+                .InitializeAsync(CancellationToken.None)
+                .ConfigureAwait(true);
+            _host.Services.GetRequiredService<MainWindow>().Show();
+            Log.Information("Application startup completed.");
+        }
+        catch (Exception exception)
+        {
+            Log.Fatal(exception, "Application startup failed.");
+            await Log.CloseAndFlushAsync().ConfigureAwait(true);
+            throw;
+        }
     }
 
     protected override async void OnExit(System.Windows.ExitEventArgs e)
     {
-        await _host.StopAsync().ConfigureAwait(true);
-        _host.Dispose();
-        base.OnExit(e);
+        try
+        {
+            Log.Information("Application shutdown started.");
+            await _host.StopAsync().ConfigureAwait(true);
+            _host.Dispose();
+            base.OnExit(e);
+        }
+        finally
+        {
+            await Log.CloseAndFlushAsync().ConfigureAwait(true);
+        }
     }
 }

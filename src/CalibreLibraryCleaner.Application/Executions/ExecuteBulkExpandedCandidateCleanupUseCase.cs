@@ -250,11 +250,10 @@ public sealed partial class ExecuteBulkExpandedCandidateCleanupUseCase(
                 continue;
             }
             if (!groups.TryGetValue(selection.GroupId, out WorkLanguageCandidateGroup? group)
-                || group.CleanupEligibility != WorkLanguageCleanupEligibility.ExplicitKeeperCleanup
                 || !group.Members.Contains(selection.KeeperBookId.Value))
             {
                 issues.Add(new("BULK_EXPANDED.GROUP_SELECTION_INVALID", ExecutionIssueSeverity.Warning,
-                    "An expanded candidate group was stale, review-only, or had no current keeper and was skipped."));
+                    "An expanded candidate group was stale or had no current keeper and was skipped."));
                 skipped++;
                 continue;
             }

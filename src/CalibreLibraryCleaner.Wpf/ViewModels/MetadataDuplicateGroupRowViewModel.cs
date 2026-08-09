@@ -66,6 +66,7 @@ public sealed class MetadataDuplicateGroupRowViewModel : ObservableObject
             ? Members.SingleOrDefault(value => value.BookId == metadata.SelectedBookId.Value)
             : Members.Single(value => value.BookId == fallbackRetention.KeeperBookId.Value);
         KeeperMember ??= Members.Single(value => value.BookId == fallbackRetention.KeeperBookId.Value);
+        KeeperWasOverridden = false;
         Skip = false;
     }
 
@@ -98,12 +99,15 @@ public sealed class MetadataDuplicateGroupRowViewModel : ObservableObject
             if (value is not null && !Members.Contains(value))
                 throw new ArgumentException("The keeper must belong to this metadata group.", nameof(value));
             if (!SetProperty(ref _keeperMember, value)) return;
+            KeeperWasOverridden = true;
             foreach (MetadataDuplicateMemberRowViewModel member in Members) member.IsKeeper = member == value;
             OnPropertyChanged(nameof(KeeperRecordId));
         }
     }
 
     public long? KeeperRecordId => KeeperMember?.BookId;
+
+    public bool KeeperWasOverridden { get; private set; }
 
     public bool Skip
     {

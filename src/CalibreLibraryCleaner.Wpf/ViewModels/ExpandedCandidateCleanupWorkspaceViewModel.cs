@@ -105,8 +105,7 @@ public sealed class ExpandedCandidateCleanupWorkspaceViewModel : ObservableObjec
 
     private bool IsEligibleSelection(ExpandedCandidateGroupRowViewModel group) =>
         !group.Skip
-        && group.KeeperMember is not null
-        && string.Equals(group.Eligibility, "Cleanup eligible", StringComparison.Ordinal);
+        && group.KeeperMember is not null;
 
     private void OnGroupPropertyChanged(object? sender, PropertyChangedEventArgs eventArgs)
     {
@@ -118,14 +117,15 @@ public sealed class ExpandedCandidateCleanupWorkspaceViewModel : ObservableObjec
     private void RefreshStatus()
     {
         int eligible = _groups.Count(IsEligibleSelection);
-        int reviewOnly = _groups.Count(value =>
-            !string.Equals(value.Eligibility, "Cleanup eligible", StringComparison.Ordinal));
+        int toReview = _groups.Count(value => !value.Skip && value.RequiresReview);
         Status = _snapshot is null
             ? "Run or load authoritative state from a fresh scan before processing expanded candidates."
             : _groups.Count == 0
                 ? "No expanded candidate groups are available."
-                : $"{eligible:N0} group(s) will be processed; {_groups.Count - eligible:N0} group(s) are skipped or review-only"
-                    + (reviewOnly > 0 ? $" ({reviewOnly:N0} require Rescan under the current policy)." : ".");
+                : $"{eligible:N0} group(s) will be processed; {_groups.Count - eligible:N0} group(s) are skipped."
+                    + (toReview > 0
+                        ? $" {toReview:N0} selected group(s) are marked to be reviewed but remain included."
+                        : string.Empty);
         ProcessCandidatesCommand.NotifyCanExecuteChanged();
     }
 }

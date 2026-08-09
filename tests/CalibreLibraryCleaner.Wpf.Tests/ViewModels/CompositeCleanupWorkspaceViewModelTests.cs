@@ -15,6 +15,34 @@ namespace CalibreLibraryCleaner.Wpf.Tests.ViewModels;
 public sealed class CompositeCleanupWorkspaceViewModelTests
 {
     [Fact]
+    public async Task ToBeReviewedExpandedGroupIsUnskippedAndCanEnableCleanup()
+    {
+        Fixture fixture = await Fixture.CreateAsync();
+        WorkLanguageCandidateGroup reviewOnly = WorkLanguageCandidateGroup.Create(
+            "en",
+            fixture.Expanded.Members,
+            fixture.Expanded.AnchorMembers,
+            fixture.Expanded.Confidence,
+            fixture.Expanded.Evidence,
+            fixture.Expanded.Contradictions,
+            fixture.Expanded.ContentComparison,
+            MatchingPolicyVersion.V2);
+        ExpandedCandidateRetentionDecision retention = ExpandedCandidateRetentionPolicy.Select(
+            [reviewOnly], fixture.Books.Values).Single();
+
+        ExpandedCandidateGroupRowViewModel row = new(reviewOnly, fixture.Books, retention);
+        CompositeCleanupWorkspaceViewModel viewModel = new(
+            fixture.UseCase, A.Fake<ICompositeCleanupDialogService>());
+        viewModel.UpdateContext(fixture.Snapshot, [], [], [row]);
+
+        row.RequiresReview.Should().BeTrue();
+        row.Eligibility.Should().Be("To be reviewed");
+        row.Skip.Should().BeFalse();
+        viewModel.CleanupAllCommand.CanExecute(null).Should().BeTrue();
+        viewModel.Status.Should().Contain("to be reviewed");
+    }
+
+    [Fact]
     public async Task ConflictsShowModalBeforeConfirmationOrWorkerStartup()
     {
         Fixture fixture = await Fixture.CreateAsync();
@@ -26,6 +54,7 @@ public sealed class CompositeCleanupWorkspaceViewModelTests
             [fixture.Expanded], fixture.Books.Values).Single();
         ExpandedCandidateGroupRowViewModel expanded = new(
             fixture.Expanded, fixture.Books, retention);
+        metadata.KeeperMember = metadata.Members.Single(value => value.BookId == 2);
         metadata.KeeperMember = metadata.Members.Single(value => value.BookId == 1);
         expanded.KeeperMember = expanded.Members.Single(value => value.BookId == 2);
         viewModel.UpdateContext(fixture.Snapshot, [], [metadata], [expanded]);

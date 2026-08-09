@@ -53,30 +53,52 @@ public static class ExpandedCandidateRetentionPolicy
         ArgumentNullException.ThrowIfNull(groups);
         ArgumentNullException.ThrowIfNull(books);
         Dictionary<CalibreBookId, CalibreBook> booksById = books.ToDictionary(value => value.Id);
-        Dictionary<CalibreBookId, int[]> assessmentScores = (epubAssessments ?? [])
-            .Select(value => (value.CalibreBookId, Score: value.Score?.Value))
-            .Concat((pdfAssessments ?? []).Select(value => (value.CalibreBookId, Score: value.Score?.Value)))
-            .Where(value => value.Score is not null)
-            .GroupBy(value => value.CalibreBookId)
-            .ToDictionary(group => group.Key, group => group.Select(value => value.Score!.Value).ToArray());
+        Dictionary<CalibreBookId, int[]> assessmentScores = AssessmentScores(epubAssessments, pdfAssessments);
         List<ExpandedCandidateRetentionDecision> decisions = [];
         foreach (WorkLanguageCandidateGroup group in groups)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            ExpandedCandidateRetentionCandidate[] candidates = group.Members
-                .Select(bookId => CreateCandidate(booksById[bookId], assessmentScores.GetValueOrDefault(bookId) ?? []))
-                .OrderByDescending(value => value.CompletedAssessmentCount)
-                .ThenByDescending(value => value.AssessmentScoreTotal)
-                .ThenByDescending(value => value.PresentFormatCount)
-                .ThenByDescending(value => value.MetadataCompletenessCount)
-                .ThenByDescending(value => value.ValidStrongIdentifierCount)
-                .ThenByDescending(value => value.HasCover)
-                .ThenBy(value => value.BookId.Value)
-                .ToArray();
+            ExpandedCandidateRetentionCandidate[] candidates = Rank(
+                group.Members.Select(bookId => booksById[bookId]), assessmentScores);
             decisions.Add(new(group.Id, candidates[0].BookId, candidates));
         }
         return new ReadOnlyCollection<ExpandedCandidateRetentionDecision>(decisions.ToArray());
     }
+
+    public static CalibreBookId SelectKeeper(
+        IEnumerable<CalibreBook> books,
+        IEnumerable<EpubAssessment>? epubAssessments = null,
+        IEnumerable<PdfAssessment>? pdfAssessments = null)
+    {
+        ArgumentNullException.ThrowIfNull(books);
+        ExpandedCandidateRetentionCandidate[] candidates = Rank(
+            books, AssessmentScores(epubAssessments, pdfAssessments));
+        if (candidates.Length == 0)
+            throw new ArgumentException("At least one book is required to select a keeper.", nameof(books));
+        return candidates[0].BookId;
+    }
+
+    private static Dictionary<CalibreBookId, int[]> AssessmentScores(
+        IEnumerable<EpubAssessment>? epubAssessments,
+        IEnumerable<PdfAssessment>? pdfAssessments) => (epubAssessments ?? [])
+        .Select(value => (value.CalibreBookId, Score: value.Score?.Value))
+        .Concat((pdfAssessments ?? []).Select(value => (value.CalibreBookId, Score: value.Score?.Value)))
+        .Where(value => value.Score is not null)
+        .GroupBy(value => value.CalibreBookId)
+        .ToDictionary(group => group.Key, group => group.Select(value => value.Score!.Value).ToArray());
+
+    private static ExpandedCandidateRetentionCandidate[] Rank(
+        IEnumerable<CalibreBook> books,
+        IReadOnlyDictionary<CalibreBookId, int[]> assessmentScores) => books
+        .Select(book => CreateCandidate(book, assessmentScores.GetValueOrDefault(book.Id) ?? []))
+        .OrderByDescending(value => value.CompletedAssessmentCount)
+        .ThenByDescending(value => value.AssessmentScoreTotal)
+        .ThenByDescending(value => value.PresentFormatCount)
+        .ThenByDescending(value => value.MetadataCompletenessCount)
+        .ThenByDescending(value => value.ValidStrongIdentifierCount)
+        .ThenByDescending(value => value.HasCover)
+        .ThenBy(value => value.BookId.Value)
+        .ToArray();
 
     private static ExpandedCandidateRetentionCandidate CreateCandidate(CalibreBook book, int[] scores)
     {

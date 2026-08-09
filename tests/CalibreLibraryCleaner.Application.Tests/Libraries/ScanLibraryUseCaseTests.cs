@@ -15,6 +15,65 @@ namespace CalibreLibraryCleaner.Application.Tests.Libraries;
 public sealed class ScanLibraryUseCaseTests
 {
     [Fact]
+    public async Task RepeatScanReusesUnchangedEpubAssessmentAfterHashVerification()
+    {
+        TestContext context = CreateContext();
+        FormatFileFingerprint fingerprint = new(4, new(new string('a', 64)));
+        A.CallTo(() => context.Hasher.HashAsync(
+                A<IReadOnlyList<FormatHashRequest>>._,
+                A<int>._,
+                A<IProgress<FormatHashProgress>?>._,
+                A<CancellationToken>._))
+            .Returns([Successful(0, fingerprint)]);
+        IEpubInspector inspector = A.Fake<IEpubInspector>();
+        A.CallTo(() => inspector.InspectAsync(
+                A<EpubInspectionRequest>._,
+                A<IProgress<EpubInspectionProgress>?>._,
+                A<CancellationToken>._))
+            .ReturnsLazily(call =>
+            {
+                EpubInspectionRequest request = call.GetArgument<EpubInspectionRequest>(0)!;
+                return Task.FromResult(EpubInspectionResult.Failed(
+                    request.BookId,
+                    request.ExpectedRelativePath,
+                    EpubInspectionProblemCode.CannotOpen,
+                    "Synthetic open failure."));
+            });
+        ILibraryStateStore store = A.Fake<ILibraryStateStore>();
+        LibraryStateSession state = new(store);
+        ScanLibraryUseCase useCase = new(
+            context.Resolver,
+            context.Reader,
+            context.Hasher,
+            context.Clock,
+            new(),
+            new AssessEpubFormatsUseCase(inspector, new()),
+            libraryStateSession: state);
+
+        LibraryScanOutcome first = await useCase.ExecuteAsync(
+            "C:/Library", null, CancellationToken.None);
+        await state.StartFromScanAsync(first.Snapshot!, CancellationToken.None);
+        List<LibraryScanProgress> progress = [];
+        LibraryScanOutcome second = await useCase.ExecuteAsync(
+            "C:/Library", new InlineProgress(progress.Add), CancellationToken.None);
+
+        second.IsSuccess.Should().BeTrue();
+        second.Snapshot!.EpubAssessments.Should().ContainSingle();
+        A.CallTo(() => inspector.InspectAsync(
+            A<EpubInspectionRequest>._,
+            A<IProgress<EpubInspectionProgress>?>._,
+            A<CancellationToken>._)).MustHaveHappenedOnceExactly();
+        A.CallTo(() => context.Hasher.HashAsync(
+            A<IReadOnlyList<FormatHashRequest>>._,
+            A<int>._,
+            A<IProgress<FormatHashProgress>?>._,
+            A<CancellationToken>._)).MustHaveHappenedTwiceExactly();
+        progress.Should().Contain(value =>
+            value.Phase == LibraryScanPhase.AssessingEpubFormats
+            && value.Message.Contains("1 reused", StringComparison.Ordinal));
+    }
+
+    [Fact]
     public async Task ExplicitScanPublishesCleanupEligibleExpandedGroupsAndProgress()
     {
         TestContext context = CreateContext(CreateCatalog(bookCount: 2, sameMetadata: true));

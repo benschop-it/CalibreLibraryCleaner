@@ -2,5 +2,5 @@ namespace CalibreLibraryCleaner.Wpf.Services;
 
 public interface IExpandedCandidateCleanupConfirmationService
 {
-    bool ConfirmExternalBackup(int eligibleGroupCount);
+    bool ConfirmExternalBackup(int selectedGroupCount);
 }

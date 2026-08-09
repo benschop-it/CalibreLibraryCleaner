@@ -6,7 +6,8 @@ namespace CalibreLibraryCleaner.Application.Executions;
 public sealed record ExactDuplicateKeeperSelection(
     ExactBinaryDuplicateGroupId GroupId,
     ExactBinaryDuplicateMember RetainedMember,
-    bool Skip = false);
+    bool Skip = false,
+    bool KeeperWasOverridden = false);
 
 public sealed record ExecuteBulkExactDuplicateCleanupRequest(
     string LibraryRoot,

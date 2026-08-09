@@ -23,8 +23,8 @@ public sealed class ExecuteCompositeCleanupUseCaseTests
         CompositeCleanupResult result = await harness.UseCase.ExecuteAsync(new(
             harness.Snapshot.Identity.LibraryRoot,
             [],
-            [new(harness.Metadata.Id, harness.First.Id, Skip: false)],
-            [new(harness.Expanded.Id, harness.Second.Id, Skip: false)],
+            [new(harness.Metadata.Id, harness.First.Id, Skip: false, KeeperWasOverridden: true)],
+            [new(harness.Expanded.Id, harness.Second.Id, Skip: false, KeeperWasOverridden: true)],
             ExternalBackupConfirmed: true), null, CancellationToken.None);
 
         result.State.Should().Be(CompositeCleanupState.Conflict);

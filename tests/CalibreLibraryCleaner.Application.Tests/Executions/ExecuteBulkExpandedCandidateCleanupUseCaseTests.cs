@@ -34,7 +34,7 @@ public sealed class ExecuteBulkExpandedCandidateCleanupUseCaseTests
     }
 
     [Fact]
-    public void ReviewOnlyOrInvalidKeeperGroupIsSkipped()
+    public void ToBeReviewedGroupWithValidKeeperIsProcessed()
     {
         CalibreBook first = Book(1, Format("EPUB", 'a'));
         CalibreBook second = Book(2, Format("EPUB", 'b'));
@@ -52,7 +52,26 @@ public sealed class ExecuteBulkExpandedCandidateCleanupUseCaseTests
         ExecuteBulkExpandedCandidateCleanupUseCase.ExpandedCleanupPlan plan =
             ExecuteBulkExpandedCandidateCleanupUseCase.BuildPlan(
                 snapshot,
-                [new(reviewOnly.Id, new(99), Skip: false)],
+                [new(reviewOnly.Id, first.Id, Skip: false)],
+                issues);
+
+        plan.TotalOperations.Should().Be(2);
+        plan.SkippedGroupCount.Should().Be(0);
+        issues.Should().BeEmpty();
+    }
+
+    [Fact]
+    public void InvalidKeeperGroupIsSkipped()
+    {
+        CalibreBook first = Book(1, Format("EPUB", 'a'));
+        CalibreBook second = Book(2, Format("EPUB", 'b'));
+        WorkLanguageCandidateGroup group = EligibleGroup(first.Id, second.Id);
+        List<ExecutionIssue> issues = [];
+
+        ExecuteBulkExpandedCandidateCleanupUseCase.ExpandedCleanupPlan plan =
+            ExecuteBulkExpandedCandidateCleanupUseCase.BuildPlan(
+                Snapshot([first, second], [group]),
+                [new(group.Id, new(99), Skip: false)],
                 issues);
 
         plan.TotalOperations.Should().Be(0);

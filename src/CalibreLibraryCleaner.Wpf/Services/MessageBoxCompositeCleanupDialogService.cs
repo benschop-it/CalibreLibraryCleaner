@@ -15,9 +15,12 @@ internal sealed class MessageBoxCompositeCleanupDialogService : ICompositeCleanu
         $"Execute Cleanup all?\n\n"
         + $"Reviewed groups: {summary.ExactSelectionCount:N0} exact, "
         + $"{summary.MetadataSelectionCount:N0} metadata, {summary.ExpandedSelectionCount:N0} expanded.\n"
+        + $"Preflight-skipped groups: {summary.SkippedSelectionCount:N0}.\n"
+        + $"Generated keeper choices reconciled across overlapping groups: {summary.ReconciledKeeperCount:N0}.\n"
         + $"Operations: {summary.TransferCount:N0} transfers, {summary.FormatRemovalCount:N0} format removals, "
         + $"{summary.RecordRemovalCount:N0} record removals.\n\n"
-        + "The application will not create or verify a backup. Continue only if a complete external backup of this Calibre library exists.",
+        + "The application will not create or verify a backup. Continue only if a complete external backup of this Calibre library exists. "
+        + "Expanded candidate matching can be uncertain; every unskipped group shown in the plan will be processed.",
         "Confirm Cleanup all",
         MessageBoxButton.YesNo,
         MessageBoxImage.Warning,
