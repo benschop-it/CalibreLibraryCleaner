@@ -40,15 +40,9 @@ Metadata cleanup may follow exact cleanup without a rescan. Exact cleanup clears
 
 Cleanup workflows never execute a frozen plan from the initial scan. Every run validates the current UI selections against the latest authoritative projected state. Exact groups are recomputed from projected fingerprints, and exact-metadata groups are filtered as records disappear. Therefore exact cleanup may be followed by metadata cleanup without a rescan.
 
-Expanded matching evidence is different: it is derived from bounded content inspection and is discarded after any mutation rather than projected as still current. Expanded cleanup consequently requires a fresh explicit scan immediately before it. The recommended conservative sequence is:
+Expanded matching evidence is derived from bounded content inspection and is discarded after any standalone mutation rather than projected as still current. Therefore the three category-specific cleanup commands cannot be chained in arbitrary order from one initial scan.
 
-1. Scan;
-2. process Exact file duplicates;
-3. process Metadata candidates;
-4. Scan again; and
-5. process Expanded candidates.
-
-Running Expanded cleanup first can permit later exact/metadata cleanup against projected state, but it places the broadest, edition-sensitive cleanup before exact evidence and is not the recommended workflow. The three workflows are therefore not supported in arbitrary order from one immutable initial-scan result.
+`Cleanup all` is the supported one-scan workflow. The user reviews keeper/Skip choices in all three tabs, then one composite planner builds every category plan against the same immutable authoritative snapshot. It detects incompatible cross-category keeper, transfer, retained-format, removal, and final-inventory intentions before backup confirmation or worker startup. Conflicts are shown to the user and no mutation begins until selections are corrected. A conflict-free plan executes one sequence of all transfers, then all format removals, then all proven-empty record removals through one worker/session/marker/checkpoint.
 
 The worker uses only Calibre's documented database `Cache` API through the fixed embedded script and strict JSON-lines protocol. Direct SQL, shell invocation, direct managed-file mutation, arbitrary Python, GUI automation, direct `calibredb` mutation commands, and mutation-engine fallback are prohibited.
 

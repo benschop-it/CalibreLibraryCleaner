@@ -28,6 +28,7 @@
         <ColumnDefinition Width="Auto" />
         <ColumnDefinition Width="Auto" />
         <ColumnDefinition Width="Auto" />
+        <ColumnDefinition Width="Auto" />
       </Grid.ColumnDefinitions>
       <Label Grid.Column="0"
              Target="{Binding ElementName=LibraryPathBox}"
@@ -64,9 +65,16 @@
               Command="{Binding ScanCommand}" />
             <Button Grid.Column="5"
               MinWidth="80"
+              Margin="0,0,8,0"
               Padding="8,4"
               Content="_Cancel"
               Command="{Binding CancelCommand}" />
+      <Button Grid.Column="6"
+              MinWidth="100"
+              Padding="8,4"
+              Content="Cleanup _all"
+              Command="{Binding CompositeCleanup.CleanupAllCommand}"
+              ToolTip="Validate and execute reviewed Exact, Metadata, and Expanded selections together" />
     </Grid>
 
     <StackPanel Grid.Row="1" Margin="0,12,0,0">
@@ -79,6 +87,13 @@
       <TextBlock Margin="0,4,0,0"
                  Text="{Binding StatusMessage}"
                  TextWrapping="Wrap" />
+      <StackPanel Margin="0,6,0,0" DataContext="{Binding CompositeCleanup}">
+        <TextBlock Text="{Binding Status}" TextWrapping="Wrap" />
+        <ProgressBar Height="12" Margin="0,3,0,0" Minimum="0" Maximum="100"
+                     Value="{Binding ProgressPercentage, Mode=OneWay}" />
+        <TextBlock Margin="0,3,0,0" Text="{Binding ProgressMessage}" TextWrapping="Wrap" />
+        <TextBlock Margin="0,3,0,0" Text="{Binding ResultSummary}" FontWeight="Bold" TextWrapping="Wrap" />
+      </StackPanel>
     </StackPanel>
 
     <Border Grid.Row="2"
@@ -157,7 +172,7 @@
             <TextBlock Text="These groups contain byte-identical files. The best located copy is retained automatically and the other format copies are proposed for removal."
                        TextWrapping="Wrap" />
             <TextBlock Margin="0,4,0,0"
-                       Text="Select another member row to change the keeper for that group. Remove duplicates processes every eligible group, merges complementary formats when unambiguous, and deletes empty records."
+                       Text="Select another member row to change the keeper, or Skip a group. Remove duplicates processes every remaining eligible group, merges complementary formats when unambiguous, and deletes empty records."
                        TextWrapping="Wrap" />
             <StackPanel Margin="0,8,0,0" DataContext="{Binding ExactBinaryCleanupPlans}">
               <Button HorizontalAlignment="Left" Padding="12,6" Content="_Remove duplicates"
@@ -175,14 +190,15 @@
             <DataGrid ItemsSource="{Binding ExactDuplicateGroups}"
                       SelectedItem="{Binding SelectedExactDuplicateGroup}"
                       AutoGenerateColumns="False"
-                      IsReadOnly="True"
+                      CanUserAddRows="False"
                       SelectionMode="Single"
                       AutomationProperties.Name="Exact binary duplicate file groups">
               <DataGrid.Columns>
-                <DataGridTextColumn Width="110" Header="Size" Binding="{Binding FileSize}" />
-                <DataGridTextColumn Width="90" Header="Files" Binding="{Binding FileCount}" />
-                <DataGridTextColumn Width="90" Header="Records" Binding="{Binding RecordCount}" />
-                <DataGridTextColumn Width="3*" Header="SHA-256" Binding="{Binding Sha256}" />
+                <DataGridCheckBoxColumn Width="70" Header="Skip" Binding="{Binding Skip, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+                <DataGridTextColumn IsReadOnly="True" Width="110" Header="Size" Binding="{Binding FileSize}" />
+                <DataGridTextColumn IsReadOnly="True" Width="90" Header="Files" Binding="{Binding FileCount}" />
+                <DataGridTextColumn IsReadOnly="True" Width="90" Header="Records" Binding="{Binding RecordCount}" />
+                <DataGridTextColumn IsReadOnly="True" Width="3*" Header="SHA-256" Binding="{Binding Sha256}" />
               </DataGrid.Columns>
             </DataGrid>
           </GroupBox>

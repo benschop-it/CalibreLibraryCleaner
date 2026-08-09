@@ -29,6 +29,11 @@ explicit backup-confirmed cleanup. It does not rewrite title or author metadata.
 Double-click a member row in any duplicate/candidate tab to inspect the selected
 book in Calibre ebook viewer.
 
+After reviewing keeper and Skip choices in all three tabs, use `Cleanup all` to
+validate overlaps and execute one transfer/removal plan from the initial scan.
+Conflicting choices are shown before backup confirmation and no mutation starts
+until they are corrected.
+
 Candidate-only EPUB fingerprints and local expanded discovery are implemented.
 PDF cross-document fingerprints, calibrated content-language detection, and
 optional online/model enrichment remain later roadmap work.

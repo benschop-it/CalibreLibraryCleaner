@@ -290,7 +290,7 @@ public sealed partial class ExecuteBulkExactDuplicateCleanupUseCase(
             CalibreMutationOperation.RemoveRecord($"bulk-remove-record:{value.Value}", value), null)),
     ];
 
-    private static BulkPlan BuildPlan(
+    internal static BulkPlan BuildPlan(
         LibrarySnapshot snapshot,
         IReadOnlyList<ExactDuplicateKeeperSelection> selections,
         List<ExecutionIssue> issues)
@@ -315,6 +315,7 @@ public sealed partial class ExecuteBulkExactDuplicateCleanupUseCase(
                     "An exact duplicate group had no current keeper selection and was skipped."));
                 continue;
             }
+            if (selection.Skip) continue;
             retainedRecords.Add(selection.RetainedMember.BookId);
             foreach (ExactBinaryDuplicateMember member in group.Members.Where(value => value != selection.RetainedMember))
             {
@@ -398,9 +399,9 @@ public sealed partial class ExecuteBulkExactDuplicateCleanupUseCase(
         string? format = null) => new(code, ExecutionIssueSeverity.BlockingError,
         explanation, recordId, format);
 
-    private readonly record struct FormatKey(CalibreBookId RecordId, string Format);
-    private sealed record FormatRemovalOperation(CalibreBookId RecordId, BookFormat Format);
-    private sealed record TransferOperation(
+    internal readonly record struct FormatKey(CalibreBookId RecordId, string Format);
+    internal sealed record FormatRemovalOperation(CalibreBookId RecordId, BookFormat Format);
+    internal sealed record TransferOperation(
         CalibreBookId SourceRecordId,
         CalibreBookId TargetRecordId,
         BookFormat SourceFormat,
@@ -408,7 +409,7 @@ public sealed partial class ExecuteBulkExactDuplicateCleanupUseCase(
     private sealed record WorkerPlannedOperation(
         CalibreMutationOperation Operation,
         FormatRemovalOperation? Removal);
-    private sealed record BulkPlan(
+    internal sealed record BulkPlan(
         IReadOnlyList<TransferOperation> Transfers,
         IReadOnlyList<FormatRemovalOperation> FormatRemovals,
         IReadOnlyList<CalibreBookId> RecordsToRemove,

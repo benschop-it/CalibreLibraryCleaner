@@ -1,3 +1,4 @@
+using System.ComponentModel;
 using CalibreLibraryCleaner.Application.Executions;
 using CalibreLibraryCleaner.Domain.Libraries;
 using CalibreLibraryCleaner.Wpf.Services;
@@ -66,9 +67,13 @@ public sealed class ExactBinaryCleanupPlanWorkspaceViewModel : ObservableObject
         LibrarySnapshot? snapshot,
         IReadOnlyList<ExactDuplicateGroupRowViewModel> groups)
     {
+        foreach (ExactDuplicateGroupRowViewModel group in _groups)
+            group.PropertyChanged -= OnGroupPropertyChanged;
         _snapshot = snapshot;
         _groups = groups;
-        int eligible = groups.Count(value => value.IsCleanupEligible && value.RetainedMember is not null);
+        foreach (ExactDuplicateGroupRowViewModel group in groups)
+            group.PropertyChanged += OnGroupPropertyChanged;
+        int eligible = groups.Count(value => !value.Skip && value.IsCleanupEligible && value.RetainedMember is not null);
         Status = snapshot is null
             ? "Run or load an authoritative scan before removing duplicates."
             : eligible == 0
@@ -78,13 +83,13 @@ public sealed class ExactBinaryCleanupPlanWorkspaceViewModel : ObservableObject
     }
 
     private bool CanRemoveDuplicates() => !IsBusy && _snapshot is not null
-        && _groups.Any(value => value.IsCleanupEligible && value.RetainedMember is not null);
+        && _groups.Any(value => !value.Skip && value.IsCleanupEligible && value.RetainedMember is not null);
 
     private async Task RemoveDuplicatesAsync()
     {
         if (_snapshot is null) return;
         ExactDuplicateKeeperSelection[] selections = _groups
-            .Where(value => value.IsCleanupEligible && value.RetainedMember is not null)
+            .Where(value => !value.Skip && value.IsCleanupEligible && value.RetainedMember is not null)
             .Select(value => new ExactDuplicateKeeperSelection(value.GroupId, value.RetainedMember!.Member))
             .ToArray();
         if (!_confirmation.ConfirmExternalBackup(selections.Length))
@@ -121,5 +126,12 @@ public sealed class ExactBinaryCleanupPlanWorkspaceViewModel : ObservableObject
             IsBusy = false;
             RemoveDuplicatesCommand.NotifyCanExecuteChanged();
         }
+    }
+
+    private void OnGroupPropertyChanged(object? sender, PropertyChangedEventArgs eventArgs)
+    {
+        if (eventArgs.PropertyName is nameof(ExactDuplicateGroupRowViewModel.Skip)
+            or nameof(ExactDuplicateGroupRowViewModel.RetainedMember))
+            UpdateContext(_snapshot, _groups);
     }
 }

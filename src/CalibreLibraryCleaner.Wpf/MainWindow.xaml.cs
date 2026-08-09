@@ -48,7 +48,8 @@ public partial class MainWindow : System.Windows.Window
         if (DataContext is MainWindowViewModel viewModel
             && (viewModel.ExactBinaryCleanupPlans?.IsBusy == true
                 || viewModel.MetadataCandidateCleanup?.IsBusy == true
-                || viewModel.ExpandedCandidateCleanup?.IsBusy == true))
+                || viewModel.ExpandedCandidateCleanup?.IsBusy == true
+                || viewModel.CompositeCleanup?.IsBusy == true))
         {
             e.Cancel = true;
             MessageBox.Show(

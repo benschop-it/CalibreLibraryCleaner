@@ -77,6 +77,7 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
         ExactBinaryCleanupPlanWorkspaceViewModel? exactBinaryCleanupPlans = null,
         MetadataCandidateCleanupWorkspaceViewModel? metadataCandidateCleanup = null,
         ExpandedCandidateCleanupWorkspaceViewModel? expandedCandidateCleanup = null,
+        CompositeCleanupWorkspaceViewModel? compositeCleanup = null,
         PersistedLibrarySnapshotsUseCase? persistedSnapshots = null,
         ILibraryStateSession? libraryStateSession = null)
     {
@@ -95,6 +96,7 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
         ExactBinaryCleanupPlans = exactBinaryCleanupPlans;
         MetadataCandidateCleanup = metadataCandidateCleanup;
         ExpandedCandidateCleanup = expandedCandidateCleanup;
+        CompositeCleanup = compositeCleanup;
         Books = new ReadOnlyObservableCollection<BookRowViewModel>(_books);
         PersistedLibraryPaths = new ReadOnlyObservableCollection<string>(_persistedLibraryPaths);
         ExactDuplicateGroups = new ReadOnlyObservableCollection<ExactDuplicateGroupRowViewModel>(_exactDuplicateGroups);
@@ -243,6 +245,8 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
     public MetadataCandidateCleanupWorkspaceViewModel? MetadataCandidateCleanup { get; }
 
     public ExpandedCandidateCleanupWorkspaceViewModel? ExpandedCandidateCleanup { get; }
+
+    public CompositeCleanupWorkspaceViewModel? CompositeCleanup { get; }
 
     public IReadOnlyList<EpubFindingFilterMode> EpubFindingFilterModes { get; } = Enum.GetValues<EpubFindingFilterMode>();
 
@@ -966,6 +970,11 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
         _expandedCandidateGroups.ReplaceAll(presentation.ExpandedGroups);
         SelectedExpandedCandidateGroup = _expandedCandidateGroups.FirstOrDefault();
         ExpandedCandidateCleanup?.UpdateContext(isFreshScan ? snapshot : null, _expandedCandidateGroups);
+        CompositeCleanup?.UpdateContext(
+            isFreshScan ? snapshot : null,
+            _exactDuplicateGroups,
+            _allMetadataDuplicateGroups,
+            _expandedCandidateGroups);
         ExpandedCandidateSummary = snapshot.MatchingRunSummary.Status switch
         {
             MatchingEvidenceStatus.Unavailable =>

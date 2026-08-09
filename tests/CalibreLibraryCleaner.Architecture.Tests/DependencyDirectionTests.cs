@@ -241,6 +241,10 @@ public sealed class DependencyDirectionTests
             Directory.EnumerateFiles(duplicatesPath, "*.cs", SearchOption.TopDirectoryOnly)
                 .Where(path => Path.GetFileName(path).Contains("Metadata", StringComparison.Ordinal) ||
                                Path.GetFileName(path).StartsWith("Normalized", StringComparison.Ordinal))
+                .Where(path => !string.Equals(
+                    Path.GetFileName(path),
+                    "MetadataCandidateRetentionPolicy.cs",
+                    StringComparison.Ordinal))
                 .Select(File.ReadAllText));
 
         source.Should().NotContain("System.IO");

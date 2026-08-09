@@ -9,6 +9,7 @@ public sealed class ExactDuplicateGroupRowViewModel : ObservableObject
 {
     private readonly IReadOnlyDictionary<CalibreBookId, CalibreBook> _books;
     private ExactDuplicateMemberRowViewModel? _retainedMember;
+    private bool _skip;
 
     public ExactDuplicateGroupRowViewModel(
         ExactBinaryDuplicateGroup group,
@@ -73,6 +74,12 @@ public sealed class ExactDuplicateGroupRowViewModel : ObservableObject
     }
 
     public bool IsCleanupEligible { get; }
+
+    public bool Skip
+    {
+        get => _skip;
+        set => SetProperty(ref _skip, value);
+    }
 
     public string? SkipReason { get; }
 
