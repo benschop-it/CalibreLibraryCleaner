@@ -53,6 +53,63 @@ public sealed class LibraryStateSessionTests
     }
 
     [Fact]
+    public async Task PostExactRefreshPublishesNewGenerationWithExactSourceProvenance()
+    {
+        ILibraryStateStore store = A.Fake<ILibraryStateStore>();
+        using LibraryStateSession session = new(store);
+        LibrarySnapshot snapshot = Snapshot("C:\\library");
+        LibraryState exact = (await session.StartFromExactAnalysisAsync(
+            snapshot, CancellationToken.None)).State!;
+        LibraryState completed = (await session.AdvanceWorkflowAsync(
+            snapshot.Identity.LibraryRoot,
+            LibraryWorkflowPhase.CandidatePreparationReady,
+            snapshot.ScannedAt,
+            CancellationToken.None)).State!;
+        LibraryWorkflowSource source = new(completed.GenerationId, completed.Revision);
+        Fake.ClearRecordedCalls(store);
+
+        LibraryStateSessionOutcome outcome = await session.StartFromPostExactRefreshAsync(
+            snapshot, source, CancellationToken.None);
+
+        outcome.IsSuccess.Should().BeTrue();
+        outcome.State!.GenerationId.Should().NotBe(exact.GenerationId);
+        outcome.State.WorkflowCheckpoint.Phase.Should().Be(LibraryWorkflowPhase.CandidatePreparationReady);
+        outcome.State.WorkflowCheckpoint.Source.Should().Be(source);
+        outcome.State.IsWorkflowCheckpointCurrent.Should().BeTrue();
+        session.GetCurrent(snapshot.Identity.LibraryRoot).Should().BeSameAs(outcome.State);
+        A.CallTo(() => store.WritePostExactRefreshBaselineAsync(
+            A<LibraryState>.That.Matches(value => value.WorkflowCheckpoint.Source == source),
+            source,
+            A<CancellationToken>._)).MustHaveHappenedOnceExactly();
+    }
+
+    [Fact]
+    public async Task PostExactRefreshRejectsSourceThatIsNoLongerCurrent()
+    {
+        ILibraryStateStore store = A.Fake<ILibraryStateStore>();
+        using LibraryStateSession session = new(store);
+        LibrarySnapshot snapshot = Snapshot("C:\\library");
+        LibraryState exact = (await session.StartFromExactAnalysisAsync(
+            snapshot, CancellationToken.None)).State!;
+        LibraryState completed = (await session.AdvanceWorkflowAsync(
+            snapshot.Identity.LibraryRoot,
+            LibraryWorkflowPhase.CandidatePreparationReady,
+            snapshot.ScannedAt,
+            CancellationToken.None)).State!;
+        LibraryWorkflowSource staleSource = new(completed.GenerationId, completed.Revision);
+        await session.StartFromExactAnalysisAsync(snapshot, CancellationToken.None);
+        Fake.ClearRecordedCalls(store);
+
+        LibraryStateSessionOutcome outcome = await session.StartFromPostExactRefreshAsync(
+            snapshot, staleSource, CancellationToken.None);
+
+        outcome.ErrorCode.Should().Be("LIBRARY_STATE.REFRESH_SOURCE_STALE");
+        session.GetCurrent(snapshot.Identity.LibraryRoot)!.GenerationId.Should().NotBe(exact.GenerationId);
+        A.CallTo(() => store.WritePostExactRefreshBaselineAsync(
+            A<LibraryState>._, A<LibraryWorkflowSource>._, A<CancellationToken>._)).MustNotHaveHappened();
+    }
+
+    [Fact]
     public async Task RejectedDeltaMarksStateUncertain()
     {
         LibraryStateSession session = new();

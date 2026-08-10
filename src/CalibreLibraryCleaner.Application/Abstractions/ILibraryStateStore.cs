@@ -8,6 +8,11 @@ public interface ILibraryStateStore
 
     Task WriteBaselineAsync(LibraryState state, CancellationToken cancellationToken);
 
+    Task WritePostExactRefreshBaselineAsync(
+        LibraryState state,
+        LibraryWorkflowSource source,
+        CancellationToken cancellationToken);
+
     Task AppendDeltaAsync(
         string libraryRoot,
         LibraryStateDelta delta,
@@ -44,7 +49,19 @@ public interface ILibraryStateStore
         CancellationToken cancellationToken);
 
     Task<LibraryState?> ReadAsync(string libraryRoot, CancellationToken cancellationToken);
+
+    Task<PostExactRefreshBasis?> ReadPostExactRefreshBasisAsync(
+        string libraryRoot,
+        CancellationToken cancellationToken);
+
+    Task<LibrarySnapshot?> ReadReusableAssessmentSnapshotAsync(
+        string libraryRoot,
+        CancellationToken cancellationToken);
 }
+
+public sealed record PostExactRefreshBasis(
+    LibraryState PreExactState,
+    IReadOnlyList<LibraryStateDelta> CompletedExactDeltas);
 
 public sealed record PersistedLibraryStateInfo(
     string LibraryRoot,

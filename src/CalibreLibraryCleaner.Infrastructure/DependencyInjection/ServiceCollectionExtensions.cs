@@ -29,6 +29,7 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<ILibraryPathResolver, LibraryPathResolver>();
         services.AddSingleton<ICalibreMetadataReader, SqliteCalibreMetadataReader>();
         services.AddSingleton<IFormatFileHasher, StreamingSha256FormatFileHasher>();
+        services.AddSingleton<IFormatFileProbe, PhysicalFormatFileProbe>();
         services.AddSingleton(new LibrarySnapshotStorageOptions());
         services.AddSingleton<ILibrarySnapshotStore, VersionedJsonLibrarySnapshotStore>();
         services.AddSingleton<ILibraryStateStore, VersionedJsonLibraryStateStore>();

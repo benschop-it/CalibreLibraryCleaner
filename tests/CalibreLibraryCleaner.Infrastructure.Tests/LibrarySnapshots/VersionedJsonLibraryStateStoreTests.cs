@@ -1,4 +1,7 @@
 using System.Text.Json.Nodes;
+using CalibreLibraryCleaner.Application.Abstractions;
+using CalibreLibraryCleaner.Application.Assessments;
+using CalibreLibraryCleaner.Domain.Assessments;
 using CalibreLibraryCleaner.Domain.Libraries;
 using CalibreLibraryCleaner.Infrastructure.LibrarySnapshots;
 using CalibreLibraryCleaner.Infrastructure.Tests.Execution;
@@ -75,6 +78,211 @@ public sealed class VersionedJsonLibraryStateStoreTests
 
         loaded!.WorkflowCheckpoint.Should().Be(state.WorkflowCheckpoint);
         loaded.IsWorkflowCheckpointCurrent.Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task CompletedExactDeltasAndBaselineSurviveCheckpointCompactionForRefresh()
+    {
+        using TemporaryDirectory directory = new();
+        InfrastructureExecutionFixture fixture = InfrastructureExecutionTestData.Create(directory.Path);
+        string cache = Path.Combine(directory.Path, "state-cache");
+        VersionedJsonLibraryStateStore store = new(new() { StorageRoot = cache });
+        LibraryState preExact = LibraryState.FromScan(fixture.Snapshot,
+                new(Guid.Parse("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee")))
+            .AdvanceWorkflow(LibraryWorkflowPhase.ExactReady, fixture.Snapshot.ScannedAt);
+        CalibreBook target = preExact.Snapshot.Books[0];
+        FormatFileFingerprint fingerprint = new(42, new(new string('c', 64)));
+        AddOrReplaceFormatLibraryStateDelta delta = new(
+            preExact.GenerationId,
+            preExact.Revision,
+            "bulk-add:target:MOBI",
+            preExact.ProjectedAtUtc.AddSeconds(1),
+            target.Id,
+            "MOBI",
+            fingerprint,
+            null);
+        LibraryStateMutationIntent intent = new(
+            "exact-run",
+            preExact.GenerationId,
+            preExact.Revision,
+            1,
+            preExact.ProjectedAtUtc.AddSeconds(1));
+        await store.WriteBaselineAsync(preExact, CancellationToken.None);
+        await store.WriteMutationIntentAsync(preExact.Snapshot.Identity.LibraryRoot, intent, CancellationToken.None);
+        LibraryState projected = LibraryStateDeltaPolicy.Apply(preExact, delta);
+        await store.AppendDeltaBatchAsync(
+            preExact.Snapshot.Identity.LibraryRoot,
+            [delta],
+            projected,
+            compactIfThresholdReached: false,
+            intent.IntentId,
+            completeMutationIntent: true,
+            CancellationToken.None);
+        await store.CompactAsync(preExact.Snapshot.Identity.LibraryRoot, projected, CancellationToken.None);
+        LibraryState ready = projected.AdvanceWorkflow(
+            LibraryWorkflowPhase.CandidatePreparationReady,
+            projected.ProjectedAtUtc.AddSeconds(1));
+        await store.WriteWorkflowCheckpointAsync(
+            preExact.Snapshot.Identity.LibraryRoot, ready, CancellationToken.None);
+
+        PostExactRefreshBasis? basis = await new VersionedJsonLibraryStateStore(
+                new() { StorageRoot = cache })
+            .ReadPostExactRefreshBasisAsync(preExact.Snapshot.Identity.LibraryRoot, CancellationToken.None);
+
+        basis.Should().NotBeNull();
+        basis!.PreExactState.Snapshot.Should().BeEquivalentTo(preExact.Snapshot);
+        basis.PreExactState.WorkflowCheckpoint.Phase.Should().Be(LibraryWorkflowPhase.ExactReady);
+        basis.CompletedExactDeltas.Should().ContainSingle().Which.Should().BeEquivalentTo(delta);
+        Directory.GetFiles(cache, "*.baseline.json").Should().ContainSingle();
+        Directory.GetFiles(cache, "*.checkpoint.json").Should().ContainSingle();
+        Directory.GetFiles(cache, "*.deltas.jsonl").Should().HaveCount(2);
+    }
+
+    [Fact]
+    public async Task NothingToDoExactCompletionProvidesEmptyRefreshBasis()
+    {
+        using TemporaryDirectory directory = new();
+        InfrastructureExecutionFixture fixture = InfrastructureExecutionTestData.Create(directory.Path);
+        string cache = Path.Combine(directory.Path, "state-cache");
+        VersionedJsonLibraryStateStore store = new(new() { StorageRoot = cache });
+        LibraryState preExact = LibraryState.FromScan(fixture.Snapshot,
+                new(Guid.Parse("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee")))
+            .AdvanceWorkflow(LibraryWorkflowPhase.ExactReady, fixture.Snapshot.ScannedAt);
+        await store.WriteBaselineAsync(preExact, CancellationToken.None);
+        LibraryState ready = preExact.AdvanceWorkflow(
+            LibraryWorkflowPhase.CandidatePreparationReady,
+            preExact.ProjectedAtUtc);
+        await store.WriteWorkflowCheckpointAsync(
+            preExact.Snapshot.Identity.LibraryRoot, ready, CancellationToken.None);
+
+        PostExactRefreshBasis? basis = await store.ReadPostExactRefreshBasisAsync(
+            preExact.Snapshot.Identity.LibraryRoot, CancellationToken.None);
+
+        basis.Should().NotBeNull();
+        basis!.PreExactState.WorkflowCheckpoint.Phase.Should().Be(LibraryWorkflowPhase.ExactReady);
+        basis.CompletedExactDeltas.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task ExactOnlyBaselineCarriesForwardReusableAssessmentsFromPriorGeneration()
+    {
+        using TemporaryDirectory directory = new();
+        InfrastructureExecutionFixture fixture = InfrastructureExecutionTestData.Create(directory.Path);
+        string cache = Path.Combine(directory.Path, "state-cache");
+        VersionedJsonLibraryStateStore store = new(new() { StorageRoot = cache });
+        CalibreBook sourceBook = fixture.Snapshot.Books.First(value => value.Formats.Count > 0);
+        FormatFileFingerprint fingerprint = sourceBook.Formats[0].Fingerprint!;
+        EpubAssessment assessment = new EpubAssessmentEngine().Assess(
+            sourceBook.Id,
+            sourceBook.Formats[0].ExpectedRelativePath,
+            fingerprint,
+            EpubInspectionResult.Failed(
+                sourceBook.Id,
+                sourceBook.Formats[0].ExpectedRelativePath,
+                EpubInspectionProblemCode.CannotOpen,
+                "Synthetic."));
+        LibrarySnapshot assessedSnapshot = new(
+            fixture.Snapshot.Identity,
+            fixture.Snapshot.ScannedAt,
+            fixture.Snapshot.Books,
+            fixture.Snapshot.Findings,
+            epubAssessments: [assessment]);
+        LibraryState assessed = LibraryState.FromScan(
+            assessedSnapshot,
+            new(Guid.Parse("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee")));
+        await store.WriteBaselineAsync(assessed, CancellationToken.None);
+        LibraryState exactOnly = LibraryState.FromScan(
+                fixture.Snapshot,
+                new(Guid.Parse("11111111-2222-3333-4444-555555555555")))
+            .AdvanceWorkflow(LibraryWorkflowPhase.ExactReady, fixture.Snapshot.ScannedAt);
+        await store.WriteBaselineAsync(exactOnly, CancellationToken.None);
+
+        LibrarySnapshot? reusable = await new VersionedJsonLibraryStateStore(
+                new() { StorageRoot = cache })
+            .ReadReusableAssessmentSnapshotAsync(fixture.Snapshot.Identity.LibraryRoot, CancellationToken.None);
+
+        reusable.Should().NotBeNull();
+        reusable!.EpubAssessments.Should().ContainSingle().Which.Should().BeEquivalentTo(assessment);
+        Directory.GetFiles(cache, "*.reusable-assessments.json").Should().ContainSingle();
+    }
+
+    [Fact]
+    public async Task PostExactRefreshBaselineReplaysExactSourceProvenance()
+    {
+        using TemporaryDirectory directory = new();
+        InfrastructureExecutionFixture fixture = InfrastructureExecutionTestData.Create(directory.Path);
+        string cache = Path.Combine(directory.Path, "state-cache");
+        VersionedJsonLibraryStateStore store = new(new() { StorageRoot = cache });
+        LibraryWorkflowSource source = new(
+            new(Guid.Parse("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee")),
+            new(42));
+        LibraryStateGenerationId refreshedGeneration = new(
+            Guid.Parse("11111111-2222-3333-4444-555555555555"));
+        LibraryState refreshed = new(
+            refreshedGeneration,
+            new(0),
+            LibraryStateStatus.Authoritative,
+            fixture.Snapshot,
+            fixture.Snapshot.ScannedAt,
+            workflowCheckpoint: new(
+                LibraryWorkflowPhase.CandidatePreparationReady,
+                refreshedGeneration,
+                new(0),
+                LibraryWorkflowPolicyVersions.Current,
+                fixture.Snapshot.ScannedAt,
+                source));
+        await store.WriteBaselineAsync(refreshed, CancellationToken.None);
+
+        LibraryState? loaded = await new VersionedJsonLibraryStateStore(new() { StorageRoot = cache })
+            .ReadAsync(fixture.Snapshot.Identity.LibraryRoot, CancellationToken.None);
+
+        loaded!.WorkflowCheckpoint.Phase.Should().Be(LibraryWorkflowPhase.CandidatePreparationReady);
+        loaded.WorkflowCheckpoint.Source.Should().Be(source);
+        loaded.IsWorkflowCheckpointCurrent.Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task PostExactRefreshBaselineRejectsChangedPersistedSource()
+    {
+        using TemporaryDirectory directory = new();
+        InfrastructureExecutionFixture fixture = InfrastructureExecutionTestData.Create(directory.Path);
+        string cache = Path.Combine(directory.Path, "state-cache");
+        VersionedJsonLibraryStateStore store = new(new() { StorageRoot = cache });
+        LibraryState exact = LibraryState.FromScan(
+                fixture.Snapshot,
+                new(Guid.Parse("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee")))
+            .AdvanceWorkflow(LibraryWorkflowPhase.ExactReady, fixture.Snapshot.ScannedAt)
+            .AdvanceWorkflow(LibraryWorkflowPhase.CandidatePreparationReady, fixture.Snapshot.ScannedAt);
+        await store.WriteBaselineAsync(exact, CancellationToken.None);
+        LibraryWorkflowSource staleSource = new(exact.GenerationId, exact.Revision);
+        LibraryState replacement = LibraryState.FromScan(
+                fixture.Snapshot,
+                new(Guid.Parse("11111111-2222-3333-4444-555555555555")))
+            .AdvanceWorkflow(LibraryWorkflowPhase.ExactReady, fixture.Snapshot.ScannedAt);
+        await store.WriteBaselineAsync(replacement, CancellationToken.None);
+        LibraryStateGenerationId refreshedGeneration = new(
+            Guid.Parse("99999999-8888-7777-6666-555555555555"));
+        LibraryState refreshed = new(
+            refreshedGeneration,
+            new(0),
+            LibraryStateStatus.Authoritative,
+            fixture.Snapshot,
+            fixture.Snapshot.ScannedAt,
+            workflowCheckpoint: new(
+                LibraryWorkflowPhase.CandidatePreparationReady,
+                refreshedGeneration,
+                new(0),
+                LibraryWorkflowPolicyVersions.Current,
+                fixture.Snapshot.ScannedAt,
+                staleSource));
+
+        Func<Task> act = () => store.WritePostExactRefreshBaselineAsync(
+            refreshed, staleSource, CancellationToken.None);
+
+        await act.Should().ThrowAsync<InvalidOperationException>();
+        LibraryState? loaded = await store.ReadAsync(
+            fixture.Snapshot.Identity.LibraryRoot, CancellationToken.None);
+        loaded!.GenerationId.Should().Be(replacement.GenerationId);
     }
 
     [Fact]

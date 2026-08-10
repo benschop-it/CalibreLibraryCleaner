@@ -82,7 +82,8 @@ public sealed record LibraryWorkflowCheckpoint
         LibraryStateGenerationId generationId,
         LibraryStateRevision revision,
         LibraryWorkflowPolicyVersions policyVersions,
-        DateTimeOffset publishedAtUtc)
+        DateTimeOffset publishedAtUtc,
+        LibraryWorkflowSource? source = null)
     {
         if (!Enum.IsDefined(phase)) throw new ArgumentOutOfRangeException(nameof(phase));
         Phase = phase;
@@ -90,6 +91,10 @@ public sealed record LibraryWorkflowCheckpoint
         Revision = revision;
         PolicyVersions = policyVersions ?? throw new ArgumentNullException(nameof(policyVersions));
         PublishedAtUtc = publishedAtUtc.ToUniversalTime();
+        if (phase is LibraryWorkflowPhase.CandidateAnalysisReady or LibraryWorkflowPhase.Completed
+            && source is null)
+            throw new ArgumentException("Candidate workflow phases require exact-stage provenance.", nameof(source));
+        Source = source;
     }
 
     public LibraryWorkflowPhase Phase { get; }
@@ -97,6 +102,21 @@ public sealed record LibraryWorkflowCheckpoint
     public LibraryStateRevision Revision { get; }
     public LibraryWorkflowPolicyVersions PolicyVersions { get; }
     public DateTimeOffset PublishedAtUtc { get; }
+    public LibraryWorkflowSource? Source { get; }
+}
+
+public sealed record LibraryWorkflowSource
+{
+    public LibraryWorkflowSource(
+        LibraryStateGenerationId generationId,
+        LibraryStateRevision revision)
+    {
+        GenerationId = generationId ?? throw new ArgumentNullException(nameof(generationId));
+        Revision = revision;
+    }
+
+    public LibraryStateGenerationId GenerationId { get; }
+    public LibraryStateRevision Revision { get; }
 }
 
 public sealed record LibraryStateUncertainty
@@ -205,7 +225,8 @@ public sealed record LibraryState
 
     public LibraryState AdvanceWorkflow(
         LibraryWorkflowPhase phase,
-        DateTimeOffset publishedAtUtc)
+        DateTimeOffset publishedAtUtc,
+        LibraryWorkflowSource? source = null)
     {
         if (!IsAuthoritative)
             throw new InvalidOperationException("Workflow phase cannot advance while library state is uncertain.");
@@ -216,8 +237,12 @@ public sealed record LibraryState
         DateTimeOffset published = publishedAtUtc.ToUniversalTime();
         if (published < ProjectedAtUtc || published < WorkflowCheckpoint.PublishedAtUtc)
             throw new InvalidOperationException("The workflow checkpoint predates authoritative state.");
+        LibraryWorkflowSource? effectiveSource = phase == LibraryWorkflowPhase.CandidateAnalysisReady
+            ? source ?? throw new InvalidOperationException(
+                "Candidate analysis requires exact-stage provenance.")
+            : WorkflowCheckpoint.Source;
         return new(GenerationId, Revision, Status, Snapshot, ProjectedAtUtc, null,
-            new(phase, GenerationId, Revision, LibraryWorkflowPolicyVersions.Current, published));
+            new(phase, GenerationId, Revision, LibraryWorkflowPolicyVersions.Current, published, effectiveSource));
     }
 
     public LibraryState MarkUncertain(LibraryStateUncertainty uncertainty) =>

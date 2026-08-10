@@ -34,6 +34,11 @@ public interface ILibraryStateSession
         LibrarySnapshot snapshot,
         CancellationToken cancellationToken);
 
+    Task<LibraryStateSessionOutcome> StartFromPostExactRefreshAsync(
+        LibrarySnapshot snapshot,
+        LibraryWorkflowSource source,
+        CancellationToken cancellationToken);
+
     Task<LibraryStateSessionOutcome> LoadAsync(
         string libraryRoot,
         CancellationToken cancellationToken);
@@ -99,6 +104,58 @@ public sealed class LibraryStateSession(ILibraryStateStore? store = null) : ILib
         LibrarySnapshot snapshot,
         CancellationToken cancellationToken) => await StartFromAnalysisAsync(
             snapshot, exactReady: true, cancellationToken).ConfigureAwait(false);
+
+    public async Task<LibraryStateSessionOutcome> StartFromPostExactRefreshAsync(
+        LibrarySnapshot snapshot,
+        LibraryWorkflowSource source,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(snapshot);
+        ArgumentNullException.ThrowIfNull(source);
+        LibraryStateGenerationId generation = new(Guid.NewGuid());
+        LibraryState state = new(
+            generation,
+            new(0),
+            LibraryStateStatus.Authoritative,
+            snapshot,
+            snapshot.ScannedAt,
+            workflowCheckpoint: new(
+                LibraryWorkflowPhase.CandidatePreparationReady,
+                generation,
+                new(0),
+                LibraryWorkflowPolicyVersions.Current,
+                snapshot.ScannedAt,
+                source));
+        await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            if (!_states.TryGetValue(snapshot.Identity.LibraryRoot, out LibraryState? current)
+                || !current.IsAuthoritative
+                || !current.IsWorkflowCheckpointCurrent
+                || current.GenerationId != source.GenerationId
+                || current.Revision != source.Revision
+                || current.WorkflowCheckpoint.Phase != LibraryWorkflowPhase.CandidatePreparationReady
+                || current.WorkflowCheckpoint.Source is not null)
+                return LibraryStateSessionOutcome.Failure(
+                    "LIBRARY_STATE.REFRESH_SOURCE_STALE",
+                    "The Exact source state changed before refreshed state publication.");
+            if (store is not null)
+                await store.WritePostExactRefreshBaselineAsync(state, source, cancellationToken)
+                    .ConfigureAwait(false);
+            _states[snapshot.Identity.LibraryRoot] = state;
+            PublishStateChanged(snapshot.Identity.LibraryRoot, state);
+            return LibraryStateSessionOutcome.Success(state);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException
+                                           or InvalidDataException or InvalidOperationException)
+        {
+            return LibraryStateSessionOutcome.Failure("LIBRARY_STATE.BASELINE_PERSIST_FAILED", exception.Message);
+        }
+        finally
+        {
+            _gate.Release();
+        }
+    }
 
     private async Task<LibraryStateSessionOutcome> StartFromAnalysisAsync(
         LibrarySnapshot snapshot,

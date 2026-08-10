@@ -125,7 +125,7 @@ Suggested phases:
 
 The checkpoint is published atomically with or immediately after the authoritative state transition it describes. It must never claim a later phase than the durable state and mutation marker support.
 
-A successful exact-only analysis starts a new generation at `ExactReady`. A successful Exact cleanup, including nothing-to-do, advances to `CandidatePreparationReady`. Candidate preparation starts a new authoritative post-exact generation at `CandidateAnalysisReady`, with provenance linking it to the exact generation/revision and mutation run. Candidate cleanup projects deltas in that generation and advances to `Completed` only after the final successful checkpoint.
+A successful exact-only analysis starts a new generation at `ExactReady`. A successful Exact cleanup, including nothing-to-do, advances to `CandidatePreparationReady`. Trusted refresh and reusable-fact preparation start a new physical authoritative generation that remains at `CandidatePreparationReady`, with provenance linking it to the exact generation/revision. Residual unified candidate discovery later advances that same generation to `CandidateAnalysisReady`. Candidate cleanup projects deltas in that generation and advances to `Completed` only after the final successful checkpoint.
 
 ### Development UI state machine
 
@@ -526,7 +526,9 @@ Manual large-library acceptance records metrics from Serilog and verifies:
 - [x] Durable workflow phase implemented.
 - [x] Exact-only analysis implemented.
 - [x] `Exact cleanup` primary button wired to the unchanged Exact executor.
-- [ ] Post-exact refresh and fingerprint reuse implemented.
+- [x] Pure post-Exact reconciliation policy implemented.
+- [x] Post-exact refresh and fingerprint reuse implemented.
+- [x] Assessment and candidate-content cache reuse implemented.
 - [ ] Unified candidate discovery and presentation implemented.
 - [ ] Candidate cleanup implemented.
 - [ ] Legacy composite/category cleanup retired.
@@ -561,3 +563,25 @@ solution build, 570 passing tests, clean formatting, clean diff hygiene apart fr
 Git line-ending notices on two Markdown files, and no vulnerable direct or
 transitive packages. `ExecuteBulkExactDuplicateCleanupUseCase` has no diff, and no
 step-5 reconciliation or later unified-candidate implementation was introduced.
+Step 5 added a pure catalog reconciliation policy that replays only contiguous
+typed Exact deltas, validates the projected inventory, classifies unchanged,
+transferred, expected-removed, targeted-hash-required, and unexplained
+associations, and fails closed on every unexpected record, metadata, format,
+stored-name, identity, or delta change. Its 10 synthetic Application tests pass.
+Step 6 retains the exact-analysis baseline and completed hash-chained Exact deltas
+across normal checkpoint compaction, rereads the catalog read-only, resolves every
+current association through the existing path boundary, reuses only explained
+unchanged fingerprints, target-hashes transfer destinations, rejects mismatches,
+and atomically publishes a new all-physical generation with exact source
+provenance. Step 7 carries reusable EPUB/PDF assessments across exact-only
+generations, rebinds compatible facts by fingerprint/version to current records and
+paths, inspects only misses, and delegates candidate-only EPUB signatures to the
+existing no-prose fingerprint/version cache. Cancellation or any preparation
+failure leaves the completed Exact generation authoritative. Final hardening adds
+read-only physical probes for unchanged files, explicit transfer-source proof,
+target fingerprint verification, contiguous retained-delta validation, and
+compare-and-swap publication against the exact source generation/revision. Missing,
+locked, unsafe, changed, stale, unproven, or incomplete evidence fails closed before
+publication. Final verification passes with 604 tests, clean formatting and diff
+hygiene, no vulnerable direct or transitive packages, and the Exact cleanup
+executor unchanged.

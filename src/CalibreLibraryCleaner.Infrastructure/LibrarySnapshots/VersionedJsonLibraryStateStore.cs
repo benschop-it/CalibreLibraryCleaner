@@ -16,6 +16,7 @@ internal sealed class VersionedJsonLibraryStateStore(
 {
     private const string SchemaVersion = "library-state/1.0";
     private const string ManifestSuffix = ".library-state.json";
+    private const string AssessmentSnapshotSuffix = ".reusable-assessments.json";
     private static readonly string EmptyDigest = new('0', 64);
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
@@ -72,6 +73,34 @@ internal sealed class VersionedJsonLibraryStateStore(
 
     public async Task WriteBaselineAsync(LibraryState state, CancellationToken cancellationToken)
     {
+        await WriteBaselineCoreAsync(state, cancellationToken).ConfigureAwait(false);
+    }
+
+    public async Task WritePostExactRefreshBaselineAsync(
+        LibraryState state,
+        LibraryWorkflowSource source,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(state);
+        ArgumentNullException.ThrowIfNull(source);
+        string libraryRoot = Canonicalize(state.Snapshot.Identity.LibraryRoot);
+        string root = StorageRoot();
+        string key = Key(libraryRoot);
+        StateManifest manifest = await ReadManifestAsync(root, key, cancellationToken).ConfigureAwait(false)
+            ?? throw new InvalidOperationException("No persisted Exact source state exists.");
+        if (manifest.Status != LibraryStateStatus.Authoritative
+            || manifest.PendingMutationIntent is not null
+            || manifest.GenerationId != source.GenerationId.Value
+            || manifest.Revision != source.Revision.Value
+            || manifest.WorkflowCheckpoint?.Phase != LibraryWorkflowPhase.CandidatePreparationReady
+            || manifest.WorkflowCheckpoint.SourceGenerationId is not null
+            || state.WorkflowCheckpoint.Source != source)
+            throw new InvalidOperationException("The persisted Exact source changed before refresh publication.");
+        await WriteBaselineCoreAsync(state, cancellationToken).ConfigureAwait(false);
+    }
+
+    private async Task WriteBaselineCoreAsync(LibraryState state, CancellationToken cancellationToken)
+    {
         ArgumentNullException.ThrowIfNull(state);
         if (state.Revision.Value != 0 || !state.IsAuthoritative)
             throw new ArgumentException("A persisted baseline must be authoritative revision zero.", nameof(state));
@@ -80,6 +109,8 @@ internal sealed class VersionedJsonLibraryStateStore(
         RejectInsideLibrary(root, libraryRoot);
         Directory.CreateDirectory(root);
         string key = Key(libraryRoot);
+        string? reusableAssessmentSnapshot = await PreserveReusableAssessmentsAsync(
+            root, key, libraryRoot, state.Snapshot, cancellationToken).ConfigureAwait(false);
         string generation = state.GenerationId.Value.ToString("N");
         string baselineName = $"{key}.{generation}.baseline.json";
         string journalName = $"{key}.{generation}.deltas.jsonl";
@@ -88,7 +119,8 @@ internal sealed class VersionedJsonLibraryStateStore(
         await WriteAtomicAsync(Path.Combine(root, journalName), [], cancellationToken).ConfigureAwait(false);
         StateManifest manifest = new(SchemaVersion, libraryRoot, state.GenerationId.Value, 0, 0,
             LibraryStateStatus.Authoritative, state.Snapshot.ScannedAt, state.ProjectedAtUtc, state.ProjectedAtUtc,
-            baselineName, journalName, EmptyDigest, 0, null, null, ToPayload(state.WorkflowCheckpoint));
+            baselineName, journalName, EmptyDigest, 0, null, null, ToPayload(state.WorkflowCheckpoint),
+            ReusableAssessmentSnapshotFile: reusableAssessmentSnapshot);
         await WriteManifestAsync(root, key, manifest, cancellationToken).ConfigureAwait(false);
         PruneUnreferencedStateFiles(root, key, manifest);
     }
@@ -154,6 +186,15 @@ internal sealed class VersionedJsonLibraryStateStore(
             HeadDigest = head,
             DeltaCount = checked(manifest.DeltaCount + deltas.Count),
             PendingMutationIntent = completeMutationIntent ? null : manifest.PendingMutationIntent,
+            PostExactRefreshBasis = completeMutationIntent
+                && manifest.PostExactRefreshBasis is { } refreshBasis
+                && refreshBasis.IntentId == mutationIntentId
+                ? refreshBasis with
+                {
+                    CompletedRevision = projectedState.Revision.Value,
+                    CompletedHeadDigest = head,
+                }
+                : manifest.PostExactRefreshBasis,
         };
         if (compactIfThresholdReached
             && options.StateDeltaCompactionThreshold > 0
@@ -179,7 +220,28 @@ internal sealed class VersionedJsonLibraryStateStore(
             || manifest.GenerationId != intent.GenerationId.Value
             || manifest.Revision != intent.ExpectedRevision.Value)
             throw new InvalidOperationException("The persisted state manifest cannot accept the mutation intent.");
-        await WriteManifestAsync(root, key, manifest with { PendingMutationIntent = ToPayload(intent) }, cancellationToken)
+        PostExactRefreshBasisPayload? refreshBasis = manifest.PostExactRefreshBasis;
+        if (manifest.WorkflowCheckpoint?.Phase == LibraryWorkflowPhase.ExactReady)
+        {
+            if (manifest.BaseRevision != manifest.Revision || manifest.DeltaCount != 0
+                || refreshBasis is not null)
+                throw new InvalidOperationException(
+                    "Exact cleanup requires an uncompacted exact-analysis baseline for later refresh.");
+            refreshBasis = new(
+                intent.IntentId,
+                manifest.GenerationId,
+                manifest.Revision,
+                manifest.ProjectedAtUtc,
+                manifest.BaselineFile,
+                manifest.JournalFile,
+                null,
+                null);
+        }
+        await WriteManifestAsync(root, key, manifest with
+        {
+            PendingMutationIntent = ToPayload(intent),
+            PostExactRefreshBasis = refreshBasis,
+        }, cancellationToken)
             .ConfigureAwait(false);
     }
 
@@ -202,6 +264,12 @@ internal sealed class VersionedJsonLibraryStateStore(
             || !PathComparer.Equals(manifest.LibraryRoot, canonical))
             throw new InvalidOperationException(
                 "The persisted state manifest cannot accept the workflow checkpoint.");
+        if (state.WorkflowCheckpoint.Phase == LibraryWorkflowPhase.CandidatePreparationReady
+            && state.Revision.Value > 0
+            && (manifest.PostExactRefreshBasis?.CompletedRevision != state.Revision.Value
+                || string.IsNullOrWhiteSpace(manifest.PostExactRefreshBasis.CompletedHeadDigest)))
+            throw new InvalidOperationException(
+                "Candidate preparation requires complete persisted Exact refresh evidence.");
         await WriteManifestAsync(root, key, manifest with
         {
             WorkflowCheckpoint = ToPayload(state.WorkflowCheckpoint),
@@ -306,6 +374,71 @@ internal sealed class VersionedJsonLibraryStateStore(
         }
     }
 
+    public async Task<PostExactRefreshBasis?> ReadPostExactRefreshBasisAsync(
+        string libraryRoot,
+        CancellationToken cancellationToken)
+    {
+        string canonical = Canonicalize(libraryRoot);
+        string root = StorageRoot();
+        string key = Key(canonical);
+        StateManifest? manifest = await ReadManifestAsync(root, key, cancellationToken).ConfigureAwait(false);
+        if (manifest is null) return null;
+        if (manifest.SchemaVersion != SchemaVersion
+            || !PathComparer.Equals(manifest.LibraryRoot, canonical)
+            || manifest.Status != LibraryStateStatus.Authoritative
+            || manifest.PendingMutationIntent is not null
+            || manifest.WorkflowCheckpoint?.Phase != LibraryWorkflowPhase.CandidatePreparationReady
+            || manifest.WorkflowCheckpoint.SourceGenerationId is not null)
+            throw new InvalidDataException("Persisted state is not ready for post-Exact refresh.");
+
+        if (manifest.Revision == 0 && manifest.PostExactRefreshBasis is null)
+        {
+            LibrarySnapshot snapshot = await ReadBaselineAsync(
+                Path.Combine(root, manifest.BaselineFile), cancellationToken).ConfigureAwait(false);
+            return new(
+                CreatePreExactState(manifest.GenerationId, 0, snapshot, manifest.CheckpointProjectedAtUtc),
+                []);
+        }
+
+        PostExactRefreshBasisPayload basis = manifest.PostExactRefreshBasis
+            ?? throw new InvalidDataException("The completed Exact cleanup has no refresh basis.");
+        if (basis.GenerationId != manifest.GenerationId
+            || basis.StartingRevision < 0
+            || basis.CompletedRevision != manifest.Revision
+            || string.IsNullOrWhiteSpace(basis.CompletedHeadDigest))
+            throw new InvalidDataException("The persisted Exact refresh basis is incomplete.");
+        LibrarySnapshot baseline = await ReadBaselineAsync(
+            Path.Combine(root, basis.BaselineFile), cancellationToken).ConfigureAwait(false);
+        LibraryState preState = CreatePreExactState(
+            basis.GenerationId, basis.StartingRevision, baseline, basis.ProjectedAtUtc);
+        (IReadOnlyList<LibraryStateDelta> deltas, string head) = await ReadDeltaJournalAsync(
+            Path.Combine(root, basis.JournalFile), preState.GenerationId, cancellationToken)
+            .ConfigureAwait(false);
+        long completedRevision = basis.CompletedRevision.Value;
+        if (deltas.Count != checked(completedRevision - basis.StartingRevision)
+            || deltas.Select((delta, index) =>
+                    delta.ExpectedRevision.Value == checked(basis.StartingRevision + index))
+                .Any(matches => !matches)
+            || !string.Equals(head, basis.CompletedHeadDigest, StringComparison.Ordinal))
+            throw new InvalidDataException("The persisted Exact refresh delta journal is incomplete or invalid.");
+        return new(preState, deltas);
+    }
+
+    public async Task<LibrarySnapshot?> ReadReusableAssessmentSnapshotAsync(
+        string libraryRoot,
+        CancellationToken cancellationToken)
+    {
+        string canonical = Canonicalize(libraryRoot);
+        string root = StorageRoot();
+        string key = Key(canonical);
+        StateManifest? manifest = await ReadManifestAsync(root, key, cancellationToken).ConfigureAwait(false);
+        if (manifest is null || manifest.ReusableAssessmentSnapshotFile is null) return null;
+        if (manifest.SchemaVersion != SchemaVersion || !PathComparer.Equals(manifest.LibraryRoot, canonical))
+            throw new InvalidDataException("The reusable assessment snapshot belongs to incompatible state.");
+        return await ReadBaselineAsync(
+            Path.Combine(root, manifest.ReusableAssessmentSnapshotFile), cancellationToken).ConfigureAwait(false);
+    }
+
     private static DeltaPayload ToPayload(LibraryStateDelta delta) => delta switch
     {
         RemoveFormatLibraryStateDelta value => new("remove-format", value.ExpectedRevision.Value,
@@ -358,6 +491,50 @@ internal sealed class VersionedJsonLibraryStateStore(
         };
     }
 
+    private static LibraryState CreatePreExactState(
+        Guid generationId,
+        long revision,
+        LibrarySnapshot snapshot,
+        DateTimeOffset projectedAtUtc)
+    {
+        LibraryStateGenerationId generation = new(generationId);
+        LibraryStateRevision stateRevision = new(revision);
+        return new(
+            generation,
+            stateRevision,
+            LibraryStateStatus.Authoritative,
+            snapshot,
+            projectedAtUtc,
+            workflowCheckpoint: new(
+                LibraryWorkflowPhase.ExactReady,
+                generation,
+                stateRevision,
+                LibraryWorkflowPolicyVersions.Current,
+                projectedAtUtc));
+    }
+
+    private static async Task<(IReadOnlyList<LibraryStateDelta> Deltas, string Head)> ReadDeltaJournalAsync(
+        string path,
+        LibraryStateGenerationId generation,
+        CancellationToken cancellationToken)
+    {
+        List<LibraryStateDelta> deltas = [];
+        string head = EmptyDigest;
+        foreach (string line in await File.ReadAllLinesAsync(path, cancellationToken).ConfigureAwait(false))
+        {
+            if (string.IsNullOrWhiteSpace(line)) continue;
+            DeltaEvent entry = JsonSerializer.Deserialize<DeltaEvent>(line, JsonOptions)
+                ?? throw new InvalidDataException("A persisted state delta is empty.");
+            string payloadJson = JsonSerializer.Serialize(entry.Payload, JsonOptions);
+            string expected = Hash($"{head}\n{payloadJson}");
+            if (entry.PreviousDigest != head || entry.Digest != expected)
+                throw new InvalidDataException("The persisted state delta hash chain is invalid.");
+            deltas.Add(FromPayload(entry.Payload, generation));
+            head = entry.Digest;
+        }
+        return (deltas, head);
+    }
+
     private static FormatFileFingerprint Fingerprint(long? size, string? sha256) =>
         new(size ?? throw new InvalidDataException("A persisted fingerprint has no size."),
             new(sha256 ?? throw new InvalidDataException("A persisted fingerprint has no digest.")));
@@ -403,7 +580,9 @@ internal sealed class VersionedJsonLibraryStateStore(
         checkpoint.PolicyVersions.ExactAnalysis,
         checkpoint.PolicyVersions.ExactCleanup,
         checkpoint.PolicyVersions.CandidateAnalysis,
-        checkpoint.PublishedAtUtc);
+        checkpoint.PublishedAtUtc,
+        checkpoint.Source?.GenerationId.Value,
+        checkpoint.Source?.Revision.Value);
 
     private static LibraryState ApplyWorkflowCheckpoint(
         LibraryState state,
@@ -423,7 +602,10 @@ internal sealed class VersionedJsonLibraryStateStore(
             new(payload.GenerationId),
             new(payload.Revision),
             versions,
-            payload.PublishedAtUtc);
+            payload.PublishedAtUtc,
+            payload.SourceGenerationId is null || payload.SourceRevision is null
+                ? null
+                : new(new(payload.SourceGenerationId.Value), new(payload.SourceRevision.Value)));
         return new(state.GenerationId, state.Revision, state.Status, state.Snapshot,
             state.ProjectedAtUtc, state.Uncertainty, checkpoint);
     }
@@ -448,6 +630,49 @@ internal sealed class VersionedJsonLibraryStateStore(
         LibrarySnapshotJsonReadResult result = LibrarySnapshotJsonSerializer.Deserialize(bytes);
         return result.Snapshot ?? throw new InvalidDataException(result.Error);
     }
+
+    private async Task<string?> PreserveReusableAssessmentsAsync(
+        string root,
+        string key,
+        string libraryRoot,
+        LibrarySnapshot incoming,
+        CancellationToken cancellationToken)
+    {
+        LibrarySnapshot? source = HasAssessments(incoming) ? incoming : null;
+        string? existingFile = null;
+        try
+        {
+            StateManifest? previousManifest = await ReadManifestAsync(root, key, cancellationToken)
+                .ConfigureAwait(false);
+            existingFile = previousManifest?.ReusableAssessmentSnapshotFile;
+            if (source is null && previousManifest is not null)
+            {
+                LibraryState? previous = await ReadAsync(libraryRoot, cancellationToken).ConfigureAwait(false);
+                if (previous?.IsAuthoritative == true && HasAssessments(previous.Snapshot))
+                    source = previous.Snapshot;
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException
+                                           or JsonException or InvalidDataException or InvalidOperationException)
+        {
+            existingFile = null;
+        }
+
+        if (source is null) return existingFile;
+        string file = key + AssessmentSnapshotSuffix;
+        await WriteAtomicAsync(
+            Path.Combine(root, file),
+            LibrarySnapshotJsonSerializer.Serialize(source),
+            cancellationToken).ConfigureAwait(false);
+        return file;
+    }
+
+    private static bool HasAssessments(LibrarySnapshot snapshot) =>
+        snapshot.EpubAssessments.Count > 0 || snapshot.PdfAssessments.Count > 0;
 
     private static async Task<StateManifest?> ReadManifestAsync(
         string root,
@@ -508,9 +733,17 @@ internal sealed class VersionedJsonLibraryStateStore(
             active.BaselineFile,
             active.JournalFile,
         };
+        if (active.PostExactRefreshBasis is not null)
+        {
+            retained.Add(active.PostExactRefreshBasis.BaselineFile);
+            retained.Add(active.PostExactRefreshBasis.JournalFile);
+        }
+        if (active.ReusableAssessmentSnapshotFile is not null)
+            retained.Add(active.ReusableAssessmentSnapshotFile);
         IEnumerable<string> candidates = Directory.EnumerateFiles(root, $"{key}.*.baseline.json", SearchOption.TopDirectoryOnly)
             .Concat(Directory.EnumerateFiles(root, $"{key}.*.checkpoint.json", SearchOption.TopDirectoryOnly))
-            .Concat(Directory.EnumerateFiles(root, $"{key}.*.deltas.jsonl", SearchOption.TopDirectoryOnly));
+            .Concat(Directory.EnumerateFiles(root, $"{key}.*.deltas.jsonl", SearchOption.TopDirectoryOnly))
+            .Concat(Directory.EnumerateFiles(root, $"{key}*{AssessmentSnapshotSuffix}", SearchOption.TopDirectoryOnly));
         foreach (string path in candidates)
         {
             string name = Path.GetFileName(path);
@@ -593,7 +826,9 @@ internal sealed class VersionedJsonLibraryStateStore(
         int DeltaCount,
         LibraryStateUncertainty? Uncertainty,
         MutationIntentPayload? PendingMutationIntent = null,
-        WorkflowCheckpointPayload? WorkflowCheckpoint = null);
+        WorkflowCheckpointPayload? WorkflowCheckpoint = null,
+        PostExactRefreshBasisPayload? PostExactRefreshBasis = null,
+        string? ReusableAssessmentSnapshotFile = null);
 
     private sealed record MutationIntentPayload(
         string IntentId,
@@ -610,7 +845,19 @@ internal sealed class VersionedJsonLibraryStateStore(
         string ExactAnalysisPolicyVersion,
         string ExactCleanupPolicyVersion,
         string CandidateAnalysisPolicyVersion,
-        DateTimeOffset PublishedAtUtc);
+        DateTimeOffset PublishedAtUtc,
+        Guid? SourceGenerationId = null,
+        long? SourceRevision = null);
+
+    private sealed record PostExactRefreshBasisPayload(
+        string IntentId,
+        Guid GenerationId,
+        long StartingRevision,
+        DateTimeOffset ProjectedAtUtc,
+        string BaselineFile,
+        string JournalFile,
+        long? CompletedRevision,
+        string? CompletedHeadDigest);
 
     private sealed record DeltaEvent(string PreviousDigest, string Digest, DeltaPayload Payload);
 
