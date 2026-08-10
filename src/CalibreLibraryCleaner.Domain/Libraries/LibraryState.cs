@@ -31,6 +31,74 @@ public enum LibraryStateStatus
     Uncertain,
 }
 
+public enum LibraryWorkflowPhase
+{
+    RequiresExactAnalysis,
+    ExactReady,
+    CandidatePreparationReady,
+    CandidateAnalysisReady,
+    Completed,
+}
+
+public sealed record LibraryWorkflowPolicyVersions
+{
+    public static LibraryWorkflowPolicyVersions Current { get; } = new(
+        "staged-cleanup/1.0.0",
+        "exact-analysis/1.0.0",
+        "exact-cleanup/1.0.0",
+        "candidate-analysis/1.0.0");
+
+    public LibraryWorkflowPolicyVersions(
+        string workflow,
+        string exactAnalysis,
+        string exactCleanup,
+        string candidateAnalysis)
+    {
+        Workflow = Validate(workflow, nameof(workflow));
+        ExactAnalysis = Validate(exactAnalysis, nameof(exactAnalysis));
+        ExactCleanup = Validate(exactCleanup, nameof(exactCleanup));
+        CandidateAnalysis = Validate(candidateAnalysis, nameof(candidateAnalysis));
+    }
+
+    public string Workflow { get; }
+    public string ExactAnalysis { get; }
+    public string ExactCleanup { get; }
+    public string CandidateAnalysis { get; }
+
+    private static string Validate(string value, string parameterName)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(value, parameterName);
+        string normalized = value.Trim();
+        if (normalized.Length > 128)
+            throw new ArgumentException("A workflow policy version exceeds its bound.", parameterName);
+        return normalized;
+    }
+}
+
+public sealed record LibraryWorkflowCheckpoint
+{
+    public LibraryWorkflowCheckpoint(
+        LibraryWorkflowPhase phase,
+        LibraryStateGenerationId generationId,
+        LibraryStateRevision revision,
+        LibraryWorkflowPolicyVersions policyVersions,
+        DateTimeOffset publishedAtUtc)
+    {
+        if (!Enum.IsDefined(phase)) throw new ArgumentOutOfRangeException(nameof(phase));
+        Phase = phase;
+        GenerationId = generationId ?? throw new ArgumentNullException(nameof(generationId));
+        Revision = revision;
+        PolicyVersions = policyVersions ?? throw new ArgumentNullException(nameof(policyVersions));
+        PublishedAtUtc = publishedAtUtc.ToUniversalTime();
+    }
+
+    public LibraryWorkflowPhase Phase { get; }
+    public LibraryStateGenerationId GenerationId { get; }
+    public LibraryStateRevision Revision { get; }
+    public LibraryWorkflowPolicyVersions PolicyVersions { get; }
+    public DateTimeOffset PublishedAtUtc { get; }
+}
+
 public sealed record LibraryStateUncertainty
 {
     public LibraryStateUncertainty(
@@ -90,7 +158,8 @@ public sealed record LibraryState
         LibraryStateStatus status,
         LibrarySnapshot snapshot,
         DateTimeOffset projectedAtUtc,
-        LibraryStateUncertainty? uncertainty = null)
+        LibraryStateUncertainty? uncertainty = null,
+        LibraryWorkflowCheckpoint? workflowCheckpoint = null)
     {
         ArgumentNullException.ThrowIfNull(generationId);
         ArgumentNullException.ThrowIfNull(snapshot);
@@ -100,12 +169,23 @@ public sealed record LibraryState
         DateTimeOffset projected = projectedAtUtc.ToUniversalTime();
         if (projected < snapshot.ScannedAt.ToUniversalTime())
             throw new ArgumentException("Projected state cannot predate its baseline scan.", nameof(projectedAtUtc));
+        LibraryWorkflowCheckpoint checkpoint = workflowCheckpoint ?? new(
+            LibraryWorkflowPhase.RequiresExactAnalysis,
+            generationId,
+            revision,
+            LibraryWorkflowPolicyVersions.Current,
+            projected);
+        if (checkpoint.GenerationId != generationId || checkpoint.Revision.Value > revision.Value)
+            throw new ArgumentException(
+                "The workflow checkpoint must bind to this generation at or before its current revision.",
+                nameof(workflowCheckpoint));
         GenerationId = generationId;
         Revision = revision;
         Status = status;
         Snapshot = snapshot;
         ProjectedAtUtc = projected;
         Uncertainty = uncertainty;
+        WorkflowCheckpoint = checkpoint;
     }
 
     public LibraryStateGenerationId GenerationId { get; }
@@ -114,13 +194,44 @@ public sealed record LibraryState
     public LibrarySnapshot Snapshot { get; }
     public DateTimeOffset ProjectedAtUtc { get; }
     public LibraryStateUncertainty? Uncertainty { get; }
+    public LibraryWorkflowCheckpoint WorkflowCheckpoint { get; }
     public bool IsAuthoritative => Status == LibraryStateStatus.Authoritative;
+    public bool IsWorkflowCheckpointCurrent => IsAuthoritative
+        && WorkflowCheckpoint.Revision == Revision
+        && WorkflowCheckpoint.PolicyVersions == LibraryWorkflowPolicyVersions.Current;
 
     public static LibraryState FromScan(LibrarySnapshot snapshot, LibraryStateGenerationId generationId) =>
         new(generationId, new(0), LibraryStateStatus.Authoritative, snapshot, snapshot.ScannedAt);
 
+    public LibraryState AdvanceWorkflow(
+        LibraryWorkflowPhase phase,
+        DateTimeOffset publishedAtUtc)
+    {
+        if (!IsAuthoritative)
+            throw new InvalidOperationException("Workflow phase cannot advance while library state is uncertain.");
+        if (WorkflowCheckpoint.PolicyVersions != LibraryWorkflowPolicyVersions.Current)
+            throw new InvalidOperationException("Workflow phase cannot advance from incompatible policy versions.");
+        if (!IsAllowedTransition(WorkflowCheckpoint.Phase, phase))
+            throw new InvalidOperationException("The requested workflow phase transition is invalid.");
+        DateTimeOffset published = publishedAtUtc.ToUniversalTime();
+        if (published < ProjectedAtUtc || published < WorkflowCheckpoint.PublishedAtUtc)
+            throw new InvalidOperationException("The workflow checkpoint predates authoritative state.");
+        return new(GenerationId, Revision, Status, Snapshot, ProjectedAtUtc, null,
+            new(phase, GenerationId, Revision, LibraryWorkflowPolicyVersions.Current, published));
+    }
+
     public LibraryState MarkUncertain(LibraryStateUncertainty uncertainty) =>
         new(GenerationId, Revision, LibraryStateStatus.Uncertain, Snapshot,
             uncertainty.OccurredAtUtc < ProjectedAtUtc ? ProjectedAtUtc : uncertainty.OccurredAtUtc,
-            uncertainty);
+            uncertainty, WorkflowCheckpoint);
+
+    private static bool IsAllowedTransition(LibraryWorkflowPhase current, LibraryWorkflowPhase next) =>
+        current switch
+        {
+            LibraryWorkflowPhase.RequiresExactAnalysis => next == LibraryWorkflowPhase.ExactReady,
+            LibraryWorkflowPhase.ExactReady => next == LibraryWorkflowPhase.CandidatePreparationReady,
+            LibraryWorkflowPhase.CandidatePreparationReady => next == LibraryWorkflowPhase.CandidateAnalysisReady,
+            LibraryWorkflowPhase.CandidateAnalysisReady => next == LibraryWorkflowPhase.Completed,
+            _ => false,
+        };
 }

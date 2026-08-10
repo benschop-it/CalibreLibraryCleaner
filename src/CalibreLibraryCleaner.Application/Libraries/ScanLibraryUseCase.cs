@@ -35,8 +35,13 @@ public sealed partial class ScanLibraryUseCase(
         string? candidatePath,
         IProgress<LibraryScanProgress>? progress,
         CancellationToken cancellationToken,
-        bool includePdfAssessments = true)
+        bool includePdfAssessments = true,
+        LibraryAnalysisMode mode = LibraryAnalysisMode.FullCompatibility)
     {
+        if (!Enum.IsDefined(mode)) throw new ArgumentOutOfRangeException(nameof(mode));
+        if (mode == LibraryAnalysisMode.CandidateResidual)
+            throw new InvalidOperationException(
+                "Residual candidate analysis requires a trusted post-exact refresh.");
         long scanStarted = Stopwatch.GetTimestamp();
         cancellationToken.ThrowIfCancellationRequested();
         progress?.Report(new(LibraryScanPhase.Validating, 0, 1, "Validating library"));
@@ -49,12 +54,16 @@ public sealed partial class ScanLibraryUseCase(
         }
 
         ValidatedLibraryLocation validatedLocation = validation.Location!;
-        LibraryState? previousState = libraryStateSession?.GetCurrent(validatedLocation.LibraryRoot);
-        if (previousState is null && libraryStateSession is not null)
+        LibraryState? previousState = null;
+        if (mode == LibraryAnalysisMode.FullCompatibility && libraryStateSession is not null)
         {
-            LibraryStateSessionOutcome load = await libraryStateSession.LoadAsync(
-                validatedLocation.LibraryRoot, cancellationToken).ConfigureAwait(false);
-            if (load.IsSuccess) previousState = load.State;
+            previousState = libraryStateSession.GetCurrent(validatedLocation.LibraryRoot);
+            if (previousState is null)
+            {
+                LibraryStateSessionOutcome load = await libraryStateSession.LoadAsync(
+                    validatedLocation.LibraryRoot, cancellationToken).ConfigureAwait(false);
+                if (load.IsSuccess) previousState = load.State;
+            }
         }
         LibrarySnapshot? previousSnapshot = previousState?.IsAuthoritative == true
             ? previousState.Snapshot
@@ -163,6 +172,51 @@ public sealed partial class ScanLibraryUseCase(
         List<CalibreBook> books = preparedBooks
             .Select(book => MapBook(book, resultsBySequence, findings, cancellationToken))
             .ToList();
+        if (mode == LibraryAnalysisMode.ExactOnly)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            progress?.Report(new(
+                LibraryScanPhase.GroupingExactDuplicates,
+                0,
+                1,
+                "Grouping exact file duplicates"));
+            IReadOnlyList<ExactBinaryDuplicateGroup> exactGroups =
+                ExactBinaryDuplicateDetector.Detect(books, cancellationToken);
+            progress?.Report(new(
+                LibraryScanPhase.GroupingExactDuplicates,
+                1,
+                1,
+                "Exact file duplicates grouped"));
+            cancellationToken.ThrowIfCancellationRequested();
+            LibraryFinding[] exactFindings = OrderFindings(findings, cancellationToken);
+            LibraryIdentity exactIdentity = new(
+                catalog.LibraryUuid,
+                catalog.SchemaVersion,
+                validation.Location!.LibraryRoot);
+            LibrarySnapshot exactSnapshot = new(
+                exactIdentity,
+                clock.GetUtcNow(),
+                books,
+                exactFindings,
+                exactGroups);
+            long exactCompleted = Stopwatch.GetTimestamp();
+            LogExactAnalysisCompleted(
+                _logger,
+                catalog.Books.Count,
+                requests.Count,
+                exactGroups.Count,
+                ElapsedMilliseconds(scanStarted, catalogReadCompleted),
+                ElapsedMilliseconds(catalogReadCompleted, resolutionCompleted),
+                ElapsedMilliseconds(resolutionCompleted, hashingCompleted),
+                ElapsedMilliseconds(hashingCompleted, exactCompleted),
+                ElapsedMilliseconds(scanStarted, exactCompleted));
+            progress?.Report(new(
+                LibraryScanPhase.Completed,
+                1,
+                1,
+                "Exact-only analysis complete"));
+            return LibraryScanOutcome.Success(exactSnapshot);
+        }
         List<EpubAssessmentTarget> epubTargets = CreateEpubTargets(preparedBooks, requests, resultsBySequence);
         EpubAssessmentReuseResult epubReuse = AssessmentReusePolicy.PartitionEpub(
             previousSnapshot, epubTargets);
@@ -538,6 +592,27 @@ public sealed partial class ScanLibraryUseCase(
         }
     }
 
+    private static LibraryFinding[] OrderFindings(
+        IEnumerable<LibraryFinding> findings,
+        CancellationToken cancellationToken)
+    {
+        Dictionary<FindingKey, LibraryFinding> uniqueFindings = [];
+        foreach (LibraryFinding finding in findings)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            uniqueFindings.TryAdd(
+                new(finding.BookId, finding.Format, finding.RelativePath, finding.Code),
+                finding);
+        }
+
+        return uniqueFindings.Values
+            .OrderBy(finding => finding.BookId?.Value ?? 0)
+            .ThenBy(finding => finding.Format, StringComparer.Ordinal)
+            .ThenBy(finding => finding.RelativePath, StringComparer.Ordinal)
+            .ThenBy(finding => finding.Code, StringComparer.Ordinal)
+            .ToArray();
+    }
+
     private static bool AreHashResultsValid(
         List<FormatHashRequest> requests,
         IReadOnlyList<FormatHashResult>? results)
@@ -750,5 +825,18 @@ public sealed partial class ScanLibraryUseCase(
         long pdfMilliseconds,
         long matchingMilliseconds,
         long recommendationAndPublicationMilliseconds,
+        long totalMilliseconds);
+
+    [LoggerMessage(401, LogLevel.Information,
+        "Exact-only analysis completed. Books={BookCount}, Formats={FormatCount}, ExactGroups={ExactGroupCount}, CatalogMilliseconds={CatalogMilliseconds}, ResolutionMilliseconds={ResolutionMilliseconds}, HashingMilliseconds={HashingMilliseconds}, GroupingAndPublicationMilliseconds={GroupingAndPublicationMilliseconds}, TotalMilliseconds={TotalMilliseconds}.")]
+    private static partial void LogExactAnalysisCompleted(
+        ILogger logger,
+        int bookCount,
+        int formatCount,
+        int exactGroupCount,
+        long catalogMilliseconds,
+        long resolutionMilliseconds,
+        long hashingMilliseconds,
+        long groupingAndPublicationMilliseconds,
         long totalMilliseconds);
 }

@@ -8,6 +8,11 @@ Large Calibre libraries often contain duplicate records, conflicting versions, i
 
 Provide a local-first, safe, explainable workflow that finds duplicates, assesses format quality, recommends a consolidation result, requires approval, backs up affected data, executes through supported Calibre mechanisms, verifies results, and retains audit and rollback information.
 
+For large libraries, stage deterministic Exact analysis and cleanup before
+expensive candidate assessment. Reconcile the residual catalog against durable
+typed mutation state, then present one unified candidate review and cleanup
+workflow without silently trusting external changes.
+
 ## Principles
 
 - Safety over aggressive automation.
@@ -17,6 +22,8 @@ Provide a local-first, safe, explainable workflow that finds duplicates, assesse
 - No direct database mutation.
 - Core analysis works without cloud services.
 - AI is optional and advisory.
+- Expensive candidate analysis runs only after exact copies have been addressed.
+- Durable workflow state makes stage availability explicit across restart.
 
 ## Success criteria
 

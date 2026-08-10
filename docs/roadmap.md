@@ -99,6 +99,15 @@ caching with versioned invalidation, and scale-oriented workflow improvements.
 Plugins receive least authority and cannot bypass cleanup-plan, backup,
 verification, or recovery gates.
 
+## Staged exact-first candidate cleanup
+
+ADR 0020 supersedes future development of the one-scan composite workflow. The
+migration first adds durable workflow state, exact-only analysis, and an `Exact
+cleanup` primary action that composes the existing Exact algorithm unchanged.
+Subsequent slices add trusted post-exact reconciliation, unified residual candidate
+discovery, Candidate cleanup, parity measurement, and only then retirement of
+`Cleanup all` and standalone Metadata/Expanded mutation surfaces.
+
 ## Possible later platform work
 
 Cross-platform UI evaluation may follow after the Windows WPF safety and review

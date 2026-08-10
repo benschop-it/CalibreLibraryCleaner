@@ -25,6 +25,7 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
     private readonly IEbookViewerLauncher? _ebookViewer;
     private readonly PersistedLibrarySnapshotsUseCase? _persistedSnapshots;
     private readonly ILibraryStateSession? _libraryStateSession;
+    private readonly LibraryWorkflowOptions _workflowOptions;
     private readonly SynchronizationContext? _uiContext;
     private readonly BulkObservableCollection<BookRowViewModel> _books = [];
     private readonly BulkObservableCollection<string> _persistedLibraryPaths = [];
@@ -79,7 +80,8 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
         ExpandedCandidateCleanupWorkspaceViewModel? expandedCandidateCleanup = null,
         CompositeCleanupWorkspaceViewModel? compositeCleanup = null,
         PersistedLibrarySnapshotsUseCase? persistedSnapshots = null,
-        ILibraryStateSession? libraryStateSession = null)
+        ILibraryStateSession? libraryStateSession = null,
+        LibraryWorkflowOptions? workflowOptions = null)
     {
         _validateLibrary = validateLibrary;
         _scanLibrary = scanLibrary;
@@ -90,6 +92,7 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
         _ebookViewer = ebookViewer;
         _persistedSnapshots = persistedSnapshots;
         _libraryStateSession = libraryStateSession;
+        _workflowOptions = workflowOptions ?? LibraryWorkflowOptions.Compatibility;
         _uiContext = SynchronizationContext.Current;
         if (_libraryStateSession is not null)
             _libraryStateSession.StateChanged += OnLibraryStateChanged;
@@ -138,6 +141,7 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
         MarkNotDuplicatesCommand = new RelayCommand(() => ApplySelectedReview(RecommendationReviewStatus.NotDuplicates), CanReviewSelected);
         ResetRecommendationCommand = new RelayCommand(ResetSelectedReview, CanReviewSelected);
         ExportRecommendationsCommand = new AsyncRelayCommand(ExportRecommendationsAsync, () => !IsBusy && _currentSnapshot is not null && _exportRecommendations is not null && _exportFilePicker is not null);
+        CandidateCleanupCommand = new RelayCommand(PrepareCandidateCleanup, CanPrepareCandidateCleanup);
     }
 
     public string SelectedLibraryPath
@@ -206,6 +210,7 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
                 PreviousMetadataDuplicateGroupCommand.NotifyCanExecuteChanged();
                 ToggleMetadataDuplicateDeferredCommand.NotifyCanExecuteChanged();
                 NotifyRecommendationCommands();
+                CandidateCleanupCommand.NotifyCanExecuteChanged();
             }
         }
     }
@@ -536,6 +541,8 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
 
     public IAsyncRelayCommand ExportRecommendationsCommand { get; }
 
+    public IRelayCommand CandidateCleanupCommand { get; }
+
     public async Task InitializeAsync(CancellationToken cancellationToken = default)
     {
         await RefreshPersistedLibraryPathsAsync(cancellationToken).ConfigureAwait(true);
@@ -551,8 +558,13 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
 
     private void OnLibraryStateChanged(object? sender, LibraryStateChangedEventArgs eventArgs)
     {
-        if (_uiContext is null || !PathsEqual(SelectedLibraryPath, eventArgs.State.Snapshot.Identity.LibraryRoot))
+        if (!PathsEqual(SelectedLibraryPath, eventArgs.State.Snapshot.Identity.LibraryRoot))
             return;
+        if (_uiContext is null)
+        {
+            CandidateCleanupCommand.NotifyCanExecuteChanged();
+            return;
+        }
         _uiContext.Post(_ => _ = ApplyProjectedStateAsync(eventArgs.State), null);
     }
 
@@ -564,6 +576,7 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
         LibraryState? latest = _libraryStateSession?.GetCurrent(state.Snapshot.Identity.LibraryRoot);
         if (latest?.GenerationId != state.GenerationId || latest.Revision != state.Revision) return;
         ApplySnapshot(state.Snapshot, presentation, state.IsAuthoritative);
+        CandidateCleanupCommand.NotifyCanExecuteChanged();
         StatusMessage = state.IsAuthoritative
             ? $"Projected library state updated to revision {state.Revision.Value}. External Calibre changes require Rescan."
             : $"Library state is uncertain after revision {state.Revision.Value}. Rescan is required before cleanup or recovery.";
@@ -607,7 +620,11 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
         try
         {
             LibraryScanOutcome outcome = await _scanLibrary
-                .ExecuteAsync(SelectedLibraryPath, progress, _scanCancellation.Token)
+                .ExecuteAsync(
+                    SelectedLibraryPath,
+                    progress,
+                    _scanCancellation.Token,
+                    mode: _workflowOptions.InitialAnalysisMode)
                 .ConfigureAwait(true);
             progress.Complete();
             if (outcome.IsSuccess)
@@ -615,9 +632,11 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
                 bool statePersisted = false;
                 if (_libraryStateSession is not null)
                 {
-                    LibraryStateSessionOutcome stateStart = await _libraryStateSession
-                        .StartFromScanAsync(outcome.Snapshot!, _scanCancellation.Token)
-                        .ConfigureAwait(true);
+                    LibraryStateSessionOutcome stateStart = _workflowOptions.IsStaged
+                        ? await _libraryStateSession.StartFromExactAnalysisAsync(
+                            outcome.Snapshot!, _scanCancellation.Token).ConfigureAwait(true)
+                        : await _libraryStateSession.StartFromScanAsync(
+                            outcome.Snapshot!, _scanCancellation.Token).ConfigureAwait(true);
                     statePersisted = stateStart.IsSuccess;
                     if (!stateStart.IsSuccess)
                     {
@@ -966,12 +985,13 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
         }
         _allMetadataDuplicateGroups = presentation.MetadataGroups;
         ApplyMetadataDuplicateFilter();
-        MetadataCandidateCleanup?.UpdateContext(isFreshScan ? snapshot : null, _allMetadataDuplicateGroups);
+        bool legacyMutationOwner = isFreshScan && !_workflowOptions.IsStaged;
+        MetadataCandidateCleanup?.UpdateContext(legacyMutationOwner ? snapshot : null, _allMetadataDuplicateGroups);
         _expandedCandidateGroups.ReplaceAll(presentation.ExpandedGroups);
         SelectedExpandedCandidateGroup = _expandedCandidateGroups.FirstOrDefault();
-        ExpandedCandidateCleanup?.UpdateContext(isFreshScan ? snapshot : null, _expandedCandidateGroups);
+        ExpandedCandidateCleanup?.UpdateContext(legacyMutationOwner ? snapshot : null, _expandedCandidateGroups);
         CompositeCleanup?.UpdateContext(
-            isFreshScan ? snapshot : null,
+            legacyMutationOwner ? snapshot : null,
             _exactDuplicateGroups,
             _allMetadataDuplicateGroups,
             _expandedCandidateGroups);
@@ -991,12 +1011,30 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
         _pdfAssessments.ReplaceAll(presentation.PdfAssessments);
         SelectedPdfAssessment = _pdfAssessments.FirstOrDefault();
         StatusMessage = snapshot.Books.Count == 0
-            ? "Scan complete. The library contains no books."
-            : $"Scan complete: {snapshot.Books.Count} books, {snapshot.ExactBinaryDuplicateGroups.Count} exact file duplicate groups, {snapshot.ExactMetadataDuplicateGroups.Count} exact metadata candidate groups, {snapshot.WorkLanguageCandidateGroups.Count} expanded candidate groups, {presentation.MissingCount} missing format files.";
+            ? _workflowOptions.IsStaged
+                ? "Exact-only analysis complete. The library contains no books."
+                : "Scan complete. The library contains no books."
+            : _workflowOptions.IsStaged
+                ? $"Exact-only analysis complete: {snapshot.Books.Count} books, {snapshot.ExactBinaryDuplicateGroups.Count} exact file duplicate groups, {presentation.MissingCount} missing format files."
+                : $"Scan complete: {snapshot.Books.Count} books, {snapshot.ExactBinaryDuplicateGroups.Count} exact file duplicate groups, {snapshot.ExactMetadataDuplicateGroups.Count} exact metadata candidate groups, {snapshot.WorkLanguageCandidateGroups.Count} expanded candidate groups, {presentation.MissingCount} missing format files.";
         IsProgressIndeterminate = false;
         ProgressPercentage = 100;
         ExportRecommendationsCommand.NotifyCanExecuteChanged();
+        CandidateCleanupCommand.NotifyCanExecuteChanged();
     }
+
+    private bool CanPrepareCandidateCleanup()
+    {
+        if (IsBusy || !_workflowOptions.IsStaged || _libraryStateSession is null
+            || string.IsNullOrWhiteSpace(SelectedLibraryPath))
+            return false;
+        LibraryState? state = _libraryStateSession.GetCurrent(SelectedLibraryPath);
+        return state is { IsWorkflowCheckpointCurrent: true }
+            && state.WorkflowCheckpoint.Phase == LibraryWorkflowPhase.CandidatePreparationReady;
+    }
+
+    private void PrepareCandidateCleanup() => StatusMessage =
+        "Candidate cleanup is unlocked. Post-exact candidate preparation is the next implementation slice.";
 
     private bool CanLoadPersistedSnapshot() => !IsBusy
         && _persistedSnapshots is not null

@@ -88,7 +88,7 @@ internal sealed class VersionedJsonLibraryStateStore(
         await WriteAtomicAsync(Path.Combine(root, journalName), [], cancellationToken).ConfigureAwait(false);
         StateManifest manifest = new(SchemaVersion, libraryRoot, state.GenerationId.Value, 0, 0,
             LibraryStateStatus.Authoritative, state.Snapshot.ScannedAt, state.ProjectedAtUtc, state.ProjectedAtUtc,
-            baselineName, journalName, EmptyDigest, 0, null);
+            baselineName, journalName, EmptyDigest, 0, null, null, ToPayload(state.WorkflowCheckpoint));
         await WriteManifestAsync(root, key, manifest, cancellationToken).ConfigureAwait(false);
         PruneUnreferencedStateFiles(root, key, manifest);
     }
@@ -183,6 +183,31 @@ internal sealed class VersionedJsonLibraryStateStore(
             .ConfigureAwait(false);
     }
 
+    public async Task WriteWorkflowCheckpointAsync(
+        string libraryRoot,
+        LibraryState state,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(state);
+        string canonical = Canonicalize(libraryRoot);
+        string root = StorageRoot();
+        string key = Key(canonical);
+        StateManifest manifest = await ReadManifestAsync(root, key, cancellationToken).ConfigureAwait(false)
+            ?? throw new InvalidOperationException("No persisted library-state baseline exists.");
+        if (manifest.Status != LibraryStateStatus.Authoritative
+            || !state.IsWorkflowCheckpointCurrent
+            || manifest.PendingMutationIntent is not null
+            || manifest.GenerationId != state.GenerationId.Value
+            || manifest.Revision != state.Revision.Value
+            || !PathComparer.Equals(manifest.LibraryRoot, canonical))
+            throw new InvalidOperationException(
+                "The persisted state manifest cannot accept the workflow checkpoint.");
+        await WriteManifestAsync(root, key, manifest with
+        {
+            WorkflowCheckpoint = ToPayload(state.WorkflowCheckpoint),
+        }, cancellationToken).ConfigureAwait(false);
+    }
+
     public async Task CompactAsync(
         string libraryRoot,
         LibraryState state,
@@ -256,6 +281,7 @@ internal sealed class VersionedJsonLibraryStateStore(
             }
             if (state.Revision.Value != manifest.Revision || head != manifest.HeadDigest)
                 throw new InvalidDataException("The persisted state manifest and delta journal disagree.");
+            state = ApplyWorkflowCheckpoint(state, manifest.WorkflowCheckpoint);
             if (manifest.Status == LibraryStateStatus.Uncertain)
             {
                 LibraryStateUncertainty uncertainty = manifest.Uncertainty
@@ -368,6 +394,53 @@ internal sealed class VersionedJsonLibraryStateStore(
     private static LibraryStateMutationIntent FromPayload(MutationIntentPayload intent) => new(
         intent.IntentId, new(intent.GenerationId), new(intent.ExpectedRevision),
         intent.OperationCount, intent.CreatedAtUtc);
+
+    private static WorkflowCheckpointPayload ToPayload(LibraryWorkflowCheckpoint checkpoint) => new(
+        checkpoint.Phase,
+        checkpoint.GenerationId.Value,
+        checkpoint.Revision.Value,
+        checkpoint.PolicyVersions.Workflow,
+        checkpoint.PolicyVersions.ExactAnalysis,
+        checkpoint.PolicyVersions.ExactCleanup,
+        checkpoint.PolicyVersions.CandidateAnalysis,
+        checkpoint.PublishedAtUtc);
+
+    private static LibraryState ApplyWorkflowCheckpoint(
+        LibraryState state,
+        WorkflowCheckpointPayload? payload)
+    {
+        if (payload is null)
+            return WithConservativeWorkflowCheckpoint(state);
+        LibraryWorkflowPolicyVersions versions = new(
+            payload.WorkflowPolicyVersion,
+            payload.ExactAnalysisPolicyVersion,
+            payload.ExactCleanupPolicyVersion,
+            payload.CandidateAnalysisPolicyVersion);
+        if (versions != LibraryWorkflowPolicyVersions.Current)
+            return WithConservativeWorkflowCheckpoint(state);
+        LibraryWorkflowCheckpoint checkpoint = new(
+            payload.Phase,
+            new(payload.GenerationId),
+            new(payload.Revision),
+            versions,
+            payload.PublishedAtUtc);
+        return new(state.GenerationId, state.Revision, state.Status, state.Snapshot,
+            state.ProjectedAtUtc, state.Uncertainty, checkpoint);
+    }
+
+    private static LibraryState WithConservativeWorkflowCheckpoint(LibraryState state) => new(
+        state.GenerationId,
+        state.Revision,
+        state.Status,
+        state.Snapshot,
+        state.ProjectedAtUtc,
+        state.Uncertainty,
+        new(
+            LibraryWorkflowPhase.RequiresExactAnalysis,
+            state.GenerationId,
+            state.Revision,
+            LibraryWorkflowPolicyVersions.Current,
+            state.ProjectedAtUtc));
 
     private static async Task<LibrarySnapshot> ReadBaselineAsync(string path, CancellationToken cancellationToken)
     {
@@ -519,7 +592,8 @@ internal sealed class VersionedJsonLibraryStateStore(
         string HeadDigest,
         int DeltaCount,
         LibraryStateUncertainty? Uncertainty,
-        MutationIntentPayload? PendingMutationIntent = null);
+        MutationIntentPayload? PendingMutationIntent = null,
+        WorkflowCheckpointPayload? WorkflowCheckpoint = null);
 
     private sealed record MutationIntentPayload(
         string IntentId,
@@ -527,6 +601,16 @@ internal sealed class VersionedJsonLibraryStateStore(
         long ExpectedRevision,
         int OperationCount,
         DateTimeOffset CreatedAtUtc);
+
+    private sealed record WorkflowCheckpointPayload(
+        LibraryWorkflowPhase Phase,
+        Guid GenerationId,
+        long Revision,
+        string WorkflowPolicyVersion,
+        string ExactAnalysisPolicyVersion,
+        string ExactCleanupPolicyVersion,
+        string CandidateAnalysisPolicyVersion,
+        DateTimeOffset PublishedAtUtc);
 
     private sealed record DeltaEvent(string PreviousDigest, string Digest, DeltaPayload Payload);
 

@@ -33,6 +33,14 @@ Additional types: `BookFormat`, `DuplicateGroup`, `NormalizedBookIdentity`, `For
 
 ADR 0012 adds `LibraryState`, generation and revision values, authoritative/uncertain status, and a closed state-delta hierarchy. One explicit scan creates revision zero. Successful typed commands advance the revision through removal, add/replace, record-creation, or metadata deltas without rereading the library. Uncertain state blocks all mutation until explicit Rescan creates a new generation.
 
+ADR 0020 adds a versioned workflow phase and checkpoint bound to one canonical
+library identity, authoritative generation, revision, and policy-version set.
+Phases are `RequiresExactAnalysis`, `ExactReady`,
+`CandidatePreparationReady`, `CandidateAnalysisReady`, and `Completed`;
+in-progress mutation remains represented by the durable mutation intent, while
+`Uncertain` is derived from library-state status. A checkpoint cannot claim a
+phase later than its bound state and mutation marker support.
+
 `BookFormat` distinguishes scan-observed `Present` state from `ProjectedPresent`. A projected format carries the command's verified fingerprint but no fabricated managed path, stored filename, or observation. `BookAuthor.Id` may be absent only for projected authors. Projected physical facts are ineligible for new plans requiring observed paths and file state.
 
 Milestone 4 adds immutable assessment values. Milestone 9 generalizes `FormatAssessment` into a shared identity/result core with explicit score components while preserving a typed `EpubAssessment` wrapper and its established recommendation semantics. Each assessment is associated with a Calibre book ID, canonical format, presentation-safe expected relative path, and observed file fingerprint. Completed assessments have a 0-through-100 score derived only from ordered findings and may declare an explicit score ceiling; `UncappedScore` remains findings-derived while `Score` is the lesser of that value and the ceiling. Unassessed results have no score or ceiling, no disqualifying finding, and only zero-point evidence because comparable facts were unavailable. Disqualified assessments have no numeric score or ceiling and at least one disqualifying finding. EPUB policy reserves disqualification for definitive file open/read failures; other formats retain their documented policies. `EpubFeatureSummary` records `Full`, `FallbackReadable`, or `Incomplete` coverage, available assessment facets, and bounded fallback candidate/renderability evidence. Snapshots keep EPUB and PDF assessments in separate deterministic collections and reject duplicate associations.
@@ -121,6 +129,14 @@ finalized event.
   rediscovered, mapped, semantically verified, and finalized in the durable
   journal without changing its actual numeric identities.
 - AI confidence is distinct from deterministic duplicate confidence.
+- Candidate preparation is unreachable before successful Exact cleanup or a
+  successful exact nothing-to-do result for the same generation.
+- Missing or incompatible workflow persistence never enables mutation and maps to
+  `RequiresExactAnalysis`.
+- Uncertain library state disables both staged mutation commands regardless of the
+  persisted workflow phase.
+- The Exact cleanup algorithm and operation ordering are unchanged by staged
+  orchestration.
 - Recommendation confidence is distinct from exact-metadata match evidence, exact-binary equality, EPUB assessment status, EPUB quality score, and per-decision strength.
 - A non-identical unassessed same-format conflict has no generated source or exclusion. A proposed redundant record has at least one available format and exact-binary coverage for every available format, and contributes no selection or unresolved/unavailable/separate evidence.
 - A non-identical EPUB comparison involving any capped assessment has no generated source or exclusion and requires manual review; sole-copy retention and exact-binary selection remain allowed.

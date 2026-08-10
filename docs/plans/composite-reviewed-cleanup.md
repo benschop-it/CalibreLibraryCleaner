@@ -1,5 +1,10 @@
 # Composite Reviewed Cleanup
 
+> **Status: Superseded for future development by ADR 0020.** The implemented
+> workflow remains transitional until staged Candidate cleanup reaches behavioral
+> and safety parity. Do not remove or weaken it before that dedicated retirement
+> slice.
+
 ## Objective
 
 Allow one explicit scan, review of Exact file duplicates, Metadata candidates, and Expanded candidates, and one `Cleanup all` command that validates all reviewed selections together, reports cross-workflow conflicts before mutation, and executes one deterministic worker-only operation graph without rescanning between categories.
@@ -173,6 +178,10 @@ dotnet list package --vulnerable --include-transitive
 ## Final outcome
 
 The composite planner merges all three reviewed selection sets from one authoritative scan, allows compatible overlap, blocks incompatible keeper/transfer/removal intentions, simulates final inventory, and emits one canonical transfer-then-format-removal-then-record-removal graph. One executor uses one backup confirmation, lease, worker, mutation marker, bounded chunk stream, projected delta stream, and checkpoint. WPF exposes Cleanup all, exact/metadata/expanded Skip and keeper choices, aggregate progress, and a bounded conflict modal.
+
+ADR 0020 supersedes this one-scan architecture for future development. The current
+implementation remains as a migration compatibility path and must not share
+mutation ownership of an authoritative generation with staged mode.
 
 A post-implementation correction preserves the quality-ranked Expanded keeper when a group is selected. A later product clarification makes the persisted Expanded evidence classification advisory: the UI displays `Cleanup eligible` or `To be reviewed`, while both types start unskipped, allow keeper changes and Skip, and enter category or composite cleanup unless explicitly skipped. Composite preflight logs distinguish submitted selections, actual user Skip counts, advisory review counts, planned category counts, operations, and conflicts.
 

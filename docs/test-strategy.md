@@ -32,4 +32,11 @@ WPF tests cover persisted development loading, exact keeper overrides, backup co
 
 Viewer tests use a controlled sibling executable and temporary synthetic library files. They prove exact one-argument launch, no-shell process configuration, trusted sibling discovery, containment/reparse validation, missing viewer/file outcomes, exact-row paths, metadata format preference, WPF command routing, and no cleanup-state mutation.
 
+Staged-workflow tests prove conservative checkpoint migration, generation/revision
+and policy binding, restart replay, uncertain-state precedence, exact-only service
+exclusion, full exact hashing, unchanged Exact planning/execution, completion and
+nothing-to-do phase advancement, and Candidate-button gating. Later refresh tests
+must prove explained fingerprint reuse, targeted hashing, fail-closed catalog
+differences, and atomic publication without using a personal library.
+
 Expanded-matching tests cover generic Unicode/identifier/language normalization, deterministic mutual top-20 retention, decisive-edge preservation, broad-bucket suppression, global fail-closed limits, cancellation, 20,000-record scale, candidate-only demand, fingerprint deduplication, cache reuse/corruption/cancellation, no-prose cache JSON, 12 by 64-token landmarks, script/style/navigation exclusion, diacritic-relaxed hashes, shifted front matter, symmetric comparison, language/series/content contradictions, weak-chain blocking, stable-anchor attachment, review-only snapshot persistence, progress, WPF presentation, and viewer routing.

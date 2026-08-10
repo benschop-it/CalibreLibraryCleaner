@@ -1,5 +1,7 @@
 using System.ComponentModel;
+using CalibreLibraryCleaner.Application.Abstractions;
 using CalibreLibraryCleaner.Application.Executions;
+using CalibreLibraryCleaner.Application.Libraries;
 using CalibreLibraryCleaner.Domain.Libraries;
 using CalibreLibraryCleaner.Wpf.Services;
 using CommunityToolkit.Mvvm.ComponentModel;
@@ -11,7 +13,10 @@ public sealed class ExactBinaryCleanupPlanWorkspaceViewModel : ObservableObject
 {
     private readonly ExecuteBulkExactDuplicateCleanupUseCase _execute;
     private readonly IExactDuplicateCleanupConfirmationService _confirmation;
+    private readonly ILibraryStateSession _libraryState;
+    private readonly IClock _clock;
     private LibrarySnapshot? _snapshot;
+    private LibraryState? _state;
     private IReadOnlyList<ExactDuplicateGroupRowViewModel> _groups = [];
     private string _status = "Run a scan to find exact file duplicates.";
     private string _progressMessage = string.Empty;
@@ -21,10 +26,14 @@ public sealed class ExactBinaryCleanupPlanWorkspaceViewModel : ObservableObject
 
     public ExactBinaryCleanupPlanWorkspaceViewModel(
         ExecuteBulkExactDuplicateCleanupUseCase execute,
-        IExactDuplicateCleanupConfirmationService confirmation)
+        IExactDuplicateCleanupConfirmationService confirmation,
+        ILibraryStateSession libraryState,
+        IClock clock)
     {
         _execute = execute;
         _confirmation = confirmation;
+        _libraryState = libraryState;
+        _clock = clock;
         RemoveDuplicatesCommand = new AsyncRelayCommand(RemoveDuplicatesAsync, CanRemoveDuplicates);
     }
 
@@ -70,20 +79,18 @@ public sealed class ExactBinaryCleanupPlanWorkspaceViewModel : ObservableObject
         foreach (ExactDuplicateGroupRowViewModel group in _groups)
             group.PropertyChanged -= OnGroupPropertyChanged;
         _snapshot = snapshot;
+        _state = snapshot is null ? null : _libraryState.GetCurrent(snapshot.Identity.LibraryRoot);
         _groups = groups;
         foreach (ExactDuplicateGroupRowViewModel group in groups)
             group.PropertyChanged += OnGroupPropertyChanged;
         int eligible = groups.Count(value => !value.Skip && value.IsCleanupEligible && value.RetainedMember is not null);
-        Status = snapshot is null
-            ? "Run or load an authoritative scan before removing duplicates."
-            : eligible == 0
-                ? "No removable exact duplicate groups are available."
-                : $"{eligible:N0} exact duplicate group(s) are ready. Select another row to change any keeper, then remove duplicates.";
+        Status = WorkflowStatus(snapshot, _state, eligible);
         RemoveDuplicatesCommand.NotifyCanExecuteChanged();
     }
 
     private bool CanRemoveDuplicates() => !IsBusy && _snapshot is not null
-        && _groups.Any(value => !value.Skip && value.IsCleanupEligible && value.RetainedMember is not null);
+        && _state is { IsWorkflowCheckpointCurrent: true }
+        && _state.WorkflowCheckpoint.Phase == LibraryWorkflowPhase.ExactReady;
 
     private async Task RemoveDuplicatesAsync()
     {
@@ -117,16 +124,56 @@ public sealed class ExactBinaryCleanupPlanWorkspaceViewModel : ObservableObject
                 + (result.SkippedRecordCount > 0
                     ? $" {result.SkippedRecordCount:N0} ambiguous or conflicting record(s) were left unchanged."
                     : string.Empty);
-            Status = result.IsCompleted
-                ? "Duplicate cleanup completed."
-                : string.Join(" ", result.Issues.Select(value => $"{value.Code}: {value.Explanation}"));
+            if (result.IsCompleted)
+            {
+                LibraryState? current = _libraryState.GetCurrent(_snapshot.Identity.LibraryRoot);
+                DateTimeOffset publishedAt = _clock.GetUtcNow().ToUniversalTime();
+                if (current is not null && publishedAt < current.ProjectedAtUtc)
+                    publishedAt = current.ProjectedAtUtc;
+                LibraryStateSessionOutcome advanced = await _libraryState.AdvanceWorkflowAsync(
+                    _snapshot.Identity.LibraryRoot,
+                    LibraryWorkflowPhase.CandidatePreparationReady,
+                    publishedAt,
+                    CancellationToken.None).ConfigureAwait(true);
+                Status = advanced.IsSuccess
+                    ? result.State == BulkExactDuplicateCleanupState.NothingToDo
+                        ? "Exact cleanup completed; no library changes were required. Candidate cleanup is available."
+                        : "Exact cleanup completed. Candidate cleanup is available."
+                    : advanced.Explanation
+                        ?? "Exact cleanup completed, but its workflow checkpoint could not be persisted.";
+            }
+            else
+            {
+                Status = string.Join(" ", result.Issues.Select(value => $"{value.Code}: {value.Explanation}"));
+            }
         }
         finally
         {
             IsBusy = false;
+            _state = _snapshot is null ? null : _libraryState.GetCurrent(_snapshot.Identity.LibraryRoot);
             RemoveDuplicatesCommand.NotifyCanExecuteChanged();
         }
     }
+
+    private static string WorkflowStatus(
+        LibrarySnapshot? snapshot,
+        LibraryState? state,
+        int eligible) => (snapshot, state) switch
+        {
+            (null, _) => "Run exact-only analysis before Exact cleanup.",
+            (_, null) => "No authoritative staged workflow state is loaded.",
+            (_, { IsAuthoritative: false }) =>
+                "Library state is uncertain. Run a new exact analysis before cleanup.",
+            (_, { IsWorkflowCheckpointCurrent: false }) =>
+                "The workflow checkpoint does not match current authoritative state.",
+            (_, { WorkflowCheckpoint.Phase: LibraryWorkflowPhase.RequiresExactAnalysis }) =>
+                "Run a new exact analysis before Exact cleanup.",
+            (_, { WorkflowCheckpoint.Phase: LibraryWorkflowPhase.ExactReady }) when eligible == 0 =>
+                "No selected exact duplicate groups require changes. Run Exact cleanup to complete this stage.",
+            (_, { WorkflowCheckpoint.Phase: LibraryWorkflowPhase.ExactReady }) =>
+                $"{eligible:N0} exact duplicate group(s) are ready. Select another row to change any keeper, then run Exact cleanup.",
+            _ => "Exact cleanup is complete for this workflow generation.",
+        };
 
     private void OnGroupPropertyChanged(object? sender, PropertyChangedEventArgs eventArgs)
     {

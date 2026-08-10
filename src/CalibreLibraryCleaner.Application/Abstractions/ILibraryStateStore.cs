@@ -28,6 +28,11 @@ public interface ILibraryStateStore
         LibraryStateMutationIntent intent,
         CancellationToken cancellationToken);
 
+    Task WriteWorkflowCheckpointAsync(
+        string libraryRoot,
+        LibraryState state,
+        CancellationToken cancellationToken);
+
     Task CompactAsync(
         string libraryRoot,
         LibraryState state,

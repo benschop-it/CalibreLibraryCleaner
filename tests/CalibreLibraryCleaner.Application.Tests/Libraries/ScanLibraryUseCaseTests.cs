@@ -15,6 +15,116 @@ namespace CalibreLibraryCleaner.Application.Tests.Libraries;
 public sealed class ScanLibraryUseCaseTests
 {
     [Fact]
+    public async Task ExactOnlyHashesEveryFormatAndBypassesCandidateServices()
+    {
+        CalibreCatalogRecord catalog = CreateCatalog(bookCount: 2, sameMetadata: true);
+        catalog = new(
+            catalog.LibraryUuid,
+            catalog.SchemaVersion,
+            catalog.Books.Select(book => book with
+            {
+                Formats =
+                [
+                    new CalibreFormatRecord("EPUB", "Book"),
+                    new CalibreFormatRecord("PDF", "Book"),
+                ],
+            }).ToArray());
+        TestContext context = CreateContext(catalog);
+        A.CallTo(() => context.Resolver.ResolveFormat(
+                A<ValidatedLibraryLocation>._,
+                A<string>._,
+                A<string>._,
+                "PDF"))
+            .ReturnsLazily(call =>
+            {
+                string directory = call.GetArgument<string>(1)!;
+                return ResolvedFormatPathOutcome.Success(new(
+                    "C:/Library",
+                    $"C:/Library/{directory}/Book.pdf",
+                    $"{directory}/Book.pdf"));
+            });
+        A.CallTo(() => context.Hasher.HashAsync(
+                A<IReadOnlyList<FormatHashRequest>>._,
+                A<int>._,
+                A<IProgress<FormatHashProgress>?>._,
+                A<CancellationToken>._))
+            .ReturnsLazily(call => Task.FromResult<IReadOnlyList<FormatHashResult>>(
+                call.GetArgument<IReadOnlyList<FormatHashRequest>>(0)!
+                    .Select(request => Successful(
+                        request.Sequence,
+                        new(4, new(new string(request.Sequence % 2 == 0 ? 'a' : 'b', 64)))))
+                    .ToArray()));
+        IEpubInspector epubInspector = A.Fake<IEpubInspector>();
+        IPdfInspector pdfInspector = A.Fake<IPdfInspector>();
+        IEpubContentSignatureInspector contentInspector = A.Fake<IEpubContentSignatureInspector>();
+        ILibraryStateSession stateSession = A.Fake<ILibraryStateSession>();
+        ScanLibraryUseCase useCase = new(
+            context.Resolver,
+            context.Reader,
+            context.Hasher,
+            context.Clock,
+            new(),
+            new AssessEpubFormatsUseCase(epubInspector, new()),
+            new(new()),
+            new AssessPdfFormatsUseCase(pdfInspector, new(), new(new())),
+            new DiscoverWorkLanguageCandidatesUseCase(
+                new ResolveCandidateContentSignaturesUseCase(
+                    contentInspector,
+                    A.Fake<IEpubContentSignatureCache>())),
+            libraryStateSession: stateSession);
+        List<LibraryScanProgress> progress = [];
+
+        LibraryScanOutcome outcome = await useCase.ExecuteAsync(
+            "C:/Library",
+            new InlineProgress(progress.Add),
+            CancellationToken.None,
+            mode: LibraryAnalysisMode.ExactOnly);
+
+        outcome.IsSuccess.Should().BeTrue();
+        outcome.Snapshot!.Books.SelectMany(book => book.Formats).Should().HaveCount(4);
+        outcome.Snapshot.ExactBinaryDuplicateGroups.Should().HaveCount(2);
+        outcome.Snapshot.ExactMetadataDuplicateGroups.Should().BeEmpty();
+        outcome.Snapshot.EpubAssessments.Should().BeEmpty();
+        outcome.Snapshot.PdfAssessments.Should().BeEmpty();
+        outcome.Snapshot.WorkLanguageCandidateGroups.Should().BeEmpty();
+        outcome.Snapshot.ConsolidationRecommendations.Should().BeEmpty();
+        progress.Should().Contain(value => value.Message == "Exact-only analysis complete");
+        progress.Should().NotContain(value =>
+            value.Phase == LibraryScanPhase.AssessingEpubFormats
+            || value.Phase == LibraryScanPhase.AssessingPdfFormats
+            || value.Phase == LibraryScanPhase.GroupingExactMetadataDuplicates
+            || value.Phase == LibraryScanPhase.BuildingMatchingProfiles
+            || value.Phase == LibraryScanPhase.GeneratingConsolidationRecommendations);
+        A.CallTo(() => context.Hasher.HashAsync(
+                A<IReadOnlyList<FormatHashRequest>>.That.Matches(requests => requests.Count == 4),
+                A<int>._,
+                A<IProgress<FormatHashProgress>?>._,
+                A<CancellationToken>._))
+            .MustHaveHappenedOnceExactly();
+        A.CallTo(() => epubInspector.InspectAsync(
+                A<EpubInspectionRequest>._,
+                A<IProgress<EpubInspectionProgress>?>._,
+                A<CancellationToken>._))
+            .MustNotHaveHappened();
+        A.CallTo(() => pdfInspector.InspectAsync(
+                A<PdfInspectionRequest>._,
+                A<Func<PdfDocumentHeaderFacts, CancellationToken, ValueTask<IReadOnlyList<int>>>>._,
+                A<IProgress<PdfInspectionProgress>?>._,
+                A<CancellationToken>._))
+            .MustNotHaveHappened();
+        A.CallTo(() => contentInspector.InspectContentSignatureAsync(
+                A<EpubContentSignatureRequest>._,
+                A<IProgress<EpubContentSignatureProgress>?>._,
+                A<CancellationToken>._))
+            .MustNotHaveHappened();
+        A.CallTo(() => stateSession.GetCurrent(A<string>.That.IsNotNull()))
+            .MustNotHaveHappened();
+        A.CallTo(() => stateSession.LoadAsync(
+                A<string>.That.IsNotNull(), A<CancellationToken>._))
+            .MustNotHaveHappened();
+    }
+
+    [Fact]
     public async Task RepeatScanReusesUnchangedEpubAssessmentAfterHashVerification()
     {
         TestContext context = CreateContext();

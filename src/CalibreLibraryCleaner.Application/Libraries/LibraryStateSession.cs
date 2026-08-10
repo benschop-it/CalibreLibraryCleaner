@@ -30,6 +30,10 @@ public interface ILibraryStateSession
         LibrarySnapshot snapshot,
         CancellationToken cancellationToken);
 
+    Task<LibraryStateSessionOutcome> StartFromExactAnalysisAsync(
+        LibrarySnapshot snapshot,
+        CancellationToken cancellationToken);
+
     Task<LibraryStateSessionOutcome> LoadAsync(
         string libraryRoot,
         CancellationToken cancellationToken);
@@ -60,6 +64,12 @@ public interface ILibraryStateSession
         bool completeMutationIntent,
         CancellationToken cancellationToken);
 
+    Task<LibraryStateSessionOutcome> AdvanceWorkflowAsync(
+        string libraryRoot,
+        LibraryWorkflowPhase phase,
+        DateTimeOffset publishedAtUtc,
+        CancellationToken cancellationToken);
+
     Task<LibraryStateSessionOutcome> CheckpointAsync(
         string libraryRoot,
         CancellationToken cancellationToken);
@@ -82,10 +92,23 @@ public sealed class LibraryStateSession(ILibraryStateStore? store = null) : ILib
 
     public async Task<LibraryStateSessionOutcome> StartFromScanAsync(
         LibrarySnapshot snapshot,
+        CancellationToken cancellationToken) => await StartFromAnalysisAsync(
+            snapshot, exactReady: false, cancellationToken).ConfigureAwait(false);
+
+    public async Task<LibraryStateSessionOutcome> StartFromExactAnalysisAsync(
+        LibrarySnapshot snapshot,
+        CancellationToken cancellationToken) => await StartFromAnalysisAsync(
+            snapshot, exactReady: true, cancellationToken).ConfigureAwait(false);
+
+    private async Task<LibraryStateSessionOutcome> StartFromAnalysisAsync(
+        LibrarySnapshot snapshot,
+        bool exactReady,
         CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(snapshot);
         LibraryState state = LibraryState.FromScan(snapshot, new(Guid.NewGuid()));
+        if (exactReady)
+            state = state.AdvanceWorkflow(LibraryWorkflowPhase.ExactReady, snapshot.ScannedAt);
         await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
@@ -267,6 +290,39 @@ public sealed class LibraryStateSession(ILibraryStateStore? store = null) : ILib
                                            or InvalidDataException or InvalidOperationException)
         {
             return LibraryStateSessionOutcome.Failure("LIBRARY_STATE.INTENT_PERSIST_FAILED", exception.Message);
+        }
+        finally
+        {
+            _gate.Release();
+        }
+    }
+
+    public async Task<LibraryStateSessionOutcome> AdvanceWorkflowAsync(
+        string libraryRoot,
+        LibraryWorkflowPhase phase,
+        DateTimeOffset publishedAtUtc,
+        CancellationToken cancellationToken)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(libraryRoot);
+        await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            if (!_states.TryGetValue(libraryRoot, out LibraryState? current))
+                return LibraryStateSessionOutcome.Failure(
+                    "LIBRARY_STATE.NOT_LOADED", "No library state exists to advance workflow.");
+            LibraryState advanced = current.AdvanceWorkflow(phase, publishedAtUtc);
+            if (store is not null)
+                await store.WriteWorkflowCheckpointAsync(libraryRoot, advanced, cancellationToken)
+                    .ConfigureAwait(false);
+            _states[libraryRoot] = advanced;
+            PublishStateChanged(libraryRoot, advanced);
+            return LibraryStateSessionOutcome.Success(advanced);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException
+                                           or InvalidDataException or InvalidOperationException)
+        {
+            return LibraryStateSessionOutcome.Failure(
+                "LIBRARY_STATE.WORKFLOW_CHECKPOINT_FAILED", exception.Message);
         }
         finally
         {

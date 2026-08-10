@@ -51,6 +51,7 @@ public partial class App : System.Windows.Application
         builder.Services.AddSingleton<DiscoverWorkLanguageCandidatesUseCase>();
         builder.Services.AddSingleton<ScanLibraryUseCase>();
         builder.Services.AddSingleton<ILibraryStateSession, LibraryStateSession>();
+        builder.Services.AddSingleton(LibraryWorkflowOptions.Staged);
         builder.Services.AddSingleton<PersistedLibrarySnapshotsUseCase>();
         builder.Services.AddSingleton<ExportRecommendationsUseCase>();
         builder.Services.AddSingleton<ExecuteBulkExactDuplicateCleanupUseCase>();

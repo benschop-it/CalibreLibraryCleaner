@@ -192,7 +192,7 @@ public static class LibraryStateDeltaPolicy
             _ => throw new ArgumentOutOfRangeException(nameof(delta), delta.GetType().Name, "Unsupported library-state delta."),
         };
         return new(state.GenerationId, state.Revision.Next(), LibraryStateStatus.Authoritative,
-            projected, delta.AppliedAtUtc);
+            projected, delta.AppliedAtUtc, workflowCheckpoint: state.WorkflowCheckpoint);
     }
 
     public static LibraryState ApplyBatch(
@@ -258,7 +258,8 @@ public static class LibraryStateDeltaPolicy
                 && !changedFormats.Contains(new(value.CalibreBookId, value.Format))),
             state.Snapshot.PdfAssessments.Where(value => !removedRecords.Contains(value.CalibreBookId)
                 && !changedFormats.Contains(new(value.CalibreBookId, value.Format))));
-        return new(state.GenerationId, revision, LibraryStateStatus.Authoritative, snapshot, projectedAt);
+        return new(state.GenerationId, revision, LibraryStateStatus.Authoritative, snapshot, projectedAt,
+            workflowCheckpoint: state.WorkflowCheckpoint);
     }
 
     private static void ValidateTransition(

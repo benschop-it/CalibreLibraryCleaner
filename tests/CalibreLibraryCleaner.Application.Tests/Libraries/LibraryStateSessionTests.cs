@@ -32,6 +32,27 @@ public sealed class LibraryStateSessionTests
     }
 
     [Fact]
+    public async Task ExactAnalysisPublishesBaselineAlreadyAtExactReady()
+    {
+        ILibraryStateStore store = A.Fake<ILibraryStateStore>();
+        using LibraryStateSession session = new(store);
+        LibrarySnapshot snapshot = Snapshot("C:\\library");
+
+        LibraryStateSessionOutcome outcome = await session.StartFromExactAnalysisAsync(
+            snapshot, CancellationToken.None);
+
+        outcome.IsSuccess.Should().BeTrue();
+        outcome.State!.WorkflowCheckpoint.Phase.Should().Be(LibraryWorkflowPhase.ExactReady);
+        outcome.State.IsWorkflowCheckpointCurrent.Should().BeTrue();
+        A.CallTo(() => store.WriteBaselineAsync(
+            A<LibraryState>.That.Matches(state =>
+                state.WorkflowCheckpoint.Phase == LibraryWorkflowPhase.ExactReady),
+            A<CancellationToken>._)).MustHaveHappenedOnceExactly();
+        A.CallTo(() => store.WriteWorkflowCheckpointAsync(
+            A<string>._, A<LibraryState>._, A<CancellationToken>._)).MustNotHaveHappened();
+    }
+
+    [Fact]
     public async Task RejectedDeltaMarksStateUncertain()
     {
         LibraryStateSession session = new();
@@ -160,6 +181,51 @@ public sealed class LibraryStateSessionTests
             .Then(A.CallTo(() => store.AppendDeltaBatchAsync(snapshot.Identity.LibraryRoot,
                 A<IReadOnlyList<LibraryStateDelta>>._, applied.State!, false,
                 intent.IntentId, true, A<CancellationToken>._)).MustHaveHappenedOnceExactly());
+    }
+
+    [Fact]
+    public async Task WorkflowAdvancePersistsBeforePublishingCurrentCheckpoint()
+    {
+        ILibraryStateStore store = A.Fake<ILibraryStateStore>();
+        using LibraryStateSession session = new(store);
+        LibrarySnapshot snapshot = Snapshot("C:\\library");
+        await session.StartFromScanAsync(snapshot, CancellationToken.None);
+        List<LibraryState> published = [];
+        session.StateChanged += (_, eventArgs) => published.Add(eventArgs.State);
+
+        LibraryStateSessionOutcome outcome = await session.AdvanceWorkflowAsync(
+            snapshot.Identity.LibraryRoot,
+            LibraryWorkflowPhase.ExactReady,
+            ScannedAt,
+            CancellationToken.None);
+
+        outcome.IsSuccess.Should().BeTrue();
+        outcome.State!.IsWorkflowCheckpointCurrent.Should().BeTrue();
+        published.Should().ContainSingle().Which.Should().BeSameAs(outcome.State);
+        A.CallTo(() => store.WriteWorkflowCheckpointAsync(
+            snapshot.Identity.LibraryRoot, outcome.State, A<CancellationToken>._))
+            .MustHaveHappenedOnceExactly();
+    }
+
+    [Fact]
+    public async Task WorkflowPersistenceFailureLeavesEarlierPhaseCurrent()
+    {
+        ILibraryStateStore store = A.Fake<ILibraryStateStore>();
+        A.CallTo(() => store.WriteWorkflowCheckpointAsync(
+                A<string>._, A<LibraryState>._, A<CancellationToken>._))
+            .ThrowsAsync(new IOException("controlled persistence failure"));
+        using LibraryStateSession session = new(store);
+        LibrarySnapshot snapshot = Snapshot("C:\\library");
+        LibraryState baseline = (await session.StartFromScanAsync(snapshot, CancellationToken.None)).State!;
+
+        LibraryStateSessionOutcome outcome = await session.AdvanceWorkflowAsync(
+            snapshot.Identity.LibraryRoot,
+            LibraryWorkflowPhase.ExactReady,
+            ScannedAt,
+            CancellationToken.None);
+
+        outcome.ErrorCode.Should().Be("LIBRARY_STATE.WORKFLOW_CHECKPOINT_FAILED");
+        session.GetCurrent(snapshot.Identity.LibraryRoot).Should().BeSameAs(baseline);
     }
 
     [Fact]

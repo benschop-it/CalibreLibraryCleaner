@@ -41,6 +41,12 @@ Must be asynchronous, cancellable, progress-reporting, bounded in parallelism, a
 
 An explicit Scan always hashes every current format for exact-duplicate and mutation safety. After hashing, unchanged EPUB/PDF assessments may be rebound from prior authoritative state only when SHA-256/size and analyzer/scoring/resource versions match. Missing, uncertain, changed, or version-incompatible facts are inspected fresh. Explicit Scan may load the application-owned prior baseline to enable this reuse after restart; startup listing remains manifest-only. EPUB assessment concurrency is CPU-aware and bounded from two through four workers. A structured scan-completion event reports phase durations and reuse counts without paths or book metadata.
 
+Staged mode introduces explicit `ExactOnly` and `CandidateResidual` analysis modes;
+the existing full scan remains a temporary compatibility mode. `ExactOnly` stops
+after catalog/path/hash processing and Exact grouping. `CandidateResidual` begins
+only after trusted post-exact reconciliation and owns assessment reuse, exact
+metadata evidence, Expanded discovery, and unified candidate construction.
+
 The runtime assumes no unrelated process mutates the selected library while the cleaner is active. Calibre mutations are initiated only by the cleaner's fixed worker. This permits future removal of duplicate race checks, but does not permit timestamp-only identity, skipped hashing, skipped path containment, or weaker parser limits.
 
 ## Persistent library-state boundary
@@ -52,6 +58,21 @@ One cleanup-run marker records the generation, starting revision, run identity, 
 One explicit successful scan creates a new authoritative generation. Successful typed cleanup chunks durably append and apply deterministic deltas; they never trigger catalog reads, hashing, ebook inspection, or targeted state scans. Replayed authoritative state remains mutation-eligible across restart until the developer explicitly rescans. Existing development `.library-snapshot.json` files migrate on explicit Load and are removed only after state publication succeeds.
 
 The application intentionally does not detect external library changes between explicit scans. Failed, ambiguous, interrupted, unpersistable, or unprojectable mutations mark the generation uncertain and block all mutation until explicit rescan.
+
+Application also owns a versioned workflow checkpoint bound to canonical library
+root, state generation, state revision, and relevant policy versions. Infrastructure
+persists that checkpoint atomically with or immediately after the durable state
+transition it describes. Missing or incompatible workflow data migrates
+conservatively to `RequiresExactAnalysis`; uncertain library state overrides any
+later checkpoint phase. Restart replay must never enable a stage that the durable
+state and mutation marker do not support.
+
+Candidate preparation is a dedicated read-only catalog reconciliation boundary.
+It compares a fresh catalog with authoritative projected state and completed typed
+Exact deltas, reuses fingerprints only for explained associations, target-hashes
+when transfer evidence is insufficient, and rejects unexplained differences. A
+successful preparation publishes a new physical authoritative generation; failure
+or cancellation leaves the prior generation and phase authoritative.
 
 ## EPUB inspection boundary
 
@@ -87,7 +108,17 @@ Domain owns immutable recommendation selections, reasons, warnings, decision str
 
 WPF owns generated keeper presentation for exact, metadata, and expanded groups, advisory `Cleanup eligible`/`To be reviewed` text, explicit keeper overrides and Skip choices, per-run external-backup confirmation, progress, and terminal status. Both advisory Expanded types are included unless explicitly skipped. Application builds one deterministic operation sequence, acquires the library mutation lease, and orchestrates one persistent worker. Infrastructure owns trusted Calibre discovery, the fixed embedded worker script, strict bounded JSON-lines protocol, process lifecycle, and lease storage.
 
-`Cleanup all` is a composite Application boundary over the three selection sets. It forms connected consolidation components from overlapping Metadata and Expanded groups, chooses one global keeper with the existing quality policy unless an explicit user override applies, normalizes Exact operations around that survivor, and simulates final format inventory. Contradictory explicit overrides and true operation/state hazards block before tool discovery; generated keeper disagreement does not. Physically incomplete groups are skipped and counted. WPF formats conflict record IDs/titles for a modal; conflict logs and Application values contain no book content. The result is one canonical operation graph from the initial scan without an intermediate rescan.
+The staged target exposes two top-level mutation stages. `Exact cleanup` gates and
+invokes `ExecuteBulkExactDuplicateCleanupUseCase` without changing its grouping,
+retention, planning, worker, projection, checkpoint, or failure behavior. `Candidate
+cleanup` is unavailable until Exact cleanup completes or returns nothing to do for
+the bound generation. Its first activation prepares residual candidates without
+mutation; a later activation executes reviewed keeper/Skip selections.
+
+The legacy `Cleanup all` composite Application boundary and standalone Metadata
+and Expanded mutation commands remain transitional until the staged Candidate
+planner/executor reaches parity. A generation has exactly one workflow owner, so
+legacy and staged commands cannot mutate the same authoritative generation.
 
 The worker uses Calibre's documented database `Cache` API through one `calibre-debug` process. Exact cleanup transfers fingerprint-verified complementary formats only to unambiguous non-conflicting targets. Metadata cleanup transfers generated complementary sources to the selected keeper, removes every format from non-keepers, and removes the emptied records. When the metadata keeper already has a format, its file wins even when a removed alternative is not byte-identical. Requests contain at most 100 operations. No shell, direct SQLite write, direct managed-library filesystem mutation, arbitrary script, direct `calibredb` mutation gateway, or second mutation engine is permitted.
 

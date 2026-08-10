@@ -1,3 +1,4 @@
+using System.Text.Json.Nodes;
 using CalibreLibraryCleaner.Domain.Libraries;
 using CalibreLibraryCleaner.Infrastructure.LibrarySnapshots;
 using CalibreLibraryCleaner.Infrastructure.Tests.Execution;
@@ -55,6 +56,73 @@ public sealed class VersionedJsonLibraryStateStoreTests
             .Which.Should().Contain("11111111222233334444555555555555");
         (await store.ReadAsync(second.Snapshot.Identity.LibraryRoot, CancellationToken.None))
             .Should().BeEquivalentTo(second);
+    }
+
+    [Fact]
+    public async Task WorkflowCheckpointReplaysAcrossStoreInstances()
+    {
+        using TemporaryDirectory directory = new();
+        InfrastructureExecutionFixture fixture = InfrastructureExecutionTestData.Create(directory.Path);
+        string cache = Path.Combine(directory.Path, "state-cache");
+        VersionedJsonLibraryStateStore writer = new(new() { StorageRoot = cache });
+        LibraryState state = LibraryState.FromScan(fixture.Snapshot,
+            new(Guid.Parse("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee")))
+            .AdvanceWorkflow(LibraryWorkflowPhase.ExactReady, fixture.Snapshot.ScannedAt);
+        await writer.WriteBaselineAsync(state, CancellationToken.None);
+
+        LibraryState? loaded = await new VersionedJsonLibraryStateStore(new() { StorageRoot = cache })
+            .ReadAsync(fixture.Snapshot.Identity.LibraryRoot, CancellationToken.None);
+
+        loaded!.WorkflowCheckpoint.Should().Be(state.WorkflowCheckpoint);
+        loaded.IsWorkflowCheckpointCurrent.Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task MissingWorkflowCheckpointMigratesConservatively()
+    {
+        using TemporaryDirectory directory = new();
+        InfrastructureExecutionFixture fixture = InfrastructureExecutionTestData.Create(directory.Path);
+        string cache = Path.Combine(directory.Path, "state-cache");
+        VersionedJsonLibraryStateStore store = new(new() { StorageRoot = cache });
+        LibraryState state = LibraryState.FromScan(fixture.Snapshot,
+            new(Guid.Parse("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee")))
+            .AdvanceWorkflow(LibraryWorkflowPhase.ExactReady, fixture.Snapshot.ScannedAt);
+        await store.WriteBaselineAsync(state, CancellationToken.None);
+        string manifestPath = Directory.GetFiles(cache, "*.library-state.json").Single();
+        JsonObject manifest = JsonNode.Parse(await File.ReadAllTextAsync(manifestPath))!.AsObject();
+        manifest.Remove("workflowCheckpoint");
+        await File.WriteAllTextAsync(manifestPath, manifest.ToJsonString());
+
+        LibraryState? loaded = await store.ReadAsync(fixture.Snapshot.Identity.LibraryRoot,
+            CancellationToken.None);
+
+        loaded!.WorkflowCheckpoint.Phase.Should().Be(LibraryWorkflowPhase.RequiresExactAnalysis);
+        loaded.WorkflowCheckpoint.Revision.Should().Be(loaded.Revision);
+        loaded.IsWorkflowCheckpointCurrent.Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task IncompatibleWorkflowPolicyMigratesConservatively()
+    {
+        using TemporaryDirectory directory = new();
+        InfrastructureExecutionFixture fixture = InfrastructureExecutionTestData.Create(directory.Path);
+        string cache = Path.Combine(directory.Path, "state-cache");
+        VersionedJsonLibraryStateStore store = new(new() { StorageRoot = cache });
+        LibraryState state = LibraryState.FromScan(fixture.Snapshot,
+            new(Guid.Parse("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee")))
+            .AdvanceWorkflow(LibraryWorkflowPhase.ExactReady, fixture.Snapshot.ScannedAt);
+        await store.WriteBaselineAsync(state, CancellationToken.None);
+        string manifestPath = Directory.GetFiles(cache, "*.library-state.json").Single();
+        JsonObject manifest = JsonNode.Parse(await File.ReadAllTextAsync(manifestPath))!.AsObject();
+        manifest["workflowCheckpoint"]!["workflowPolicyVersion"] = "staged-cleanup/0.0.0";
+        await File.WriteAllTextAsync(manifestPath, manifest.ToJsonString());
+
+        LibraryState? loaded = await store.ReadAsync(fixture.Snapshot.Identity.LibraryRoot,
+            CancellationToken.None);
+
+        loaded!.WorkflowCheckpoint.Phase.Should().Be(LibraryWorkflowPhase.RequiresExactAnalysis);
+        loaded.WorkflowCheckpoint.PolicyVersions.Should().Be(LibraryWorkflowPolicyVersions.Current);
+        loaded.IsWorkflowCheckpointCurrent.Should().BeTrue();
     }
 
     [Fact]

@@ -12,6 +12,19 @@
 - Invalidate the persisted result before an approved library mutation; only a later complete normal scan may repopulate it.
 - When Load is invoked, immediately show an indeterminate loading-saved-analysis phase before deserialization or state replay begins. After scanning or loading completes, show an indeterminate preparing-results phase while large presentation collections are materialized, then publish the collections and finish progress at 100%.
 
+The staged workflow begins with explicit exact-only analysis. It reads the complete
+catalog, resolves every current format path, hashes every resolvable format with
+streaming SHA-256 and bounded concurrency, and publishes Exact binary groups. It
+does not assess EPUB/PDF files, generate recommendations, detect exact-metadata
+groups, inspect candidate content, or run Expanded discovery.
+
+After Exact cleanup succeeds, Candidate preparation performs a dedicated read-only
+catalog refresh. It reconciles current records, metadata, format labels, and
+associations against authoritative projected state and completed Exact deltas.
+Known fingerprints may be reused only for explained associations. Unexplained
+catalog or file changes fail closed and require a new exact analysis. Candidate
+preparation is not a normal full scan and never occurs implicitly during mutation.
+
 ## Duplicate detection
 
 Support progressively:
@@ -24,7 +37,23 @@ Support progressively:
 
 Every group must expose confidence and reasons. Exact title/author matches are candidates, not proof of identical content.
 
-Expanded discovery runs only during explicit Scan. It first canonicalizes compatible author variants using family name, positional initials, comma order, and non-conflicting full given-name expansions. It searches for duplicate works only inside those author identities, requires independent title/identifier/series/binary evidence, and partitions candidates by language. Every non-binary final inferred relation uses EPUB content evidence from 12 by 64-token hash landmarks and a bounded shingle sketch when available. Signatures are cached by fingerprint/version outside the library and retain no prose. Groups whose evidence meets the strongest policy criteria display `Cleanup eligible`; groups with weaker, incomplete, ambiguous, older-policy, or contradictory evidence display `To be reviewed`. This distinction is advisory: both types start unskipped, use the generated keeper, permit keeper changes and Skip, and are processed unless the user explicitly skips them.
+Residual candidate discovery runs only after successful Exact cleanup and trusted
+post-exact refresh. It retains exact normalized title/author detection as mandatory
+candidate evidence and combines that evidence with Expanded discovery into one
+disjoint candidate model. Exact-metadata candidates remain present when EPUB
+content is absent and bypass ordinary candidate caps. Expanded discovery first
+canonicalizes compatible author variants using family name, positional initials,
+comma order, and non-conflicting full given-name expansions. It searches for
+duplicate works only inside those author identities, requires independent
+title/identifier/series/binary evidence, and partitions candidates by language.
+Every non-binary final inferred relation uses EPUB content evidence from 12 by
+64-token hash landmarks and a bounded shingle sketch when available. Signatures
+are cached by fingerprint/version outside the library and retain no prose. Groups
+whose evidence meets the strongest policy criteria display `Cleanup eligible`;
+groups with weaker, incomplete, ambiguous, older-policy, or contradictory evidence
+display `To be reviewed`. This distinction is advisory: both types start
+unskipped, use the generated keeper, permit keeper changes and Skip, and are
+processed unless the user explicitly skips them.
 
 For each byte-identical same-format file group, automatically retain the copy on the record with the most formats, then the best metadata/validated identifiers/cover evidence, using the lowest Calibre ID only as a tie-breaker. Remove the other format copies, not their records. A record becomes a deletion target only when no formats remain after deduplication. Mixed-format-label groups are anomalous and skipped. The user is responsible for a complete library backup; complementary formats are fingerprint-verified in automatic temporary staging before transfer and source removal.
 
@@ -74,7 +103,11 @@ Expanded groups from authoritative matching evidence can be processed. Before ea
 
 ## Cleanup all
 
-After one scan, the user can review keeper and Skip choices in Exact file duplicates, Metadata candidates, and Expanded candidates, then invoke one `Cleanup all` command. The application builds one combined plan from the same authoritative snapshot. Overlapping Metadata and Expanded groups form consolidation components and receive one quality-ranked global keeper. Generated keeper disagreements are reconciled automatically; contradictory explicit keeper overrides remain blocking conflicts. Exact-file defaults are normalized around the global survivor while preserving explicitly overridden exact keepers. Physically incomplete or stale groups are counted and skipped without blocking unrelated work. True target-content, transfer, retained-format, or final-inventory hazards are displayed before backup confirmation or mutation. A conflict-free plan uses one backup confirmation and one persistent worker, executing transfers first, format removals second, and proven-empty record removals last. No intermediate scan is performed.
+`Cleanup all` is a transitional one-scan workflow. It remains available during
+staged migration but is superseded for future development by separate `Exact
+cleanup` and `Candidate cleanup` stages. It must not mutate a generation owned by
+the staged workflow and will be retired only after staged Candidate cleanup reaches
+behavioral and safety parity.
 
 ## Exact duplicate cleanup
 
@@ -86,7 +119,17 @@ Worker startup or preflight failure logs and stops before mutation. Any failed, 
 
 Persisted analysis loading remains available during development. Startup lists only small state manifests; explicit Load restores the saved analysis without scanning. Legacy snapshot files migrate into state on explicit Load. New scans and checkpoints retain only the active state generation.
 
+In staged mode, Exact cleanup is enabled only for a compatible authoritative
+`ExactReady` checkpoint and eligible unskipped Exact selections. It invokes the
+existing Exact cleanup algorithm unchanged. Completed and nothing-to-do outcomes
+advance the durable phase to `CandidatePreparationReady`; failed or ambiguous
+mutation leaves state uncertain and Candidate cleanup disabled.
+
 ## Metadata candidate cleanup
+
+Standalone Metadata cleanup is transitional. In the staged target, exact normalized
+metadata remains mandatory evidence inside unified Candidate cleanup rather than a
+separate mutation authority.
 
 The Metadata candidates workflow lists exact normalized title/author groups, selects the generated best metadata source as the default keeper, and allows the user to Skip a group or select another sole keeper. Groups without a generated metadata source use a deterministic format-coverage and metadata-quality fallback keeper. Every group starts unskipped. Choices reset when another scan or persisted snapshot is loaded.
 

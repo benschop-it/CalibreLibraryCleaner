@@ -37,6 +37,11 @@ validate overlaps and execute one transfer/removal plan from the initial scan.
 Conflicting choices are shown before backup confirmation and no mutation starts
 until they are corrected.
 
+ADR 0020 defines the in-progress replacement: exact-only analysis, the unchanged
+Exact cleanup algorithm, trusted post-exact refresh, and one residual Candidate
+cleanup workflow. Legacy category commands and `Cleanup all` remain available only
+during migration and will be retired after staged behavioral and safety parity.
+
 Candidate-only EPUB fingerprints and local expanded discovery are implemented.
 PDF cross-document fingerprints, calibrated content-language detection, and
 optional online/model enrichment remain later roadmap work.

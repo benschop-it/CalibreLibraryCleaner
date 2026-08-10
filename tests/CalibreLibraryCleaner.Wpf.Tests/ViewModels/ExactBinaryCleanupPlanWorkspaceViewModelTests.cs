@@ -15,6 +15,50 @@ namespace CalibreLibraryCleaner.Wpf.Tests.ViewModels;
 public sealed class ExactBinaryCleanupPlanWorkspaceViewModelTests
 {
     [Fact]
+    public async Task NothingToDoCompletesExactStageWithoutStartingWorker()
+    {
+        DateTimeOffset now = new(2026, 8, 10, 12, 0, 0, TimeSpan.Zero);
+        LibrarySnapshot snapshot = new(
+            new("87f7ed1f-59a8-45a6-975a-7e06fd84780d", 27, "C:\\library"),
+            now,
+            [],
+            []);
+        using LibraryStateSession stateSession = new();
+        await stateSession.StartFromExactAnalysisAsync(snapshot, CancellationToken.None);
+        ICalibreToolDiscovery tools = A.Fake<ICalibreToolDiscovery>();
+        ICalibreMutationWorkerFactory workers = A.Fake<ICalibreMutationWorkerFactory>();
+        IClock clock = A.Fake<IClock>();
+        A.CallTo(() => clock.GetUtcNow()).Returns(now);
+        IExactDuplicateCleanupConfirmationService confirmation =
+            A.Fake<IExactDuplicateCleanupConfirmationService>();
+        A.CallTo(() => confirmation.ConfirmExternalBackup(0)).Returns(true);
+        ExactBinaryCleanupPlanWorkspaceViewModel viewModel = new(
+            new(
+                stateSession,
+                tools,
+                workers,
+                A.Fake<ILibraryMutationLease>(),
+                A.Fake<ICleanupExecutionIdGenerator>(),
+                clock),
+            confirmation,
+            stateSession,
+            clock);
+        viewModel.UpdateContext(snapshot, []);
+
+        await viewModel.RemoveDuplicatesCommand.ExecuteAsync(null);
+
+        stateSession.GetCurrent(snapshot.Identity.LibraryRoot)!.WorkflowCheckpoint.Phase.Should()
+            .Be(LibraryWorkflowPhase.CandidatePreparationReady);
+        viewModel.Status.Should().Contain("no library changes were required");
+        viewModel.RemoveDuplicatesCommand.CanExecute(null).Should().BeFalse();
+        A.CallTo(() => tools.DiscoverAndProbeAsync(A<string>._, A<CancellationToken>._))
+            .MustNotHaveHappened();
+        A.CallTo(() => workers.TryOpenAsync(
+            A<OpenCalibreMutationWorkerRequest>._, A<CancellationToken>._))
+            .MustNotHaveHappened();
+    }
+
+    [Fact]
     public async Task RemoveDuplicatesHonorsUserKeeperOverride()
     {
         DateTimeOffset now = new(2026, 8, 2, 12, 0, 0, TimeSpan.Zero);
@@ -24,7 +68,7 @@ public sealed class ExactBinaryCleanupPlanWorkspaceViewModelTests
             new("87f7ed1f-59a8-45a6-975a-7e06fd84780d", 27, "C:\\library"),
             now, books, [], ExactBinaryDuplicateDetector.Detect(books));
         using LibraryStateSession stateSession = new();
-        await stateSession.StartFromScanAsync(snapshot, CancellationToken.None);
+        await stateSession.StartFromExactAnalysisAsync(snapshot, CancellationToken.None);
         ExactBinaryDuplicateGroup group = snapshot.ExactBinaryDuplicateGroups.Single();
         ExactDuplicateGroupRowViewModel row = new(group, books.ToDictionary(value => value.Id));
         row.RetainedMember = row.Members.Single(value => value.BookId == 2);
@@ -64,7 +108,8 @@ public sealed class ExactBinaryCleanupPlanWorkspaceViewModelTests
         IExactDuplicateCleanupConfirmationService confirmation =
             A.Fake<IExactDuplicateCleanupConfirmationService>();
         A.CallTo(() => confirmation.ConfirmExternalBackup(A<int>._)).Returns(true);
-        ExactBinaryCleanupPlanWorkspaceViewModel viewModel = new(useCase, confirmation);
+        ExactBinaryCleanupPlanWorkspaceViewModel viewModel = new(
+            useCase, confirmation, stateSession, clock);
         viewModel.UpdateContext(snapshot, [row]);
 
         await viewModel.RemoveDuplicatesCommand.ExecuteAsync(null);
@@ -73,6 +118,9 @@ public sealed class ExactBinaryCleanupPlanWorkspaceViewModelTests
             .And.Contain("deleted 1 empty record");
         stateSession.GetCurrent(snapshot.Identity.LibraryRoot)!.Snapshot.Books
             .Select(value => value.Id).Should().Equal(new CalibreBookId(2));
+        stateSession.GetCurrent(snapshot.Identity.LibraryRoot)!.WorkflowCheckpoint.Phase.Should()
+            .Be(LibraryWorkflowPhase.CandidatePreparationReady);
+        viewModel.RemoveDuplicatesCommand.CanExecute(null).Should().BeFalse();
         A.CallTo(() => workerSession.ExecuteChunkAsync(
             A<CalibreMutationChunkRequest>.That.Matches(value => value.Operations.Any(operation =>
                 operation.Kind == CalibreMutationOperationKind.RemoveFormat
