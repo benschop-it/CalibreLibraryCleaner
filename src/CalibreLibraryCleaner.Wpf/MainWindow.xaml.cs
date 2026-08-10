@@ -23,6 +23,9 @@ public partial class MainWindow : System.Windows.Window
     private void ExpandedCandidateMembersGrid_MouseDoubleClick(object sender, MouseButtonEventArgs e) =>
         RouteRowDoubleClick(sender, e, viewModel => viewModel.OpenSelectedExpandedCandidateCommand);
 
+    private void UnifiedCandidateMembersGrid_MouseDoubleClick(object sender, MouseButtonEventArgs e) =>
+        RouteRowDoubleClick(sender, e, viewModel => viewModel.OpenSelectedUnifiedCandidateCommand);
+
     private void RouteRowDoubleClick(
         object sender,
         MouseButtonEventArgs e,

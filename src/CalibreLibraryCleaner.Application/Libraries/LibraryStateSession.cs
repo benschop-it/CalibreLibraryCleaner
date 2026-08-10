@@ -39,6 +39,12 @@ public interface ILibraryStateSession
         LibraryWorkflowSource source,
         CancellationToken cancellationToken);
 
+    Task<LibraryStateSessionOutcome> CompleteCandidateAnalysisAsync(
+        LibrarySnapshot snapshot,
+        LibraryStateGenerationId expectedGeneration,
+        LibraryStateRevision expectedRevision,
+        CancellationToken cancellationToken);
+
     Task<LibraryStateSessionOutcome> LoadAsync(
         string libraryRoot,
         CancellationToken cancellationToken);
@@ -150,6 +156,61 @@ public sealed class LibraryStateSession(ILibraryStateStore? store = null) : ILib
                                            or InvalidDataException or InvalidOperationException)
         {
             return LibraryStateSessionOutcome.Failure("LIBRARY_STATE.BASELINE_PERSIST_FAILED", exception.Message);
+        }
+        finally
+        {
+            _gate.Release();
+        }
+    }
+
+    public async Task<LibraryStateSessionOutcome> CompleteCandidateAnalysisAsync(
+        LibrarySnapshot snapshot,
+        LibraryStateGenerationId expectedGeneration,
+        LibraryStateRevision expectedRevision,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(snapshot);
+        ArgumentNullException.ThrowIfNull(expectedGeneration);
+        await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            if (!_states.TryGetValue(snapshot.Identity.LibraryRoot, out LibraryState? current)
+                || !current.IsAuthoritative
+                || !current.IsWorkflowCheckpointCurrent
+                || current.GenerationId != expectedGeneration
+                || current.Revision != expectedRevision
+                || current.WorkflowCheckpoint.Phase != LibraryWorkflowPhase.CandidatePreparationReady
+                || current.WorkflowCheckpoint.Source is not { } source)
+                return LibraryStateSessionOutcome.Failure(
+                    "LIBRARY_STATE.CANDIDATE_SOURCE_STALE",
+                    "The refreshed source state changed before candidate analysis publication.");
+            DateTimeOffset publishedAt = snapshot.ScannedAt < current.ProjectedAtUtc
+                ? current.ProjectedAtUtc
+                : snapshot.ScannedAt;
+            LibraryState analyzed = new(
+                current.GenerationId,
+                current.Revision,
+                LibraryStateStatus.Authoritative,
+                snapshot,
+                publishedAt,
+                workflowCheckpoint: new(
+                    LibraryWorkflowPhase.CandidateAnalysisReady,
+                    current.GenerationId,
+                    current.Revision,
+                    LibraryWorkflowPolicyVersions.Current,
+                    publishedAt,
+                    source));
+            if (store is not null)
+                await store.WriteCandidateAnalysisAsync(
+                    snapshot.Identity.LibraryRoot, analyzed, source, cancellationToken).ConfigureAwait(false);
+            _states[snapshot.Identity.LibraryRoot] = analyzed;
+            PublishStateChanged(snapshot.Identity.LibraryRoot, analyzed);
+            return LibraryStateSessionOutcome.Success(analyzed);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException
+                                           or InvalidDataException or InvalidOperationException)
+        {
+            return LibraryStateSessionOutcome.Failure("LIBRARY_STATE.CANDIDATE_PERSIST_FAILED", exception.Message);
         }
         finally
         {

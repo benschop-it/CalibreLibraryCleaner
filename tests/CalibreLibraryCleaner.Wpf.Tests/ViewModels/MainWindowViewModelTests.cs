@@ -176,6 +176,46 @@ public sealed class MainWindowViewModelTests
     }
 
     [Fact]
+    public async Task PersistedUnifiedGroupsShowKeeperDetailsOverrideAndOpenSelectedMember()
+    {
+        const string libraryRoot = "C:\\Books";
+        ILibrarySnapshotStore store = A.Fake<ILibrarySnapshotStore>();
+        IEbookViewerLauncher viewer = A.Fake<IEbookViewerLauncher>();
+        LibrarySnapshot snapshot = UnifiedSnapshot(libraryRoot);
+        A.CallTo(() => store.ListAsync(A<CancellationToken>._))
+            .Returns([new(libraryRoot, snapshot.ScannedAt)]);
+        A.CallTo(() => store.ReadAsync(libraryRoot, A<CancellationToken>._)).Returns(snapshot);
+        A.CallTo(() => viewer.LaunchAsync(A<EbookViewerLaunchRequest>._, A<CancellationToken>._))
+            .Returns(EbookViewerLaunchResult.Success());
+        MainWindowViewModel viewModel = CreateViewModel(
+            A.Fake<ILibraryFolderPicker>(), out _, out _, out _, new(store), ebookViewer: viewer);
+
+        await viewModel.InitializeAsync();
+        viewModel.SelectedPersistedLibraryPath = libraryRoot;
+        await viewModel.LoadPersistedSnapshotCommand.ExecuteAsync(null);
+
+        viewModel.UnifiedCandidateGroups.Should().ContainSingle();
+        UnifiedCandidateGroupRowViewModel group = viewModel.UnifiedCandidateGroups[0];
+        group.Skip.Should().BeFalse();
+        group.KeeperTitle.Should().Be("Second");
+        group.KeeperAuthors.Should().Be("Author");
+        viewModel.UnifiedCandidateSummary.Should().Contain("1 unified candidate group");
+        UnifiedCandidateMemberRowViewModel alternate = group.Members.Single(value => value.BookId == 1);
+        viewModel.SelectedUnifiedCandidateMember = alternate;
+        group.KeeperRecordId.Should().Be(1);
+        group.KeeperTitle.Should().Be("First");
+        alternate.Action.Should().Be("Keep");
+
+        await viewModel.OpenSelectedUnifiedCandidateCommand.ExecuteAsync(null);
+
+        A.CallTo(() => viewer.LaunchAsync(
+            A<EbookViewerLaunchRequest>.That.Matches(value =>
+                value.LibraryRoot == libraryRoot
+                && value.ExpectedRelativePath == "Author/First.epub"),
+            A<CancellationToken>._)).MustHaveHappenedOnceExactly();
+    }
+
+    [Fact]
     public async Task PersistedAuthoritativeStateLoadsAsMutationEligible()
     {
         const string libraryRoot = "C:\\Books";
@@ -769,6 +809,41 @@ public sealed class MainWindowViewModelTests
                 1,
                 1,
                 0));
+    }
+
+    private static LibrarySnapshot UnifiedSnapshot(string libraryRoot)
+    {
+        CalibreBook first = ExpandedBook(1, "First", "Author/First.epub", new(1_024, new(new string('a', 64))));
+        CalibreBook second = ExpandedBook(
+            2, "Second", "Author/Second.epub", new(2_048, new(new string('b', 64))), hasCover: true);
+        WorkLanguageCandidateGroup expanded = WorkLanguageCandidateGroup.Create(
+            "en",
+            [first.Id, second.Id],
+            [first.Id],
+            WorkLanguageCandidateConfidence.Strong,
+            [new("MATCH.CONTENT.EQUIVALENT", CandidateEvidenceStrength.Anchor)],
+            contentComparison: new(1, 1, 0, 0, 0, 0));
+        UnifiedCandidateGroup unified = UnifiedCandidateMergePolicy.Merge(
+            [], [expanded], [first, second]).Single();
+        return new(
+            new("87f7ed1f-59a8-45a6-975a-7e06fd84780d", 27, libraryRoot),
+            new DateTimeOffset(2026, 8, 1, 12, 0, 0, TimeSpan.Zero),
+            [first, second],
+            [],
+            workLanguageCandidateGroups: [expanded],
+            matchingRunSummary: new(
+                MatchingPolicyVersion.Current,
+                MatchingEvidenceStatus.Available,
+                2,
+                1,
+                1,
+                0,
+                2,
+                2,
+                1,
+                1,
+                0),
+            unifiedCandidateGroups: [unified]);
     }
 
     private static CalibreBook ExpandedBook(

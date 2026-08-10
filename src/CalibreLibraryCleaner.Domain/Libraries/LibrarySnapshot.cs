@@ -20,7 +20,8 @@ public sealed record LibrarySnapshot
         IEnumerable<ConsolidationRecommendation>? consolidationRecommendations = null,
         IEnumerable<PdfAssessment>? pdfAssessments = null,
         IEnumerable<WorkLanguageCandidateGroup>? workLanguageCandidateGroups = null,
-        BookMatchingRunSummary? matchingRunSummary = null)
+        BookMatchingRunSummary? matchingRunSummary = null,
+        IEnumerable<UnifiedCandidateGroup>? unifiedCandidateGroups = null)
     {
         ArgumentNullException.ThrowIfNull(identity);
         ArgumentNullException.ThrowIfNull(books);
@@ -105,6 +106,16 @@ public sealed record LibrarySnapshot
             throw new ArgumentException(
                 "The matching run summary does not match the snapshot.", nameof(matchingRunSummary));
         }
+        UnifiedCandidateGroup[] orderedUnifiedGroups = (unifiedCandidateGroups ?? [])
+            .OrderBy(value => value.Id.Value, StringComparer.Ordinal).ToArray();
+        if (orderedUnifiedGroups.Select(value => value.Id).Distinct().Count() != orderedUnifiedGroups.Length
+            || orderedUnifiedGroups.SelectMany(value => value.Members).Any(value => !currentBookIds.Contains(value))
+            || orderedUnifiedGroups.SelectMany(value => value.Members)
+                .GroupBy(value => value).Any(group => group.Count() > 1))
+            throw new ArgumentException(
+                "Unified candidate groups must be unique, disjoint, and reference current books.",
+                nameof(unifiedCandidateGroups));
+        UnifiedCandidateGroups = new ReadOnlyCollection<UnifiedCandidateGroup>(orderedUnifiedGroups);
     }
 
     public LibraryIdentity Identity { get; }
@@ -128,4 +139,6 @@ public sealed record LibrarySnapshot
     public IReadOnlyList<WorkLanguageCandidateGroup> WorkLanguageCandidateGroups { get; }
 
     public BookMatchingRunSummary MatchingRunSummary { get; }
+
+    public IReadOnlyList<UnifiedCandidateGroup> UnifiedCandidateGroups { get; }
 }

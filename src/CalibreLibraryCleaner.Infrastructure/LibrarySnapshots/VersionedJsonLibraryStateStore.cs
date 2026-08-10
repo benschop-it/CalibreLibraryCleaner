@@ -99,6 +99,52 @@ internal sealed class VersionedJsonLibraryStateStore(
         await WriteBaselineCoreAsync(state, cancellationToken).ConfigureAwait(false);
     }
 
+    public async Task WriteCandidateAnalysisAsync(
+        string libraryRoot,
+        LibraryState state,
+        LibraryWorkflowSource source,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(state);
+        ArgumentNullException.ThrowIfNull(source);
+        string canonical = Canonicalize(libraryRoot);
+        string root = StorageRoot();
+        string key = Key(canonical);
+        StateManifest manifest = await ReadManifestAsync(root, key, cancellationToken).ConfigureAwait(false)
+            ?? throw new InvalidOperationException("No persisted refreshed candidate source exists.");
+        if (!PathComparer.Equals(state.Snapshot.Identity.LibraryRoot, canonical)
+            || manifest.Status != LibraryStateStatus.Authoritative
+            || manifest.PendingMutationIntent is not null
+            || manifest.GenerationId != state.GenerationId.Value
+            || manifest.Revision != state.Revision.Value
+            || manifest.BaseRevision != manifest.Revision
+            || manifest.DeltaCount != 0
+            || manifest.WorkflowCheckpoint?.Phase != LibraryWorkflowPhase.CandidatePreparationReady
+            || manifest.WorkflowCheckpoint.SourceGenerationId != source.GenerationId.Value
+            || manifest.WorkflowCheckpoint.SourceRevision != source.Revision.Value
+            || state.WorkflowCheckpoint.Phase != LibraryWorkflowPhase.CandidateAnalysisReady
+            || state.WorkflowCheckpoint.Source != source)
+            throw new InvalidOperationException("The persisted refreshed source changed before candidate publication.");
+        string checkpoint = $"{key}.{state.GenerationId.Value:N}.{state.Revision.Value}.candidate-analysis.checkpoint.json";
+        await WriteAtomicAsync(
+            Path.Combine(root, checkpoint),
+            LibrarySnapshotJsonSerializer.Serialize(state.Snapshot),
+            cancellationToken).ConfigureAwait(false);
+        string? reusableAssessments = await PreserveReusableAssessmentsAsync(
+            root, key, canonical, state.Snapshot, cancellationToken).ConfigureAwait(false);
+        StateManifest updated = manifest with
+        {
+            ScannedAtUtc = state.Snapshot.ScannedAt,
+            CheckpointProjectedAtUtc = state.ProjectedAtUtc,
+            ProjectedAtUtc = state.ProjectedAtUtc,
+            BaselineFile = checkpoint,
+            WorkflowCheckpoint = ToPayload(state.WorkflowCheckpoint),
+            ReusableAssessmentSnapshotFile = reusableAssessments,
+        };
+        await WriteManifestAsync(root, key, updated, cancellationToken).ConfigureAwait(false);
+        PruneUnreferencedStateFiles(root, key, updated);
+    }
+
     private async Task WriteBaselineCoreAsync(LibraryState state, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(state);

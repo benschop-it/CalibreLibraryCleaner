@@ -13,6 +13,12 @@ public interface ILibraryStateStore
         LibraryWorkflowSource source,
         CancellationToken cancellationToken);
 
+    Task WriteCandidateAnalysisAsync(
+        string libraryRoot,
+        LibraryState state,
+        LibraryWorkflowSource source,
+        CancellationToken cancellationToken);
+
     Task AppendDeltaAsync(
         string libraryRoot,
         LibraryStateDelta delta,

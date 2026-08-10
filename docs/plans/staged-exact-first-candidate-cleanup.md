@@ -529,7 +529,9 @@ Manual large-library acceptance records metrics from Serilog and verifies:
 - [x] Pure post-Exact reconciliation policy implemented.
 - [x] Post-exact refresh and fingerprint reuse implemented.
 - [x] Assessment and candidate-content cache reuse implemented.
-- [ ] Unified candidate discovery and presentation implemented.
+- [x] Unified candidate domain values and merge policy implemented.
+- [x] Residual candidate analysis implemented.
+- [x] Unified candidate discovery and presentation implemented.
 - [ ] Candidate cleanup implemented.
 - [ ] Legacy composite/category cleanup retired.
 - [ ] Full automated and large-library acceptance completed.
@@ -585,3 +587,31 @@ locked, unsafe, changed, stale, unproven, or incomplete evidence fails closed be
 publication. Final verification passes with 604 tests, clean formatting and diff
 hygiene, no vulnerable direct or transitive packages, and the Exact cleanup
 executor unchanged.
+Step 8 adds versioned unified candidate groups, evidence provenance, advisory
+classification, review findings, deterministic existing-policy keeper ranking,
+and a complete-component merge policy. Exact Metadata groups are mandatory inputs
+outside the ordinary candidate cap; a focused 25-member test proves they remain
+present. Language, series/index, strong-identifier, edition-marker, and content
+contradictions prevent unsafe bridges, while snapshot invariants enforce disjoint
+current-record membership. Seven focused Domain tests pass.
+Step 9 adds cancellable residual analysis over the refreshed physical generation:
+exact Metadata detection runs independently of Expanded candidate caps, existing
+Expanded discovery and fingerprint-keyed content caching are reused, unified groups
+are built only after both evidence streams complete, and compare-and-swap
+publication advances the same generation to `CandidateAnalysisReady`. Expanded
+limit outcomes retain uncapped Metadata candidates. Four focused orchestration
+tests and 18 state/serialization tests pass; cancellation and stale publication
+leave the refreshed generation authoritative.
+Step 10 adds persisted unified group/member presentation with virtualized grids,
+keeper-first title and author columns, evidence/classification/review details,
+session-scoped Skip and keeper overrides, deterministic ranking facts, and safe
+viewer launch. Keeper changes notify title, authors, record ID, and every affected
+member action. Unified groups and exact-source provenance round-trip through the
+state store. Candidate cleanup remains non-executing: no Candidate request,
+planner, worker orchestration, or mutation command was added.
+Final steps 8-10 verification passes with a clean full build, clean formatting and
+diff hygiene, no vulnerable direct or transitive packages, and 626 passing tests.
+The complete suite is run with project-level parallelism disabled because unchanged
+PDF/viewer worker tests can contend for process resources when all test projects run
+concurrently. The Exact cleanup executor and post-Exact refresh implementation were
+not modified by these slices.

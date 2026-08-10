@@ -2,6 +2,7 @@ using System.IO.Compression;
 using System.Text;
 using CalibreLibraryCleaner.Application.Libraries;
 using CalibreLibraryCleaner.Domain.Assessments;
+using CalibreLibraryCleaner.Domain.Duplicates;
 using CalibreLibraryCleaner.Domain.Libraries;
 using CalibreLibraryCleaner.Domain.Matching;
 using CalibreLibraryCleaner.Infrastructure.LibrarySnapshots;
@@ -107,6 +108,115 @@ public sealed class LibrarySnapshotJsonSerializerTests
             .Should().Be(WorkLanguageCleanupEligibility.ExplicitKeeperCleanup);
         read.Snapshot.MatchingRunSummary.Should().BeEquivalentTo(summary);
         LibrarySnapshotJsonSerializer.Serialize(read.Snapshot).Should().Equal(serialized);
+    }
+
+    [Fact]
+    public void UnifiedCandidateGroupsRoundTripCanonically()
+    {
+        using Fixtures.TemporaryDirectory directory = new();
+        InfrastructureExecutionFixture fixture = InfrastructureExecutionTestData.Create(directory.Path);
+        CalibreBook[] books = fixture.Snapshot.Books.Take(2).Select(value => new CalibreBook(
+            value.Id,
+            "Shared title",
+            value.AuthorSort,
+            [new(value.Authors[0].Id, "Shared Author", "Shared Author")],
+            value.Identifiers,
+            value.Formats,
+            value.RelativeDirectory,
+            value.PublicationMetadata)).ToArray();
+        ExactMetadataDuplicateGroup metadata = ExactMetadataDuplicateDetector.Detect(books).Single();
+        UnifiedCandidateGroup unified = UnifiedCandidateMergePolicy.Merge([metadata], [], books).Single();
+        LibrarySnapshot value = new(
+            fixture.Snapshot.Identity,
+            fixture.Snapshot.ScannedAt,
+            books,
+            [],
+            exactMetadataDuplicateGroups: [metadata],
+            unifiedCandidateGroups: [unified]);
+
+        byte[] serialized = LibrarySnapshotJsonSerializer.Serialize(value);
+        LibrarySnapshotJsonReadResult read = LibrarySnapshotJsonSerializer.Deserialize(serialized);
+
+        read.IsSuccess.Should().BeTrue(read.Error);
+        read.Snapshot!.UnifiedCandidateGroups.Should().ContainSingle().Which
+            .Should().BeEquivalentTo(unified);
+        LibrarySnapshotJsonSerializer.Serialize(read.Snapshot).Should().Equal(serialized);
+    }
+
+    [Fact]
+    public void MixedUnifiedEvidenceContradictionsAndReviewFindingsRoundTripCanonically()
+    {
+        using Fixtures.TemporaryDirectory directory = new();
+        InfrastructureExecutionFixture fixture = InfrastructureExecutionTestData.Create(directory.Path);
+        CalibreBook[] books = fixture.Snapshot.Books.Take(2).Select(value => new CalibreBook(
+            value.Id,
+            "Shared title",
+            "Shared Author",
+            [new(value.Authors[0].Id, "Shared Author", "Shared Author")],
+            value.Identifiers,
+            value.Formats,
+            value.RelativeDirectory,
+            value.PublicationMetadata)).ToArray();
+        ExactMetadataDuplicateGroup metadata = ExactMetadataDuplicateDetector.Detect(books).Single();
+        WorkLanguageCandidateGroup expanded = WorkLanguageCandidateGroup.Create(
+            "en",
+            books.Select(value => value.Id),
+            [books[0].Id],
+            WorkLanguageCandidateConfidence.Strong,
+            [new("MATCH.CONTENT.AMBIGUOUS", CandidateEvidenceStrength.Weak)],
+            [new("MATCH.SERIES_INDEX.CONFLICT")],
+            new(1, 0, 0, 1, 0, 0));
+        UnifiedCandidatePolicyVersion version = UnifiedCandidatePolicyVersion.Current;
+        UnifiedCandidateGroup unified = new(
+            UnifiedCandidateGroup.CreateId(version, books.Select(value => value.Id)),
+            books.Select(value => value.Id),
+            books[0].Id,
+            "en",
+            UnifiedCandidateEvidenceSource.ExactMetadata
+                | UnifiedCandidateEvidenceSource.Expanded
+                | UnifiedCandidateEvidenceSource.Title
+                | UnifiedCandidateEvidenceSource.Author
+                | UnifiedCandidateEvidenceSource.Series
+                | UnifiedCandidateEvidenceSource.Content,
+            [
+                new("MATCH.METADATA.EXACT_TITLE_AUTHOR", CandidateEvidenceStrength.Strong),
+                new("MATCH.CONTENT.AMBIGUOUS", CandidateEvidenceStrength.Weak),
+            ],
+            [new("MATCH.SERIES_INDEX.CONFLICT")],
+            new(1, 0, 0, 1, 0, 0),
+            UnifiedCandidateClassification.ToBeReviewed,
+            [metadata.Id],
+            [expanded.Id],
+            [new("UNIFIED.METADATA_OVERLAP_CONTRADICTED", books.Select(value => value.Id))],
+            version);
+        BookMatchingRunSummary summary = new(
+            MatchingPolicyVersion.Current,
+            MatchingEvidenceStatus.Available,
+            books.Length,
+            1,
+            1,
+            0,
+            2,
+            0,
+            1,
+            1,
+            0);
+        LibrarySnapshot value = new(
+            fixture.Snapshot.Identity,
+            fixture.Snapshot.ScannedAt,
+            books,
+            [],
+            exactMetadataDuplicateGroups: [metadata],
+            workLanguageCandidateGroups: [expanded],
+            matchingRunSummary: summary,
+            unifiedCandidateGroups: [unified]);
+
+        LibrarySnapshotJsonReadResult read = LibrarySnapshotJsonSerializer.Deserialize(
+            LibrarySnapshotJsonSerializer.Serialize(value));
+
+        read.IsSuccess.Should().BeTrue(read.Error);
+        read.Snapshot!.UnifiedCandidateGroups.Should().ContainSingle().Which
+            .Should().BeEquivalentTo(unified);
     }
 
     [Fact]

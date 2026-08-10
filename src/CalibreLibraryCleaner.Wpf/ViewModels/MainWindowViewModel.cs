@@ -32,6 +32,7 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
     private readonly BulkObservableCollection<ExactDuplicateGroupRowViewModel> _exactDuplicateGroups = [];
     private readonly BulkObservableCollection<MetadataDuplicateGroupRowViewModel> _metadataDuplicateGroups = [];
     private readonly BulkObservableCollection<ExpandedCandidateGroupRowViewModel> _expandedCandidateGroups = [];
+    private readonly BulkObservableCollection<UnifiedCandidateGroupRowViewModel> _unifiedCandidateGroups = [];
     private readonly BulkObservableCollection<EpubAssessmentRowViewModel> _epubAssessments = [];
     private readonly BulkObservableCollection<EpubAssessmentFindingRowViewModel> _epubFindings = [];
     private readonly BulkObservableCollection<PdfAssessmentRowViewModel> _pdfAssessments = [];
@@ -47,6 +48,7 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
     private string _exactDuplicateSummary = "No exact file duplicate groups have been found.";
     private string _metadataDuplicateSummary = "No exact metadata candidate groups have been found.";
     private string _expandedCandidateSummary = "Run a fresh scan to discover expanded candidates.";
+    private string _unifiedCandidateSummary = "Run Candidate analysis to prepare unified candidates.";
     private string _metadataDuplicateFilterText = string.Empty;
     private MetadataDuplicateFilterMode _metadataDuplicateFilterMode;
     private bool _isBusy;
@@ -59,6 +61,8 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
     private MetadataDuplicateMemberRowViewModel? _selectedMetadataDuplicateMember;
     private ExpandedCandidateGroupRowViewModel? _selectedExpandedCandidateGroup;
     private ExpandedCandidateMemberRowViewModel? _selectedExpandedCandidateMember;
+    private UnifiedCandidateGroupRowViewModel? _selectedUnifiedCandidateGroup;
+    private UnifiedCandidateMemberRowViewModel? _selectedUnifiedCandidateMember;
     private EpubAssessmentRowViewModel? _selectedEpubAssessment;
     private EpubFindingFilterMode _epubFindingFilterMode;
     private PdfAssessmentRowViewModel? _selectedPdfAssessment;
@@ -107,6 +111,8 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
             _metadataDuplicateGroups);
         ExpandedCandidateGroups = new ReadOnlyObservableCollection<ExpandedCandidateGroupRowViewModel>(
             _expandedCandidateGroups);
+        UnifiedCandidateGroups = new ReadOnlyObservableCollection<UnifiedCandidateGroupRowViewModel>(
+            _unifiedCandidateGroups);
         EpubAssessments = new ReadOnlyObservableCollection<EpubAssessmentRowViewModel>(_epubAssessments);
         EpubFindings = new ReadOnlyObservableCollection<EpubAssessmentFindingRowViewModel>(_epubFindings);
         PdfAssessments = new ReadOnlyObservableCollection<PdfAssessmentRowViewModel>(_pdfAssessments);
@@ -126,6 +132,9 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
         OpenSelectedExpandedCandidateCommand = new AsyncRelayCommand(
             OpenSelectedExpandedCandidateAsync,
             () => !IsBusy && _ebookViewer is not null && SelectedExpandedCandidateMember is not null);
+        OpenSelectedUnifiedCandidateCommand = new AsyncRelayCommand(
+            OpenSelectedUnifiedCandidateAsync,
+            () => !IsBusy && _ebookViewer is not null && SelectedUnifiedCandidateMember is not null);
         NextMetadataDuplicateGroupCommand = new RelayCommand(
             () => MoveMetadataSelection(1),
             () => !IsBusy && _metadataDuplicateGroups.Count > 0);
@@ -206,6 +215,7 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
                 OpenSelectedExactDuplicateCommand.NotifyCanExecuteChanged();
                 OpenSelectedMetadataCandidateCommand.NotifyCanExecuteChanged();
                 OpenSelectedExpandedCandidateCommand.NotifyCanExecuteChanged();
+                OpenSelectedUnifiedCandidateCommand.NotifyCanExecuteChanged();
                 NextMetadataDuplicateGroupCommand.NotifyCanExecuteChanged();
                 PreviousMetadataDuplicateGroupCommand.NotifyCanExecuteChanged();
                 ToggleMetadataDuplicateDeferredCommand.NotifyCanExecuteChanged();
@@ -236,6 +246,8 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
     public ReadOnlyObservableCollection<MetadataDuplicateGroupRowViewModel> MetadataDuplicateGroups { get; }
 
     public ReadOnlyObservableCollection<ExpandedCandidateGroupRowViewModel> ExpandedCandidateGroups { get; }
+
+    public ReadOnlyObservableCollection<UnifiedCandidateGroupRowViewModel> UnifiedCandidateGroups { get; }
 
     public ReadOnlyObservableCollection<EpubAssessmentRowViewModel> EpubAssessments { get; }
 
@@ -276,6 +288,12 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
     {
         get => _expandedCandidateSummary;
         private set => SetProperty(ref _expandedCandidateSummary, value);
+    }
+
+    public string UnifiedCandidateSummary
+    {
+        get => _unifiedCandidateSummary;
+        private set => SetProperty(ref _unifiedCandidateSummary, value);
     }
 
     public string MetadataDuplicateFilterText
@@ -415,6 +433,34 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
         }
     }
 
+    public UnifiedCandidateGroupRowViewModel? SelectedUnifiedCandidateGroup
+    {
+        get => _selectedUnifiedCandidateGroup;
+        set
+        {
+            if (SetProperty(ref _selectedUnifiedCandidateGroup, value))
+            {
+                OnPropertyChanged(nameof(SelectedUnifiedCandidateMembers));
+                SelectedUnifiedCandidateMember = value?.KeeperMember;
+            }
+        }
+    }
+
+    public IReadOnlyList<UnifiedCandidateMemberRowViewModel> SelectedUnifiedCandidateMembers =>
+        SelectedUnifiedCandidateGroup?.Members ?? [];
+
+    public UnifiedCandidateMemberRowViewModel? SelectedUnifiedCandidateMember
+    {
+        get => _selectedUnifiedCandidateMember;
+        set
+        {
+            if (!SetProperty(ref _selectedUnifiedCandidateMember, value)) return;
+            OpenSelectedUnifiedCandidateCommand.NotifyCanExecuteChanged();
+            if (value is null || SelectedUnifiedCandidateGroup is null) return;
+            SelectedUnifiedCandidateGroup.KeeperMember = value;
+        }
+    }
+
     public IReadOnlyList<RecommendationFormatRowViewModel> SelectedRecommendationFormats =>
         SelectedMetadataDuplicateGroup?.FormatRows ?? [];
 
@@ -522,6 +568,8 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
     public IAsyncRelayCommand OpenSelectedMetadataCandidateCommand { get; }
 
     public IAsyncRelayCommand OpenSelectedExpandedCandidateCommand { get; }
+
+    public IAsyncRelayCommand OpenSelectedUnifiedCandidateCommand { get; }
 
     public IRelayCommand NextMetadataDuplicateGroupCommand { get; }
 
@@ -812,6 +860,19 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
         return OpenBookFormatAsync(member.LaunchRelativePath, member.LaunchFormat);
     }
 
+    private Task OpenSelectedUnifiedCandidateAsync()
+    {
+        UnifiedCandidateMemberRowViewModel? member = SelectedUnifiedCandidateMember;
+        if (member is null) return Task.CompletedTask;
+        if (member.LaunchRelativePath is null || member.LaunchFormat is null)
+        {
+            ErrorMessage = "The selected unified candidate has no present book format to open.";
+            ErrorAction = "Choose another record or run a new exact analysis after restoring its format files.";
+            return Task.CompletedTask;
+        }
+        return OpenBookFormatAsync(member.LaunchRelativePath, member.LaunchFormat);
+    }
+
     private async Task OpenBookFormatAsync(string expectedRelativePath, string format)
     {
         if (_ebookViewer is null || string.IsNullOrWhiteSpace(SelectedLibraryPath)) return;
@@ -909,6 +970,18 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
             expandedGroups[index] = new(group, booksById, expandedRetention[group.Id]);
         }
 
+        UnifiedCandidateGroupRowViewModel[] unifiedGroups = new UnifiedCandidateGroupRowViewModel[
+            snapshot.UnifiedCandidateGroups.Count];
+        for (int index = 0; index < snapshot.UnifiedCandidateGroups.Count; index++)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            unifiedGroups[index] = new(
+                snapshot.UnifiedCandidateGroups[index],
+                booksById,
+                snapshot.EpubAssessments,
+                snapshot.PdfAssessments);
+        }
+
         EpubAssessmentRowViewModel[] epubAssessments = new EpubAssessmentRowViewModel[snapshot.EpubAssessments.Count];
         for (int index = 0; index < snapshot.EpubAssessments.Count; index++)
         {
@@ -937,7 +1010,8 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
             }
         }
 
-        return new(books, groups, metadataGroups, expandedGroups, epubAssessments, pdfAssessments, missingCount);
+        return new(books, groups, metadataGroups, expandedGroups, unifiedGroups,
+            epubAssessments, pdfAssessments, missingCount);
     }
 
     private void ApplySnapshot(
@@ -989,6 +1063,13 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
         MetadataCandidateCleanup?.UpdateContext(legacyMutationOwner ? snapshot : null, _allMetadataDuplicateGroups);
         _expandedCandidateGroups.ReplaceAll(presentation.ExpandedGroups);
         SelectedExpandedCandidateGroup = _expandedCandidateGroups.FirstOrDefault();
+        _unifiedCandidateGroups.ReplaceAll(presentation.UnifiedGroups);
+        SelectedUnifiedCandidateGroup = _unifiedCandidateGroups.FirstOrDefault();
+        UnifiedCandidateSummary = presentation.UnifiedGroups.Count == 0
+            ? "No unified candidate groups are available."
+            : presentation.UnifiedGroups.Count == 1
+                ? "1 unified candidate group is ready for review."
+                : $"{presentation.UnifiedGroups.Count:N0} disjoint unified candidate groups are ready for review.";
         ExpandedCandidateCleanup?.UpdateContext(legacyMutationOwner ? snapshot : null, _expandedCandidateGroups);
         CompositeCleanup?.UpdateContext(
             legacyMutationOwner ? snapshot : null,
@@ -1010,11 +1091,16 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
         SelectedEpubAssessment = _epubAssessments.FirstOrDefault();
         _pdfAssessments.ReplaceAll(presentation.PdfAssessments);
         SelectedPdfAssessment = _pdfAssessments.FirstOrDefault();
+        bool candidateAnalysisAvailable = presentation.UnifiedGroups.Count > 0
+            || snapshot.MatchingRunSummary.Status == MatchingEvidenceStatus.Available
+            || snapshot.Findings.Any(value => value.Code == "MATCHING.CANDIDATE_LIMIT_EXCEEDED");
         StatusMessage = snapshot.Books.Count == 0
             ? _workflowOptions.IsStaged
                 ? "Exact-only analysis complete. The library contains no books."
                 : "Scan complete. The library contains no books."
-            : _workflowOptions.IsStaged
+            : _workflowOptions.IsStaged && candidateAnalysisAvailable
+                ? $"Candidate review ready: {presentation.UnifiedGroups.Count:N0} unified groups across {snapshot.Books.Count:N0} books."
+                : _workflowOptions.IsStaged
                 ? $"Exact-only analysis complete: {snapshot.Books.Count} books, {snapshot.ExactBinaryDuplicateGroups.Count} exact file duplicate groups, {presentation.MissingCount} missing format files."
                 : $"Scan complete: {snapshot.Books.Count} books, {snapshot.ExactBinaryDuplicateGroups.Count} exact file duplicate groups, {snapshot.ExactMetadataDuplicateGroups.Count} exact metadata candidate groups, {snapshot.WorkLanguageCandidateGroups.Count} expanded candidate groups, {presentation.MissingCount} missing format files.";
         IsProgressIndeterminate = false;
@@ -1034,7 +1120,7 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
     }
 
     private void PrepareCandidateCleanup() => StatusMessage =
-        "Candidate cleanup is unlocked. Post-exact candidate preparation is the next implementation slice.";
+        "Candidate cleanup is unlocked. Candidate preparation activation and cleanup execution are wired in later workflow slices.";
 
     private bool CanLoadPersistedSnapshot() => !IsBusy
         && _persistedSnapshots is not null
@@ -1343,6 +1429,7 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
         IReadOnlyList<ExactDuplicateGroupRowViewModel> Groups,
         IReadOnlyList<MetadataDuplicateGroupRowViewModel> MetadataGroups,
         IReadOnlyList<ExpandedCandidateGroupRowViewModel> ExpandedGroups,
+        IReadOnlyList<UnifiedCandidateGroupRowViewModel> UnifiedGroups,
         IReadOnlyList<EpubAssessmentRowViewModel> EpubAssessments,
         IReadOnlyList<PdfAssessmentRowViewModel> PdfAssessments,
         int MissingCount);

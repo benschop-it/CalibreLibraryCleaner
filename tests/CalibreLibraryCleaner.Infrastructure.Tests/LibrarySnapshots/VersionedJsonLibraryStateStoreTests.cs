@@ -2,7 +2,9 @@ using System.Text.Json.Nodes;
 using CalibreLibraryCleaner.Application.Abstractions;
 using CalibreLibraryCleaner.Application.Assessments;
 using CalibreLibraryCleaner.Domain.Assessments;
+using CalibreLibraryCleaner.Domain.Duplicates;
 using CalibreLibraryCleaner.Domain.Libraries;
+using CalibreLibraryCleaner.Domain.Matching;
 using CalibreLibraryCleaner.Infrastructure.LibrarySnapshots;
 using CalibreLibraryCleaner.Infrastructure.Tests.Execution;
 using CalibreLibraryCleaner.Infrastructure.Tests.Fixtures;
@@ -239,6 +241,77 @@ public sealed class VersionedJsonLibraryStateStoreTests
         loaded!.WorkflowCheckpoint.Phase.Should().Be(LibraryWorkflowPhase.CandidatePreparationReady);
         loaded.WorkflowCheckpoint.Source.Should().Be(source);
         loaded.IsWorkflowCheckpointCurrent.Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task CandidateAnalysisBaselineReplaysUnifiedGroupsAndExactSourceProvenance()
+    {
+        using TemporaryDirectory directory = new();
+        InfrastructureExecutionFixture fixture = InfrastructureExecutionTestData.Create(directory.Path);
+        string cache = Path.Combine(directory.Path, "state-cache");
+        VersionedJsonLibraryStateStore store = new(new() { StorageRoot = cache });
+        LibraryWorkflowSource source = new(
+            new(Guid.Parse("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee")),
+            new(42));
+        LibraryStateGenerationId generation = new(
+            Guid.Parse("11111111-2222-3333-4444-555555555555"));
+        CalibreBook[] books = fixture.Snapshot.Books.Take(2).Select(value => new CalibreBook(
+            value.Id,
+            "Shared title",
+            "Shared Author",
+            [new(value.Authors[0].Id, "Shared Author", "Shared Author")],
+            value.Identifiers,
+            value.Formats,
+            value.RelativeDirectory,
+            value.PublicationMetadata)).ToArray();
+        LibrarySnapshot refreshedSnapshot = new(
+            fixture.Snapshot.Identity, fixture.Snapshot.ScannedAt, books, []);
+        LibraryState refreshed = new(
+            generation,
+            new(0),
+            LibraryStateStatus.Authoritative,
+            refreshedSnapshot,
+            refreshedSnapshot.ScannedAt,
+            workflowCheckpoint: new(
+                LibraryWorkflowPhase.CandidatePreparationReady,
+                generation,
+                new(0),
+                LibraryWorkflowPolicyVersions.Current,
+                refreshedSnapshot.ScannedAt,
+                source));
+        await store.WriteBaselineAsync(refreshed, CancellationToken.None);
+        ExactMetadataDuplicateGroup metadata = ExactMetadataDuplicateDetector.Detect(books).Single();
+        UnifiedCandidateGroup unified = UnifiedCandidateMergePolicy.Merge([metadata], [], books).Single();
+        LibrarySnapshot analyzedSnapshot = new(
+            refreshedSnapshot.Identity,
+            refreshedSnapshot.ScannedAt.AddSeconds(1),
+            books,
+            [],
+            exactMetadataDuplicateGroups: [metadata],
+            unifiedCandidateGroups: [unified]);
+        LibraryState analyzed = new(
+            generation,
+            new(0),
+            LibraryStateStatus.Authoritative,
+            analyzedSnapshot,
+            analyzedSnapshot.ScannedAt,
+            workflowCheckpoint: new(
+                LibraryWorkflowPhase.CandidateAnalysisReady,
+                generation,
+                new(0),
+                LibraryWorkflowPolicyVersions.Current,
+                analyzedSnapshot.ScannedAt,
+                source));
+
+        await store.WriteCandidateAnalysisAsync(
+            analyzedSnapshot.Identity.LibraryRoot, analyzed, source, CancellationToken.None);
+        LibraryState? loaded = await new VersionedJsonLibraryStateStore(new() { StorageRoot = cache })
+            .ReadAsync(analyzedSnapshot.Identity.LibraryRoot, CancellationToken.None);
+
+        loaded!.WorkflowCheckpoint.Phase.Should().Be(LibraryWorkflowPhase.CandidateAnalysisReady);
+        loaded.WorkflowCheckpoint.Source.Should().Be(source);
+        loaded.Snapshot.UnifiedCandidateGroups.Should().ContainSingle().Which
+            .Should().BeEquivalentTo(unified);
     }
 
     [Fact]

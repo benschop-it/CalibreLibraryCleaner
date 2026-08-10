@@ -24,8 +24,19 @@ public sealed record WorkLanguageDiscoveryResult(
     BookMatchingRunSummary Summary,
     bool LimitExceeded);
 
+public interface IWorkLanguageCandidateDiscoverer
+{
+    Task<WorkLanguageDiscoveryResult> ExecuteAsync(
+        IReadOnlyList<CalibreBook> books,
+        IReadOnlyList<EpubAssessment> epubAssessments,
+        IReadOnlyList<EpubAssessmentTarget> epubTargets,
+        int maximumContentConcurrency,
+        IProgress<WorkLanguageDiscoveryProgress>? progress,
+        CancellationToken cancellationToken);
+}
+
 public sealed class DiscoverWorkLanguageCandidatesUseCase(
-    ResolveCandidateContentSignaturesUseCase resolveContentSignatures)
+    ResolveCandidateContentSignaturesUseCase resolveContentSignatures) : IWorkLanguageCandidateDiscoverer
 {
     public async Task<WorkLanguageDiscoveryResult> ExecuteAsync(
         IReadOnlyList<CalibreBook> books,

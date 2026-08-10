@@ -2,6 +2,7 @@ using CalibreLibraryCleaner.Application.Abstractions;
 using CalibreLibraryCleaner.Application.Libraries;
 using CalibreLibraryCleaner.Domain.Duplicates;
 using CalibreLibraryCleaner.Domain.Libraries;
+using CalibreLibraryCleaner.Domain.Matching;
 using FakeItEasy;
 using FluentAssertions;
 using Xunit;
@@ -107,6 +108,85 @@ public sealed class LibraryStateSessionTests
         session.GetCurrent(snapshot.Identity.LibraryRoot)!.GenerationId.Should().NotBe(exact.GenerationId);
         A.CallTo(() => store.WritePostExactRefreshBaselineAsync(
             A<LibraryState>._, A<LibraryWorkflowSource>._, A<CancellationToken>._)).MustNotHaveHappened();
+    }
+
+    [Fact]
+    public async Task CandidateAnalysisPublishesAgainstCurrentRefreshedGeneration()
+    {
+        ILibraryStateStore store = A.Fake<ILibraryStateStore>();
+        using LibraryStateSession session = new(store);
+        LibrarySnapshot snapshot = Snapshot("C:\\library");
+        LibraryState exact = (await session.StartFromExactAnalysisAsync(
+            snapshot, CancellationToken.None)).State!;
+        LibraryState completed = (await session.AdvanceWorkflowAsync(
+            snapshot.Identity.LibraryRoot,
+            LibraryWorkflowPhase.CandidatePreparationReady,
+            snapshot.ScannedAt,
+            CancellationToken.None)).State!;
+        LibraryState refreshed = (await session.StartFromPostExactRefreshAsync(
+            snapshot,
+            new(completed.GenerationId, completed.Revision),
+            CancellationToken.None)).State!;
+        ExactMetadataDuplicateGroup metadata = ExactMetadataDuplicateDetector.Detect(snapshot.Books).Single();
+        UnifiedCandidateGroup unified = UnifiedCandidateMergePolicy.Merge(
+            [metadata], [], snapshot.Books).Single();
+        LibrarySnapshot analyzed = new(
+            snapshot.Identity,
+            snapshot.ScannedAt.AddSeconds(1),
+            snapshot.Books,
+            snapshot.Findings,
+            snapshot.ExactBinaryDuplicateGroups,
+            [metadata],
+            unifiedCandidateGroups: [unified]);
+        Fake.ClearRecordedCalls(store);
+
+        LibraryStateSessionOutcome outcome = await session.CompleteCandidateAnalysisAsync(
+            analyzed, refreshed.GenerationId, refreshed.Revision, CancellationToken.None);
+
+        outcome.IsSuccess.Should().BeTrue();
+        outcome.State!.WorkflowCheckpoint.Phase.Should().Be(LibraryWorkflowPhase.CandidateAnalysisReady);
+        outcome.State.WorkflowCheckpoint.Source.Should().Be(refreshed.WorkflowCheckpoint.Source);
+        outcome.State.Snapshot.UnifiedCandidateGroups.Should().ContainSingle();
+        A.CallTo(() => store.WriteCandidateAnalysisAsync(
+            analyzed.Identity.LibraryRoot,
+            A<LibraryState>.That.Matches(value =>
+                value.WorkflowCheckpoint.Phase == LibraryWorkflowPhase.CandidateAnalysisReady),
+            refreshed.WorkflowCheckpoint.Source!,
+            A<CancellationToken>._)).MustHaveHappenedOnceExactly();
+        exact.GenerationId.Should().NotBe(outcome.State.GenerationId);
+    }
+
+    [Fact]
+    public async Task CandidateAnalysisRejectsStaleRefreshedGenerationBeforePersistence()
+    {
+        ILibraryStateStore store = A.Fake<ILibraryStateStore>();
+        using LibraryStateSession session = new(store);
+        LibrarySnapshot snapshot = Snapshot("C:\\library");
+        LibraryState exact = (await session.StartFromExactAnalysisAsync(
+            snapshot, CancellationToken.None)).State!;
+        LibraryState completed = (await session.AdvanceWorkflowAsync(
+            snapshot.Identity.LibraryRoot,
+            LibraryWorkflowPhase.CandidatePreparationReady,
+            snapshot.ScannedAt,
+            CancellationToken.None)).State!;
+        LibraryState refreshed = (await session.StartFromPostExactRefreshAsync(
+            snapshot,
+            new(completed.GenerationId, completed.Revision),
+            CancellationToken.None)).State!;
+        await session.StartFromExactAnalysisAsync(snapshot, CancellationToken.None);
+        Fake.ClearRecordedCalls(store);
+
+        LibraryStateSessionOutcome outcome = await session.CompleteCandidateAnalysisAsync(
+            snapshot, refreshed.GenerationId, refreshed.Revision, CancellationToken.None);
+
+        outcome.ErrorCode.Should().Be("LIBRARY_STATE.CANDIDATE_SOURCE_STALE");
+        session.GetCurrent(snapshot.Identity.LibraryRoot)!.GenerationId.Should().NotBe(refreshed.GenerationId);
+        A.CallTo(() => store.WriteCandidateAnalysisAsync(
+            A<string>._,
+            A<LibraryState>._,
+            A<LibraryWorkflowSource>._,
+            A<CancellationToken>._)).MustNotHaveHappened();
+        exact.GenerationId.Should().NotBe(refreshed.GenerationId);
     }
 
     [Fact]

@@ -309,6 +309,77 @@
           </GroupBox>
         </Grid>
       </TabItem>
+      <TabItem Header="_Unified candidates" AutomationProperties.Name="Unified candidate review">
+        <Grid Margin="8">
+          <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+            <RowDefinition Height="*" />
+          </Grid.RowDefinitions>
+          <TextBlock Grid.Row="0"
+                     Margin="0,0,0,8"
+                     FontWeight="Bold"
+                     Text="{Binding UnifiedCandidateSummary}"
+                     TextWrapping="Wrap" />
+          <GroupBox Grid.Row="1" Header="Unified candidate groups">
+            <DataGrid ItemsSource="{Binding UnifiedCandidateGroups}"
+                      SelectedItem="{Binding SelectedUnifiedCandidateGroup}"
+                      AutoGenerateColumns="False"
+                      SelectionMode="Single"
+                      CanUserAddRows="False"
+                      EnableRowVirtualization="True"
+                      EnableColumnVirtualization="True"
+                      VirtualizingPanel.VirtualizationMode="Recycling"
+                      AutomationProperties.Name="Unified candidate groups">
+              <DataGrid.Columns>
+                <DataGridTemplateColumn Width="65" Header="Skip">
+                  <DataGridTemplateColumn.CellTemplate>
+                    <DataTemplate>
+                      <CheckBox HorizontalAlignment="Center"
+                                VerticalAlignment="Center"
+                                IsChecked="{Binding Skip, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+                    </DataTemplate>
+                  </DataGridTemplateColumn.CellTemplate>
+                </DataGridTemplateColumn>
+                <DataGridTextColumn IsReadOnly="True" Width="2*" Header="Keeper title" Binding="{Binding KeeperTitle}" />
+                <DataGridTextColumn IsReadOnly="True" Width="2*" Header="Keeper authors" Binding="{Binding KeeperAuthors}" />
+                <DataGridTextColumn IsReadOnly="True" Width="85" Header="Keeper ID" Binding="{Binding KeeperRecordId}" />
+                <DataGridTextColumn IsReadOnly="True" Width="105" Header="Eligibility" Binding="{Binding Eligibility}" />
+                <DataGridTextColumn IsReadOnly="True" Width="85" Header="Language" Binding="{Binding Language}" />
+                <DataGridTextColumn IsReadOnly="True" Width="70" Header="Records" Binding="{Binding RecordCount}" />
+                <DataGridTextColumn IsReadOnly="True" Width="2*" Header="Evidence sources" Binding="{Binding EvidenceSources}" />
+                <DataGridTextColumn IsReadOnly="True" Width="3*" Header="Evidence" Binding="{Binding Evidence}" />
+                <DataGridTextColumn IsReadOnly="True" Width="2*" Header="Review findings" Binding="{Binding ReviewFindings}" />
+                <DataGridTextColumn IsReadOnly="True" Width="3*" Header="Content comparison" Binding="{Binding ContentEvidence}" />
+              </DataGrid.Columns>
+            </DataGrid>
+          </GroupBox>
+          <GroupBox Grid.Row="2" Margin="0,8,0,0" Header="Select the record to keep; double-click a row to open its book">
+            <DataGrid ItemsSource="{Binding SelectedUnifiedCandidateMembers}"
+                      SelectedItem="{Binding SelectedUnifiedCandidateMember}"
+                      MouseDoubleClick="UnifiedCandidateMembersGrid_MouseDoubleClick"
+                      AutoGenerateColumns="False"
+                      IsReadOnly="True"
+                      SelectionMode="Single"
+                      SelectionUnit="FullRow"
+                      EnableRowVirtualization="True"
+                      EnableColumnVirtualization="True"
+                      VirtualizingPanel.VirtualizationMode="Recycling"
+                      AutomationProperties.Name="Members in selected unified candidate group">
+              <DataGrid.Columns>
+                <DataGridTextColumn Width="80" Header="Action" Binding="{Binding Action}" />
+                <DataGridTextColumn Width="70" Header="Record ID" Binding="{Binding BookId}" />
+                <DataGridTextColumn Width="2*" Header="Title" Binding="{Binding Title}" />
+                <DataGridTextColumn Width="2*" Header="Authors" Binding="{Binding Authors}" />
+                <DataGridTextColumn Width="100" Header="Languages" Binding="{Binding Languages}" />
+                <DataGridTextColumn Width="*" Header="Series/index" Binding="{Binding Series}" />
+                <DataGridTextColumn Width="2*" Header="Formats/status" Binding="{Binding Formats}" />
+                <DataGridTextColumn Width="3*" Header="Keeper ranking" Binding="{Binding RetentionFacts}" />
+              </DataGrid.Columns>
+            </DataGrid>
+          </GroupBox>
+        </Grid>
+      </TabItem>
       <TabItem Header="E_xpanded candidates" AutomationProperties.Name="Expanded content-confirmed candidates">
         <Grid Margin="8">
           <Grid.RowDefinitions>

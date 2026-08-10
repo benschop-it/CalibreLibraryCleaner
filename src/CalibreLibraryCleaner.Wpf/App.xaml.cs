@@ -52,6 +52,9 @@ public partial class App : System.Windows.Application
         builder.Services.AddSingleton<IResidualAnalysisFactsPreparer>(serviceProvider =>
             serviceProvider.GetRequiredService<PrepareResidualAnalysisFactsUseCase>());
         builder.Services.AddSingleton<DiscoverWorkLanguageCandidatesUseCase>();
+        builder.Services.AddSingleton<IWorkLanguageCandidateDiscoverer>(serviceProvider =>
+            serviceProvider.GetRequiredService<DiscoverWorkLanguageCandidatesUseCase>());
+        builder.Services.AddSingleton<AnalyzeResidualCandidatesUseCase>();
         builder.Services.AddSingleton<ScanLibraryUseCase>();
         builder.Services.AddSingleton<RefreshAfterExactCleanupUseCase>();
         builder.Services.AddSingleton<ILibraryStateSession, LibraryStateSession>();

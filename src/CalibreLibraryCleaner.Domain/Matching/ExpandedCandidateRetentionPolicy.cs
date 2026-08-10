@@ -78,6 +78,16 @@ public static class ExpandedCandidateRetentionPolicy
         return candidates[0].BookId;
     }
 
+    public static IReadOnlyList<ExpandedCandidateRetentionCandidate> RankCandidates(
+        IEnumerable<CalibreBook> books,
+        IEnumerable<EpubAssessment>? epubAssessments = null,
+        IEnumerable<PdfAssessment>? pdfAssessments = null)
+    {
+        ArgumentNullException.ThrowIfNull(books);
+        return new ReadOnlyCollection<ExpandedCandidateRetentionCandidate>(Rank(
+            books, AssessmentScores(epubAssessments, pdfAssessments)));
+    }
+
     private static Dictionary<CalibreBookId, int[]> AssessmentScores(
         IEnumerable<EpubAssessment>? epubAssessments,
         IEnumerable<PdfAssessment>? pdfAssessments) => (epubAssessments ?? [])
