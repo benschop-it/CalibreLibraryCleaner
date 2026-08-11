@@ -28,6 +28,21 @@ public sealed class PostExactCleanupReconciliationPolicyTests
     }
 
     [Fact]
+    public void UnchangedInvalidPathAssociationIsPreservedAsNonExecutable()
+    {
+        BookFormat invalid = new("EPUB", "book", string.Empty, FormatFileStatus.InvalidPath);
+        LibraryState pre = PreState([Book(1, invalid)]);
+        LibraryState post = CompleteExact(pre, []);
+
+        PostExactReconciliationResult result = PostExactCleanupReconciliationPolicy.Reconcile(
+            pre, post, [], Catalog(BookRecord(1, ("EPUB", "book"))));
+
+        result.IsSuccess.Should().BeTrue();
+        result.Decisions.Should().ContainSingle().Which.Should().Be(new PostExactAssociationDecision(
+            new(new(1), "EPUB"), PostExactAssociationDisposition.PreservedInvalidPath, null));
+    }
+
+    [Fact]
     public void TransferTargetRequiresHashWithCurrentWorkerEvidence()
     {
         LibraryState pre = PreState([

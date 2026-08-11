@@ -15,6 +15,9 @@ associations. It may reuse a fingerprint only from authoritative pre-exact ident
 plus a completed typed mutation relation; timestamp, size, path, stored name, or
 record ID alone never proves identity. Any unexplained catalog or file change stops
 preparation and requires a new exact analysis.
+An association already classified `InvalidPath` may remain only when the catalog
+association is unchanged and path resolution still fails; it remains non-executable,
+and any changed or newly resolvable outcome fails closed.
 
 Explicit duplicate-row viewing may launch the trusted Calibre `ebook-viewer.exe`. The requested format must be a physical regular file contained in the selected library. Launch uses no shell and passes the physical path as one argument. Viewer launch does not alter projected state or authorize cleanup.
 
@@ -26,7 +29,7 @@ Startup listing reads only small manifests or bounded legacy metadata. A manifes
 
 ## Duplicate cleanup
 
-Exact duplicate, exact-metadata candidate, and content-confirmed expanded candidate cleanup are the only mutation workflows. Before each run, the user confirms that a complete external backup of the Calibre library exists. The application does not create, inspect, or verify that backup.
+Exact and unified Candidate cleanup are the only mutation workflows. Before each run, the user confirms that a complete external backup of the Calibre library exists. The application does not create, inspect, or verify that backup.
 
 The workflow:
 
@@ -40,11 +43,7 @@ The workflow:
 8. projects and durably journals only complete successful chunks; and
 9. writes one final checkpoint after complete success.
 
-Transfers precede dependent source removals. Formats are removed before records, and a record is removed only when projected empty. Exact cleanup leaves ambiguous or conflicting records unchanged. Metadata cleanup is explicitly keeper-authoritative: same-format alternatives on Remove records are deleted even when not byte-identical, while unresolved complementary sources skip the group before mutation.
-
-Expanded cleanup accepts groups from authoritative matching evidence. A deterministic quality policy proposes one keeper; every group starts unskipped, and the user may select another sole keeper or Skip the group. `Cleanup eligible` and `To be reviewed` communicate evidence strength only and do not change execution behavior. Complementary formats are transferred, then all formats and empty non-keeper records are removed. Candidate evidence may not prove identical work, edition, revision, illustrations, or formatting; this limitation is repeated in the backup confirmation. Expanded cleanup does not rewrite title, authors, or other metadata.
-
-Metadata cleanup may follow exact cleanup without a rescan. Exact cleanup clears generated recommendations and may add authoritative `ProjectedPresent` formats to its keeper. In that state, metadata cleanup derives a fallback keeper from available present/projected format coverage and metadata quality, accepts projected formats only on the keeper, and requires every Remove-source format to remain scan-observed `Present`. Complementary transfer without a recommendation is allowed only for one unique present source or byte-identical alternatives; conflicting alternatives still skip the group.
+Transfers precede dependent source removals. Formats are removed before records, and a record is removed only when projected empty. Exact cleanup leaves ambiguous or conflicting records unchanged. Unified Candidate cleanup is keeper-authoritative: same-format alternatives on Remove records are deleted even when not byte-identical. Every executable association must be physical `Present`; stale, projected, missing, unsafe, or unverified groups skip before mutation.
 
 The staged target runs Exact cleanup first through the existing algorithm and fixed
 worker path unchanged. Candidate cleanup remains disabled until Exact cleanup
@@ -55,15 +54,11 @@ user activations so the generated keeper, evidence, and Skip state can be review
 
 ## Cleanup ordering
 
-Cleanup workflows never execute a frozen plan from the initial scan. Every run validates the current UI selections against the latest authoritative projected state. Exact groups are recomputed from projected fingerprints, and exact-metadata groups are filtered as records disappear. Therefore exact cleanup may be followed by metadata cleanup without a rescan.
-
-Expanded matching evidence is derived from bounded content inspection and is discarded after any standalone mutation rather than projected as still current. Therefore the three category-specific cleanup commands cannot be chained in arbitrary order from one initial scan.
-
-`Cleanup all` remains a transitional one-scan workflow while staged Candidate
-cleanup is implemented and proven. It must not mutate a generation owned by staged
-workflow state. Standalone Metadata/Expanded cleanup and composite cleanup are
-retired only in a later parity slice; until then their existing safety rules remain
-in force.
+Exact cleanup validates current exact selections against authoritative state.
+Candidate preparation then performs trusted reconciliation and publishes a new
+physical generation before discovery. Candidate cleanup validates current
+generation, revision, unified membership, keeper, Skip, and physical facts before
+mutation. `Cleanup all` and standalone Metadata/Expanded mutation paths are retired.
 
 The worker uses only Calibre's documented database `Cache` API through the fixed embedded script and strict JSON-lines protocol. Direct SQL, shell invocation, direct managed-file mutation, arbitrary Python, GUI automation, direct `calibredb` mutation commands, and mutation-engine fallback are prohibited.
 

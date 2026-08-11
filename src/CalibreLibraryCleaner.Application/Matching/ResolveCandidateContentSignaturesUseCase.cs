@@ -134,6 +134,8 @@ public sealed partial class ResolveCandidateContentSignaturesUseCase(
         int completed = 0;
         int cacheHits = 0;
         int inspections = 0;
+        long cacheHitBytes = 0;
+        long inspectionAttemptBytes = 0;
         long cacheReadMilliseconds = 0;
         long inspectionMilliseconds = 0;
         long cacheWriteMilliseconds = 0;
@@ -160,6 +162,7 @@ public sealed partial class ResolveCandidateContentSignaturesUseCase(
             if (signature is not null && signature.Fingerprint == item.Key.Fingerprint)
             {
                 Interlocked.Increment(ref cacheHits);
+                Interlocked.Add(ref cacheHitBytes, item.Key.Fingerprint.SizeInBytes);
                 outcome = "CacheHit";
             }
             else
@@ -173,6 +176,7 @@ public sealed partial class ResolveCandidateContentSignaturesUseCase(
                     try
                     {
                         Interlocked.Increment(ref inspections);
+                        Interlocked.Add(ref inspectionAttemptBytes, item.Key.Fingerprint.SizeInBytes);
                         itemInspections++;
                         long inspectionStarted = Stopwatch.GetTimestamp();
                         try
@@ -264,8 +268,11 @@ public sealed partial class ResolveCandidateContentSignaturesUseCase(
         LogResolutionCompleted(
             _logger,
             work.Length,
+            work.Sum(value => value.Key.Fingerprint.SizeInBytes),
             cacheHits,
+            Volatile.Read(ref cacheHitBytes),
             inspections,
+            Volatile.Read(ref inspectionAttemptBytes),
             signatures.Count,
             unavailable.Count,
             Volatile.Read(ref cacheReadMilliseconds),
@@ -401,12 +408,15 @@ public sealed partial class ResolveCandidateContentSignaturesUseCase(
         long elapsedMilliseconds);
 
     [LoggerMessage(203, LogLevel.Information,
-        "Candidate EPUB signature resolution completed. UniqueFingerprints={UniqueFingerprints}, CacheHits={CacheHits}, Inspections={Inspections}, SignatureRecords={SignatureRecords}, UnavailableRecords={UnavailableRecords}, AggregateCacheReadMilliseconds={AggregateCacheReadMilliseconds}, AggregateInspectionMilliseconds={AggregateInspectionMilliseconds}, AggregateCacheWriteMilliseconds={AggregateCacheWriteMilliseconds}, PruneMilliseconds={PruneMilliseconds}, TotalMilliseconds={TotalMilliseconds}.")]
+        "Candidate EPUB signature resolution completed. UniqueFingerprints={UniqueFingerprints}, UniqueFingerprintBytes={UniqueFingerprintBytes}, CacheHits={CacheHits}, CacheHitBytes={CacheHitBytes}, Inspections={Inspections}, InspectionAttemptBytes={InspectionAttemptBytes}, SignatureRecords={SignatureRecords}, UnavailableRecords={UnavailableRecords}, AggregateCacheReadMilliseconds={AggregateCacheReadMilliseconds}, AggregateInspectionMilliseconds={AggregateInspectionMilliseconds}, AggregateCacheWriteMilliseconds={AggregateCacheWriteMilliseconds}, PruneMilliseconds={PruneMilliseconds}, TotalMilliseconds={TotalMilliseconds}.")]
     private static partial void LogResolutionCompleted(
         ILogger logger,
         int uniqueFingerprints,
+        long uniqueFingerprintBytes,
         int cacheHits,
+        long cacheHitBytes,
         int inspections,
+        long inspectionAttemptBytes,
         int signatureRecords,
         int unavailableRecords,
         long aggregateCacheReadMilliseconds,

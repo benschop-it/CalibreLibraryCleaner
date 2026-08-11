@@ -24,9 +24,12 @@ public enum ResidualCandidateAnalysisPhase
 
 public sealed record ResidualCandidateAnalysisProgress(
     ResidualCandidateAnalysisPhase Phase,
-    int Completed,
-    int Total,
-    string Message);
+    long Completed,
+    long Total,
+    string Message,
+    CandidateProgressUnit Unit = CandidateProgressUnit.Records,
+    string Detail = "",
+    int ActiveItems = 0);
 
 public sealed record ResidualCandidateAnalysisResult(
     LibraryState? State,
@@ -91,8 +94,15 @@ public sealed partial class AnalyzeResidualCandidatesUseCase(
                 "CANDIDATE_ANALYSIS.LIBRARY_INVALID",
                 validation.Error?.Message ?? "The selected library does not match refreshed state.");
 
+        if (current.Snapshot.Books.SelectMany(value => value.Formats).Any(value =>
+                value.FileStatus is not FormatFileStatus.Present and not FormatFileStatus.InvalidPath))
+            return ResidualCandidateAnalysisResult.Failure(
+                "CANDIDATE_ANALYSIS.FORMAT_STATE_INCOMPLETE",
+                "Residual candidate state contains an unsupported non-physical format status.");
+
         List<EpubAssessmentTarget> epubTargets = [];
-        int totalEpub = current.Snapshot.Books.Sum(book => book.Formats.Count(format => format.Format == "EPUB"));
+        int totalEpub = current.Snapshot.Books.Sum(book => book.Formats.Count(format =>
+            format.Format == "EPUB" && format.FileStatus == FormatFileStatus.Present));
         int resolved = 0;
         progress?.Report(new(
             ResidualCandidateAnalysisPhase.ResolvingEpubTargets,
@@ -101,7 +111,8 @@ public sealed partial class AnalyzeResidualCandidatesUseCase(
             "Resolving residual EPUB targets"));
         foreach (CalibreBook book in current.Snapshot.Books.OrderBy(value => value.Id.Value))
         {
-            foreach (BookFormat format in book.Formats.Where(value => value.Format == "EPUB"))
+            foreach (BookFormat format in book.Formats.Where(value =>
+                         value.Format == "EPUB" && value.FileStatus == FormatFileStatus.Present))
             {
                 cancellationToken.ThrowIfCancellationRequested();
                 if (format.FileStatus != FormatFileStatus.Present
@@ -249,6 +260,10 @@ public sealed partial class AnalyzeResidualCandidatesUseCase(
             ResidualCandidateAnalysisPhase.DiscoveringExpandedCandidates,
             value.Completed,
             value.Total,
-            string.IsNullOrWhiteSpace(value.Detail) ? value.Phase.ToString() : value.Detail));
+            string.IsNullOrWhiteSpace(value.Detail) ? value.Phase.ToString() : value.Detail,
+            value.Phase == WorkLanguageDiscoveryPhase.InspectingContent
+                ? CandidateProgressUnit.Fingerprints
+                : CandidateProgressUnit.Records,
+            value.Detail));
     }
 }

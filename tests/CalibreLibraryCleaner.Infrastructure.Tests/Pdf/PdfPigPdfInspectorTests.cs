@@ -236,7 +236,9 @@ public sealed class PdfPigPdfInspectorTests
             (header, token) =>
             {
                 token.ThrowIfCancellationRequested();
-                File.SetLastWriteTimeUtc(fixture.Path, request.Observation.LastWriteTimeUtc.UtcDateTime.AddSeconds(2));
+                File.SetAttributes(
+                    fixture.Path,
+                    File.GetAttributes(fixture.Path) ^ FileAttributes.NotContentIndexed);
                 return ValueTask.FromResult<IReadOnlyList<int>>(Enumerable.Range(1, header.PageCount).ToArray());
             },
             null,
@@ -257,6 +259,27 @@ public sealed class PdfPigPdfInspectorTests
         IsolatedPdfInspector.ParentIdentityMatches(request, result).Should().BeTrue();
         File.SetLastWriteTimeUtc(fixture.Path, request.Observation.LastWriteTimeUtc.UtcDateTime.AddSeconds(2));
         IsolatedPdfInspector.ParentIdentityMatches(request, result).Should().BeFalse();
+    }
+
+    [Fact]
+    public void IsolatedInspectorPreservesWorkerReportedFileStateFailures()
+    {
+        using SyntheticPdfFixture fixture = SyntheticPdfFixture.CreateText();
+        PdfInspectionRequest request = fixture.CreateRequest();
+        PdfInspectionProblemCode[] fileStateProblems =
+        [
+            PdfInspectionProblemCode.MissingFile,
+            PdfInspectionProblemCode.InaccessibleFile,
+            PdfInspectionProblemCode.UnsafePath,
+            PdfInspectionProblemCode.ChangedFile,
+        ];
+
+        foreach (PdfInspectionProblemCode problem in fileStateProblems)
+        {
+            PdfInspectionResult result = PdfInspectionResult.Failed(
+                request.BookId, request.ExpectedRelativePath, problem);
+            IsolatedPdfInspector.ParentIdentityMatches(request, result).Should().BeTrue();
+        }
     }
 
     [Fact]

@@ -1,7 +1,9 @@
+using System.Collections.Concurrent;
 using System.Collections.Specialized;
 using System.IO;
 using CalibreLibraryCleaner.Application.Abstractions;
 using CalibreLibraryCleaner.Application.Assessments;
+using CalibreLibraryCleaner.Application.Executions;
 using CalibreLibraryCleaner.Application.Libraries;
 using CalibreLibraryCleaner.Domain.Libraries;
 using CalibreLibraryCleaner.Domain.Matching;
@@ -93,6 +95,7 @@ public sealed class MainWindowViewModelTests
         A.CallTo(() => stateSession.LoadAsync(libraryRoot, A<CancellationToken>._))
             .Returns(LibraryStateSessionOutcome.Success(state));
         A.CallTo(() => stateSession.GetCurrent(libraryRoot)).Returns(state);
+        ICandidatePreparationWorkflow preparation = A.Fake<ICandidatePreparationWorkflow>();
         MainWindowViewModel viewModel = CreateViewModel(
             A.Fake<ILibraryFolderPicker>(),
             out _,
@@ -100,15 +103,242 @@ public sealed class MainWindowViewModelTests
             out _,
             new(store),
             stateSession,
-            workflowOptions: LibraryWorkflowOptions.Staged);
+            workflowOptions: LibraryWorkflowOptions.Staged,
+            candidatePreparation: preparation);
 
         await viewModel.InitializeAsync();
         viewModel.SelectedPersistedLibraryPath = libraryRoot;
         await viewModel.LoadPersistedSnapshotCommand.ExecuteAsync(null);
 
         viewModel.CandidateCleanupCommand.CanExecute(null).Should().BeTrue();
-        viewModel.CandidateCleanupCommand.Execute(null);
-        viewModel.StatusMessage.Should().Contain("Candidate cleanup is unlocked");
+        viewModel.CandidateCleanupAutomationName.Should().Be("Prepare Candidate review");
+        viewModel.CandidateCleanupToolTip.Should().Contain("without mutation");
+    }
+
+    [Fact]
+    public async Task FirstCandidateActivationPreparesReviewAndNeverMutates()
+    {
+        const string libraryRoot = "C:\\Books";
+        ILibrarySnapshotStore store = A.Fake<ILibrarySnapshotStore>();
+        LibrarySnapshot exactSnapshot = Snapshot(libraryRoot);
+        LibrarySnapshot unifiedSnapshot = UnifiedSnapshot(libraryRoot);
+        A.CallTo(() => store.ListAsync(A<CancellationToken>._))
+            .Returns([new(libraryRoot, exactSnapshot.ScannedAt)]);
+        ILibraryStateSession stateSession = A.Fake<ILibraryStateSession>();
+        LibraryState current = WorkflowState(
+            exactSnapshot, LibraryWorkflowPhase.CandidatePreparationReady, source: null);
+        A.CallTo(() => stateSession.LoadAsync(libraryRoot, A<CancellationToken>._))
+            .ReturnsLazily(() => LibraryStateSessionOutcome.Success(current));
+        A.CallTo(() => stateSession.GetCurrent(libraryRoot)).ReturnsLazily(() => current);
+        ICandidatePreparationWorkflow preparation = A.Fake<ICandidatePreparationWorkflow>();
+        LibraryWorkflowSource source = new(current.GenerationId, current.Revision);
+        LibraryState refreshed = WorkflowState(
+            exactSnapshot, LibraryWorkflowPhase.CandidatePreparationReady, source);
+        LibraryState analyzed = WorkflowState(
+            unifiedSnapshot, LibraryWorkflowPhase.CandidateAnalysisReady, source,
+            refreshed.GenerationId);
+        TaskCompletionSource heartbeatObserved = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        A.CallTo(() => preparation.RefreshAsync(
+            libraryRoot, A<IProgress<CandidatePreparationProgress>?>._, A<CancellationToken>._))
+            .ReturnsLazily(async call =>
+            {
+                call.GetArgument<IProgress<CandidatePreparationProgress>?>(1)?.Report(new(
+                    CandidatePreparationPhase.AssessingEpubFormats,
+                    25,
+                    100,
+                    CandidateProgressUnit.Files,
+                    "Assessing EPUB files: 25 of 100 complete",
+                    "Content: 4",
+                    4));
+                await heartbeatObserved.Task.WaitAsync(TimeSpan.FromSeconds(3));
+                current = refreshed;
+                return new PostExactRefreshResult(
+                    refreshed,
+                    new(1, 0, 0, 0L, 0, 0, 0, 0L, 0, 0, 0, 1));
+            });
+        A.CallTo(() => preparation.AnalyzeAsync(
+            libraryRoot, A<IProgress<CandidatePreparationProgress>?>._, A<CancellationToken>._))
+            .ReturnsLazily(() =>
+            {
+                current = analyzed;
+                return new ResidualCandidateAnalysisResult(analyzed, 1, 1, 1, false);
+            });
+        IUnifiedCandidateCleanupExecutor executor = A.Fake<IUnifiedCandidateCleanupExecutor>();
+        IUnifiedCandidateCleanupConfirmationService confirmation =
+            A.Fake<IUnifiedCandidateCleanupConfirmationService>();
+        MainWindowViewModel viewModel = CreateViewModel(
+            A.Fake<ILibraryFolderPicker>(), out _, out _, out _, new(store), stateSession,
+            workflowOptions: LibraryWorkflowOptions.Staged,
+            candidatePreparation: preparation,
+            candidateExecutor: executor,
+            candidateConfirmation: confirmation);
+        await viewModel.InitializeAsync();
+        viewModel.SelectedPersistedLibraryPath = libraryRoot;
+        await viewModel.LoadPersistedSnapshotCommand.ExecuteAsync(null);
+        ConcurrentQueue<string> candidateStatuses = [];
+        viewModel.PropertyChanged += (_, eventArgs) =>
+        {
+            if (eventArgs.PropertyName == nameof(MainWindowViewModel.StatusMessage))
+            {
+                candidateStatuses.Enqueue(viewModel.StatusMessage);
+                if (viewModel.StatusMessage.Contains("Elapsed 0:01", StringComparison.Ordinal))
+                    heartbeatObserved.TrySetResult();
+            }
+        };
+
+        await viewModel.CandidateCleanupCommand.ExecuteAsync(null);
+
+        A.CallTo(() => preparation.RefreshAsync(
+            libraryRoot, A<IProgress<CandidatePreparationProgress>?>._, A<CancellationToken>._))
+            .MustHaveHappenedOnceExactly();
+        A.CallTo(() => preparation.AnalyzeAsync(
+            libraryRoot, A<IProgress<CandidatePreparationProgress>?>._, A<CancellationToken>._))
+            .MustHaveHappenedOnceExactly();
+        A.CallTo(() => confirmation.ConfirmExternalBackup(A<int>._)).MustNotHaveHappened();
+        A.CallTo(() => executor.ExecuteAsync(
+            A<ExecuteUnifiedCandidateCleanupRequest>._,
+            A<IProgress<UnifiedCandidateCleanupProgress>?>._,
+            A<CancellationToken>._)).MustNotHaveHappened();
+        candidateStatuses.Should().Contain(value =>
+            value.Contains("Assessing EPUB files: 25 of 100 complete", StringComparison.Ordinal)
+            && value.Contains("Content: 4", StringComparison.Ordinal));
+        candidateStatuses.Should().Contain(value =>
+            value.Contains("Assessing EPUB files: 25 of 100 complete", StringComparison.Ordinal)
+            && value.Contains("Elapsed 0:01", StringComparison.Ordinal));
+        viewModel.UnifiedCandidateGroups.Should().ContainSingle();
+        viewModel.StatusMessage.Should().Contain("activate Candidate cleanup again");
+        viewModel.CandidateCleanupAutomationName.Should().Be("Run Candidate cleanup");
+        viewModel.CandidateCleanupCommand.CanExecute(null).Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task CandidatePreparationCancelUpdatesImmediatelyAndDoesNotAnalyze()
+    {
+        const string libraryRoot = "C:\\Books";
+        ILibrarySnapshotStore store = A.Fake<ILibrarySnapshotStore>();
+        LibrarySnapshot snapshot = Snapshot(libraryRoot);
+        A.CallTo(() => store.ListAsync(A<CancellationToken>._))
+            .Returns([new(libraryRoot, snapshot.ScannedAt)]);
+        LibraryState state = WorkflowState(
+            snapshot, LibraryWorkflowPhase.CandidatePreparationReady, source: null);
+        ILibraryStateSession stateSession = A.Fake<ILibraryStateSession>();
+        A.CallTo(() => stateSession.LoadAsync(libraryRoot, A<CancellationToken>._))
+            .Returns(LibraryStateSessionOutcome.Success(state));
+        A.CallTo(() => stateSession.GetCurrent(libraryRoot)).Returns(state);
+        ICandidatePreparationWorkflow preparation = A.Fake<ICandidatePreparationWorkflow>();
+        TaskCompletionSource started = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        A.CallTo(() => preparation.RefreshAsync(
+                libraryRoot,
+                A<IProgress<CandidatePreparationProgress>?>._,
+                A<CancellationToken>._))
+            .ReturnsLazily(async call =>
+            {
+                CancellationToken token = call.GetArgument<CancellationToken>(2);
+                call.GetArgument<IProgress<CandidatePreparationProgress>?>(1)?.Report(new(
+                    CandidatePreparationPhase.AssessingEpubFormats,
+                    1,
+                    100,
+                    CandidateProgressUnit.Files,
+                    "Assessing EPUB files: 1 of 100 complete"));
+                started.TrySetResult();
+                await Task.Delay(Timeout.InfiniteTimeSpan, token);
+                throw new InvalidOperationException("The cancellation test reached an unreachable path.");
+            });
+        MainWindowViewModel viewModel = CreateViewModel(
+            A.Fake<ILibraryFolderPicker>(), out _, out _, out _, new(store), stateSession,
+            workflowOptions: LibraryWorkflowOptions.Staged,
+            candidatePreparation: preparation);
+        await viewModel.InitializeAsync();
+        viewModel.SelectedPersistedLibraryPath = libraryRoot;
+        await viewModel.LoadPersistedSnapshotCommand.ExecuteAsync(null);
+
+        Task operation = viewModel.CandidateCleanupCommand.ExecuteAsync(null);
+        await started.Task.WaitAsync(TimeSpan.FromSeconds(3));
+        viewModel.CancelCommand.Execute(null);
+
+        viewModel.StatusMessage.Should().Be(
+            "Cancel requested; waiting for the current bounded operation to stop...");
+        await operation;
+        viewModel.StatusMessage.Should().Be("Candidate preparation canceled without mutation.");
+        A.CallTo(() => preparation.AnalyzeAsync(
+            A<string>._,
+            A<IProgress<CandidatePreparationProgress>?>._,
+            A<CancellationToken>._)).MustNotHaveHappened();
+        stateSession.GetCurrent(libraryRoot).Should().BeSameAs(state);
+    }
+
+    [Fact]
+    public async Task RestartedCandidateReviewExecutesSelectionsOnceAndDisablesAtCompleted()
+    {
+        const string libraryRoot = "C:\\Books";
+        ILibrarySnapshotStore store = A.Fake<ILibrarySnapshotStore>();
+        LibrarySnapshot snapshot = UnifiedSnapshot(libraryRoot);
+        A.CallTo(() => store.ListAsync(A<CancellationToken>._))
+            .Returns([new(libraryRoot, snapshot.ScannedAt)]);
+        LibraryWorkflowSource source = new(
+            new(Guid.Parse("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee")), new(3));
+        LibraryState analyzed = WorkflowState(snapshot, LibraryWorkflowPhase.CandidateAnalysisReady, source);
+        LibraryState current = analyzed;
+        ILibraryStateSession stateSession = A.Fake<ILibraryStateSession>();
+        A.CallTo(() => stateSession.LoadAsync(libraryRoot, A<CancellationToken>._))
+            .ReturnsLazily(() => LibraryStateSessionOutcome.Success(current));
+        A.CallTo(() => stateSession.GetCurrent(libraryRoot)).ReturnsLazily(() => current);
+        ICandidatePreparationWorkflow preparation = A.Fake<ICandidatePreparationWorkflow>();
+        IUnifiedCandidateCleanupExecutor executor = A.Fake<IUnifiedCandidateCleanupExecutor>();
+        IUnifiedCandidateCleanupConfirmationService confirmation =
+            A.Fake<IUnifiedCandidateCleanupConfirmationService>();
+        A.CallTo(() => confirmation.ConfirmExternalBackup(1)).Returns(true);
+        ExecuteUnifiedCandidateCleanupRequest? captured = null;
+        A.CallTo(() => executor.ExecuteAsync(
+                A<ExecuteUnifiedCandidateCleanupRequest>._,
+                A<IProgress<UnifiedCandidateCleanupProgress>?>._,
+                A<CancellationToken>._))
+            .Invokes(call => captured = call.GetArgument<ExecuteUnifiedCandidateCleanupRequest>(0))
+            .ReturnsLazily(() =>
+            {
+                current = analyzed.AdvanceWorkflow(
+                    LibraryWorkflowPhase.Completed, analyzed.ProjectedAtUtc);
+                return new UnifiedCandidateCleanupResult(
+                    new(Guid.Parse("99999999-8888-7777-6666-555555555555")),
+                    UnifiedCandidateCleanupState.Completed,
+                    0,
+                    1,
+                    1,
+                    0,
+                    []);
+            });
+        MainWindowViewModel viewModel = CreateViewModel(
+            A.Fake<ILibraryFolderPicker>(), out _, out _, out _, new(store), stateSession,
+            workflowOptions: LibraryWorkflowOptions.Staged,
+            candidatePreparation: preparation,
+            candidateExecutor: executor,
+            candidateConfirmation: confirmation);
+        await viewModel.InitializeAsync();
+        viewModel.SelectedPersistedLibraryPath = libraryRoot;
+        await viewModel.LoadPersistedSnapshotCommand.ExecuteAsync(null);
+        UnifiedCandidateGroupRowViewModel group = viewModel.UnifiedCandidateGroups.Single();
+        viewModel.SelectedUnifiedCandidateMember = group.Members.Single(value => value.BookId == 1);
+
+        await viewModel.CandidateCleanupCommand.ExecuteAsync(null);
+
+        A.CallTo(() => preparation.RefreshAsync(
+            A<string>._, A<IProgress<CandidatePreparationProgress>?>._, A<CancellationToken>._))
+            .MustNotHaveHappened();
+        A.CallTo(() => preparation.AnalyzeAsync(
+            A<string>._, A<IProgress<CandidatePreparationProgress>?>._, A<CancellationToken>._))
+            .MustNotHaveHappened();
+        A.CallTo(() => confirmation.ConfirmExternalBackup(1)).MustHaveHappenedOnceExactly();
+        captured.Should().NotBeNull();
+        captured!.ExpectedGeneration.Should().Be(analyzed.GenerationId);
+        captured.ExpectedRevision.Should().Be(analyzed.Revision);
+        captured.ExternalBackupConfirmed.Should().BeTrue();
+        captured.GroupSelections.Should().ContainSingle(value =>
+            value.KeeperBookId == new CalibreBookId(1)
+            && value.KeeperWasOverridden
+            && !value.Skip);
+        viewModel.CandidateCleanupCommand.CanExecute(null).Should().BeFalse();
+        viewModel.CandidateCleanupAutomationName.Should().Be("Candidate cleanup completed");
+        viewModel.CandidateCleanupResultSummary.Should().Contain("removed 1 format");
     }
 
     [Fact]
@@ -414,7 +644,7 @@ public sealed class MainWindowViewModelTests
         await viewModel.SelectLibraryCommand.ExecuteAsync(null);
         await viewModel.ScanCommand.ExecuteAsync(null);
 
-        preparingProgress.Should().Be((true, 0d));
+        preparingProgress.Should().Be((false, 0d));
         viewModel.Books.Should().ContainSingle();
         viewModel.SelectedFormats.Should().ContainSingle(format => format.Status == "Missing");
         viewModel.StatusMessage.Should().Contain("1 missing format files");
@@ -756,7 +986,10 @@ public sealed class MainWindowViewModelTests
         PersistedLibrarySnapshotsUseCase? persistedSnapshots = null,
         ILibraryStateSession? stateSession = null,
         IEbookViewerLauncher? ebookViewer = null,
-        LibraryWorkflowOptions? workflowOptions = null)
+        LibraryWorkflowOptions? workflowOptions = null,
+        ICandidatePreparationWorkflow? candidatePreparation = null,
+        IUnifiedCandidateCleanupExecutor? candidateExecutor = null,
+        IUnifiedCandidateCleanupConfirmationService? candidateConfirmation = null)
     {
         resolver = A.Fake<ILibraryPathResolver>();
         reader = A.Fake<ICalibreMetadataReader>();
@@ -769,7 +1002,33 @@ public sealed class MainWindowViewModelTests
             ebookViewer: ebookViewer,
             persistedSnapshots: persistedSnapshots,
             libraryStateSession: stateSession,
-            workflowOptions: workflowOptions);
+            workflowOptions: workflowOptions,
+            candidatePreparation: candidatePreparation,
+            executeUnifiedCandidateCleanup: candidateExecutor,
+            unifiedCandidateConfirmation: candidateConfirmation);
+    }
+
+    private static LibraryState WorkflowState(
+        LibrarySnapshot snapshot,
+        LibraryWorkflowPhase phase,
+        LibraryWorkflowSource? source,
+        LibraryStateGenerationId? generation = null)
+    {
+        LibraryStateGenerationId stateGeneration = generation ?? new(
+            Guid.Parse("11111111-2222-3333-4444-555555555555"));
+        return new(
+            stateGeneration,
+            new(0),
+            LibraryStateStatus.Authoritative,
+            snapshot,
+            snapshot.ScannedAt,
+            workflowCheckpoint: new(
+                phase,
+                stateGeneration,
+                new(0),
+                LibraryWorkflowPolicyVersions.Current,
+                snapshot.ScannedAt,
+                source));
     }
 
     private static LibrarySnapshot Snapshot(string libraryRoot) => new(

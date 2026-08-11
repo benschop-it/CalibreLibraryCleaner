@@ -19,6 +19,8 @@ public sealed class UnifiedCandidateGroupRowViewModel : ObservableObject
     {
         ArgumentNullException.ThrowIfNull(group);
         ArgumentNullException.ThrowIfNull(books);
+        CandidateGroupId = group.Id;
+        MemberBookIds = group.Members;
         GroupId = group.Id.Value;
         Language = group.Language == "und" ? "Unknown" : group.Language;
         Eligibility = group.Classification == UnifiedCandidateClassification.CleanupEligible
@@ -50,6 +52,8 @@ public sealed class UnifiedCandidateGroupRowViewModel : ObservableObject
     }
 
     public string GroupId { get; }
+    public UnifiedCandidateGroupId CandidateGroupId { get; }
+    public IReadOnlyList<CalibreBookId> MemberBookIds { get; }
     public string Language { get; }
     public string Eligibility { get; }
     public int RecordCount { get; }
@@ -78,6 +82,7 @@ public sealed class UnifiedCandidateGroupRowViewModel : ObservableObject
     }
 
     public long KeeperRecordId => KeeperMember.BookId;
+    public CalibreBookId KeeperBookId => new(KeeperMember.BookId);
     public string KeeperTitle => KeeperMember.Title;
     public string KeeperAuthors => KeeperMember.Authors;
     public bool KeeperWasOverridden { get; private set; }

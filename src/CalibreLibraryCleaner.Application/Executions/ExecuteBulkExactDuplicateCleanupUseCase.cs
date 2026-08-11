@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using CalibreLibraryCleaner.Application.Abstractions;
 using CalibreLibraryCleaner.Application.Libraries;
 using CalibreLibraryCleaner.Domain.Duplicates;
@@ -26,6 +27,7 @@ public sealed partial class ExecuteBulkExactDuplicateCleanupUseCase(
         CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(request);
+        long started = Stopwatch.GetTimestamp();
         CleanupExecutionId executionId = executionIds.Create();
         List<ExecutionIssue> issues = [];
         if (!request.ExternalBackupConfirmed)
@@ -55,7 +57,11 @@ public sealed partial class ExecuteBulkExactDuplicateCleanupUseCase(
             return Result(BulkExactDuplicateCleanupState.PreflightFailed, 0, 0, 0, 0);
         }
         if (plan.TotalOperations == 0)
+        {
+            LogCleanupCompleted(_logger, executionId.ToString(), "NothingToDo", 0, 0, 0, 0,
+                plan.SkippedRecordCount, ElapsedMilliseconds(started));
             return Result(BulkExactDuplicateCleanupState.NothingToDo, 0, 0, 0, plan.SkippedRecordCount);
+        }
 
         LogCleanupStarted(_logger, executionId.ToString(), plan.TotalOperations);
 
@@ -229,7 +235,9 @@ public sealed partial class ExecuteBulkExactDuplicateCleanupUseCase(
                 issues.Add(new("BULK_EXACT.CHECKPOINT_FAILED", ExecutionIssueSeverity.Warning,
                     "Duplicate cleanup completed, but projected state checkpoint compaction was deferred."));
             progress?.Report(new("Duplicate cleanup completed.", plan.TotalOperations, plan.TotalOperations));
-            LogCleanupCompleted(_logger, executionId.ToString(), plan.TotalOperations);
+            LogCleanupCompleted(_logger, executionId.ToString(), "Completed", plan.TotalOperations,
+                removedFormats, mergedRecords, removedRecords, plan.SkippedRecordCount,
+                ElapsedMilliseconds(started));
             return Result(BulkExactDuplicateCleanupState.Completed, removedFormats,
                 mergedRecords, removedRecords, plan.SkippedRecordCount);
         }
@@ -251,9 +259,21 @@ public sealed partial class ExecuteBulkExactDuplicateCleanupUseCase(
         string failureCode,
         Exception? exception);
 
+    private static long ElapsedMilliseconds(long started) =>
+        (long)Stopwatch.GetElapsedTime(started).TotalMilliseconds;
+
     [LoggerMessage(4, LogLevel.Information,
-        "Exact duplicate cleanup {ExecutionId} completed {OperationCount} operations.")]
-    private static partial void LogCleanupCompleted(ILogger logger, string executionId, int operationCount);
+        "Exact duplicate cleanup {ExecutionId} finished. Outcome={Outcome}, Operations={OperationCount}, RemovedFormats={RemovedFormats}, MergedRecords={MergedRecords}, RemovedRecords={RemovedRecords}, SkippedRecords={SkippedRecords}, TotalMilliseconds={TotalMilliseconds}.")]
+    private static partial void LogCleanupCompleted(
+        ILogger logger,
+        string executionId,
+        string outcome,
+        int operationCount,
+        int removedFormats,
+        int mergedRecords,
+        int removedRecords,
+        int skippedRecords,
+        long totalMilliseconds);
 
     private static LibraryStateDelta CreateDelta(
         LibraryStateGenerationId generationId,

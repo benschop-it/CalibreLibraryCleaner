@@ -94,18 +94,28 @@ public sealed class MatchingScaleBaselineTests(ITestOutputHelper output)
     {
         int work = (index - 1) / 2;
         string title = $"Synthetic Work {work:D5}";
-        string[] authors = index % 2 == 0
-            ? ["First Author", "Second Author"]
-            : ["Second Author", "First Author"];
+        string familyName = $"Benchmark{AlphabeticKey(work)}";
+        string author = $"Ada {familyName}";
+        string authorSort = $"{familyName}, Ada";
         return new(
             new(index),
             title,
-            "Author, First",
-            authors.Select((author, authorIndex) => new BookAuthor(
-                new((index * 10L) + authorIndex + 1), author, author)),
+            authorSort,
+            [new BookAuthor(new(index * 10L), author, authorSort)],
             [],
             [],
             $"Synthetic/{index}",
             new(languages: [index % 4 < 2 ? "eng" : "nld"]));
+    }
+
+    private static string AlphabeticKey(int value)
+    {
+        char[] key = new char[4];
+        for (int index = key.Length - 1; index >= 0; index--)
+        {
+            key[index] = (char)('A' + value % 26);
+            value /= 26;
+        }
+        return new(key);
     }
 }

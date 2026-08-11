@@ -55,6 +55,9 @@ public partial class App : System.Windows.Application
         builder.Services.AddSingleton<IWorkLanguageCandidateDiscoverer>(serviceProvider =>
             serviceProvider.GetRequiredService<DiscoverWorkLanguageCandidatesUseCase>());
         builder.Services.AddSingleton<AnalyzeResidualCandidatesUseCase>();
+        builder.Services.AddSingleton<CandidatePreparationWorkflow>();
+        builder.Services.AddSingleton<ICandidatePreparationWorkflow>(serviceProvider =>
+            serviceProvider.GetRequiredService<CandidatePreparationWorkflow>());
         builder.Services.AddSingleton<ScanLibraryUseCase>();
         builder.Services.AddSingleton<RefreshAfterExactCleanupUseCase>();
         builder.Services.AddSingleton<ILibraryStateSession, LibraryStateSession>();
@@ -62,24 +65,17 @@ public partial class App : System.Windows.Application
         builder.Services.AddSingleton<PersistedLibrarySnapshotsUseCase>();
         builder.Services.AddSingleton<ExportRecommendationsUseCase>();
         builder.Services.AddSingleton<ExecuteBulkExactDuplicateCleanupUseCase>();
-        builder.Services.AddSingleton<ExecuteBulkMetadataCandidateCleanupUseCase>();
-        builder.Services.AddSingleton<ExecuteBulkExpandedCandidateCleanupUseCase>();
-        builder.Services.AddSingleton<ExecuteCompositeCleanupUseCase>();
+        builder.Services.AddSingleton<ExecuteUnifiedCandidateCleanupUseCase>();
+        builder.Services.AddSingleton<IUnifiedCandidateCleanupExecutor>(serviceProvider =>
+            serviceProvider.GetRequiredService<ExecuteUnifiedCandidateCleanupUseCase>());
         builder.Services.AddSingleton(new LibraryAnalysisOptions());
         builder.Services.AddSingleton<ILibraryFolderPicker, OpenFolderDialogLibraryFolderPicker>();
         builder.Services.AddSingleton<IRecommendationExportFilePicker, SaveFileDialogRecommendationExportFilePicker>();
         builder.Services.AddSingleton<IExactDuplicateCleanupConfirmationService,
             MessageBoxExactDuplicateCleanupConfirmationService>();
-        builder.Services.AddSingleton<IMetadataCandidateCleanupConfirmationService,
-            MessageBoxMetadataCandidateCleanupConfirmationService>();
-        builder.Services.AddSingleton<IExpandedCandidateCleanupConfirmationService,
-            MessageBoxExpandedCandidateCleanupConfirmationService>();
-        builder.Services.AddSingleton<ICompositeCleanupDialogService,
-            MessageBoxCompositeCleanupDialogService>();
+        builder.Services.AddSingleton<IUnifiedCandidateCleanupConfirmationService,
+            MessageBoxUnifiedCandidateCleanupConfirmationService>();
         builder.Services.AddSingleton<ExactBinaryCleanupPlanWorkspaceViewModel>();
-        builder.Services.AddSingleton<MetadataCandidateCleanupWorkspaceViewModel>();
-        builder.Services.AddSingleton<ExpandedCandidateCleanupWorkspaceViewModel>();
-        builder.Services.AddSingleton<CompositeCleanupWorkspaceViewModel>();
         builder.Services.AddSingleton<MainWindowViewModel>();
         builder.Services.AddSingleton<MainWindow>();
         _host = builder.Build();

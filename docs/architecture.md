@@ -71,8 +71,24 @@ Candidate preparation is a dedicated read-only catalog reconciliation boundary.
 It compares a fresh catalog with authoritative projected state and completed typed
 Exact deltas, reuses fingerprints only for explained associations, target-hashes
 when transfer evidence is insufficient, and rejects unexplained differences. A
-successful preparation publishes a new physical authoritative generation; failure
-or cancellation leaves the prior generation and phase authoritative.
+successful preparation publishes a new authoritative generation whose executable
+associations are physical. Unchanged pre-existing invalid-path associations may be
+preserved as non-executable findings; changed or newly resolvable associations fail
+closed. Failure or cancellation leaves the prior generation and phase authoritative.
+
+Application owns one presentation-neutral Candidate-preparation progress envelope
+with stable phases and phase-local units. Existing hashing, EPUB, PDF, signature,
+grouping, publication, and presentation counters are adapted into that envelope;
+WPF renders determinate progress only when the active phase has a known total and
+adds an elapsed heartbeat without advancing work counters. Progress remains
+observational and cannot alter state transitions, concurrency, or mutation authority.
+
+Application owns one presentation-neutral Candidate-preparation progress envelope
+with stable phases and phase-local units. Existing hashing, EPUB, PDF, signature,
+grouping, publication, and presentation counters are adapted into that envelope;
+WPF renders determinate progress only when the active phase has a known total and
+adds an elapsed heartbeat without advancing work counters. Progress remains
+observational and cannot alter state transitions, concurrency, or mutation authority.
 
 ## EPUB inspection boundary
 
@@ -90,7 +106,14 @@ Only non-binary work candidates with two usable EPUB targets request content, an
 
 The signature cache validates its complete storage-root ancestor chain because any ancestor reparse point can redirect an apparently safe path. Once that controlled root is validated, immediate cache children use leaf-only checks. Cache writes are atomic but intentionally non-durable because cache loss affects only performance. Pruning runs once after a resolver batch, not after each entry.
 
-Matching diagnostics use structured logs without paths or book metadata. Information events report pair/fingerprint demand, periodic completion, aggregate cache/inspection/write/prune time, and cache size/pruning. Debug events report each fingerprint and EPUB preflight/counting/sampling timing. The WPF host writes these events through Serilog to bounded rolling files under `%LOCALAPPDATA%\CalibreLibraryCleaner\logs`, with Debug enabled for matching and EPUB inspection categories. Composite-cleanup preflight logs submitted/user-skipped counts, Expanded policy eligibility, planned category counts, operation count, and conflict count without titles or paths. The UI status also reports fingerprint ordinal and current preflight/counting/sampling chapter progress.
+Matching diagnostics use structured logs without paths or book metadata.
+Information events report pair/fingerprint demand, periodic completion, aggregate
+cache/inspection/write/prune time, and cache size/pruning. Debug details report
+bounded fingerprint and EPUB preflight/counting/sampling timing only when
+`CALIBRE_DIAGNOSTIC_LOGGING=1`; production defaults to Information and coalesces
+repeated EPUB stage callbacks. The WPF host writes these events through Serilog to
+bounded rolling files under `%LOCALAPPDATA%\CalibreLibraryCleaner\logs`. The UI
+reports fingerprint ordinal and current preflight/counting/sampling progress.
 
 ## PDF inspection boundary
 
@@ -102,11 +125,11 @@ The worker opens one seekable read-only stream, reports the page header, accepts
 
 ## Recommendation boundary
 
-Domain owns immutable recommendation selections, reasons, warnings, decision strength, qualitative confidence, and invariants. Application indexes completed Milestone 2–4 evidence and orchestrates deterministic generation. Metadata candidate cleanup uses the generated metadata source as its default keeper and generated selected format sources for complementary transfers; user keeper/Skip choices remain transient WPF state.
+Domain owns immutable recommendation selections, reasons, warnings, decision strength, qualitative confidence, and invariants. Application indexes completed Milestone 2–4 evidence and orchestrates deterministic generation. Recommendation review is analysis-only; executable Candidate retention and transfer selection use unified candidate evidence and current physical facts.
 
 ## Duplicate-cleanup boundary
 
-WPF owns generated keeper presentation for exact, metadata, and expanded groups, advisory `Cleanup eligible`/`To be reviewed` text, explicit keeper overrides and Skip choices, per-run external-backup confirmation, progress, and terminal status. Both advisory Expanded types are included unless explicitly skipped. Application builds one deterministic operation sequence, acquires the library mutation lease, and orchestrates one persistent worker. Infrastructure owns trusted Calibre discovery, the fixed embedded worker script, strict bounded JSON-lines protocol, process lifecycle, and lease storage.
+WPF owns generated keeper presentation for Exact and unified Candidate groups, advisory `Cleanup eligible`/`To be reviewed` text, explicit keeper overrides and Skip choices, per-run external-backup confirmation, progress, and terminal status. Both advisory Candidate types are included unless explicitly skipped. Metadata and Expanded tabs remain read-only evidence views. Application builds one deterministic operation sequence, acquires the library mutation lease, and orchestrates one persistent worker. Infrastructure owns trusted Calibre discovery, the fixed embedded worker script, strict bounded JSON-lines protocol, process lifecycle, and lease storage.
 
 The staged target exposes two top-level mutation stages. `Exact cleanup` gates and
 invokes `ExecuteBulkExactDuplicateCleanupUseCase` without changing its grouping,
@@ -115,12 +138,11 @@ cleanup` is unavailable until Exact cleanup completes or returns nothing to do f
 the bound generation. Its first activation prepares residual candidates without
 mutation; a later activation executes reviewed keeper/Skip selections.
 
-The legacy `Cleanup all` composite Application boundary and standalone Metadata
-and Expanded mutation commands remain transitional until the staged Candidate
-planner/executor reaches parity. A generation has exactly one workflow owner, so
-legacy and staged commands cannot mutate the same authoritative generation.
+The legacy `Cleanup all` composite boundary and standalone Metadata/Expanded
+mutation commands were retired after shadow parity. Exact and staged Candidate
+cleanup are the only mutation owners.
 
-The worker uses Calibre's documented database `Cache` API through one `calibre-debug` process. Exact cleanup transfers fingerprint-verified complementary formats only to unambiguous non-conflicting targets. Metadata cleanup transfers generated complementary sources to the selected keeper, removes every format from non-keepers, and removes the emptied records. When the metadata keeper already has a format, its file wins even when a removed alternative is not byte-identical. Requests contain at most 100 operations. No shell, direct SQLite write, direct managed-library filesystem mutation, arbitrary script, direct `calibredb` mutation gateway, or second mutation engine is permitted.
+The worker uses Calibre's documented database `Cache` API through one `calibre-debug` process. Exact cleanup transfers fingerprint-verified complementary formats only to unambiguous non-conflicting targets. Unified Candidate cleanup transfers one quality-ranked complementary source for each format absent from the selected keeper, removes every non-keeper format, and removes only records proven empty. The keeper's same-format file wins. Requests contain at most 100 operations. No shell, direct SQLite write, direct managed-library filesystem mutation, arbitrary script, direct `calibredb` mutation gateway, or second mutation engine is permitted.
 
 Every run requires explicit confirmation that a complete external library backup exists. The application does not create, inspect, or verify that backup. A startup/preflight failure logs and stops before mutation. A failed, ambiguous, interrupted, unpersistable, or unprojectable mutation logs structured technical context, marks projected state uncertain, stops without retry or continuation, and blocks later mutation until explicit Rescan.
 

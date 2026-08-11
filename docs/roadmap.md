@@ -104,9 +104,9 @@ verification, or recovery gates.
 ADR 0020 supersedes future development of the one-scan composite workflow. The
 migration first adds durable workflow state, exact-only analysis, and an `Exact
 cleanup` primary action that composes the existing Exact algorithm unchanged.
-Subsequent slices add trusted post-exact reconciliation, unified residual candidate
-discovery, Candidate cleanup, parity measurement, and only then retirement of
-`Cleanup all` and standalone Metadata/Expanded mutation surfaces.
+Trusted post-exact reconciliation, unified residual discovery, Candidate cleanup,
+and shadow parity are implemented. `Cleanup all` and standalone Metadata/Expanded
+mutation surfaces are retired; Metadata/Expanded analysis views remain available.
 
 ## Possible later platform work
 

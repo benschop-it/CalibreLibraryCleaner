@@ -451,7 +451,13 @@ public sealed class PdfAssessmentPolicyTests
                 Func<PdfDocumentHeaderFacts, CancellationToken, ValueTask<IReadOnlyList<int>>> selector = call.GetArgument<Func<PdfDocumentHeaderFacts, CancellationToken, ValueTask<IReadOnlyList<int>>>>(1)!;
                 CancellationToken token = call.GetArgument<CancellationToken>(3);
                 int current = Interlocked.Increment(ref active);
-                maximum = Math.Max(maximum, current);
+                int observed;
+                do
+                {
+                    observed = Volatile.Read(ref maximum);
+                    if (observed >= current) break;
+                }
+                while (Interlocked.CompareExchange(ref maximum, current, observed) != observed);
                 if (current == 2) twoStarted.TrySetResult();
                 IReadOnlyList<int> selected = await selector(new(request.BookId, request.ExpectedRelativePath, 5, []), token);
                 await release.Task.WaitAsync(token);

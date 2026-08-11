@@ -50,7 +50,7 @@ public sealed class PrepareResidualAnalysisFactsUseCaseTests
             PdfFingerprint, Observation(PdfFingerprint));
 
         ResidualAnalysisFacts facts = await useCase.PrepareAsync(
-            Root, [epubTarget], [pdfTarget], CancellationToken.None);
+            Root, [epubTarget], [pdfTarget], null, CancellationToken.None);
 
         facts.ReusedEpubAssessmentCount.Should().Be(1);
         facts.ReusedPdfAssessmentCount.Should().Be(1);
@@ -143,6 +143,7 @@ public sealed class PrepareResidualAnalysisFactsUseCaseTests
         PrepareResidualAnalysisFactsUseCase useCase = UseCase(
             store, epubInspector, pdfInspector,
             A.Fake<IEpubContentSignatureInspector>(), A.Fake<IEpubContentSignatureCache>());
+        List<ResidualAnalysisFactsProgress> progress = [];
 
         ResidualAnalysisFacts facts = await useCase.PrepareAsync(
             Root,
@@ -150,12 +151,24 @@ public sealed class PrepareResidualAnalysisFactsUseCaseTests
             [new(
                 new(20), "PDF", "book-20.pdf", Root, $"{Root}\\book-20.pdf",
                 FormatFileStatus.Present, PdfFingerprint, Observation(PdfFingerprint))],
+            new InlineProgress<ResidualAnalysisFactsProgress>(progress.Add),
             CancellationToken.None);
 
         facts.FreshEpubAssessmentCount.Should().Be(1);
         facts.FreshPdfAssessmentCount.Should().Be(1);
         facts.ReusedEpubAssessmentCount.Should().Be(0);
         facts.ReusedPdfAssessmentCount.Should().Be(0);
+        progress.Select(value => value.Phase).Should().ContainInOrder(
+            ResidualAnalysisFactsPhase.AssessingEpubFormats,
+            ResidualAnalysisFactsPhase.AssessingPdfFormats);
+        progress.Should().Contain(value =>
+            value.Phase == ResidualAnalysisFactsPhase.AssessingEpubFormats
+            && value.CompletedFiles == 1
+            && value.TotalFiles == 1);
+        progress.Should().Contain(value =>
+            value.Phase == ResidualAnalysisFactsPhase.AssessingPdfFormats
+            && value.CompletedFiles == 1
+            && value.TotalFiles == 1);
         A.CallTo(() => epubInspector.InspectAsync(
             A<EpubInspectionRequest>._,
             A<IProgress<EpubInspectionProgress>?>._,
@@ -221,4 +234,9 @@ public sealed class PrepareResidualAnalysisFactsUseCaseTests
         Now,
         Now,
         0);
+
+    private sealed class InlineProgress<T>(Action<T> report) : IProgress<T>
+    {
+        public void Report(T value) => report(value);
+    }
 }

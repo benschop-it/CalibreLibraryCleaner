@@ -92,8 +92,10 @@ public sealed class PdfWorkerProtocolTests
     [Fact]
     public void WorkerManagedHeapWarningUsesTheConfiguredSoftThreshold()
     {
+        byte[] retained = GC.AllocateUninitializedArray<byte>(1024, pinned: true);
         PdfInspectionWorkerHost.ManagedHeapWarningExceeded(1).Should().BeTrue();
         PdfInspectionWorkerHost.ManagedHeapWarningExceeded(long.MaxValue).Should().BeFalse();
+        GC.KeepAlive(retained);
     }
 
     [Fact]

@@ -28,7 +28,9 @@ public sealed class RefreshAfterExactCleanupUseCaseTests
 
         result.IsSuccess.Should().BeTrue();
         result.Metrics.ReusedFingerprintCount.Should().Be(1);
+        result.Metrics.ReusedFingerprintBytes.Should().Be(10);
         result.Metrics.TargetedHashCount.Should().Be(0);
+        result.Metrics.TargetedHashBytes.Should().Be(0);
         result.State!.WorkflowCheckpoint.Phase.Should().Be(LibraryWorkflowPhase.CandidatePreparationReady);
         result.State.WorkflowCheckpoint.Source.Should().Be(new LibraryWorkflowSource(
             post.GenerationId, post.Revision));
@@ -40,6 +42,63 @@ public sealed class RefreshAfterExactCleanupUseCaseTests
             A<IReadOnlyList<FormatHashRequest>>._,
             A<int>._,
             A<IProgress<FormatHashProgress>?>._,
+            A<CancellationToken>._)).MustNotHaveHappened();
+    }
+
+    [Fact]
+    public async Task UnchangedInvalidPathIsPreservedWithoutHashingOrAssessment()
+    {
+        BookFormat invalid = new("EPUB", "book", string.Empty, FormatFileStatus.InvalidPath);
+        LibraryState pre = PreState([Book(1, invalid)]);
+        LibraryState post = CompleteExact(pre, []);
+        TestContext context = Context(pre, post, [], Catalog(BookRecord(1, ("EPUB", "book"))));
+        A.CallTo(() => context.Resolver.ResolveFormat(
+                A<ValidatedLibraryLocation>._,
+                A<string>._,
+                A<string>._,
+                "EPUB"))
+            .Returns(ResolvedFormatPathOutcome.Failure("Synthetic invalid path."));
+
+        PostExactRefreshResult result = await context.UseCase.ExecuteAsync(
+            Root, null, CancellationToken.None);
+
+        result.IsSuccess.Should().BeTrue();
+        result.Metrics.PreservedInvalidPathCount.Should().Be(1);
+        result.Metrics.ReusedFingerprintCount.Should().Be(0);
+        result.State!.Snapshot.Books.Single().Formats.Should().ContainSingle().Which
+            .FileStatus.Should().Be(FormatFileStatus.InvalidPath);
+        A.CallTo(() => context.FactsPreparer.PrepareAsync(
+            Root,
+            A<IReadOnlyList<CalibreLibraryCleaner.Application.Assessments.EpubAssessmentTarget>>
+                .That.IsEmpty(),
+            A<IReadOnlyList<CalibreLibraryCleaner.Application.Assessments.Pdf.PdfAssessmentTarget>>
+                .That.IsEmpty(),
+            A<IProgress<ResidualAnalysisFactsProgress>?>._,
+            A<CancellationToken>._)).MustHaveHappenedOnceExactly();
+        A.CallTo(() => context.Hasher.HashAsync(
+            A<IReadOnlyList<FormatHashRequest>>._,
+            A<int>._,
+            A<IProgress<FormatHashProgress>?>._,
+            A<CancellationToken>._)).MustNotHaveHappened();
+        A.CallTo(() => context.Probe.ProbeAsync(
+            A<ResolvedFormatPath>._, A<CancellationToken>._)).MustNotHaveHappened();
+    }
+
+    [Fact]
+    public async Task PreviouslyInvalidPathThatNowResolvesFailsClosed()
+    {
+        BookFormat invalid = new("EPUB", "book", string.Empty, FormatFileStatus.InvalidPath);
+        LibraryState pre = PreState([Book(1, invalid)]);
+        LibraryState post = CompleteExact(pre, []);
+        TestContext context = Context(pre, post, [], Catalog(BookRecord(1, ("EPUB", "book"))));
+
+        PostExactRefreshResult result = await context.UseCase.ExecuteAsync(
+            Root, null, CancellationToken.None);
+
+        result.ErrorCode.Should().Be("POST_EXACT.INVALID_PATH_CHANGED");
+        A.CallTo(() => context.State.StartFromPostExactRefreshAsync(
+            A<LibrarySnapshot>._,
+            A<LibraryWorkflowSource>._,
             A<CancellationToken>._)).MustNotHaveHappened();
     }
 
@@ -72,17 +131,31 @@ public sealed class RefreshAfterExactCleanupUseCaseTests
             .ReturnsLazily(call =>
             {
                 FormatHashRequest request = call.GetArgument<IReadOnlyList<FormatHashRequest>>(0)!.Single();
+                call.GetArgument<IProgress<FormatHashProgress>?>(2)?.Report(new(
+                    20,
+                    20,
+                    1,
+                    1,
+                    0,
+                    "Transfer target hash complete"));
                 return Task.FromResult<IReadOnlyList<FormatHashResult>>([
                     FormatHashResult.Success(request.Sequence, Pdf, Observation(Pdf)),
                 ]);
             });
+        List<PostExactRefreshProgress> progress = [];
 
         PostExactRefreshResult result = await context.UseCase.ExecuteAsync(
-            Root, null, CancellationToken.None);
+            Root, new InlineProgress<PostExactRefreshProgress>(progress.Add), CancellationToken.None);
 
         result.IsSuccess.Should().BeTrue();
         result.Metrics.TargetedHashCount.Should().Be(1);
+        result.Metrics.TargetedHashBytes.Should().Be(20);
         result.Metrics.ReboundTransferCount.Should().Be(1);
+        progress.Should().Contain(value =>
+            value.Phase == PostExactRefreshPhase.HashingTransferTargets
+            && value.Unit == CandidateProgressUnit.Bytes
+            && value.Completed == 20
+            && value.Total == 20);
         result.State!.Snapshot.Books.Should().ContainSingle();
         result.State.Snapshot.Books.Single().Formats.Should().Contain(value =>
             value.Format == "PDF"
@@ -174,6 +247,7 @@ public sealed class RefreshAfterExactCleanupUseCaseTests
                 Root,
                 A<IReadOnlyList<CalibreLibraryCleaner.Application.Assessments.EpubAssessmentTarget>>._,
                 A<IReadOnlyList<CalibreLibraryCleaner.Application.Assessments.Pdf.PdfAssessmentTarget>>._,
+                A<IProgress<ResidualAnalysisFactsProgress>?>._,
                 A<CancellationToken>._))
             .ThrowsAsync(new OperationCanceledException());
 
@@ -288,6 +362,7 @@ public sealed class RefreshAfterExactCleanupUseCaseTests
             Root,
             A<IReadOnlyList<CalibreLibraryCleaner.Application.Assessments.EpubAssessmentTarget>>._,
             A<IReadOnlyList<CalibreLibraryCleaner.Application.Assessments.Pdf.PdfAssessmentTarget>>._,
+            A<IProgress<ResidualAnalysisFactsProgress>?>._,
             A<CancellationToken>._))
             .ReturnsLazily(call => Task.FromResult(new ResidualAnalysisFacts(
             call.GetArgument<IReadOnlyList<CalibreLibraryCleaner.Application.Assessments.EpubAssessmentTarget>>(1)!,
@@ -401,4 +476,9 @@ public sealed class RefreshAfterExactCleanupUseCaseTests
         IFormatFileProbe Probe,
         IResidualAnalysisFactsPreparer FactsPreparer,
         RefreshAfterExactCleanupUseCase UseCase);
+
+    private sealed class InlineProgress<T>(Action<T> report) : IProgress<T>
+    {
+        public void Report(T value) => report(value);
+    }
 }

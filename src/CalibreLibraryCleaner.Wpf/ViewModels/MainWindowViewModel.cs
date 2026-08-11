@@ -2,6 +2,7 @@ using System.Collections.ObjectModel;
 using System.Collections.Specialized;
 using System.ComponentModel;
 using CalibreLibraryCleaner.Application.Abstractions;
+using CalibreLibraryCleaner.Application.Executions;
 using CalibreLibraryCleaner.Application.Libraries;
 using CalibreLibraryCleaner.Application.Recommendations;
 using CalibreLibraryCleaner.Domain.Duplicates;
@@ -26,6 +27,9 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
     private readonly PersistedLibrarySnapshotsUseCase? _persistedSnapshots;
     private readonly ILibraryStateSession? _libraryStateSession;
     private readonly LibraryWorkflowOptions _workflowOptions;
+    private readonly ICandidatePreparationWorkflow? _candidatePreparation;
+    private readonly IUnifiedCandidateCleanupExecutor? _executeUnifiedCandidateCleanup;
+    private readonly IUnifiedCandidateCleanupConfirmationService? _unifiedCandidateConfirmation;
     private readonly SynchronizationContext? _uiContext;
     private readonly BulkObservableCollection<BookRowViewModel> _books = [];
     private readonly BulkObservableCollection<string> _persistedLibraryPaths = [];
@@ -38,6 +42,7 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
     private readonly BulkObservableCollection<PdfAssessmentRowViewModel> _pdfAssessments = [];
     private readonly BulkObservableCollection<PdfAssessmentFindingRowViewModel> _pdfFindings = [];
     private readonly Dictionary<RecommendationReviewKey, ReviewedConsolidationRecommendation> _recommendationReviews = [];
+    private readonly object _candidateProgressGate = new();
     private IReadOnlyList<MetadataDuplicateGroupRowViewModel> _allMetadataDuplicateGroups = [];
     private CancellationTokenSource? _scanCancellation;
     private string _selectedLibraryPath = string.Empty;
@@ -49,6 +54,7 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
     private string _metadataDuplicateSummary = "No exact metadata candidate groups have been found.";
     private string _expandedCandidateSummary = "Run a fresh scan to discover expanded candidates.";
     private string _unifiedCandidateSummary = "Run Candidate analysis to prepare unified candidates.";
+    private string _candidateCleanupResultSummary = string.Empty;
     private string _metadataDuplicateFilterText = string.Empty;
     private MetadataDuplicateFilterMode _metadataDuplicateFilterMode;
     private bool _isBusy;
@@ -70,6 +76,17 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
     private string? _currentLibraryUuid;
     private LibrarySnapshot? _currentSnapshot;
     private bool _isCurrentSnapshotFresh;
+    private CandidatePreparationProgress? _latestCandidateProgress;
+    private CancellationTokenSource? _candidateHeartbeatCancellation;
+    private Task? _candidateHeartbeatTask;
+    private DateTimeOffset _candidateOperationStartedUtc;
+    private int _candidateHeartbeatVersion;
+    private long _candidateProgressSequence;
+    private DateTimeOffset _lastCandidateProgressAppliedUtc;
+    private CandidatePreparationPhase? _lastCandidateProgressPhase;
+    private string _lastCandidateProgressDetail = string.Empty;
+    private bool _isCandidatePreparationActive;
+    private bool _candidateCancellationRequested;
 
     public MainWindowViewModel(
         ValidateLibraryUseCase validateLibrary,
@@ -80,12 +97,12 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
         IClock? clock = null,
         IEbookViewerLauncher? ebookViewer = null,
         ExactBinaryCleanupPlanWorkspaceViewModel? exactBinaryCleanupPlans = null,
-        MetadataCandidateCleanupWorkspaceViewModel? metadataCandidateCleanup = null,
-        ExpandedCandidateCleanupWorkspaceViewModel? expandedCandidateCleanup = null,
-        CompositeCleanupWorkspaceViewModel? compositeCleanup = null,
         PersistedLibrarySnapshotsUseCase? persistedSnapshots = null,
         ILibraryStateSession? libraryStateSession = null,
-        LibraryWorkflowOptions? workflowOptions = null)
+        LibraryWorkflowOptions? workflowOptions = null,
+        ICandidatePreparationWorkflow? candidatePreparation = null,
+        IUnifiedCandidateCleanupExecutor? executeUnifiedCandidateCleanup = null,
+        IUnifiedCandidateCleanupConfirmationService? unifiedCandidateConfirmation = null)
     {
         _validateLibrary = validateLibrary;
         _scanLibrary = scanLibrary;
@@ -97,13 +114,13 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
         _persistedSnapshots = persistedSnapshots;
         _libraryStateSession = libraryStateSession;
         _workflowOptions = workflowOptions ?? LibraryWorkflowOptions.Compatibility;
+        _candidatePreparation = candidatePreparation;
+        _executeUnifiedCandidateCleanup = executeUnifiedCandidateCleanup;
+        _unifiedCandidateConfirmation = unifiedCandidateConfirmation;
         _uiContext = SynchronizationContext.Current;
         if (_libraryStateSession is not null)
             _libraryStateSession.StateChanged += OnLibraryStateChanged;
         ExactBinaryCleanupPlans = exactBinaryCleanupPlans;
-        MetadataCandidateCleanup = metadataCandidateCleanup;
-        ExpandedCandidateCleanup = expandedCandidateCleanup;
-        CompositeCleanup = compositeCleanup;
         Books = new ReadOnlyObservableCollection<BookRowViewModel>(_books);
         PersistedLibraryPaths = new ReadOnlyObservableCollection<string>(_persistedLibraryPaths);
         ExactDuplicateGroups = new ReadOnlyObservableCollection<ExactDuplicateGroupRowViewModel>(_exactDuplicateGroups);
@@ -150,7 +167,7 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
         MarkNotDuplicatesCommand = new RelayCommand(() => ApplySelectedReview(RecommendationReviewStatus.NotDuplicates), CanReviewSelected);
         ResetRecommendationCommand = new RelayCommand(ResetSelectedReview, CanReviewSelected);
         ExportRecommendationsCommand = new AsyncRelayCommand(ExportRecommendationsAsync, () => !IsBusy && _currentSnapshot is not null && _exportRecommendations is not null && _exportFilePicker is not null);
-        CandidateCleanupCommand = new RelayCommand(PrepareCandidateCleanup, CanPrepareCandidateCleanup);
+        CandidateCleanupCommand = new AsyncRelayCommand(CandidateCleanupAsync, CanRunCandidateCleanup);
     }
 
     public string SelectedLibraryPath
@@ -162,6 +179,7 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
             {
                 ScanCommand.NotifyCanExecuteChanged();
                 LoadPersistedSnapshotCommand.NotifyCanExecuteChanged();
+                NotifyCandidateCleanupStateChanged();
             }
         }
     }
@@ -259,12 +277,6 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
 
     public ExactBinaryCleanupPlanWorkspaceViewModel? ExactBinaryCleanupPlans { get; }
 
-    public MetadataCandidateCleanupWorkspaceViewModel? MetadataCandidateCleanup { get; }
-
-    public ExpandedCandidateCleanupWorkspaceViewModel? ExpandedCandidateCleanup { get; }
-
-    public CompositeCleanupWorkspaceViewModel? CompositeCleanup { get; }
-
     public IReadOnlyList<EpubFindingFilterMode> EpubFindingFilterModes { get; } = Enum.GetValues<EpubFindingFilterMode>();
 
     public IReadOnlyList<EpubFindingFilterMode> PdfFindingFilterModes { get; } = Enum.GetValues<EpubFindingFilterMode>();
@@ -295,6 +307,30 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
         get => _unifiedCandidateSummary;
         private set => SetProperty(ref _unifiedCandidateSummary, value);
     }
+
+    public string CandidateCleanupResultSummary
+    {
+        get => _candidateCleanupResultSummary;
+        private set => SetProperty(ref _candidateCleanupResultSummary, value);
+    }
+
+    public string CandidateCleanupAutomationName => CandidatePhase() switch
+    {
+        LibraryWorkflowPhase.CandidatePreparationReady => "Prepare Candidate review",
+        LibraryWorkflowPhase.CandidateAnalysisReady => "Run Candidate cleanup",
+        LibraryWorkflowPhase.Completed => "Candidate cleanup completed",
+        _ => "Candidate cleanup unavailable",
+    };
+
+    public string CandidateCleanupToolTip => CandidatePhase() switch
+    {
+        LibraryWorkflowPhase.CandidatePreparationReady =>
+            "Refresh the post-Exact library and prepare unified candidates without mutation",
+        LibraryWorkflowPhase.CandidateAnalysisReady =>
+            "Execute reviewed unified keeper and Skip selections after backup confirmation",
+        LibraryWorkflowPhase.Completed => "Candidate cleanup is complete for this workflow generation",
+        _ => "Available after Exact cleanup completes for the current workflow generation",
+    };
 
     public string MetadataDuplicateFilterText
     {
@@ -589,7 +625,7 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
 
     public IAsyncRelayCommand ExportRecommendationsCommand { get; }
 
-    public IRelayCommand CandidateCleanupCommand { get; }
+    public IAsyncRelayCommand CandidateCleanupCommand { get; }
 
     public async Task InitializeAsync(CancellationToken cancellationToken = default)
     {
@@ -600,6 +636,8 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
     {
         _scanCancellation?.Cancel();
         _scanCancellation?.Dispose();
+        Interlocked.Increment(ref _candidateHeartbeatVersion);
+        _candidateHeartbeatCancellation?.Cancel();
         if (_libraryStateSession is not null)
             _libraryStateSession.StateChanged -= OnLibraryStateChanged;
     }
@@ -610,7 +648,7 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
             return;
         if (_uiContext is null)
         {
-            CandidateCleanupCommand.NotifyCanExecuteChanged();
+            NotifyCandidateCleanupStateChanged();
             return;
         }
         _uiContext.Post(_ => _ = ApplyProjectedStateAsync(eventArgs.State), null);
@@ -622,9 +660,11 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
         SnapshotPresentation presentation = await PreparePresentationAsync(
             state.Snapshot, CancellationToken.None).ConfigureAwait(true);
         LibraryState? latest = _libraryStateSession?.GetCurrent(state.Snapshot.Identity.LibraryRoot);
-        if (latest?.GenerationId != state.GenerationId || latest.Revision != state.Revision) return;
+        if (latest?.GenerationId != state.GenerationId
+            || latest.Revision != state.Revision
+            || latest.WorkflowCheckpoint != state.WorkflowCheckpoint) return;
         ApplySnapshot(state.Snapshot, presentation, state.IsAuthoritative);
-        CandidateCleanupCommand.NotifyCanExecuteChanged();
+        NotifyCandidateCleanupStateChanged();
         StatusMessage = state.IsAuthoritative
             ? $"Projected library state updated to revision {state.Revision.Value}. External Calibre changes require Rescan."
             : $"Library state is uncertain after revision {state.Revision.Value}. Rescan is required before cleanup or recovery.";
@@ -821,9 +861,20 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
 
     private void CancelScan()
     {
+        if (_isCandidatePreparationActive)
+        {
+            lock (_candidateProgressGate)
+            {
+                _candidateCancellationRequested = true;
+                _candidateProgressSequence++;
+            }
+            Interlocked.Increment(ref _candidateHeartbeatVersion);
+        }
         _scanCancellation?.Cancel();
         CancelCommand.NotifyCanExecuteChanged();
-        StatusMessage = "Scan canceled. Waiting for the current read to stop...";
+        StatusMessage = _isCandidatePreparationActive
+            ? "Cancel requested; waiting for the current bounded operation to stop..."
+            : "Scan canceled. Waiting for the current read to stop...";
     }
 
     private Task OpenSelectedExactDuplicateAsync()
@@ -909,21 +960,49 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
 
     private async Task<SnapshotPresentation> PreparePresentationAsync(
         LibrarySnapshot snapshot,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        bool candidatePreparation = false)
     {
         ProgressPercentage = 0;
         IsProgressIndeterminate = true;
         StatusMessage = $"Preparing {snapshot.Books.Count:N0} books and analysis results for display...";
         await Task.Yield();
-        return await Task.Run(
-            () => CreatePresentation(snapshot, cancellationToken),
+        SynchronizedProgress<CandidatePreparationProgress> progress = new(
+            _uiContext,
+            candidatePreparation ? UpdateCandidateProgress : UpdatePresentationProgress);
+        SnapshotPresentation presentation = await Task.Run(
+            () => CreatePresentation(snapshot, progress, cancellationToken),
             cancellationToken).ConfigureAwait(true);
+        await progress.DrainAsync().ConfigureAwait(true);
+        return presentation;
     }
 
     private static SnapshotPresentation CreatePresentation(
         LibrarySnapshot snapshot,
+        IProgress<CandidatePreparationProgress>? progress,
         CancellationToken cancellationToken)
     {
+        long totalItems = snapshot.Books.Count
+            + snapshot.ExactBinaryDuplicateGroups.Count
+            + snapshot.ExactMetadataDuplicateGroups.Count
+            + snapshot.WorkLanguageCandidateGroups.Count
+            + snapshot.UnifiedCandidateGroups.Count
+            + snapshot.EpubAssessments.Count
+            + snapshot.PdfAssessments.Count
+            + snapshot.Findings.Count;
+        long completedItems = 0;
+        void ReportPresentationProgress(string detail, bool force = false)
+        {
+            if (progress is null || (!force && completedItems % 100 != 0)) return;
+            progress.Report(new(
+                CandidatePreparationPhase.PreparingPresentation,
+                completedItems,
+                totalItems,
+                CandidateProgressUnit.Records,
+                $"Preparing results for display: {completedItems:N0} of {totalItems:N0}",
+                detail));
+        }
+        ReportPresentationProgress("Preparing books", force: true);
         BookRowViewModel[] books = new BookRowViewModel[snapshot.Books.Count];
         Dictionary<CalibreBookId, CalibreBook> booksById = new(snapshot.Books.Count);
         for (int index = 0; index < snapshot.Books.Count; index++)
@@ -932,6 +1011,8 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
             CalibreBook book = snapshot.Books[index];
             books[index] = new(book);
             booksById.Add(book.Id, book);
+            completedItems++;
+            ReportPresentationProgress("Preparing books");
         }
 
         ExactDuplicateGroupRowViewModel[] groups = new ExactDuplicateGroupRowViewModel[
@@ -940,6 +1021,8 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
         {
             cancellationToken.ThrowIfCancellationRequested();
             groups[index] = new(snapshot.ExactBinaryDuplicateGroups[index], booksById);
+            completedItems++;
+            ReportPresentationProgress("Preparing Exact groups");
         }
 
         Dictionary<ExactMetadataDuplicateGroupId, ConsolidationRecommendation> recommendations = snapshot.ConsolidationRecommendations
@@ -952,6 +1035,8 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
             ExactMetadataDuplicateGroup metadataGroup = snapshot.ExactMetadataDuplicateGroups[index];
             recommendations.TryGetValue(metadataGroup.Id, out ConsolidationRecommendation? recommendation);
             metadataGroups[index] = new(metadataGroup, booksById, recommendation);
+            completedItems++;
+            ReportPresentationProgress("Preparing Metadata groups");
         }
 
         ExpandedCandidateGroupRowViewModel[] expandedGroups = new ExpandedCandidateGroupRowViewModel[
@@ -968,6 +1053,8 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
             cancellationToken.ThrowIfCancellationRequested();
             WorkLanguageCandidateGroup group = snapshot.WorkLanguageCandidateGroups[index];
             expandedGroups[index] = new(group, booksById, expandedRetention[group.Id]);
+            completedItems++;
+            ReportPresentationProgress("Preparing Expanded groups");
         }
 
         UnifiedCandidateGroupRowViewModel[] unifiedGroups = new UnifiedCandidateGroupRowViewModel[
@@ -980,6 +1067,8 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
                 booksById,
                 snapshot.EpubAssessments,
                 snapshot.PdfAssessments);
+            completedItems++;
+            ReportPresentationProgress("Preparing unified groups");
         }
 
         EpubAssessmentRowViewModel[] epubAssessments = new EpubAssessmentRowViewModel[snapshot.EpubAssessments.Count];
@@ -989,6 +1078,8 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
             Domain.Assessments.EpubAssessment assessment = snapshot.EpubAssessments[index];
             booksById.TryGetValue(assessment.CalibreBookId, out CalibreBook? book);
             epubAssessments[index] = new(assessment, book);
+            completedItems++;
+            ReportPresentationProgress("Preparing EPUB assessments");
         }
 
         PdfAssessmentRowViewModel[] pdfAssessments = new PdfAssessmentRowViewModel[snapshot.PdfAssessments.Count];
@@ -998,6 +1089,8 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
             Domain.Assessments.PdfAssessment assessment = snapshot.PdfAssessments[index];
             booksById.TryGetValue(assessment.CalibreBookId, out CalibreBook? book);
             pdfAssessments[index] = new(assessment, book);
+            completedItems++;
+            ReportPresentationProgress("Preparing PDF assessments");
         }
 
         int missingCount = 0;
@@ -1008,7 +1101,11 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
             {
                 missingCount++;
             }
+            completedItems++;
+            ReportPresentationProgress("Preparing findings");
         }
+
+        ReportPresentationProgress("Results prepared", force: true);
 
         return new(books, groups, metadataGroups, expandedGroups, unifiedGroups,
             epubAssessments, pdfAssessments, missingCount);
@@ -1059,8 +1156,6 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
         }
         _allMetadataDuplicateGroups = presentation.MetadataGroups;
         ApplyMetadataDuplicateFilter();
-        bool legacyMutationOwner = isFreshScan && !_workflowOptions.IsStaged;
-        MetadataCandidateCleanup?.UpdateContext(legacyMutationOwner ? snapshot : null, _allMetadataDuplicateGroups);
         _expandedCandidateGroups.ReplaceAll(presentation.ExpandedGroups);
         SelectedExpandedCandidateGroup = _expandedCandidateGroups.FirstOrDefault();
         _unifiedCandidateGroups.ReplaceAll(presentation.UnifiedGroups);
@@ -1070,12 +1165,6 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
             : presentation.UnifiedGroups.Count == 1
                 ? "1 unified candidate group is ready for review."
                 : $"{presentation.UnifiedGroups.Count:N0} disjoint unified candidate groups are ready for review.";
-        ExpandedCandidateCleanup?.UpdateContext(legacyMutationOwner ? snapshot : null, _expandedCandidateGroups);
-        CompositeCleanup?.UpdateContext(
-            legacyMutationOwner ? snapshot : null,
-            _exactDuplicateGroups,
-            _allMetadataDuplicateGroups,
-            _expandedCandidateGroups);
         ExpandedCandidateSummary = snapshot.MatchingRunSummary.Status switch
         {
             MatchingEvidenceStatus.Unavailable =>
@@ -1106,21 +1195,307 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
         IsProgressIndeterminate = false;
         ProgressPercentage = 100;
         ExportRecommendationsCommand.NotifyCanExecuteChanged();
-        CandidateCleanupCommand.NotifyCanExecuteChanged();
+        NotifyCandidateCleanupStateChanged();
     }
 
-    private bool CanPrepareCandidateCleanup()
+    private bool CanRunCandidateCleanup()
     {
         if (IsBusy || !_workflowOptions.IsStaged || _libraryStateSession is null
             || string.IsNullOrWhiteSpace(SelectedLibraryPath))
             return false;
         LibraryState? state = _libraryStateSession.GetCurrent(SelectedLibraryPath);
-        return state is { IsWorkflowCheckpointCurrent: true }
-            && state.WorkflowCheckpoint.Phase == LibraryWorkflowPhase.CandidatePreparationReady;
+        if (state is not { IsAuthoritative: true, IsWorkflowCheckpointCurrent: true }) return false;
+        return state.WorkflowCheckpoint.Phase switch
+        {
+            LibraryWorkflowPhase.CandidatePreparationReady =>
+                _candidatePreparation is not null,
+            LibraryWorkflowPhase.CandidateAnalysisReady =>
+                _executeUnifiedCandidateCleanup is not null && _unifiedCandidateConfirmation is not null,
+            _ => false,
+        };
     }
 
-    private void PrepareCandidateCleanup() => StatusMessage =
-        "Candidate cleanup is unlocked. Candidate preparation activation and cleanup execution are wired in later workflow slices.";
+    private async Task CandidateCleanupAsync()
+    {
+        if (_libraryStateSession is null || string.IsNullOrWhiteSpace(SelectedLibraryPath)) return;
+        LibraryState? startingState = _libraryStateSession.GetCurrent(SelectedLibraryPath);
+        if (startingState is null) return;
+        LibraryWorkflowPhase startingPhase = startingState.WorkflowCheckpoint.Phase;
+        _scanCancellation?.Dispose();
+        _scanCancellation = new CancellationTokenSource();
+        IsBusy = true;
+        ClearError();
+        ProgressPercentage = 0;
+        IsProgressIndeterminate = true;
+        CandidateCleanupResultSummary = string.Empty;
+        if (startingPhase == LibraryWorkflowPhase.CandidatePreparationReady)
+        {
+            _isCandidatePreparationActive = true;
+            StartCandidateHeartbeat();
+        }
+        try
+        {
+            if (startingPhase == LibraryWorkflowPhase.CandidatePreparationReady)
+            {
+                LibraryState? refreshed = startingState;
+                if (startingState.WorkflowCheckpoint.Source is null)
+                {
+                    if (_candidatePreparation is null) return;
+                    Progress<CandidatePreparationProgress> refreshProgress = new(UpdateCandidateProgress);
+                    PostExactRefreshResult refresh = await _candidatePreparation.RefreshAsync(
+                        SelectedLibraryPath, refreshProgress, _scanCancellation.Token).ConfigureAwait(true);
+                    if (!refresh.IsSuccess)
+                    {
+                        ErrorMessage = refresh.Explanation ?? "Candidate refresh failed.";
+                        ErrorAction = "Run a new exact analysis if the current library has unexplained changes.";
+                        StatusMessage = "Candidate preparation stopped before review state was published.";
+                        return;
+                    }
+                    refreshed = refresh.State;
+                }
+                if (_candidatePreparation is null || refreshed is null) return;
+                Progress<CandidatePreparationProgress> analysisProgress = new(UpdateCandidateProgress);
+                ResidualCandidateAnalysisResult analysis = await _candidatePreparation.AnalyzeAsync(
+                    SelectedLibraryPath, analysisProgress, _scanCancellation.Token).ConfigureAwait(true);
+                if (!analysis.IsSuccess)
+                {
+                    ErrorMessage = analysis.Explanation ?? "Candidate analysis failed.";
+                    ErrorAction = "Retry Candidate cleanup preparation or run a new exact analysis if state changed.";
+                    StatusMessage = "Candidate preparation stopped without mutation.";
+                    return;
+                }
+                SnapshotPresentation presentation = await PreparePresentationAsync(
+                    analysis.State!.Snapshot,
+                    _scanCancellation.Token,
+                    candidatePreparation: true).ConfigureAwait(true);
+                ApplySnapshot(analysis.State.Snapshot, presentation, analysis.State.IsAuthoritative);
+                StatusMessage = $"Candidate review ready: {analysis.UnifiedGroupCount:N0} unified group(s). Review keeper and Skip choices, then activate Candidate cleanup again.";
+                return;
+            }
+
+            if (startingPhase != LibraryWorkflowPhase.CandidateAnalysisReady
+                || _executeUnifiedCandidateCleanup is null
+                || _unifiedCandidateConfirmation is null)
+                return;
+            UnifiedCandidateCleanupSelection[] selections = _unifiedCandidateGroups.Select(group =>
+                new UnifiedCandidateCleanupSelection(
+                group.CandidateGroupId,
+                group.MemberBookIds,
+                group.KeeperBookId,
+                group.Skip,
+                group.KeeperWasOverridden)).ToArray();
+            int selectedCount = selections.Count(value => !value.Skip);
+            if (!_unifiedCandidateConfirmation.ConfirmExternalBackup(selectedCount))
+            {
+                StatusMessage = "Candidate cleanup canceled. Confirm a complete external backup before retrying.";
+                return;
+            }
+            IsProgressIndeterminate = false;
+            Progress<UnifiedCandidateCleanupProgress> cleanupProgress = new(value =>
+                UpdateOperationProgress(value.Message, value.CompletedOperations, value.TotalOperations));
+            UnifiedCandidateCleanupResult result = await _executeUnifiedCandidateCleanup.ExecuteAsync(new(
+                SelectedLibraryPath,
+                startingState.GenerationId,
+                startingState.Revision,
+                selections,
+                ExternalBackupConfirmed: true), cleanupProgress, _scanCancellation.Token).ConfigureAwait(true);
+            CandidateCleanupResultSummary = $"Transferred {result.TransferredFormatCount:N0} format(s), removed {result.RemovedFormatCount:N0} format(s), and removed {result.RemovedRecordCount:N0} record(s)."
+                + (result.SkippedGroupCount > 0 ? $" Skipped {result.SkippedGroupCount:N0} group(s)." : string.Empty);
+            LibraryState? final = _libraryStateSession.GetCurrent(SelectedLibraryPath);
+            if (final is not null)
+            {
+                SnapshotPresentation presentation = await PreparePresentationAsync(
+                    final.Snapshot, CancellationToken.None).ConfigureAwait(true);
+                ApplySnapshot(final.Snapshot, presentation, final.IsAuthoritative);
+            }
+            StatusMessage = result.IsCompleted
+                ? "Candidate cleanup completed."
+                : string.Join(" ", result.Issues.Select(value => $"{value.Code}: {value.Explanation}"));
+        }
+        catch (OperationCanceledException)
+        {
+            StatusMessage = startingPhase == LibraryWorkflowPhase.CandidatePreparationReady
+                ? "Candidate preparation canceled without mutation."
+                : "Candidate cleanup cancellation was requested; review the terminal state before continuing.";
+        }
+        finally
+        {
+            await StopCandidateHeartbeatAsync().ConfigureAwait(true);
+            _isCandidatePreparationActive = false;
+            IsBusy = false;
+            _scanCancellation.Dispose();
+            _scanCancellation = null;
+            CancelCommand.NotifyCanExecuteChanged();
+            NotifyCandidateCleanupStateChanged();
+        }
+    }
+
+    private void UpdateCandidateProgress(CandidatePreparationProgress progress)
+    {
+        lock (_candidateProgressGate)
+        {
+            if (_candidateCancellationRequested) return;
+            _latestCandidateProgress = progress;
+            _candidateProgressSequence++;
+            DateTimeOffset now = CurrentUtc();
+            bool phaseChanged = _lastCandidateProgressPhase != progress.Phase;
+            bool detailChanged = !string.Equals(
+                _lastCandidateProgressDetail, progress.Detail, StringComparison.Ordinal);
+            bool completed = progress.Total > 0 && progress.Completed == progress.Total;
+            if (phaseChanged || detailChanged || completed
+                || now - _lastCandidateProgressAppliedUtc >= TimeSpan.FromMilliseconds(200))
+            {
+                _lastCandidateProgressAppliedUtc = now;
+                _lastCandidateProgressPhase = progress.Phase;
+                _lastCandidateProgressDetail = progress.Detail;
+                ApplyCandidateProgress(progress, CandidateElapsed());
+            }
+        }
+    }
+
+    private void ApplyCandidateProgress(CandidatePreparationProgress progress, TimeSpan elapsed)
+    {
+        string detail = string.IsNullOrWhiteSpace(progress.Detail) ? string.Empty : $" {progress.Detail}.";
+        string active = progress.ActiveItems > 0 ? $" {progress.ActiveItems:N0} active." : string.Empty;
+        StatusMessage = $"{progress.Message}.{detail}{active} Elapsed {FormatElapsed(elapsed)}";
+        IsProgressIndeterminate = progress.Total <= 0;
+        ProgressPercentage = progress.Total <= 0 ? 0 : 100d * progress.Completed / progress.Total;
+    }
+
+    private void UpdateOperationProgress(string message, int completed, int total)
+    {
+        StatusMessage = message;
+        IsProgressIndeterminate = total <= 0;
+        ProgressPercentage = total <= 0 ? 0 : 100d * completed / total;
+    }
+
+    private void UpdatePresentationProgress(CandidatePreparationProgress progress)
+    {
+        StatusMessage = string.IsNullOrWhiteSpace(progress.Detail)
+            ? progress.Message
+            : $"{progress.Message}. {progress.Detail}.";
+        IsProgressIndeterminate = progress.Total <= 0;
+        ProgressPercentage = progress.Total <= 0 ? 0 : 100d * progress.Completed / progress.Total;
+    }
+
+    private void StartCandidateHeartbeat()
+    {
+        _candidateOperationStartedUtc = CurrentUtc();
+        int version = Interlocked.Increment(ref _candidateHeartbeatVersion);
+        lock (_candidateProgressGate)
+        {
+            _candidateCancellationRequested = false;
+            _latestCandidateProgress = null;
+            _candidateProgressSequence = 0;
+        }
+        _lastCandidateProgressAppliedUtc = DateTimeOffset.MinValue;
+        _lastCandidateProgressPhase = null;
+        _lastCandidateProgressDetail = string.Empty;
+        _candidateHeartbeatCancellation?.Dispose();
+        _candidateHeartbeatCancellation = new();
+        _candidateHeartbeatTask = RunCandidateHeartbeatAsync(version, _candidateHeartbeatCancellation.Token);
+    }
+
+    private async Task RunCandidateHeartbeatAsync(int version, CancellationToken cancellationToken)
+    {
+        try
+        {
+            using PeriodicTimer timer = new(TimeSpan.FromSeconds(1));
+            while (await timer.WaitForNextTickAsync(cancellationToken).ConfigureAwait(false))
+            {
+                CandidatePreparationProgress? progress;
+                long sequence;
+                lock (_candidateProgressGate)
+                {
+                    progress = _latestCandidateProgress;
+                    sequence = _candidateProgressSequence;
+                }
+                if (progress is null) continue;
+                PostToUi(() =>
+                {
+                    lock (_candidateProgressGate)
+                    {
+                        if (!_candidateCancellationRequested
+                            && version == Volatile.Read(ref _candidateHeartbeatVersion)
+                            && sequence == _candidateProgressSequence)
+                            ApplyCandidateProgress(
+                                progress,
+                                CandidateElapsed());
+                    }
+                });
+            }
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+        }
+    }
+
+    private async Task StopCandidateHeartbeatAsync()
+    {
+        CancellationTokenSource? cancellation = _candidateHeartbeatCancellation;
+        Task? task = _candidateHeartbeatTask;
+        Interlocked.Increment(ref _candidateHeartbeatVersion);
+        _candidateHeartbeatCancellation = null;
+        _candidateHeartbeatTask = null;
+        cancellation?.Cancel();
+        if (task is not null) await task.ConfigureAwait(true);
+        cancellation?.Dispose();
+        lock (_candidateProgressGate)
+        {
+            _latestCandidateProgress = null;
+        }
+    }
+
+    private void PostToUi(Action action)
+    {
+        if (_uiContext is null || SynchronizationContext.Current == _uiContext)
+            action();
+        else
+            _uiContext.Post(_ => action(), null);
+    }
+
+    private static string FormatElapsed(TimeSpan elapsed) => elapsed.TotalHours >= 1
+        ? elapsed.ToString(@"h\:mm\:ss", System.Globalization.CultureInfo.InvariantCulture)
+        : elapsed.ToString(@"m\:ss", System.Globalization.CultureInfo.InvariantCulture);
+
+    private DateTimeOffset CurrentUtc() => (_clock?.GetUtcNow() ?? DateTimeOffset.UtcNow).ToUniversalTime();
+
+    private TimeSpan CandidateElapsed()
+    {
+        TimeSpan elapsed = CurrentUtc() - _candidateOperationStartedUtc;
+        return elapsed < TimeSpan.Zero ? TimeSpan.Zero : elapsed;
+    }
+
+    private sealed class SynchronizedProgress<T>(SynchronizationContext? context, Action<T> report) : IProgress<T>
+    {
+        public void Report(T value)
+        {
+            if (context is null || SynchronizationContext.Current == context)
+                report(value);
+            else
+                context.Post(_ => report(value), null);
+        }
+
+        public Task DrainAsync()
+        {
+            if (context is null || SynchronizationContext.Current == context)
+                return Task.CompletedTask;
+            TaskCompletionSource drained = new(TaskCreationOptions.RunContinuationsAsynchronously);
+            context.Post(_ => drained.TrySetResult(), null);
+            return drained.Task;
+        }
+    }
+
+    private LibraryWorkflowPhase? CandidatePhase() => string.IsNullOrWhiteSpace(SelectedLibraryPath)
+        ? null
+        : _libraryStateSession?.GetCurrent(SelectedLibraryPath)?.WorkflowCheckpoint.Phase;
+
+    private void NotifyCandidateCleanupStateChanged()
+    {
+        CandidateCleanupCommand.NotifyCanExecuteChanged();
+        OnPropertyChanged(nameof(CandidateCleanupAutomationName));
+        OnPropertyChanged(nameof(CandidateCleanupToolTip));
+    }
 
     private bool CanLoadPersistedSnapshot() => !IsBusy
         && _persistedSnapshots is not null

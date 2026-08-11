@@ -32,13 +32,16 @@ public sealed class ExactBinaryCleanupPlanWorkspaceViewModelTests
         IExactDuplicateCleanupConfirmationService confirmation =
             A.Fake<IExactDuplicateCleanupConfirmationService>();
         A.CallTo(() => confirmation.ConfirmExternalBackup(0)).Returns(true);
+        ICleanupExecutionIdGenerator executionIds = A.Fake<ICleanupExecutionIdGenerator>();
+        A.CallTo(() => executionIds.Create()).Returns(new CleanupExecutionId(
+            Guid.Parse("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee")));
         ExactBinaryCleanupPlanWorkspaceViewModel viewModel = new(
             new(
                 stateSession,
                 tools,
                 workers,
                 A.Fake<ILibraryMutationLease>(),
-                A.Fake<ICleanupExecutionIdGenerator>(),
+                executionIds,
                 clock),
             confirmation,
             stateSession,

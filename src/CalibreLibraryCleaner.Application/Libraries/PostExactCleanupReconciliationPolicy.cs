@@ -9,6 +9,7 @@ public enum PostExactAssociationDisposition
     Transferred,
     ExpectedRemoved,
     TargetedHashRequired,
+    PreservedInvalidPath,
     Unexplained,
 }
 
@@ -217,6 +218,26 @@ public static class PostExactCleanupReconciliationPolicy
                 BookFormat? preFormat = preBooks.GetValueOrDefault(bookId)?.Formats.SingleOrDefault(
                     value => string.Equals(value.Format, format, StringComparison.Ordinal));
                 CalibreFormatRecord catalogFormat = catalogFormats[format];
+                if (preFormat is
+                    {
+                        FileStatus: FormatFileStatus.InvalidPath,
+                        Fingerprint: null,
+                        Observation: null,
+                    }
+                    && expectedFormat.FileStatus == FormatFileStatus.InvalidPath
+                    && expectedFormat.Fingerprint is null
+                    && expectedFormat.Observation is null
+                    && string.Equals(preFormat.StoredFileName, expectedFormat.StoredFileName,
+                        StringComparison.Ordinal)
+                    && string.Equals(preFormat.StoredFileName, catalogFormat.StoredName,
+                        StringComparison.Ordinal))
+                {
+                    decisions.Add(new(
+                        key,
+                        PostExactAssociationDisposition.PreservedInvalidPath,
+                        null));
+                    continue;
+                }
                 if (preFormat is null
                     || preFormat.FileStatus != FormatFileStatus.Present
                     || preFormat.Fingerprint is null

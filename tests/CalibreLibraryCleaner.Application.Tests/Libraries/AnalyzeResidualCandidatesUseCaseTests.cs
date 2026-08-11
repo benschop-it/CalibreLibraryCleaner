@@ -85,6 +85,41 @@ public sealed class AnalyzeResidualCandidatesUseCaseTests
     }
 
     [Fact]
+    public async Task PreservedInvalidEpubIsExcludedFromContentTargetsButRetainsMetadataEvidence()
+    {
+        CalibreBook valid = Book(1);
+        CalibreBook source = Book(2);
+        CalibreBook invalid = new(
+            source.Id,
+            source.Title,
+            source.AuthorSort,
+            source.Authors,
+            source.Identifiers,
+            [new BookFormat("EPUB", "book", string.Empty, FormatFileStatus.InvalidPath)],
+            source.RelativeDirectory,
+            source.PublicationMetadata);
+        CalibreBook[] books = [valid, invalid];
+        TestContext context = Context(books);
+        IReadOnlyList<EpubAssessmentTarget>? captured = null;
+        A.CallTo(() => context.Discoverer.ExecuteAsync(
+                A<IReadOnlyList<CalibreBook>>._,
+                A<IReadOnlyList<Domain.Assessments.EpubAssessment>>._,
+                A<IReadOnlyList<EpubAssessmentTarget>>._,
+                A<int>._,
+                A<IProgress<WorkLanguageDiscoveryProgress>?>._,
+                A<CancellationToken>._))
+            .Invokes(call => captured = call.GetArgument<IReadOnlyList<EpubAssessmentTarget>>(2))
+            .Returns(Discovery(books.Length));
+
+        ResidualCandidateAnalysisResult result = await context.UseCase.ExecuteAsync(
+            Root, null, CancellationToken.None);
+
+        result.IsSuccess.Should().BeTrue();
+        result.ExactMetadataGroupCount.Should().Be(1);
+        captured.Should().ContainSingle(value => value.BookId == valid.Id);
+    }
+
+    [Fact]
     public async Task CancellationDuringDiscoveryLeavesRefreshedGenerationAuthoritative()
     {
         CalibreBook[] books = [Book(1), Book(2)];

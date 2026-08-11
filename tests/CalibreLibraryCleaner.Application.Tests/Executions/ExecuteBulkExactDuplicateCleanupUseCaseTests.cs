@@ -33,6 +33,12 @@ public sealed class ExecuteBulkExactDuplicateCleanupUseCaseTests
         result.RemovedFormatCount.Should().Be(2);
         result.MergedRecordCount.Should().Be(1);
         result.RemovedRecordCount.Should().Be(1);
+        harness.Logger.Entries.Should().Contain(value => value.Level == LogLevel.Information
+            && value.Message.Contains("Outcome=Completed", StringComparison.Ordinal)
+            && value.Message.Contains("RemovedFormats=2", StringComparison.Ordinal)
+            && value.Message.Contains("MergedRecords=1", StringComparison.Ordinal)
+            && value.Message.Contains("RemovedRecords=1", StringComparison.Ordinal)
+            && value.Message.Contains("TotalMilliseconds=", StringComparison.Ordinal));
         harness.Trace.Should().ContainInOrder("transfer:2:1:PDF",
             "remove-format:2:EPUB", "remove-format:2:PDF", "remove-record:2");
         LibrarySnapshot final = harness.State.GetCurrent(harness.Snapshot.Identity.LibraryRoot)!.Snapshot;

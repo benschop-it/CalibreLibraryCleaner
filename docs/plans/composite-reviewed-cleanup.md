@@ -1,9 +1,8 @@
 # Composite Reviewed Cleanup
 
-> **Status: Superseded for future development by ADR 0020.** The implemented
-> workflow remains transitional until staged Candidate cleanup reaches behavioral
-> and safety parity. Do not remove or weaken it before that dedicated retirement
-> slice.
+> **Status: Retired after staged parity.** ADR 0020 replaced this mutation workflow
+> with staged Exact and unified Candidate cleanup. This document remains only as
+> historical design and validation context.
 
 ## Objective
 
@@ -179,9 +178,9 @@ dotnet list package --vulnerable --include-transitive
 
 The composite planner merges all three reviewed selection sets from one authoritative scan, allows compatible overlap, blocks incompatible keeper/transfer/removal intentions, simulates final inventory, and emits one canonical transfer-then-format-removal-then-record-removal graph. One executor uses one backup confirmation, lease, worker, mutation marker, bounded chunk stream, projected delta stream, and checkpoint. WPF exposes Cleanup all, exact/metadata/expanded Skip and keeper choices, aggregate progress, and a bounded conflict modal.
 
-ADR 0020 supersedes this one-scan architecture for future development. The current
-implementation remains as a migration compatibility path and must not share
-mutation ownership of an authoritative generation with staged mode.
+ADR 0020 superseded and retired this one-scan mutation architecture after the
+unified Candidate shadow parity recorded in
+`docs/workflows/unified-candidate-shadow-parity.md`.
 
 A post-implementation correction preserves the quality-ranked Expanded keeper when a group is selected. A later product clarification makes the persisted Expanded evidence classification advisory: the UI displays `Cleanup eligible` or `To be reviewed`, while both types start unskipped, allow keeper changes and Skip, and enter category or composite cleanup unless explicitly skipped. Composite preflight logs distinguish submitted selections, actual user Skip counts, advisory review counts, planned category counts, operations, and conflicts.
 

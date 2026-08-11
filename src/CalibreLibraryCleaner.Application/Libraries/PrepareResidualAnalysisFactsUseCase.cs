@@ -1,4 +1,5 @@
 using System.Collections.ObjectModel;
+using System.Diagnostics;
 using CalibreLibraryCleaner.Application.Abstractions;
 using CalibreLibraryCleaner.Application.Assessments;
 using CalibreLibraryCleaner.Application.Assessments.Pdf;
@@ -49,6 +50,7 @@ public interface IResidualAnalysisFactsPreparer
         string libraryRoot,
         IReadOnlyList<EpubAssessmentTarget> epubTargets,
         IReadOnlyList<PdfAssessmentTarget> pdfTargets,
+        IProgress<ResidualAnalysisFactsProgress>? progress,
         CancellationToken cancellationToken);
 
     Task<CandidateContentSignatureBatchResult> ResolveCandidateContentSignaturesAsync(
@@ -57,6 +59,22 @@ public interface IResidualAnalysisFactsPreparer
         IProgress<CandidateContentSignatureProgress>? progress,
         CancellationToken cancellationToken);
 }
+
+public enum ResidualAnalysisFactsPhase
+{
+    AssessingEpubFormats,
+    AssessingPdfFormats,
+}
+
+public sealed record ResidualAnalysisFactsProgress(
+    ResidualAnalysisFactsPhase Phase,
+    int CompletedFiles,
+    int TotalFiles,
+    int ReusedFiles,
+    int ActiveFiles,
+    string Stage,
+    int CompletedPages = 0,
+    int TotalPages = 0);
 
 public sealed partial class PrepareResidualAnalysisFactsUseCase(
     ILibraryStateStore stateStore,
@@ -73,12 +91,14 @@ public sealed partial class PrepareResidualAnalysisFactsUseCase(
         string libraryRoot,
         IReadOnlyList<EpubAssessmentTarget> epubTargets,
         IReadOnlyList<PdfAssessmentTarget> pdfTargets,
+        IProgress<ResidualAnalysisFactsProgress>? progress,
         CancellationToken cancellationToken)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(libraryRoot);
         ArgumentNullException.ThrowIfNull(epubTargets);
         ArgumentNullException.ThrowIfNull(pdfTargets);
         cancellationToken.ThrowIfCancellationRequested();
+        long started = Stopwatch.GetTimestamp();
         LibrarySnapshot? reusable = null;
         try
         {
@@ -96,23 +116,44 @@ public sealed partial class PrepareResidualAnalysisFactsUseCase(
         }
 
         EpubAssessmentReuseResult epubReuse = AssessmentReusePolicy.PartitionEpub(reusable, epubTargets);
+        progress?.Report(new(
+            ResidualAnalysisFactsPhase.AssessingEpubFormats,
+            epubReuse.Reused.Count,
+            epubTargets.Count,
+            epubReuse.Reused.Count,
+            0,
+            "Starting"));
+        long epubStarted = Stopwatch.GetTimestamp();
         IReadOnlyList<EpubAssessment> freshEpub = epubReuse.FreshTargets.Count == 0
             ? []
             : await assessEpubFormats.ExecuteAsync(
                 epubReuse.FreshTargets,
                 options.MaxEpubAssessmentConcurrency,
                 EpubInspectionLimits.V1,
-                null,
+                progress is null
+                    ? null
+                    : new EpubProgressAdapter(progress, epubReuse.Reused.Count, epubTargets.Count),
                 cancellationToken).ConfigureAwait(false);
+        long epubCompleted = Stopwatch.GetTimestamp();
         PdfAssessmentReuseResult pdfReuse = AssessmentReusePolicy.PartitionPdf(reusable, pdfTargets);
+        progress?.Report(new(
+            ResidualAnalysisFactsPhase.AssessingPdfFormats,
+            pdfReuse.Reused.Count,
+            pdfTargets.Count,
+            pdfReuse.Reused.Count,
+            0,
+            "Starting"));
         IReadOnlyList<PdfAssessment> freshPdf = pdfReuse.FreshTargets.Count == 0
             ? []
             : await assessPdfFormats.ExecuteAsync(
                 pdfReuse.FreshTargets,
                 options.MaxPdfAssessmentConcurrency,
                 PdfInspectionLimits.V1,
-                null,
+                progress is null
+                    ? null
+                    : new PdfProgressAdapter(progress, pdfReuse.Reused.Count, pdfTargets.Count),
                 cancellationToken).ConfigureAwait(false);
+        long pdfCompleted = Stopwatch.GetTimestamp();
         EpubAssessment[] epub = epubReuse.Reused.Concat(freshEpub)
             .OrderBy(value => value.CalibreBookId.Value)
             .ThenBy(value => value.ExpectedRelativePath, StringComparer.Ordinal)
@@ -128,7 +169,10 @@ public sealed partial class PrepareResidualAnalysisFactsUseCase(
             freshEpub.Count,
             pdfTargets.Count,
             pdfReuse.Reused.Count,
-            freshPdf.Count);
+            freshPdf.Count,
+            ElapsedMilliseconds(epubStarted, epubCompleted),
+            ElapsedMilliseconds(epubCompleted, pdfCompleted),
+            ElapsedMilliseconds(started, pdfCompleted));
         return new(
             epubTargets,
             pdfTargets,
@@ -161,8 +205,11 @@ public sealed partial class PrepareResidualAnalysisFactsUseCase(
         "Reusable assessment snapshot could not be loaded. FailureType={FailureType}.")]
     private static partial void LogAssessmentCacheUnavailable(ILogger logger, string failureType);
 
+    private static long ElapsedMilliseconds(long started, long completed) =>
+        (long)Stopwatch.GetElapsedTime(started, completed).TotalMilliseconds;
+
     [LoggerMessage(2, LogLevel.Information,
-        "Residual format facts prepared. EpubTargets={EpubTargets}, ReusedEpubAssessments={ReusedEpubAssessments}, FreshEpubAssessments={FreshEpubAssessments}, PdfTargets={PdfTargets}, ReusedPdfAssessments={ReusedPdfAssessments}, FreshPdfAssessments={FreshPdfAssessments}.")]
+        "Residual format facts prepared. EpubTargets={EpubTargets}, ReusedEpubAssessments={ReusedEpubAssessments}, FreshEpubAssessments={FreshEpubAssessments}, PdfTargets={PdfTargets}, ReusedPdfAssessments={ReusedPdfAssessments}, FreshPdfAssessments={FreshPdfAssessments}, EpubMilliseconds={EpubMilliseconds}, PdfMilliseconds={PdfMilliseconds}, TotalMilliseconds={TotalMilliseconds}.")]
     private static partial void LogAssessmentPreparationCompleted(
         ILogger logger,
         int epubTargets,
@@ -170,5 +217,38 @@ public sealed partial class PrepareResidualAnalysisFactsUseCase(
         int freshEpubAssessments,
         int pdfTargets,
         int reusedPdfAssessments,
-        int freshPdfAssessments);
+        int freshPdfAssessments,
+        long epubMilliseconds,
+        long pdfMilliseconds,
+        long totalMilliseconds);
+
+    private sealed class EpubProgressAdapter(
+        IProgress<ResidualAnalysisFactsProgress> progress,
+        int reusedFiles,
+        int totalFiles) : IProgress<EpubAssessmentProgress>
+    {
+        public void Report(EpubAssessmentProgress value) => progress.Report(new(
+            ResidualAnalysisFactsPhase.AssessingEpubFormats,
+            reusedFiles + value.CompletedFiles,
+            totalFiles,
+            reusedFiles,
+            value.ActiveFiles,
+            value.ActiveStageSummary.Length > 0 ? value.ActiveStageSummary : value.Stage));
+    }
+
+    private sealed class PdfProgressAdapter(
+        IProgress<ResidualAnalysisFactsProgress> progress,
+        int reusedFiles,
+        int totalFiles) : IProgress<PdfAssessmentProgress>
+    {
+        public void Report(PdfAssessmentProgress value) => progress.Report(new(
+            ResidualAnalysisFactsPhase.AssessingPdfFormats,
+            reusedFiles + value.CompletedFiles,
+            totalFiles,
+            reusedFiles,
+            string.Equals(value.Stage, "Complete", StringComparison.Ordinal) ? 0 : 1,
+            value.Stage,
+            value.CompletedPages,
+            value.TotalPages));
+    }
 }

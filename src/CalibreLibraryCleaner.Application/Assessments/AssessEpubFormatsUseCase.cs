@@ -76,15 +76,25 @@ public sealed partial class AssessEpubFormatsUseCase(
                     target.Fingerprint,
                     target.Observation,
                     limits);
-                IProgress<EpubInspectionProgress>? inspectionProgress = progress is null
-                    ? new InlineInspectionProgress(value => LogAssessmentStage(
-                        _logger,
-                        target.BookId.Value,
-                        value.Stage,
-                        value.CompletedUnits,
-                        value.TotalUnits ?? 0,
-                        ElapsedMilliseconds(started, Stopwatch.GetTimestamp())))
-                    : new InlineInspectionProgress(value =>
+                object stageLogGate = new();
+                string lastLoggedStage = string.Empty;
+                long lastStageLog = started;
+                void ReportStage(EpubInspectionProgress value)
+                {
+                    bool log;
+                    lock (stageLogGate)
+                    {
+                        long now = Stopwatch.GetTimestamp();
+                        log = !string.Equals(lastLoggedStage, value.Stage, StringComparison.Ordinal)
+                            || value.TotalUnits is > 0 && value.CompletedUnits == value.TotalUnits
+                            || Stopwatch.GetElapsedTime(lastStageLog, now) >= TimeSpan.FromSeconds(1);
+                        if (log)
+                        {
+                            lastLoggedStage = value.Stage;
+                            lastStageLog = now;
+                        }
+                    }
+                    if (log)
                     {
                         LogAssessmentStage(
                             _logger,
@@ -93,8 +103,11 @@ public sealed partial class AssessEpubFormatsUseCase(
                             value.CompletedUnits,
                             value.TotalUnits ?? 0,
                             ElapsedMilliseconds(started, Stopwatch.GetTimestamp()));
+                    }
+                    if (progress is not null)
                         progressCoordinator.ReportStage(index, SafePath(target), FormatInspectionStage(value));
-                    });
+                }
+                IProgress<EpubInspectionProgress> inspectionProgress = new InlineInspectionProgress(ReportStage);
                 try
                 {
                     inspection = await inspector.InspectAsync(request, inspectionProgress, token).ConfigureAwait(false);

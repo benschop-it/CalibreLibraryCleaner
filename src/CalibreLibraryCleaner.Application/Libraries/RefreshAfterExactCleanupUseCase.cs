@@ -17,22 +17,30 @@ public enum PostExactRefreshPhase
     Reconciling,
     ResolvingFiles,
     HashingTransferTargets,
+    AssessingEpubFormats,
+    AssessingPdfFormats,
     Publishing,
     Completed,
 }
 
 public sealed record PostExactRefreshProgress(
     PostExactRefreshPhase Phase,
-    int Completed,
-    int Total,
-    string Message);
+    long Completed,
+    long Total,
+    string Message,
+    CandidateProgressUnit Unit = CandidateProgressUnit.Steps,
+    string Detail = "",
+    int ActiveItems = 0);
 
 public sealed record PostExactRefreshMetrics(
     int CatalogRecordCount,
     int CatalogFormatCount,
     int ReusedFingerprintCount,
+    long ReusedFingerprintBytes,
+    int PreservedInvalidPathCount,
     int ReboundTransferCount,
     int TargetedHashCount,
+    long TargetedHashBytes,
     int ReusedAssessmentCount,
     int FreshAssessmentCount,
     int UnexplainedDifferenceCount,
@@ -77,8 +85,11 @@ public sealed partial class RefreshAfterExactCleanupUseCase(
         int catalogRecordCount = 0;
         int catalogFormatCount = 0;
         int reusedCount = 0;
+        long reusedBytes = 0;
+        int preservedInvalidPathCount = 0;
         int reboundCount = 0;
         int targetedHashCount = 0;
+        long targetedHashBytes = 0;
         int reusedAssessmentCount = 0;
         int freshAssessmentCount = 0;
         int unexplainedCount = 0;
@@ -90,8 +101,11 @@ public sealed partial class RefreshAfterExactCleanupUseCase(
             catalogRecordCount,
             catalogFormatCount,
             reusedCount,
+            reusedBytes,
+            preservedInvalidPathCount,
             reboundCount,
             targetedHashCount,
+            targetedHashBytes,
             reusedAssessmentCount,
             freshAssessmentCount,
             unexplainedCount,
@@ -169,7 +183,8 @@ public sealed partial class RefreshAfterExactCleanupUseCase(
         Dictionary<PostExactAssociationKey, PostExactAssociationDecision> currentDecisions = reconciliation.Decisions
             .Where(value => value.Disposition is PostExactAssociationDisposition.Unchanged
                 or PostExactAssociationDisposition.Transferred
-                or PostExactAssociationDisposition.TargetedHashRequired)
+                or PostExactAssociationDisposition.TargetedHashRequired
+                or PostExactAssociationDisposition.PreservedInvalidPath)
             .ToDictionary(value => value.Association);
         Dictionary<PostExactAssociationKey, BookFormat> preFormats = basis.PreExactState.Snapshot.Books
             .SelectMany(book => book.Formats.Select(format => new
@@ -180,6 +195,7 @@ public sealed partial class RefreshAfterExactCleanupUseCase(
             .ToDictionary(value => value.Key, value => value.Format);
         List<ResolvedAssociation> resolvedAssociations = [];
         List<FormatHashRequest> hashRequests = [];
+        Dictionary<PostExactAssociationKey, BookFormat> refreshedFormats = [];
         int resolvedCount = 0;
         progress?.Report(new(
             PostExactRefreshPhase.ResolvingFiles,
@@ -200,11 +216,31 @@ public sealed partial class RefreshAfterExactCleanupUseCase(
                         $"Record {book.Id} has no explained {key.Format} association.");
                 ResolvedFormatPathOutcome resolved = pathResolver.ResolveFormat(
                     validation.Location, book.RelativeDirectory, format.StoredName, key.Format);
+                BookFormat? preFormat = preFormats.GetValueOrDefault(key);
+                if (decision.Disposition == PostExactAssociationDisposition.PreservedInvalidPath)
+                {
+                    if (resolved.IsSuccess || preFormat?.FileStatus != FormatFileStatus.InvalidPath)
+                        return Failure(
+                            "POST_EXACT.INVALID_PATH_CHANGED",
+                            $"Record {book.Id} has a changed {key.Format} path outcome.");
+                    refreshedFormats.Add(key, new(
+                        key.Format,
+                        format.StoredName,
+                        string.Empty,
+                        FormatFileStatus.InvalidPath));
+                    preservedInvalidPathCount++;
+                    resolvedCount++;
+                    progress?.Report(new(
+                        PostExactRefreshPhase.ResolvingFiles,
+                        resolvedCount,
+                        catalogFormatCount,
+                        "Resolving post-Exact format files"));
+                    continue;
+                }
                 if (!resolved.IsSuccess)
                     return Failure(
                         "POST_EXACT.PATH_INVALID",
                         $"Record {book.Id} has an unsafe or invalid {key.Format} path.");
-                BookFormat? preFormat = preFormats.GetValueOrDefault(key);
                 if (decision.Disposition == PostExactAssociationDisposition.Unchanged
                     && (preFormat is null
                         || !PathsEqual(resolved.Path!.RelativePath, preFormat.ExpectedRelativePath)))
@@ -251,10 +287,13 @@ public sealed partial class RefreshAfterExactCleanupUseCase(
                 "Verifying transferred format bytes"));
             try
             {
+                IProgress<FormatHashProgress>? hashProgress = progress is null
+                    ? null
+                    : new TransferHashProgressAdapter(progress);
                 hashResults = await formatFileHasher.HashAsync(
                     hashRequests,
                     options.MaxHashConcurrency,
-                    null,
+                    hashProgress,
                     cancellationToken).ConfigureAwait(false);
             }
             catch (OperationCanceledException)
@@ -272,9 +311,9 @@ public sealed partial class RefreshAfterExactCleanupUseCase(
                     "POST_EXACT.TARGET_HASH_FAILED",
                     "Transferred format target hashing returned incomplete results.");
             targetedHashCount = hashResults.Count;
+            targetedHashBytes = hashResults.Sum(value => value.Fingerprint!.SizeInBytes);
         }
         Dictionary<int, FormatHashResult> hashes = hashResults.ToDictionary(value => value.Sequence);
-        Dictionary<PostExactAssociationKey, BookFormat> physicalFormats = [];
         foreach (ResolvedAssociation association in resolvedAssociations)
         {
             if (association.Decision.ExpectedFingerprint is not { } expectedFingerprint)
@@ -299,8 +338,9 @@ public sealed partial class RefreshAfterExactCleanupUseCase(
                 fingerprint = expectedFingerprint;
                 observation = association.ProbeObservation!;
                 reusedCount++;
+                reusedBytes += fingerprint.SizeInBytes;
             }
-            physicalFormats.Add(association.Key, new(
+            refreshedFormats.Add(association.Key, new(
                 association.Key.Format,
                 association.StoredName,
                 association.Path.RelativePath,
@@ -312,17 +352,19 @@ public sealed partial class RefreshAfterExactCleanupUseCase(
         DateTimeOffset refreshedAt = clock.GetUtcNow().ToUniversalTime();
         if (refreshedAt < postExactState.ProjectedAtUtc) refreshedAt = postExactState.ProjectedAtUtc;
         CalibreBook[] books = catalog.Books.OrderBy(value => value.Id)
-            .Select(value => MapBook(value, physicalFormats))
+            .Select(value => MapBook(value, refreshedFormats))
             .ToArray();
         Dictionary<PostExactAssociationKey, ResolvedAssociation> resolvedByKey = resolvedAssociations
             .ToDictionary(value => value.Key);
-        EpubAssessmentTarget[] epubTargets = physicalFormats
-            .Where(value => value.Key.Format == "EPUB")
+        EpubAssessmentTarget[] epubTargets = refreshedFormats
+            .Where(value => value.Key.Format == "EPUB"
+                && value.Value.FileStatus == FormatFileStatus.Present)
             .OrderBy(value => value.Key.BookId.Value)
             .Select(value => ToEpubTarget(value.Key, value.Value, resolvedByKey[value.Key].Path))
             .ToArray();
-        PdfAssessmentTarget[] pdfTargets = physicalFormats
-            .Where(value => value.Key.Format == "PDF")
+        PdfAssessmentTarget[] pdfTargets = refreshedFormats
+            .Where(value => value.Key.Format == "PDF"
+                && value.Value.FileStatus == FormatFileStatus.Present)
             .OrderBy(value => value.Key.BookId.Value)
             .Select(value => ToPdfTarget(value.Key, value.Value, resolvedByKey[value.Key].Path))
             .ToArray();
@@ -330,6 +372,7 @@ public sealed partial class RefreshAfterExactCleanupUseCase(
             validation.Location.LibraryRoot,
             epubTargets,
             pdfTargets,
+            progress is null ? null : new FactsProgressAdapter(progress),
             cancellationToken).ConfigureAwait(false);
         reusedAssessmentCount = facts.ReusedEpubAssessmentCount + facts.ReusedPdfAssessmentCount;
         freshAssessmentCount = facts.FreshEpubAssessmentCount + facts.FreshPdfAssessmentCount;
@@ -357,8 +400,11 @@ public sealed partial class RefreshAfterExactCleanupUseCase(
             metrics.CatalogRecordCount,
             metrics.CatalogFormatCount,
             metrics.ReusedFingerprintCount,
+            metrics.ReusedFingerprintBytes,
+            metrics.PreservedInvalidPathCount,
             metrics.ReboundTransferCount,
             metrics.TargetedHashCount,
+            metrics.TargetedHashBytes,
             metrics.ReusedAssessmentCount,
             metrics.FreshAssessmentCount,
             metrics.TotalMilliseconds);
@@ -451,14 +497,17 @@ public sealed partial class RefreshAfterExactCleanupUseCase(
         int unexplainedDifferences);
 
     [LoggerMessage(2, LogLevel.Information,
-        "Post-Exact refresh completed. CatalogRecords={CatalogRecords}, CatalogFormats={CatalogFormats}, ReusedFingerprints={ReusedFingerprints}, ReboundTransfers={ReboundTransfers}, TargetedHashes={TargetedHashes}, ReusedAssessments={ReusedAssessments}, FreshAssessments={FreshAssessments}, TotalMilliseconds={TotalMilliseconds}.")]
+        "Post-Exact refresh completed. CatalogRecords={CatalogRecords}, CatalogFormats={CatalogFormats}, ReusedFingerprints={ReusedFingerprints}, ReusedFingerprintBytes={ReusedFingerprintBytes}, PreservedInvalidPaths={PreservedInvalidPaths}, ReboundTransfers={ReboundTransfers}, TargetedHashes={TargetedHashes}, TargetedHashBytes={TargetedHashBytes}, ReusedAssessments={ReusedAssessments}, FreshAssessments={FreshAssessments}, TotalMilliseconds={TotalMilliseconds}.")]
     private static partial void LogRefreshCompleted(
         ILogger logger,
         int catalogRecords,
         int catalogFormats,
         int reusedFingerprints,
+        long reusedFingerprintBytes,
+        int preservedInvalidPaths,
         int reboundTransfers,
         int targetedHashes,
+        long targetedHashBytes,
         int reusedAssessments,
         int freshAssessments,
         long totalMilliseconds);
@@ -471,4 +520,43 @@ public sealed partial class RefreshAfterExactCleanupUseCase(
         BookFormat? PreExactFormat,
         FormatFileObservation? ProbeObservation,
         int? HashSequence);
+
+    private sealed class TransferHashProgressAdapter(IProgress<PostExactRefreshProgress> progress) :
+        IProgress<FormatHashProgress>
+    {
+        public void Report(FormatHashProgress value)
+        {
+            bool useBytes = value.TotalBytes > 0;
+            progress.Report(new(
+                PostExactRefreshPhase.HashingTransferTargets,
+                useBytes ? Math.Min(value.CompletedBytes, value.TotalBytes) : value.CompletedFiles,
+                useBytes ? value.TotalBytes : value.TotalFiles,
+                value.Message,
+                useBytes ? CandidateProgressUnit.Bytes : CandidateProgressUnit.Files,
+                ActiveItems: value.ActiveFiles));
+        }
+    }
+
+    private sealed class FactsProgressAdapter(IProgress<PostExactRefreshProgress> progress) :
+        IProgress<ResidualAnalysisFactsProgress>
+    {
+        public void Report(ResidualAnalysisFactsProgress value)
+        {
+            string format = value.Phase == ResidualAnalysisFactsPhase.AssessingEpubFormats ? "EPUB" : "PDF";
+            string message = $"Assessing {format} files: {value.CompletedFiles:N0} of {value.TotalFiles:N0} complete ({value.ReusedFiles:N0} reused)";
+            string detail = value.TotalPages > 0
+                ? $"{value.Stage}: {value.CompletedPages:N0} of {value.TotalPages:N0} sampled pages"
+                : value.Stage;
+            progress.Report(new(
+                value.Phase == ResidualAnalysisFactsPhase.AssessingEpubFormats
+                    ? PostExactRefreshPhase.AssessingEpubFormats
+                    : PostExactRefreshPhase.AssessingPdfFormats,
+                value.CompletedFiles,
+                value.TotalFiles,
+                message,
+                CandidateProgressUnit.Files,
+                detail,
+                value.ActiveFiles));
+        }
+    }
 }

@@ -200,10 +200,12 @@ public sealed partial class ScanLibraryUseCase(
                 exactFindings,
                 exactGroups);
             long exactCompleted = Stopwatch.GetTimestamp();
+            long hashedBytes = hashResults.Sum(result => result.Fingerprint?.SizeInBytes ?? 0L);
             LogExactAnalysisCompleted(
                 _logger,
                 catalog.Books.Count,
                 requests.Count,
+                hashedBytes,
                 exactGroups.Count,
                 ElapsedMilliseconds(scanStarted, catalogReadCompleted),
                 ElapsedMilliseconds(catalogReadCompleted, resolutionCompleted),
@@ -828,11 +830,12 @@ public sealed partial class ScanLibraryUseCase(
         long totalMilliseconds);
 
     [LoggerMessage(401, LogLevel.Information,
-        "Exact-only analysis completed. Books={BookCount}, Formats={FormatCount}, ExactGroups={ExactGroupCount}, CatalogMilliseconds={CatalogMilliseconds}, ResolutionMilliseconds={ResolutionMilliseconds}, HashingMilliseconds={HashingMilliseconds}, GroupingAndPublicationMilliseconds={GroupingAndPublicationMilliseconds}, TotalMilliseconds={TotalMilliseconds}.")]
+        "Exact-only analysis completed. Books={BookCount}, Formats={FormatCount}, HashedBytes={HashedBytes}, ExactGroups={ExactGroupCount}, CatalogMilliseconds={CatalogMilliseconds}, ResolutionMilliseconds={ResolutionMilliseconds}, HashingMilliseconds={HashingMilliseconds}, GroupingAndPublicationMilliseconds={GroupingAndPublicationMilliseconds}, TotalMilliseconds={TotalMilliseconds}.")]
     private static partial void LogExactAnalysisCompleted(
         ILogger logger,
         int bookCount,
         int formatCount,
+        long hashedBytes,
         int exactGroupCount,
         long catalogMilliseconds,
         long resolutionMilliseconds,

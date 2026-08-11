@@ -206,6 +206,8 @@ public sealed class ResolveCandidateContentSignaturesUseCaseTests
             && value.Contains("UniqueFingerprints=2", StringComparison.Ordinal));
         logger.Messages.Should().Contain(value =>
             value.Contains("AggregateInspectionMilliseconds", StringComparison.Ordinal)
+            && value.Contains("UniqueFingerprintBytes=2048", StringComparison.Ordinal)
+            && value.Contains("InspectionAttemptBytes=2048", StringComparison.Ordinal)
             && value.Contains("PruneMilliseconds", StringComparison.Ordinal));
         logger.Messages.Should().NotContain(value =>
             value.Contains("Author/", StringComparison.Ordinal)

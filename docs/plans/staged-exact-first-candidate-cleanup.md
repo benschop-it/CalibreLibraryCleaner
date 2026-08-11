@@ -532,9 +532,14 @@ Manual large-library acceptance records metrics from Serilog and verifies:
 - [x] Unified candidate domain values and merge policy implemented.
 - [x] Residual candidate analysis implemented.
 - [x] Unified candidate discovery and presentation implemented.
-- [ ] Candidate cleanup implemented.
-- [ ] Legacy composite/category cleanup retired.
-- [ ] Full automated and large-library acceptance completed.
+- [x] Candidate cleanup implemented.
+- [x] Shadow parity completed and intentional differences documented.
+- [x] Legacy composite/category cleanup retired.
+- [x] Production staged metrics completed and metric contracts tested.
+- [x] Synthetic 20,000-record scale baseline measured.
+- [x] Final automated verification and complete tracked/untracked diff review completed.
+- [x] Manual large-library acceptance checklist prepared.
+- [x] Disposable large-library staged measurement and manual acceptance executed.
 
 ## Final outcome
 
@@ -574,8 +579,9 @@ Step 6 retains the exact-analysis baseline and completed hash-chained Exact delt
 across normal checkpoint compaction, rereads the catalog read-only, resolves every
 current association through the existing path boundary, reuses only explained
 unchanged fingerprints, target-hashes transfer destinations, rejects mismatches,
-and atomically publishes a new all-physical generation with exact source
-provenance. Step 7 carries reusable EPUB/PDF assessments across exact-only
+and atomically publishes a new authoritative generation with exact source
+provenance and physical executable associations while preserving unchanged invalid paths
+as non-executable findings. Step 7 carries reusable EPUB/PDF assessments across exact-only
 generations, rebinds compatible facts by fingerprint/version to current records and
 paths, inspects only misses, and delegates candidate-only EPUB signatures to the
 existing no-prose fingerprint/version cache. Cancellation or any preparation
@@ -615,3 +621,109 @@ The complete suite is run with project-level parallelism disabled because unchan
 PDF/viewer worker tests can contend for process resources when all test projects run
 concurrently. The Exact cleanup executor and post-Exact refresh implementation were
 not modified by these slices.
+Steps 11-12 wire one durable `Candidate cleanup` command across restart. An
+activation captured at `CandidatePreparationReady` performs trusted refresh when
+needed, resumes after an already durable refresh, runs residual analysis, publishes
+the unified review workspace, and stops without mutation. A later activation at
+`CandidateAnalysisReady` captures current keeper/Skip/member selections, requests
+one external-backup confirmation, and invokes the unified executor. The executor
+pins generation/revision/membership, skips stale or physically incomplete groups,
+simulates final inventory, and emits deterministic transfer-then-format-removal-
+then-empty-record-removal operations. One lease, fixed persistent worker, durable
+marker, at-most-100-operation chunks, complete-chunk typed deltas, final checkpoint,
+and durable `Completed` transition are used. Worker ambiguity, cancellation after
+the marker, delta failure, checkpoint failure, or completion-publication failure
+stops and marks state uncertain. No scan, catalog, hashing, assessment, or content
+service is reachable from mutation execution. Seventy-four focused Application/WPF
+tests pass, and the Exact executor, post-Exact refresh, and residual discovery
+implementations remain unchanged.
+Final steps 11-12 verification passes with 74 focused Application/WPF tests, a
+clean full build, clean formatting and diff hygiene, no vulnerable direct or
+transitive packages, and 643 passing tests. The complete suite is run serially by
+project because unchanged controlled PDF/viewer worker tests can briefly retain
+temporary process files when test projects compete. No Candidate execution path
+references catalog, path, hashing, EPUB/PDF inspection, refresh, or discovery
+services.
+Step 13 ran six synthetic shadow comparisons before deletion. Metadata-only
+membership/keeper/same-format removals, Expanded complementary operations,
+advisory-group execution, and incomplete-physical-state skips matched legacy
+behavior. Two intentional differences are documented in
+`docs/workflows/unified-candidate-shadow-parity.md`: unified quality ranking resolves
+formerly ambiguous complementary Metadata sources, and staged Candidate cleanup
+rejects all `ProjectedPresent` placeholders. Step 14 then removed `Cleanup all`,
+standalone Metadata/Expanded executors and contracts, composite reconciliation,
+confirmation services, workspaces, DI registrations, mutation buttons, and their
+dedicated tests. Metadata/Expanded analysis grids and viewer actions remain
+read-only. Exact cleanup and the staged workflow remain unchanged.
+Final steps 13-14 verification passes with a clean full build, clean formatting
+and diff hygiene, no vulnerable direct or transitive packages, no remaining legacy
+mutation symbols or bindings, and 619 passing tests. The six shadow tests were
+removed only after their passed results and intentional differences were recorded.
+The full suite is run serially by project because unchanged isolated PDF/viewer
+worker tests can transiently hit resource or file-release races when competing.
+Steps 15-16 complete production metric coverage for Exact hashing bytes and phase
+durations, Exact removal counts and duration, post-Exact fingerprint reuse and
+targeted-hash counts/bytes, EPUB/PDF reuse/fresh counts and durations, Candidate
+signature cache/inspection counts/bytes and durations, unified group counts, and
+Candidate operation counts/duration. Focused scan, metric, cleanup, and restart
+checks pass, including five explicit persisted replay tests across `ExactReady`,
+`CandidatePreparationReady`, `CandidateAnalysisReady`, and `Completed` gating.
+
+One opt-in synthetic run on 2026-08-10 measured 20,000 records, 10,000 Exact
+Metadata groups, and 10,000 retained Candidate pairs. On .NET SDK 10.0.301,
+Windows 10.0.22631, an Intel Core i7-11850H, and 31.7 GiB RAM, Exact grouping took
+386 ms, matching-profile construction 1,238 ms, Candidate generation 704 ms, and
+snapshot serialization 1,067 ms. The run allocated 91,892,904 bytes for Exact
+grouping and 650,991,368 bytes for matching, retained 26,846,776 matching bytes
+after full collection, and serialized 18,976,606 bytes. These are one synthetic
+reference run, not thresholds or developer-library performance. The first two
+benchmark attempts exposed a stale fixture: one shared author identity was
+suppressed by the accepted oversized-bucket policy. The fixture now uses 10,000
+bounded synthetic author identities and the same baseline passes.
+
+Final automated verification restores and builds the complete solution cleanly,
+passes formatting, reports no vulnerable direct or transitive packages, reports
+no editor diagnostics, and passes `git diff --check` except for an LF-to-CRLF
+notice on `docs/safety-and-rollback.md`. The intermittent PDF failures were
+diagnosed: an exited-process probe race was misclassified as a hard resource
+failure, and a Windows timestamp mutation was not immediately observable while an
+in-process stream remained open. An exited-process probe is now neutral, the
+identity test changes an immediately observable file attribute, focused hard-limit
+checks pass, and the complete serial suite passed 619/619. After the
+acceptance-discovered refresh correction and four added tests, the final complete
+serial suite passed 623/623. A final PDF identity regression guard increased the
+suite to 624 tests. The first 624-test run saw the unchanged scheduler-sensitive
+`OrchestrationIsBoundedCanonicalAndCancellationAware` test observe concurrency 1
+instead of 2; it passed alone and the final complete serial suite passed 624/624.
+
+Manual acceptance completed on the user-selected disposable large-library copy
+after separate explicit backup confirmations. Exact analysis measured 27,952
+books, 29,235 resolvable formats, 30,738,918,140 hashed bytes, 5,750 groups, and
+51,105 ms. Sixty-three additional catalog associations were existing invalid-path
+findings. Exact cleanup completed 13,542 operations in 284,465 ms: 6,777 format
+removals, 3 merged records, 6,762 record removals, and 1 skipped record.
+
+The first Candidate preparation attempt safely rejected those 63 invalid paths as
+unexplained and published nothing. Inspection proved all 63 were unchanged
+pre-existing `InvalidPath` associations. The corrected policy preserves only the
+same still-unresolvable catalog association as non-executable; a changed or newly
+resolvable path remains fail-closed. The successful refresh measured 21,190
+records, 22,524 associations, 22,458 reused fingerprints/24,819,959,298 bytes, 63
+preserved invalid paths, and 3 targeted hashes/1,336,933 bytes. All 20,571 EPUB and
+473 PDF assessments were fresh, taking 1,624,071 ms. Candidate signatures measured
+8,267 fingerprints, 8,010 cache hits, and 257 inspections. Residual discovery
+produced 32 Exact Metadata, 3,189 Expanded, and 3,190 unified groups in 148,008 ms.
+Candidate cleanup completed 7,813 operations in 190,646 ms: 229 transfers, 3,908
+format removals, 3,676 record removals, and 8 skipped groups.
+
+Manual restart/load checks passed at `ExactReady`, `CandidatePreparationReady`,
+and `CandidateAnalysisReady`; keeper ID/title/authors and override responsiveness
+passed sampled UI review. Final state is authoritative `Completed`, revision 7,813,
+with no pending marker. Normal shutdown released the database lock and left no app,
+PDF worker, Calibre worker, viewer, or `testhost` process. Two remaining
+`vstest.console` processes belong to Visual Studio service parents. Acceptance is
+recorded as passed with deviations: assessment sub-progress remained visually
+stuck on targeted hashing, eight Debug log segments totaled about 183 MiB, and no
+compatible prior assessment baseline existed to measure assessment reuse. Detailed
+evidence is in `docs/workflows/staged-large-library-acceptance.md`; observed
+durations are measurements, not performance thresholds.

@@ -226,7 +226,7 @@ public sealed class IsolatedPdfInspector(PdfWorkerOptions options) : IPdfInspect
         }
         catch (InvalidOperationException)
         {
-            return PdfInspectionProblemCode.WorkerCrashed;
+            return null;
         }
     }
 

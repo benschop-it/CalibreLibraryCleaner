@@ -6,6 +6,7 @@ using CalibreLibraryCleaner.Domain.Assessments;
 using CalibreLibraryCleaner.Domain.Libraries;
 using FakeItEasy;
 using FluentAssertions;
+using Microsoft.Extensions.Logging;
 using Xunit;
 
 namespace CalibreLibraryCleaner.Application.Tests.Assessments;
@@ -481,6 +482,36 @@ public sealed class EpubAssessmentTests
     }
 
     [Fact]
+    public async Task RepeatedChapterCallbacksAreCoalescedInDiagnosticLogging()
+    {
+        IEpubInspector inspector = A.Fake<IEpubInspector>();
+        A.CallTo(() => inspector.InspectAsync(
+                A<EpubInspectionRequest>._,
+                A<IProgress<EpubInspectionProgress>?>._,
+                A<CancellationToken>._))
+            .ReturnsLazily(call =>
+            {
+                EpubInspectionRequest request = call.GetArgument<EpubInspectionRequest>(0)!;
+                IProgress<EpubInspectionProgress>? progress =
+                    call.GetArgument<IProgress<EpubInspectionProgress>?>(1);
+                for (int chapter = 1; chapter <= 100; chapter++)
+                    progress?.Report(new("Content", chapter, 100));
+                return Task.FromResult(Healthy(request.BookId, request.ExpectedRelativePath));
+            });
+        CapturingLogger<AssessEpubFormatsUseCase> logger = new();
+        AssessEpubFormatsUseCase useCase = new(inspector, new(), logger);
+        EpubAssessmentTarget target = new(
+            new(1), "EPUB", "Book.epub", "root", "book",
+            FormatFileStatus.Present, Fingerprint, Observation);
+
+        await useCase.ExecuteAsync(
+            [target], 1, EpubInspectionLimits.V1, null, CancellationToken.None);
+
+        logger.Messages.Count(value => value.Contains("EPUB assessment stage", StringComparison.Ordinal))
+            .Should().Be(2);
+    }
+
+    [Fact]
     public async Task ConcurrentWorkersReportStableAggregateStagesWithoutAlternatingPaths()
     {
         IEpubInspector inspector = A.Fake<IEpubInspector>();
@@ -579,5 +610,19 @@ public sealed class EpubAssessmentTests
     private sealed class InlineProgress(Action<EpubAssessmentProgress> report) : IProgress<EpubAssessmentProgress>
     {
         public void Report(EpubAssessmentProgress value) => report(value);
+    }
+
+    private sealed class CapturingLogger<T> : ILogger<T>
+    {
+        public List<string> Messages { get; } = [];
+
+        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+        public bool IsEnabled(LogLevel logLevel) => true;
+        public void Log<TState>(
+            LogLevel logLevel,
+            EventId eventId,
+            TState state,
+            Exception? exception,
+            Func<TState, Exception?, string> formatter) => Messages.Add(formatter(state, exception));
     }
 }

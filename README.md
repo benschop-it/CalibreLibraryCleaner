@@ -9,8 +9,8 @@ Visual Studio Code and GitHub Copilot Business.
 The application can build immutable read-only analysis snapshots, hash formats,
 detect exact binary and exact normalized metadata candidates, assess EPUB and
 PDF quality, generate bounded local work-language candidates with candidate-only
-EPUB hash evidence, generate recommendations, and consolidate exact or metadata
-duplicate groups through a constrained persistent Calibre worker.
+EPUB hash evidence, and execute staged Exact and unified Candidate cleanup through
+a constrained persistent Calibre worker.
 
 Persisted analysis loading remains available during development because a full
 large-library scan can take approximately twenty minutes. Startup lists small
@@ -19,28 +19,17 @@ Explicit Scan still SHA-256 hashes every file, but unchanged EPUB/PDF assessment
 are reused from authoritative state when fingerprints and analyzer versions match.
 Repeat scans should therefore avoid most archive parsing and PDF worker startup.
 
-Exact-binary and metadata candidate groups both use generated keeper rows that
-can be overridden by selecting another member. Metadata groups can be skipped;
-processing transfers generated complementary formats and removes every
-non-keeper record. The application requires confirmation of a complete external
-library backup, uses one persistent `calibre-debug` worker, logs failures, and
-requires Rescan after a failed or ambiguous mutation.
+Exact cleanup runs first from an exact-only analysis. Candidate preparation then
+performs trusted post-Exact reconciliation, reuses compatible facts, and builds
+disjoint unified Metadata/Expanded groups. Candidate cleanup uses reviewed keeper
+and Skip choices, transfers complementary formats, and removes non-keepers. Each
+mutation stage separately requires confirmation of a complete external backup.
 
-The Expanded candidates tab presents content-confirmed same-work/same-language
-groups with a generated sole keeper, Keep/Remove actions, Skip, evidence, and
-explicit backup-confirmed cleanup. It does not rewrite title or author metadata.
-Double-click a member row in any duplicate/candidate tab to inspect the selected
-book in Calibre ebook viewer.
-
-After reviewing keeper and Skip choices in all three tabs, use `Cleanup all` to
-validate overlaps and execute one transfer/removal plan from the initial scan.
-Conflicting choices are shown before backup confirmation and no mutation starts
-until they are corrected.
-
-ADR 0020 defines the in-progress replacement: exact-only analysis, the unchanged
-Exact cleanup algorithm, trusted post-exact refresh, and one residual Candidate
-cleanup workflow. Legacy category commands and `Cleanup all` remain available only
-during migration and will be retired after staged behavioral and safety parity.
+Metadata and Expanded tabs remain read-only evidence views. The Unified candidates
+tab presents executable disjoint groups, keeper details, evidence, advisory
+classification, keeper override, and Skip. Double-click opens a present format in
+Calibre ebook viewer. Legacy standalone Metadata/Expanded mutation commands and
+`Cleanup all` were retired after documented shadow parity.
 
 Candidate-only EPUB fingerprints and local expanded discovery are implemented.
 PDF cross-document fingerprints, calibrated content-language detection, and

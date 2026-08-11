@@ -24,6 +24,25 @@ associations against authoritative projected state and completed Exact deltas.
 Known fingerprints may be reused only for explained associations. Unexplained
 catalog or file changes fail closed and require a new exact analysis. Candidate
 preparation is not a normal full scan and never occurs implicitly during mutation.
+An unchanged catalog association already classified `InvalidPath` by Exact analysis
+may remain as a non-executable finding only while the same association remains
+unresolvable. A newly resolvable or otherwise changed association fails closed.
+
+Candidate preparation reports its active phase with truthful phase-local units.
+Transfer verification uses bytes/files; EPUB/PDF assessment uses completed/total
+files plus bounded technical substages; content matching uses fingerprints; and
+result materialization uses exact item totals. A one-second elapsed heartbeat keeps
+the current phase visible when semantic counters do not advance. It never invents
+completed work. Cancel remains available and immediately reports that cancellation
+is pending while the current bounded operation stops.
+
+Candidate preparation reports its active phase with truthful phase-local units.
+Transfer verification uses bytes/files; EPUB/PDF assessment uses completed/total
+files plus bounded technical substages; content matching uses fingerprints; and
+result materialization uses exact item totals. A one-second elapsed heartbeat keeps
+the current phase visible when semantic counters do not advance. It never invents
+completed work. Cancel remains available and immediately reports that cancellation
+is pending while the current bounded operation stops.
 
 ## Duplicate detection
 
@@ -99,15 +118,19 @@ Double-clicking a member in Exact file duplicates opens that exact format in Cal
 
 The Expanded candidates tab shows content-confirmed work-language groups, confidence, reason/contradiction codes, bounded content evidence, member formats, a generated sole keeper, Keep/Remove actions, and a session-scoped Skip choice. Selecting another member changes the keeper. Double-clicking opens its preferred present format.
 
-Expanded groups from authoritative matching evidence can be processed. Before each run the user confirms a complete external backup and acknowledges that candidate matching may not prove identical work, edition, revision, illustrations, or formatting. `To be reviewed` is an advisory prompt for optional inspection, not a cleanup gate. Complementary formats are transferred to the keeper; every format and empty record on Remove members is removed through the fixed worker. The keeper's same-format file wins. This workflow does not automatically rewrite title or author metadata.
+Metadata and Expanded tabs are read-only evidence views. Unified Candidate groups
+combine these evidence sources into disjoint executable groups. Before Candidate
+cleanup the user confirms a complete external backup and acknowledges that matching
+may not prove identical work, edition, revision, illustrations, or formatting.
+`To be reviewed` is advisory rather than a cleanup gate. Complementary formats are
+transferred to the keeper; every non-keeper format and proven-empty record is
+removed through the fixed worker. The keeper's same-format file wins.
 
-## Cleanup all
+## Retired legacy cleanup
 
-`Cleanup all` is a transitional one-scan workflow. It remains available during
-staged migration but is superseded for future development by separate `Exact
-cleanup` and `Candidate cleanup` stages. It must not mutate a generation owned by
-the staged workflow and will be retired only after staged Candidate cleanup reaches
-behavioral and safety parity.
+`Cleanup all` and standalone Metadata/Expanded mutation commands are retired.
+Shadow parity and intentional differences are recorded in
+`docs/workflows/unified-candidate-shadow-parity.md`.
 
 ## Exact duplicate cleanup
 
@@ -125,17 +148,6 @@ existing Exact cleanup algorithm unchanged. Completed and nothing-to-do outcomes
 advance the durable phase to `CandidatePreparationReady`; failed or ambiguous
 mutation leaves state uncertain and Candidate cleanup disabled.
 
-## Metadata candidate cleanup
-
-Standalone Metadata cleanup is transitional. In the staged target, exact normalized
-metadata remains mandatory evidence inside unified Candidate cleanup rather than a
-separate mutation authority.
-
-The Metadata candidates workflow lists exact normalized title/author groups, selects the generated best metadata source as the default keeper, and allows the user to Skip a group or select another sole keeper. Groups without a generated metadata source use a deterministic format-coverage and metadata-quality fallback keeper. Every group starts unskipped. Choices reset when another scan or persisted snapshot is loaded.
-
-After exact cleanup, generated recommendations may be unavailable and the exact keeper may contain authoritative projected formats. The metadata fallback keeper must then prefer available format coverage and metadata quality rather than arbitrary member order. Projected formats are permitted only on the keeper; Remove records still require scan-observed physical facts. Missing recommendations do not block same-format removal or a uniquely resolvable complementary transfer.
-
-One command processes all unskipped groups after external-backup confirmation. The keeper retains its current metadata and formats. Generated selected complementary formats are transferred when absent from the keeper. Every format on every non-keeper is then removed and each empty non-keeper record is removed. If the keeper already has the same format, the keeper's file is retained even when the removed alternative is not byte-identical. An unresolved complementary source causes the group to be skipped before mutation.
 ## AI
 
 Optional AI may assist with ambiguous metadata or edition comparison. It must include provenance and may not directly authorize destructive operations.
