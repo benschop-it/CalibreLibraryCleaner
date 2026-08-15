@@ -1,4 +1,5 @@
 using System.Text.Json.Serialization;
+using CalibreLibraryCleaner.Domain.Matching;
 
 namespace CalibreLibraryCleaner.Domain.Tests.Matching.Evaluation;
 
@@ -32,7 +33,8 @@ public sealed record MatchingScenario(
     IReadOnlyList<MatchingExpectedGroup> ExpectedGroups,
     string ReviewNote,
     int Repeat = 1,
-    long CalibreIdStride = 0);
+    long CalibreIdStride = 0,
+    IReadOnlyList<MatchingBibliographicResolution>? BibliographicResolutions = null);
 
 public sealed record MatchingRecordFixture(
     string Key,
@@ -93,6 +95,16 @@ public sealed record MatchingExpectedGroup(
     string WorkKey,
     string Language,
     IReadOnlyList<string> AcceptableKeeperRecordIds);
+
+public sealed record MatchingBibliographicResolution(
+    string RecordKey,
+    string ProviderId,
+    string ProviderVersion,
+    BibliographicQueryFields QueryFields,
+    string RetrievedAtUtc,
+    BibliographicResolutionStatus Status,
+    string? WorkId,
+    string? ProblemCode);
 
 public static class MatchingCorpusVocabulary
 {

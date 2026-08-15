@@ -46,7 +46,7 @@ public sealed record LibraryWorkflowPolicyVersions
         "staged-cleanup/1.0.0",
         "exact-analysis/1.1.0",
         "exact-cleanup/1.0.0",
-        "candidate-analysis/1.1.0");
+        "candidate-analysis/1.2.0");
 
     public LibraryWorkflowPolicyVersions(
         string workflow,

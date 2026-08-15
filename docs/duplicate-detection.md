@@ -78,6 +78,16 @@ signature is keyed by file fingerprint and all policy/resource versions and stor
 No prose is retained. Comparison is symmetric. Equivalent/high-similarity content
 can support union; unavailable/weak/different content does not.
 
+## Open Library evidence
+
+Candidate pairs still unresolved after local content may query Open Library. Queries
+are cache-first and disclose/transmit validated ISBN only when available, otherwise
+bounded title, author, and optional language. A deterministic policy requires one
+compatible or clearly dominant work result. Two records resolving to the same
+provider work ID gain provenance-bearing Anchor evidence; different, ambiguous,
+missing, failed, or rate-limited results remain neutral. Existing decisive
+contradictions still reject the pair.
+
 ## Component and group construction
 
 Anchor/strong compatible edges seed components. Before each union, the matcher checks
@@ -130,18 +140,20 @@ ebook prose or personal-library data.
 
 The reviewed `matching-evaluation/1.0` baseline for current policies records:
 
-- pair precision: 220/220, 100%;
-- pair recall: 220/232, 94.8276%;
-- F1: 440/452, 97.3451%;
+- pair precision: 222/222, 100%;
+- pair recall: 222/232, 95.6897%;
+- F1: 444/454, 97.7974%;
 - candidate-route recall: 232/232, 100%;
-- exact final components: 200/212, 94.3396%;
-- keeper coverage: 200/212 expected groups, 94.3396%; and
-- keeper accuracy among those complete predicted groups: 200/200, 100%.
+- exact final components: 202/212, 95.2830%;
+- keeper coverage: 202/212 expected groups, 95.2830%; and
+- keeper accuracy among those complete predicted groups: 202/202, 100%.
 
 Contradiction-aware Exact Metadata removed all 20 prior false positives. Edition-
 neutral title similarity then recovered all ten previously unproposed positive pairs
-without changing precision. The 12 remaining false negatives all reached candidate
-generation but had requested-yet-unavailable/weak content outcomes. These are corpus
+without changing precision. Open Library evidence recovered the two independently
+sourced public-domain work families. The ten remaining false negatives are synthetic
+cases that reached candidate generation but had requested-yet-unavailable/weak
+content outcomes. These are corpus
 measurements, not universal library accuracy claims. Later policy changes must report
 calibration and frozen-holdout deltas against the committed semantic baseline.
 

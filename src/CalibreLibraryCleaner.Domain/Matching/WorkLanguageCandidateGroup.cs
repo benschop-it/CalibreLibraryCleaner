@@ -40,7 +40,8 @@ public sealed record MatchingPolicyVersion
     public static MatchingPolicyVersion V2 { get; } = new("work-language-matching/1.1.0");
     public static MatchingPolicyVersion V3 { get; } = new("work-language-matching/1.2.0");
     public static MatchingPolicyVersion V4 { get; } = new("work-language-matching/1.3.0");
-    public static MatchingPolicyVersion Current => V4;
+    public static MatchingPolicyVersion V5 { get; } = new("work-language-matching/1.4.0");
+    public static MatchingPolicyVersion Current => V5;
 
     public MatchingPolicyVersion(string value)
     {
@@ -55,17 +56,45 @@ public sealed record MatchingPolicyVersion
 
 public sealed record CandidateEvidence
 {
-    public CandidateEvidence(string code, CandidateEvidenceStrength strength)
+    public CandidateEvidence(
+        string code,
+        CandidateEvidenceStrength strength,
+        CandidateEvidenceProvenance? provenance = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(code);
         if (code.Length > 128 || !Enum.IsDefined(strength))
             throw new ArgumentException("Candidate evidence is invalid.");
         Code = code.Trim();
         Strength = strength;
+        Provenance = provenance;
     }
 
     public string Code { get; }
     public CandidateEvidenceStrength Strength { get; }
+    public CandidateEvidenceProvenance? Provenance { get; }
+}
+
+public sealed record CandidateEvidenceProvenance
+{
+    public CandidateEvidenceProvenance(string sourceId, string sourceVersion, string resultId)
+    {
+        SourceId = Bound(sourceId, 64, nameof(sourceId));
+        SourceVersion = Bound(sourceVersion, 128, nameof(sourceVersion));
+        ResultId = Bound(resultId, 160, nameof(resultId));
+    }
+
+    public string SourceId { get; }
+    public string SourceVersion { get; }
+    public string ResultId { get; }
+
+    private static string Bound(string value, int maximumLength, string parameterName)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(value, parameterName);
+        string normalized = value.Trim();
+        return normalized.Length <= maximumLength
+            ? normalized
+            : throw new ArgumentOutOfRangeException(parameterName);
+    }
 }
 
 public sealed record CandidateContradiction
@@ -143,7 +172,10 @@ public sealed record WorkLanguageCandidateGroup
         CalibreBookId[] orderedAnchors = anchorMembers.Distinct().OrderBy(value => value.Value).ToArray();
         CandidateEvidence[] orderedEvidence = evidence.Distinct()
             .OrderByDescending(value => value.Strength)
-            .ThenBy(value => value.Code, StringComparer.Ordinal).ToArray();
+            .ThenBy(value => value.Code, StringComparer.Ordinal)
+            .ThenBy(value => value.Provenance?.SourceId ?? string.Empty, StringComparer.Ordinal)
+            .ThenBy(value => value.Provenance?.SourceVersion ?? string.Empty, StringComparer.Ordinal)
+            .ThenBy(value => value.Provenance?.ResultId ?? string.Empty, StringComparer.Ordinal).ToArray();
         CandidateContradiction[] orderedContradictions = (contradictions ?? []).Distinct()
             .OrderBy(value => value.Code, StringComparer.Ordinal).ToArray();
         if (orderedMembers.Length < 2
@@ -168,7 +200,9 @@ public sealed record WorkLanguageCandidateGroup
         PolicyVersion = policyVersion;
         EvidenceStatus = evidenceStatus;
         CleanupEligibility = policyVersion is { } version
-            && (version == MatchingPolicyVersion.V3 || version == MatchingPolicyVersion.V4)
+            && (version == MatchingPolicyVersion.V3
+                || version == MatchingPolicyVersion.V4
+                || version == MatchingPolicyVersion.V5)
             && ContentComparison.ComparedPairCount > 0
             && ContentComparison.EquivalentPairCount + ContentComparison.HighSimilarityPairCount
                 == ContentComparison.ComparedPairCount
@@ -239,7 +273,14 @@ public sealed record BookMatchingRunSummary
         int contentCacheHits,
         int contentComparisons,
         int inferredGroupCount,
-        int unknownLanguageCount)
+        int unknownLanguageCount,
+        int bibliographicQueries = 0,
+        int bibliographicCacheHits = 0,
+        int bibliographicProviderRequests = 0,
+        int bibliographicMatchedRecords = 0,
+        int bibliographicFailures = 0,
+        bool bibliographicRequestLimitReached = false,
+        bool bibliographicEnabled = false)
     {
         ArgumentNullException.ThrowIfNull(policyVersion);
         int[] counts =
@@ -253,11 +294,20 @@ public sealed record BookMatchingRunSummary
             contentComparisons,
             inferredGroupCount,
             unknownLanguageCount,
+            bibliographicQueries,
+            bibliographicCacheHits,
+            bibliographicProviderRequests,
+            bibliographicMatchedRecords,
+            bibliographicFailures,
         ];
         if (!Enum.IsDefined(status) || counts.Any(value => value < 0)
             || retainedPairCount > proposedPairCount
             || contentCacheHits > contentSignaturesRequested
-            || unknownLanguageCount > recordCount)
+            || unknownLanguageCount > recordCount
+            || bibliographicCacheHits > bibliographicQueries
+            || bibliographicProviderRequests > bibliographicQueries
+            || bibliographicMatchedRecords > recordCount
+            || bibliographicFailures > bibliographicProviderRequests)
             throw new ArgumentException("The matching run summary is invalid.");
         PolicyVersion = policyVersion;
         Status = status;
@@ -270,6 +320,13 @@ public sealed record BookMatchingRunSummary
         ContentComparisons = contentComparisons;
         InferredGroupCount = inferredGroupCount;
         UnknownLanguageCount = unknownLanguageCount;
+        BibliographicQueries = bibliographicQueries;
+        BibliographicCacheHits = bibliographicCacheHits;
+        BibliographicProviderRequests = bibliographicProviderRequests;
+        BibliographicMatchedRecords = bibliographicMatchedRecords;
+        BibliographicFailures = bibliographicFailures;
+        BibliographicRequestLimitReached = bibliographicRequestLimitReached;
+        BibliographicEnabled = bibliographicEnabled;
     }
 
     public MatchingPolicyVersion PolicyVersion { get; }
@@ -283,6 +340,13 @@ public sealed record BookMatchingRunSummary
     public int ContentComparisons { get; }
     public int InferredGroupCount { get; }
     public int UnknownLanguageCount { get; }
+    public int BibliographicQueries { get; }
+    public int BibliographicCacheHits { get; }
+    public int BibliographicProviderRequests { get; }
+    public int BibliographicMatchedRecords { get; }
+    public int BibliographicFailures { get; }
+    public bool BibliographicRequestLimitReached { get; }
+    public bool BibliographicEnabled { get; }
 
     public static BookMatchingRunSummary Unavailable(int recordCount) => new(
         MatchingPolicyVersion.Current,

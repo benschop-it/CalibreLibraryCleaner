@@ -1,5 +1,7 @@
 using CalibreLibraryCleaner.Application.Abstractions;
 using CalibreLibraryCleaner.Application.Executions;
+using CalibreLibraryCleaner.Application.Matching;
+using CalibreLibraryCleaner.Infrastructure.Bibliographic;
 using CalibreLibraryCleaner.Infrastructure.Calibre;
 using CalibreLibraryCleaner.Infrastructure.Epub;
 using CalibreLibraryCleaner.Infrastructure.Execution;
@@ -38,6 +40,28 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<IEpubContentSignatureInspector>(provider => provider.GetRequiredService<VersOneEpubInspector>());
         services.AddSingleton(new EpubContentSignatureCacheOptions());
         services.AddSingleton<IEpubContentSignatureCache, FileEpubContentSignatureCache>();
+        bool openLibraryEnabled = !string.Equals(
+            Environment.GetEnvironmentVariable("CALIBRE_OPEN_LIBRARY_ENABLED"), "0", StringComparison.Ordinal);
+        OpenLibraryOptions openLibraryOptions = new(
+            enabled: openLibraryEnabled,
+            contact: Environment.GetEnvironmentVariable("CALIBRE_OPEN_LIBRARY_CONTACT"));
+        services.AddSingleton(openLibraryOptions);
+        services.AddSingleton(new BibliographicEnrichmentOptions(enabled: openLibraryEnabled));
+        services.AddSingleton(new BibliographicResolutionCacheOptions());
+        services.AddSingleton<IBibliographicResolutionCache, FileBibliographicResolutionCache>();
+        services.AddSingleton(_ => new HttpClient(new SocketsHttpHandler
+        {
+            AllowAutoRedirect = false,
+            AutomaticDecompression = System.Net.DecompressionMethods.GZip
+                | System.Net.DecompressionMethods.Deflate,
+        })
+        {
+            BaseAddress = new("https://openlibrary.org/", UriKind.Absolute),
+            Timeout = TimeSpan.FromSeconds(65),
+        });
+        services.AddSingleton<OpenLibraryBibliographicProvider>();
+        services.AddSingleton<IBibliographicProvider>(provider =>
+            provider.GetRequiredService<OpenLibraryBibliographicProvider>());
         services.AddSingleton(new PdfWorkerOptions());
         services.AddSingleton<IPdfInspector, IsolatedPdfInspector>();
         services.AddSingleton<IRecommendationExporter, VersionedJsonRecommendationExporter>();

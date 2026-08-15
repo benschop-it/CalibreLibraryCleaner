@@ -89,7 +89,18 @@ public static class MatchingCorpusEvaluator
         Dictionary<BookCandidatePairId, CandidateContentComparison> injected = generation.Pairs
             .Where(value => value.NeedsContentEvidence && oracleByPair.ContainsKey(value.Id))
             .ToDictionary(value => value.Id, value => CreateComparison(oracleByPair[value.Id]));
-        IReadOnlyList<BookCandidateDecision> decisions = BookCandidateDecisionPolicy.Decide(generation.Pairs, injected);
+        Dictionary<CalibreBookId, BookMatchingProfile> profileById = profiles.ToDictionary(value => value.BookId);
+        Dictionary<CalibreBookId, CalibreBook> bookById = books.ToDictionary(value => value.Id);
+        Dictionary<CalibreBookId, BibliographicWorkResolution> bibliographic =
+            (scenario.BibliographicResolutions ?? []).ToDictionary(
+                value => idByKey[value.RecordKey],
+                value => CreateBibliographicResolution(
+                    value,
+                    bookById[idByKey[value.RecordKey]],
+                    profileById[idByKey[value.RecordKey]]));
+        IReadOnlyList<BookCandidatePair> enrichedPairs = BibliographicPairEvidencePolicy.Enrich(
+            generation.Pairs, bibliographic);
+        IReadOnlyList<BookCandidateDecision> decisions = BookCandidateDecisionPolicy.Decide(enrichedPairs, injected);
         IReadOnlyList<WorkLanguageCandidateGroup> expanded = WorkLanguageCandidateClusterer.Cluster(profiles, decisions);
         IReadOnlyList<UnifiedCandidateGroup> unified = UnifiedCandidateMergePolicy.Merge(
             exact, expanded, books, epubAssessments);
@@ -395,6 +406,29 @@ public static class MatchingCorpusEvaluator
         oracle.MatchedRegionCount,
         oracle.TokenCountRatioPermille,
         oracle.ShingleSimilarityPermille);
+
+    private static BibliographicWorkResolution CreateBibliographicResolution(
+        MatchingBibliographicResolution oracle,
+        CalibreBook book,
+        BookMatchingProfile profile)
+    {
+        BibliographicProviderIdentity provider = new(oracle.ProviderId, oracle.ProviderVersion);
+        BibliographicLookupQuery query = BibliographicLookupQuery.Create(book, profile, provider);
+        if (query.Fields != oracle.QueryFields)
+            throw new MatchingCorpusValidationException("CORPUS.BIBLIOGRAPHIC_QUERY_FIELDS_MISMATCH");
+        return new(
+            book.Id,
+            provider,
+            query.QueryIdentity,
+            query.Fields,
+            DateTimeOffset.Parse(
+                oracle.RetrievedAtUtc,
+                System.Globalization.CultureInfo.InvariantCulture,
+                System.Globalization.DateTimeStyles.RoundtripKind),
+            oracle.Status,
+            oracle.WorkId,
+            oracle.ProblemCode);
+    }
 
     private static HashSet<BookCandidatePairId> PairIds(IEnumerable<IEnumerable<CalibreBookId>> groups)
     {

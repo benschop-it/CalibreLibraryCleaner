@@ -187,7 +187,11 @@
       "expectedGroups": [
         {"workKey":"wikidata-work-q92640","language":"en","acceptableKeeperRecordIds":["alice-a","alice-b"]}
       ],
-      "reviewNote": "Minimal CC0 Wikidata facts for public-domain work Q92640; variant marker is synthetic."
+      "reviewNote": "Minimal CC0 Wikidata facts for public-domain work Q92640; variant marker is synthetic.",
+      "bibliographicResolutions": [
+        {"recordKey":"alice-a","providerId":"open-library","providerVersion":"open-library-search-1.0.0","queryFields":"Title, Authors, Language","retrievedAtUtc":"2026-08-15T12:00:00Z","status":"Matched","workId":"/works/OL138052W","problemCode":null},
+        {"recordKey":"alice-b","providerId":"open-library","providerVersion":"open-library-search-1.0.0","queryFields":"Title, Authors, Language","retrievedAtUtc":"2026-08-15T12:00:00Z","status":"Matched","workId":"/works/OL138052W","problemCode":null}
+      ]
     }
   ]
 }

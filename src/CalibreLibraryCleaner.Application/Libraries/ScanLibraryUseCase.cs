@@ -786,6 +786,8 @@ public sealed partial class ScanLibraryUseCase(
                     (LibraryScanPhase.GeneratingMatchingCandidates, "Searching for duplicate works within author groups"),
                 WorkLanguageDiscoveryPhase.InspectingContent =>
                     (LibraryScanPhase.InspectingCandidateContent, "Confirming candidate books with EPUB content evidence"),
+                WorkLanguageDiscoveryPhase.ResolvingBibliographicEvidence =>
+                    (LibraryScanPhase.InspectingCandidateContent, "Resolving unresolved records with Open Library bibliographic evidence"),
                 WorkLanguageDiscoveryPhase.Clustering =>
                     (LibraryScanPhase.GroupingWorkLanguageCandidates, "Publishing confirmed work-language groups"),
                 _ => throw new ArgumentOutOfRangeException(nameof(value)),

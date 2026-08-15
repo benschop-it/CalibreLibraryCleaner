@@ -69,7 +69,10 @@ public sealed class LibrarySnapshotJsonSerializerTests
             [members[0]],
             WorkLanguageCandidateConfidence.Strong,
             [
-                new("MATCH.CONTENT.HIGH_SIMILARITY", CandidateEvidenceStrength.Anchor),
+                new(
+                    "MATCH.BIBLIOGRAPHIC.SAME_WORK",
+                    CandidateEvidenceStrength.Anchor,
+                    new("open-library", "open-library-search-1.0.0", "/works/OL138052W")),
                 new("MATCH.AUTHOR.COMPATIBLE", CandidateEvidenceStrength.Supporting),
             ],
             contentComparison: new(1, 0, 1, 0, 0, 0));
@@ -84,7 +87,13 @@ public sealed class LibrarySnapshotJsonSerializerTests
             1,
             1,
             1,
-            0);
+            0,
+            bibliographicQueries: 2,
+            bibliographicCacheHits: 1,
+            bibliographicProviderRequests: 1,
+            bibliographicMatchedRecords: 2,
+            bibliographicFailures: 0,
+            bibliographicEnabled: true);
         LibrarySnapshot value = new(
             fixture.Snapshot.Identity,
             fixture.Snapshot.ScannedAt,

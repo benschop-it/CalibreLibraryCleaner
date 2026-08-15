@@ -198,6 +198,7 @@ public static class MatchingCorpusLoader
         }
         ValidateExpectedGroups(scenario, keys);
         ValidateComparisons(scenario, keys);
+        ValidateBibliographicResolutions(scenario, keys);
     }
 
     private static void ValidateRecord(string scenarioId, MatchingRecordFixture record)
@@ -328,6 +329,45 @@ public static class MatchingCorpusLoader
         }
     }
 
+    private static void ValidateBibliographicResolutions(MatchingScenario scenario, HashSet<string> keys)
+    {
+        MatchingBibliographicResolution[] values = (scenario.BibliographicResolutions ?? []).ToArray();
+        if (values.Length > MaximumRecordsPerScenario
+            || values.Select(value => (value.RecordKey, value.ProviderId)).Distinct().Count() != values.Length)
+            throw new MatchingCorpusValidationException("CORPUS.BIBLIOGRAPHIC_COUNT_INVALID", scenario.Id);
+        foreach (MatchingBibliographicResolution value in values)
+        {
+            if (!keys.Contains(value.RecordKey)
+                || !IsOpaqueId(value.ProviderId)
+                || !IsOpaqueId(value.ProviderVersion)
+                || value.QueryFields == BibliographicQueryFields.None
+                || !DateTimeOffset.TryParse(
+                    value.RetrievedAtUtc,
+                    System.Globalization.CultureInfo.InvariantCulture,
+                    System.Globalization.DateTimeStyles.RoundtripKind,
+                    out DateTimeOffset retrievedAt))
+                throw new MatchingCorpusValidationException(
+                    "CORPUS.BIBLIOGRAPHIC_RESOLUTION_INVALID", scenario.Id, value.RecordKey);
+            try
+            {
+                _ = new BibliographicWorkResolution(
+                    new(1),
+                    new(value.ProviderId, value.ProviderVersion),
+                    new string('a', 64),
+                    value.QueryFields,
+                    retrievedAt,
+                    value.Status,
+                    value.WorkId,
+                    value.ProblemCode);
+            }
+            catch (ArgumentException)
+            {
+                throw new MatchingCorpusValidationException(
+                    "CORPUS.BIBLIOGRAPHIC_RESOLUTION_INVALID", scenario.Id, value.RecordKey);
+            }
+        }
+    }
+
     private static void ValidateStringList(
         IReadOnlyList<string>? values,
         string code,
@@ -396,6 +436,9 @@ public static class MatchingCorpusLoader
             {
                 AcceptableKeeperRecordIds = value.AcceptableKeeperRecordIds.Order(StringComparer.Ordinal).ToArray(),
             }).ToArray(),
+        BibliographicResolutions = (scenario.BibliographicResolutions ?? [])
+                .OrderBy(value => value.RecordKey, StringComparer.Ordinal)
+                .ThenBy(value => value.ProviderId, StringComparer.Ordinal).ToArray(),
     };
 
     private static MatchingCorpus ExpandTemplates(MatchingCorpus corpus)

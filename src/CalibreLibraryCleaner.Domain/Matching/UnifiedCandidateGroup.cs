@@ -100,7 +100,10 @@ public sealed record UnifiedCandidateGroup
         CalibreBookId[] orderedMembers = members.Distinct().OrderBy(value => value.Value).ToArray();
         CandidateEvidence[] orderedEvidence = evidence.Distinct()
             .OrderByDescending(value => value.Strength)
-            .ThenBy(value => value.Code, StringComparer.Ordinal).ToArray();
+            .ThenBy(value => value.Code, StringComparer.Ordinal)
+            .ThenBy(value => value.Provenance?.SourceId ?? string.Empty, StringComparer.Ordinal)
+            .ThenBy(value => value.Provenance?.SourceVersion ?? string.Empty, StringComparer.Ordinal)
+            .ThenBy(value => value.Provenance?.ResultId ?? string.Empty, StringComparer.Ordinal).ToArray();
         CandidateContradiction[] orderedContradictions = (contradictions ?? []).Distinct()
             .OrderBy(value => value.Code, StringComparer.Ordinal).ToArray();
         ExactMetadataDuplicateGroupId[] metadataIds = (exactMetadataGroupIds ?? []).Distinct()

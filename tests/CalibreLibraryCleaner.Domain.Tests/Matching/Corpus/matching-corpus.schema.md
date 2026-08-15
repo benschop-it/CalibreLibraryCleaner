@@ -9,6 +9,11 @@ optional content-comparison oracles, expected multi-record groups, and acceptabl
 keeper record IDs. Records with the same `workKey` and `expectedLanguage` are
 positive pairs. Every other pair in that scenario is negative.
 
+Optional `bibliographicResolutions` are per-record provider-result oracles containing
+provider/version, disclosed query-field flags, retrieval time, status, and a bounded
+work ID only for `Matched`. The evaluator derives and verifies the real query identity
+from record facts; raw provider payloads are prohibited.
+
 Content oracles map a canonical record-key pair to the exact public
 `CandidateContentComparison` fields. Missing oracle data means unavailable evidence;
 it never creates a candidate that the production generator did not retain.

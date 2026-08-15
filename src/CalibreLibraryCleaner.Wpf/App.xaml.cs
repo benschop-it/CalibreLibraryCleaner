@@ -48,6 +48,7 @@ public partial class App : System.Windows.Application
         builder.Services.AddSingleton<ConsolidationRecommendationPolicy>();
         builder.Services.AddSingleton<GenerateConsolidationRecommendationsUseCase>();
         builder.Services.AddSingleton<ResolveCandidateContentSignaturesUseCase>();
+        builder.Services.AddSingleton<ResolveBibliographicEvidenceUseCase>();
         builder.Services.AddSingleton<PrepareResidualAnalysisFactsUseCase>();
         builder.Services.AddSingleton<IResidualAnalysisFactsPreparer>(serviceProvider =>
             serviceProvider.GetRequiredService<PrepareResidualAnalysisFactsUseCase>());

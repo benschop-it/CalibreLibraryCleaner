@@ -78,6 +78,13 @@ landmarks, and a bounded hash sketch. It contains no prose.
 contradictions, confidence, content comparison summary, policy version, and advisory
 eligibility.
 
+`BibliographicLookupQuery`, bounded provider work candidates, and
+`BibliographicWorkResolution` separate transmitted fields, one-way query identity,
+provider/work identity, retrieval time, status, and policy versions. Matching
+evidence may carry bounded source/version/result provenance. Same-provider/same-work
+resolutions add positive evidence; absence, ambiguity, or provider disagreement is
+neutral.
+
 `UnifiedCandidateGroup` merges Exact Metadata and Expanded evidence into one
 disjoint executable group. It contains canonical members, evidence provenance,
 review findings, advisory classification, generated keeper, retention facts, and
@@ -93,7 +100,7 @@ Future provider-neutral Domain values should represent:
 - PDF content signatures/comparisons with coverage semantics;
 - cover/visual and structural comparisons;
 - content-language classification;
-- bibliographic provider work/edition evidence with provenance; and
+- additional bibliographic provider work/edition evidence with provenance; and
 - local model/embedding evidence with model/input versions.
 
 These values are evidence inputs. They cannot reference HTTP/model runtimes or call

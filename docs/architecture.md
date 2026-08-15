@@ -59,6 +59,13 @@ components only through compatible anchor/strong relations. Complete-component
 language, author, series, identifier, edition-marker, and content contradictions
 block unsafe unions. Final groups are partitioned by normalized language.
 
+Locally unresolved ambiguous/unavailable-content pairs may use bounded Open Library
+work search. Application selects and caps queries, reads/writes reduced resolution
+cache entries, reports progress, and applies Domain resolution/fusion. Infrastructure
+owns fixed-endpoint HTTPS, rate limiting, response parsing, and atomic cache files.
+Only identical resolved provider work IDs add positive evidence; ambiguity, mismatch,
+failure, timeout, or cache loss remains neutral and local matching continues.
+
 Exact normalized metadata evidence is mandatory input to unified grouping and is not
 suppressed by ordinary candidate caps. The unified merge policy produces disjoint
 executable groups; each record occurs in at most one group.
@@ -70,7 +77,7 @@ Add independent provider-neutral evidence boundaries for:
 - PDF whole-document/sampled fingerprints;
 - cover and visual similarity;
 - content-language classification;
-- online bibliographic work/edition identity; and
+- additional online bibliographic work/edition identity; and
 - local embedding/model outputs.
 
 Every evidence result carries input identity, provider/model/policy versions,
@@ -85,6 +92,8 @@ must be calibrated on labeled data. Online failure cannot block local matching.
 - Compatible EPUB/PDF assessments are reusable by fingerprint and all analyzer,
   scoring, classification, and resource versions.
 - EPUB signatures are cached by fingerprint and signature/inspection versions.
+- Open Library resolutions are cached by query hash and all provider/query/resolution
+  policy versions; entries contain reduced work identity evidence, not raw payloads.
 - Cache entries contain technical facts/hashes, not prose or absolute library paths.
 - Atomic writes and bounded pruning make cache loss a performance event, not a
   correctness event.
@@ -150,17 +159,21 @@ After failed or ambiguous mutation, stop and require explicit Rescan. Do not add
 rollback/recovery models, backup bundles, execution history, or reconciliation-heavy
 state.
 
-## Online bibliographic evidence target
+## Online bibliographic evidence
 
-Configured providers are enabled by default. Infrastructure owns HTTP, credentials,
-rate limits, retries, response parsing, and provider caches behind Application ports.
-Application requests only bounded bibliographic metadata needed for matching. Domain
-owns provider-neutral evidence and fusion.
+Open Library is enabled by default for low-volume user-triggered Candidate analysis.
+Infrastructure owns fixed HTTPS, optional contact configuration, provider rate
+limits, bounded response parsing, and provider cache files behind Application ports.
+Application requests only unresolved records, caps a run at 24 cache misses, and
+transmits validated ISBN when available or bounded title, author, and optional
+language fields. Domain owns provider-neutral work resolution and evidence fusion.
 
 The UI/settings disclose enabled providers and transmitted field categories. Logs do
 not contain book metadata or provider payloads. Provider results are advisory,
-versioned, cached, and reproducible from stored safe identifiers/evidence where
-possible. Network/provider failures degrade to local matching.
+versioned, cached, and reproducible from stored query hashes and reduced evidence.
+Network/provider/cache failures degrade to local matching. Set
+`CALIBRE_OPEN_LIBRARY_ENABLED=0` to disable the provider; optional
+`CALIBRE_OPEN_LIBRARY_CONTACT` identifies regular requests without being logged.
 
 ## Local ML target
 
@@ -182,5 +195,5 @@ payloads, or embeddings by default.
 - Current mutation state is more detailed than the accepted minimal target.
 - Full compatibility scan code remains for compatibility although staged mode is the
   configured product workflow.
-- PDF matching, online providers, local ML, incremental candidate recomputation, and
+- PDF matching, additional online providers, local ML, incremental candidate recomputation, and
   calibrated evidence fusion are not implemented.

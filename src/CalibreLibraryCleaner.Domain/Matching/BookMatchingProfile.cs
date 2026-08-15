@@ -97,6 +97,20 @@ public static class CandidateMetadataNormalizer
 
     public static bool IsEditionMarker(string token) => EditionMarkers.Contains(token);
 
+    public static int TitleSimilarityPermille(
+        IEnumerable<string> first,
+        IEnumerable<string> second)
+    {
+        ArgumentNullException.ThrowIfNull(first);
+        ArgumentNullException.ThrowIfNull(second);
+        HashSet<string> left = first.Where(value => !IsEditionMarker(value)).ToHashSet(StringComparer.Ordinal);
+        HashSet<string> right = second.Where(value => !IsEditionMarker(value)).ToHashSet(StringComparer.Ordinal);
+        if (left.Count == 0 || right.Count == 0) return 0;
+        int intersection = left.Count(right.Contains);
+        int union = left.Count + right.Count - intersection;
+        return union == 0 ? 0 : intersection * 1000 / union;
+    }
+
     public static string[] TitleKeys(string value)
     {
         string[] tokens = Tokenize(value);

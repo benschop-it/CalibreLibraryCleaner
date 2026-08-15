@@ -29,3 +29,15 @@ main-namespace data, which Wikidata publishes under CC0-1.0:
 Only title, author, language, and stable source identity facts were retained. No
 descriptions, quotations, book prose, images, or provider payloads are committed.
 The edition-marker variants are synthetic and identified as such in scenario notes.
+
+Open Library Search API work identities were reviewed on 2026-08-15 using bounded
+title/author queries and the documented `key,title,author_name,language` fields:
+
+- `Q92640` records resolve to `/works/OL138052W`.
+- `Q170583` records resolve to `/works/OL66554W`.
+- API documentation and usage guidance:
+    `https://openlibrary.org/developers/api` and
+    `https://openlibrary.org/dev/docs/api/search`.
+
+The corpus stores only these stable work IDs, provider/version provenance, disclosed
+query field categories, and retrieval time. No response payload is committed.

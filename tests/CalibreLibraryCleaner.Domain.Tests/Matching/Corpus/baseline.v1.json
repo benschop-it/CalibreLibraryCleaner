@@ -1,11 +1,11 @@
 {
   "schemaVersion": "matching-evaluation/1.0",
   "corpusVersion": "matching-corpus-data/1.0",
-  "calibrationDigest": "e2caad058508d12da3fda2b2d7fd23ea6b02f9265b27a00d4dc41d510c41c019",
-  "holdoutDigest": "c991ae9d6d692dfa57da9fcbceaa0a1a553bf33c098c1852643af1fdfe181d14",
+  "calibrationDigest": "b405b8ad9d2f917041baa49003954b0f090c7ff2dae814a94c06e1f4e4c8ceb7",
+  "holdoutDigest": "c99b3f6eb9914b1ae824f8019ea94cba5f360b1669ec8ce6abc8060f1e409315",
   "policies": {
     "exactMetadata": "exact-metadata/1.1.0",
-    "matching": "work-language-matching/1.3.0",
+    "matching": "work-language-matching/1.4.0",
     "unified": "unified-candidates/1.0.0",
     "keeper": "expanded-candidate-keeper/1.0.0"
   },
@@ -38,25 +38,25 @@
   "overall": {
     "name": "Overall",
     "pairs": {
-      "truePositives": 220,
+      "truePositives": 222,
       "falsePositives": 0,
-      "falseNegatives": 12,
+      "falseNegatives": 10,
       "trueNegatives": 2600
     },
     "precision": {
-      "numerator": 220,
-      "denominator": 220,
+      "numerator": 222,
+      "denominator": 222,
       "percentage": 100
     },
     "recall": {
-      "numerator": 220,
+      "numerator": 222,
       "denominator": 232,
-      "percentage": 94.8276
+      "percentage": 95.6897
     },
     "f1": {
-      "numerator": 440,
-      "denominator": 452,
-      "percentage": 97.3451
+      "numerator": 444,
+      "denominator": 454,
+      "percentage": 97.7974
     },
     "candidateRouteRecall": {
       "numerator": 232,
@@ -69,29 +69,29 @@
       "percentage": 100
     },
     "exactComponentRate": {
-      "numerator": 200,
+      "numerator": 202,
       "denominator": 212,
-      "percentage": 94.3396
+      "percentage": 95.2830
     },
     "languageAccuracy": {
-      "numerator": 200,
-      "denominator": 200,
+      "numerator": 202,
+      "denominator": 202,
       "percentage": 100
     },
     "keeperCoverage": {
-      "numerator": 200,
+      "numerator": 202,
       "denominator": 212,
-      "percentage": 94.3396
+      "percentage": 95.2830
     },
     "keeperAccuracy": {
-      "numerator": 200,
-      "denominator": 200,
+      "numerator": 202,
+      "denominator": 202,
       "percentage": 100
     },
     "expectedGroups": 212,
-    "predictedGroups": 200,
+    "predictedGroups": 202,
     "overmergedGroups": 0,
-    "fragmentedGroups": 12,
+    "fragmentedGroups": 10,
     "crossLanguageMerges": 0,
     "contentRequestedPairs": 2202,
     "contentOracleAvailablePairs": 50,
@@ -105,7 +105,7 @@
     "decisionDispositions": [
       {
         "name": "Anchor",
-        "count": 30
+        "count": 32
       },
       {
         "name": "Rejected",
@@ -113,13 +113,13 @@
       },
       {
         "name": "Weak",
-        "count": 2162
+        "count": 2160
       }
     ],
     "failureCategories": [
       {
         "name": "CONTENT_UNAVAILABLE_OR_WEAK",
-        "count": 12
+        "count": 10
       }
     ],
     "unifiedClassifications": [
@@ -129,7 +129,7 @@
       },
       {
         "name": "ToBeReviewed",
-        "count": 180
+        "count": 182
       }
     ],
     "unifiedFindings": []
@@ -138,25 +138,25 @@
     {
       "name": "Calibration",
       "pairs": {
-        "truePositives": 110,
+        "truePositives": 111,
         "falsePositives": 0,
-        "falseNegatives": 6,
+        "falseNegatives": 5,
         "trueNegatives": 1300
       },
       "precision": {
-        "numerator": 110,
-        "denominator": 110,
+        "numerator": 111,
+        "denominator": 111,
         "percentage": 100
       },
       "recall": {
-        "numerator": 110,
+        "numerator": 111,
         "denominator": 116,
-        "percentage": 94.8276
+        "percentage": 95.6897
       },
       "f1": {
-        "numerator": 220,
-        "denominator": 226,
-        "percentage": 97.3451
+        "numerator": 222,
+        "denominator": 227,
+        "percentage": 97.7974
       },
       "candidateRouteRecall": {
         "numerator": 116,
@@ -169,29 +169,29 @@
         "percentage": 100
       },
       "exactComponentRate": {
-        "numerator": 100,
+        "numerator": 101,
         "denominator": 106,
-        "percentage": 94.3396
+        "percentage": 95.2830
       },
       "languageAccuracy": {
-        "numerator": 100,
-        "denominator": 100,
+        "numerator": 101,
+        "denominator": 101,
         "percentage": 100
       },
       "keeperCoverage": {
-        "numerator": 100,
+        "numerator": 101,
         "denominator": 106,
-        "percentage": 94.3396
+        "percentage": 95.2830
       },
       "keeperAccuracy": {
-        "numerator": 100,
-        "denominator": 100,
+        "numerator": 101,
+        "denominator": 101,
         "percentage": 100
       },
       "expectedGroups": 106,
-      "predictedGroups": 100,
+      "predictedGroups": 101,
       "overmergedGroups": 0,
-      "fragmentedGroups": 6,
+      "fragmentedGroups": 5,
       "crossLanguageMerges": 0,
       "contentRequestedPairs": 1101,
       "contentOracleAvailablePairs": 25,
@@ -205,7 +205,7 @@
       "decisionDispositions": [
         {
           "name": "Anchor",
-          "count": 15
+          "count": 16
         },
         {
           "name": "Rejected",
@@ -213,13 +213,13 @@
         },
         {
           "name": "Weak",
-          "count": 1081
+          "count": 1080
         }
       ],
       "failureCategories": [
         {
           "name": "CONTENT_UNAVAILABLE_OR_WEAK",
-          "count": 6
+          "count": 5
         }
       ],
       "unifiedClassifications": [
@@ -229,7 +229,7 @@
         },
         {
           "name": "ToBeReviewed",
-          "count": 90
+          "count": 91
         }
       ],
       "unifiedFindings": []
@@ -237,25 +237,25 @@
     {
       "name": "Holdout",
       "pairs": {
-        "truePositives": 110,
+        "truePositives": 111,
         "falsePositives": 0,
-        "falseNegatives": 6,
+        "falseNegatives": 5,
         "trueNegatives": 1300
       },
       "precision": {
-        "numerator": 110,
-        "denominator": 110,
+        "numerator": 111,
+        "denominator": 111,
         "percentage": 100
       },
       "recall": {
-        "numerator": 110,
+        "numerator": 111,
         "denominator": 116,
-        "percentage": 94.8276
+        "percentage": 95.6897
       },
       "f1": {
-        "numerator": 220,
-        "denominator": 226,
-        "percentage": 97.3451
+        "numerator": 222,
+        "denominator": 227,
+        "percentage": 97.7974
       },
       "candidateRouteRecall": {
         "numerator": 116,
@@ -268,29 +268,29 @@
         "percentage": 100
       },
       "exactComponentRate": {
-        "numerator": 100,
+        "numerator": 101,
         "denominator": 106,
-        "percentage": 94.3396
+        "percentage": 95.2830
       },
       "languageAccuracy": {
-        "numerator": 100,
-        "denominator": 100,
+        "numerator": 101,
+        "denominator": 101,
         "percentage": 100
       },
       "keeperCoverage": {
-        "numerator": 100,
+        "numerator": 101,
         "denominator": 106,
-        "percentage": 94.3396
+        "percentage": 95.2830
       },
       "keeperAccuracy": {
-        "numerator": 100,
-        "denominator": 100,
+        "numerator": 101,
+        "denominator": 101,
         "percentage": 100
       },
       "expectedGroups": 106,
-      "predictedGroups": 100,
+      "predictedGroups": 101,
       "overmergedGroups": 0,
-      "fragmentedGroups": 6,
+      "fragmentedGroups": 5,
       "crossLanguageMerges": 0,
       "contentRequestedPairs": 1101,
       "contentOracleAvailablePairs": 25,
@@ -304,7 +304,7 @@
       "decisionDispositions": [
         {
           "name": "Anchor",
-          "count": 15
+          "count": 16
         },
         {
           "name": "Rejected",
@@ -312,13 +312,13 @@
         },
         {
           "name": "Weak",
-          "count": 1081
+          "count": 1080
         }
       ],
       "failureCategories": [
         {
           "name": "CONTENT_UNAVAILABLE_OR_WEAK",
-          "count": 6
+          "count": 5
         }
       ],
       "unifiedClassifications": [
@@ -328,7 +328,7 @@
         },
         {
           "name": "ToBeReviewed",
-          "count": 90
+          "count": 91
         }
       ],
       "unifiedFindings": []
@@ -338,25 +338,25 @@
     {
       "name": "author-variant",
       "pairs": {
-        "truePositives": 20,
+        "truePositives": 22,
         "falsePositives": 0,
-        "falseNegatives": 12,
+        "falseNegatives": 10,
         "trueNegatives": 120
       },
       "precision": {
-        "numerator": 20,
-        "denominator": 20,
+        "numerator": 22,
+        "denominator": 22,
         "percentage": 100
       },
       "recall": {
-        "numerator": 20,
+        "numerator": 22,
         "denominator": 32,
-        "percentage": 62.5
+        "percentage": 68.75
       },
       "f1": {
-        "numerator": 40,
-        "denominator": 52,
-        "percentage": 76.9231
+        "numerator": 44,
+        "denominator": 54,
+        "percentage": 81.4815
       },
       "candidateRouteRecall": {
         "numerator": 32,
@@ -369,29 +369,29 @@
         "percentage": 100
       },
       "exactComponentRate": {
-        "numerator": 20,
+        "numerator": 22,
         "denominator": 32,
-        "percentage": 62.5
+        "percentage": 68.75
       },
       "languageAccuracy": {
-        "numerator": 20,
-        "denominator": 20,
+        "numerator": 22,
+        "denominator": 22,
         "percentage": 100
       },
       "keeperCoverage": {
-        "numerator": 20,
+        "numerator": 22,
         "denominator": 32,
-        "percentage": 62.5
+        "percentage": 68.75
       },
       "keeperAccuracy": {
-        "numerator": 20,
-        "denominator": 20,
+        "numerator": 22,
+        "denominator": 22,
         "percentage": 100
       },
       "expectedGroups": 32,
-      "predictedGroups": 20,
+      "predictedGroups": 22,
       "overmergedGroups": 0,
-      "fragmentedGroups": 12,
+      "fragmentedGroups": 10,
       "crossLanguageMerges": 0,
       "contentRequestedPairs": 32,
       "contentOracleAvailablePairs": 30,
@@ -405,23 +405,27 @@
       "decisionDispositions": [
         {
           "name": "Anchor",
-          "count": 20
+          "count": 22
         },
         {
           "name": "Weak",
-          "count": 12
+          "count": 10
         }
       ],
       "failureCategories": [
         {
           "name": "CONTENT_UNAVAILABLE_OR_WEAK",
-          "count": 12
+          "count": 10
         }
       ],
       "unifiedClassifications": [
         {
           "name": "CleanupEligible",
           "count": 20
+        },
+        {
+          "name": "ToBeReviewed",
+          "count": 2
         }
       ],
       "unifiedFindings": []
@@ -1038,25 +1042,25 @@
     {
       "name": "edition-variant",
       "pairs": {
-        "truePositives": 20,
+        "truePositives": 22,
         "falsePositives": 0,
-        "falseNegatives": 12,
+        "falseNegatives": 10,
         "trueNegatives": 120
       },
       "precision": {
-        "numerator": 20,
-        "denominator": 20,
+        "numerator": 22,
+        "denominator": 22,
         "percentage": 100
       },
       "recall": {
-        "numerator": 20,
+        "numerator": 22,
         "denominator": 32,
-        "percentage": 62.5
+        "percentage": 68.75
       },
       "f1": {
-        "numerator": 40,
-        "denominator": 52,
-        "percentage": 76.9231
+        "numerator": 44,
+        "denominator": 54,
+        "percentage": 81.4815
       },
       "candidateRouteRecall": {
         "numerator": 32,
@@ -1069,29 +1073,29 @@
         "percentage": 100
       },
       "exactComponentRate": {
-        "numerator": 20,
+        "numerator": 22,
         "denominator": 32,
-        "percentage": 62.5
+        "percentage": 68.75
       },
       "languageAccuracy": {
-        "numerator": 20,
-        "denominator": 20,
+        "numerator": 22,
+        "denominator": 22,
         "percentage": 100
       },
       "keeperCoverage": {
-        "numerator": 20,
+        "numerator": 22,
         "denominator": 32,
-        "percentage": 62.5
+        "percentage": 68.75
       },
       "keeperAccuracy": {
-        "numerator": 20,
-        "denominator": 20,
+        "numerator": 22,
+        "denominator": 22,
         "percentage": 100
       },
       "expectedGroups": 32,
-      "predictedGroups": 20,
+      "predictedGroups": 22,
       "overmergedGroups": 0,
-      "fragmentedGroups": 12,
+      "fragmentedGroups": 10,
       "crossLanguageMerges": 0,
       "contentRequestedPairs": 32,
       "contentOracleAvailablePairs": 30,
@@ -1105,23 +1109,27 @@
       "decisionDispositions": [
         {
           "name": "Anchor",
-          "count": 20
+          "count": 22
         },
         {
           "name": "Weak",
-          "count": 12
+          "count": 10
         }
       ],
       "failureCategories": [
         {
           "name": "CONTENT_UNAVAILABLE_OR_WEAK",
-          "count": 12
+          "count": 10
         }
       ],
       "unifiedClassifications": [
         {
           "name": "CleanupEligible",
           "count": 20
+        },
+        {
+          "name": "ToBeReviewed",
+          "count": 2
         }
       ],
       "unifiedFindings": []
@@ -1715,25 +1723,25 @@
     {
       "name": "metadata-only",
       "pairs": {
-        "truePositives": 50,
+        "truePositives": 52,
         "falsePositives": 0,
-        "falseNegatives": 2,
+        "falseNegatives": 0,
         "trueNegatives": 160
       },
       "precision": {
-        "numerator": 50,
-        "denominator": 50,
+        "numerator": 52,
+        "denominator": 52,
         "percentage": 100
       },
       "recall": {
-        "numerator": 50,
+        "numerator": 52,
         "denominator": 52,
-        "percentage": 96.1538
+        "percentage": 100
       },
       "f1": {
-        "numerator": 100,
-        "denominator": 102,
-        "percentage": 98.0392
+        "numerator": 104,
+        "denominator": 104,
+        "percentage": 100
       },
       "candidateRouteRecall": {
         "numerator": 52,
@@ -1746,29 +1754,29 @@
         "percentage": 100
       },
       "exactComponentRate": {
-        "numerator": 50,
+        "numerator": 52,
         "denominator": 52,
-        "percentage": 96.1538
+        "percentage": 100
       },
       "languageAccuracy": {
-        "numerator": 50,
-        "denominator": 50,
+        "numerator": 52,
+        "denominator": 52,
         "percentage": 100
       },
       "keeperCoverage": {
-        "numerator": 50,
+        "numerator": 52,
         "denominator": 52,
-        "percentage": 96.1538
+        "percentage": 100
       },
       "keeperAccuracy": {
-        "numerator": 50,
-        "denominator": 50,
+        "numerator": 52,
+        "denominator": 52,
         "percentage": 100
       },
       "expectedGroups": 52,
-      "predictedGroups": 50,
+      "predictedGroups": 52,
       "overmergedGroups": 0,
-      "fragmentedGroups": 2,
+      "fragmentedGroups": 0,
       "crossLanguageMerges": 0,
       "contentRequestedPairs": 42,
       "contentOracleAvailablePairs": 0,
@@ -1781,20 +1789,19 @@
       "globalLimitOutcomes": 0,
       "decisionDispositions": [
         {
-          "name": "Weak",
-          "count": 42
-        }
-      ],
-      "failureCategories": [
-        {
-          "name": "CONTENT_UNAVAILABLE_OR_WEAK",
+          "name": "Anchor",
           "count": 2
+        },
+        {
+          "name": "Weak",
+          "count": 40
         }
       ],
+      "failureCategories": [],
       "unifiedClassifications": [
         {
           "name": "ToBeReviewed",
-          "count": 50
+          "count": 52
         }
       ],
       "unifiedFindings": []
@@ -2228,25 +2235,25 @@
     {
       "name": "title-noise",
       "pairs": {
-        "truePositives": 20,
+        "truePositives": 22,
         "falsePositives": 0,
-        "falseNegatives": 12,
+        "falseNegatives": 10,
         "trueNegatives": 120
       },
       "precision": {
-        "numerator": 20,
-        "denominator": 20,
+        "numerator": 22,
+        "denominator": 22,
         "percentage": 100
       },
       "recall": {
-        "numerator": 20,
+        "numerator": 22,
         "denominator": 32,
-        "percentage": 62.5
+        "percentage": 68.75
       },
       "f1": {
-        "numerator": 40,
-        "denominator": 52,
-        "percentage": 76.9231
+        "numerator": 44,
+        "denominator": 54,
+        "percentage": 81.4815
       },
       "candidateRouteRecall": {
         "numerator": 32,
@@ -2259,29 +2266,29 @@
         "percentage": 100
       },
       "exactComponentRate": {
-        "numerator": 20,
+        "numerator": 22,
         "denominator": 32,
-        "percentage": 62.5
+        "percentage": 68.75
       },
       "languageAccuracy": {
-        "numerator": 20,
-        "denominator": 20,
+        "numerator": 22,
+        "denominator": 22,
         "percentage": 100
       },
       "keeperCoverage": {
-        "numerator": 20,
+        "numerator": 22,
         "denominator": 32,
-        "percentage": 62.5
+        "percentage": 68.75
       },
       "keeperAccuracy": {
-        "numerator": 20,
-        "denominator": 20,
+        "numerator": 22,
+        "denominator": 22,
         "percentage": 100
       },
       "expectedGroups": 32,
-      "predictedGroups": 20,
+      "predictedGroups": 22,
       "overmergedGroups": 0,
-      "fragmentedGroups": 12,
+      "fragmentedGroups": 10,
       "crossLanguageMerges": 0,
       "contentRequestedPairs": 32,
       "contentOracleAvailablePairs": 30,
@@ -2295,23 +2302,27 @@
       "decisionDispositions": [
         {
           "name": "Anchor",
-          "count": 20
+          "count": 22
         },
         {
           "name": "Weak",
-          "count": 12
+          "count": 10
         }
       ],
       "failureCategories": [
         {
           "name": "CONTENT_UNAVAILABLE_OR_WEAK",
-          "count": 12
+          "count": 10
         }
       ],
       "unifiedClassifications": [
         {
           "name": "CleanupEligible",
           "count": 20
+        },
+        {
+          "name": "ToBeReviewed",
+          "count": 2
         }
       ],
       "unifiedFindings": []
@@ -2431,12 +2442,6 @@
       "category": "CONTENT_UNAVAILABLE_OR_WEAK"
     },
     {
-      "scenarioId": "cal-wikidata-q92640",
-      "firstRecordId": "alice-a",
-      "secondRecordId": "alice-b",
-      "category": "CONTENT_UNAVAILABLE_OR_WEAK"
-    },
-    {
       "scenarioId": "hold-content-g01",
       "firstRecordId": "c1",
       "secondRecordId": "c2",
@@ -2464,12 +2469,6 @@
       "scenarioId": "hold-content-g05",
       "firstRecordId": "c1",
       "secondRecordId": "c2",
-      "category": "CONTENT_UNAVAILABLE_OR_WEAK"
-    },
-    {
-      "scenarioId": "hold-wikidata-q170583",
-      "firstRecordId": "pride-a",
-      "secondRecordId": "pride-b",
       "category": "CONTENT_UNAVAILABLE_OR_WEAK"
     }
   ],

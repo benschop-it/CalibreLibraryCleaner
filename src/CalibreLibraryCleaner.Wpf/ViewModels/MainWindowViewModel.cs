@@ -1165,6 +1165,9 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
             : presentation.UnifiedGroups.Count == 1
                 ? "1 unified candidate group is ready for review."
                 : $"{presentation.UnifiedGroups.Count:N0} disjoint unified candidate groups are ready for review.";
+        string bibliographicSummary = snapshot.MatchingRunSummary.BibliographicEnabled
+            ? $"Open Library used {snapshot.MatchingRunSummary.BibliographicCacheHits:N0} cached and {snapshot.MatchingRunSummary.BibliographicProviderRequests:N0} online result(s), transmitting identifier or title, author, and language fields for unresolved records."
+            : "Open Library bibliographic evidence was disabled.";
         ExpandedCandidateSummary = snapshot.MatchingRunSummary.Status switch
         {
             MatchingEvidenceStatus.Unavailable =>
@@ -1172,9 +1175,9 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
             MatchingEvidenceStatus.Stale =>
                 "Expanded matching evidence is stale after library changes. Run a fresh scan to regenerate it.",
             _ when presentation.ExpandedGroups.Count == 0 =>
-                $"No expanded work-language candidate groups were found from {snapshot.MatchingRunSummary.RetainedPairCount:N0} retained pairs.",
+                $"No expanded work-language candidate groups were found from {snapshot.MatchingRunSummary.RetainedPairCount:N0} retained pairs. {bibliographicSummary}",
             _ =>
-                $"{presentation.ExpandedGroups.Count:N0} expanded content-confirmed groups from {snapshot.MatchingRunSummary.RetainedPairCount:N0} retained pairs; {snapshot.MatchingRunSummary.ContentSignaturesRequested:N0} content signatures requested.",
+                $"{presentation.ExpandedGroups.Count:N0} expanded groups from {snapshot.MatchingRunSummary.RetainedPairCount:N0} retained pairs; {snapshot.MatchingRunSummary.ContentSignaturesRequested:N0} content signatures requested. {bibliographicSummary}",
         };
         _epubAssessments.ReplaceAll(presentation.EpubAssessments);
         SelectedEpubAssessment = _epubAssessments.FirstOrDefault();

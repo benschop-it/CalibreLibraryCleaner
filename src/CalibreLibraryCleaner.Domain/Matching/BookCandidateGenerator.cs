@@ -52,7 +52,10 @@ public sealed record BookCandidatePair
         ArgumentNullException.ThrowIfNull(evidence);
         CandidateEvidence[] orderedEvidence = evidence.Distinct()
             .OrderByDescending(value => value.Strength)
-            .ThenBy(value => value.Code, StringComparer.Ordinal).ToArray();
+            .ThenBy(value => value.Code, StringComparer.Ordinal)
+            .ThenBy(value => value.Provenance?.SourceId ?? string.Empty, StringComparer.Ordinal)
+            .ThenBy(value => value.Provenance?.SourceVersion ?? string.Empty, StringComparer.Ordinal)
+            .ThenBy(value => value.Provenance?.ResultId ?? string.Empty, StringComparer.Ordinal).ToArray();
         CandidateContradiction[] orderedContradictions = (contradictions ?? []).Distinct()
             .OrderBy(value => value.Code, StringComparer.Ordinal).ToArray();
         if (orderedEvidence.Length == 0) throw new ArgumentException("A candidate pair requires evidence.");
@@ -266,14 +269,7 @@ public static class BookCandidateGenerator
 
     private static int TitleJaccardPermille(
         IReadOnlyList<string> first,
-        IReadOnlyList<string> second)
-    {
-        HashSet<string> left = first.Where(value => !CandidateMetadataNormalizer.IsEditionMarker(value))
-            .ToHashSet(StringComparer.Ordinal);
-        HashSet<string> right = second.Where(value => !CandidateMetadataNormalizer.IsEditionMarker(value))
-            .ToHashSet(StringComparer.Ordinal);
-        return JaccardPermille(left, right);
-    }
+        IReadOnlyList<string> second) => CandidateMetadataNormalizer.TitleSimilarityPermille(first, second);
 
     private static int JaccardPermille(HashSet<string> left, HashSet<string> right)
     {

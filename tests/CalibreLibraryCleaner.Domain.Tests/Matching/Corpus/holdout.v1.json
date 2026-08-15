@@ -187,7 +187,11 @@
       "expectedGroups": [
         {"workKey":"wikidata-work-q170583","language":"en","acceptableKeeperRecordIds":["pride-a","pride-b"]}
       ],
-      "reviewNote": "Minimal CC0 Wikidata facts for public-domain work Q170583; variant marker is synthetic."
+      "reviewNote": "Minimal CC0 Wikidata facts for public-domain work Q170583; variant marker is synthetic.",
+      "bibliographicResolutions": [
+        {"recordKey":"pride-a","providerId":"open-library","providerVersion":"open-library-search-1.0.0","queryFields":"Title, Authors, Language","retrievedAtUtc":"2026-08-15T12:00:00Z","status":"Matched","workId":"/works/OL66554W","problemCode":null},
+        {"recordKey":"pride-b","providerId":"open-library","providerVersion":"open-library-search-1.0.0","queryFields":"Title, Authors, Language","retrievedAtUtc":"2026-08-15T12:00:00Z","status":"Matched","workId":"/works/OL66554W","problemCode":null}
+      ]
     }
   ]
 }

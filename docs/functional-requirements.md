@@ -95,6 +95,9 @@ advisory; a group is processed unless the user selects Skip. Candidate cleanup:
 - explicit author/language/series/identifier/content contradictions;
 - candidate-only EPUB signatures containing 12 bounded token landmarks and a
   bounded shingle sketch; and
+- enabled-by-default, cache-first Open Library work identity for locally unresolved
+  pairs, with deterministic title/author/language compatibility and field-category
+  disclosure; and
 - deterministic component construction without blind weak-edge transitive closure.
 
 Candidate generation uses indexes, per-record caps, and a global pair ceiling rather
@@ -123,8 +126,10 @@ including generations/checkpoints and current projected mutation state. Startup
 lists small manifests; explicit Load restores saved state without scanning.
 
 Implemented caches reuse compatible EPUB/PDF assessments and EPUB content signatures
-by fingerprint and analyzer/model/resource versions. Cache loss affects performance,
-not matching semantics.
+by fingerprint and analyzer/model/resource versions. Reduced Open Library work
+resolutions are cached by a one-way query identity plus provider/query/resolution
+versions; raw queries and provider payloads are not stored. Cache loss affects
+performance, not matching semantics.
 
 ## Progress and responsiveness
 
@@ -146,9 +151,9 @@ be arbitrarily cancelled after it starts.
 - Add cover/visual and richer structural evidence where it improves labeled-corpus
   precision or recall.
 - Add calibrated content-language detection.
-- Add configured online bibliographic providers, enabled by default. Record provider,
-  request fields, response identity, retrieval time, cache identity, and policy
-  version. Network/provider failure falls back to local evidence.
+- Add additional configured online bibliographic providers only where they improve
+  labeled quality beyond the implemented Open Library source. Preserve provider,
+  request-field, response-identity, retrieval-time, cache, and policy provenance.
 - Add versioned local ML/embeddings for title, author, language, metadata, and bounded
   content similarity where benchmarks show value.
 - Calibrate evidence fusion, contradictions, thresholds, and confidence on labeled

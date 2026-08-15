@@ -2,8 +2,8 @@
 
 This directory contains only active execution plans.
 
-There is no active execution plan. The next plan should address the 12 measured
-requested-but-unavailable/weak content-evidence false negatives.
+There is no active execution plan. The next matching plan should evaluate local
+models or richer local content evidence for the ten remaining synthetic cases.
 
 Keep active plans current during implementation, then move them to
 `../archive/plans/` after completion and documentation reconciliation.

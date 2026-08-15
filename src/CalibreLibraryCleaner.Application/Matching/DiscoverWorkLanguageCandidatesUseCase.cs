@@ -10,6 +10,7 @@ public enum WorkLanguageDiscoveryPhase
     BuildingProfiles,
     GeneratingCandidates,
     InspectingContent,
+    ResolvingBibliographicEvidence,
     Clustering,
 }
 
@@ -36,7 +37,8 @@ public interface IWorkLanguageCandidateDiscoverer
 }
 
 public sealed class DiscoverWorkLanguageCandidatesUseCase(
-    ResolveCandidateContentSignaturesUseCase resolveContentSignatures) : IWorkLanguageCandidateDiscoverer
+    ResolveCandidateContentSignaturesUseCase resolveContentSignatures,
+    ResolveBibliographicEvidenceUseCase? resolveBibliographicEvidence = null) : IWorkLanguageCandidateDiscoverer
 {
     public async Task<WorkLanguageDiscoveryResult> ExecuteAsync(
         IReadOnlyList<CalibreBook> books,
@@ -106,12 +108,23 @@ public sealed class DiscoverWorkLanguageCandidatesUseCase(
                 : EpubContentSignatureComparer.Unavailable();
         }
 
-        progress?.Report(new(WorkLanguageDiscoveryPhase.Clustering, 0, candidates.Pairs.Count));
+        BibliographicEvidenceBatchResult bibliography = resolveBibliographicEvidence is null
+            ? BibliographicEvidenceBatchResult.Disabled(candidates.Pairs)
+            : await resolveBibliographicEvidence.ExecuteAsync(
+                books,
+                profiles,
+                candidates.Pairs,
+                comparisons,
+                progress is null ? null : new BibliographicProgressAdapter(progress),
+                cancellationToken).ConfigureAwait(false);
+
+        progress?.Report(new(WorkLanguageDiscoveryPhase.Clustering, 0, bibliography.Pairs.Count));
         IReadOnlyList<BookCandidateDecision> decisions = BookCandidateDecisionPolicy.Decide(
-            candidates.Pairs, comparisons, cancellationToken);
+            bibliography.Pairs, comparisons, cancellationToken);
         IReadOnlyList<WorkLanguageCandidateGroup> groups = WorkLanguageCandidateClusterer.Cluster(
             profiles, decisions, cancellationToken: cancellationToken);
-        progress?.Report(new(WorkLanguageDiscoveryPhase.Clustering, candidates.Pairs.Count, candidates.Pairs.Count));
+        progress?.Report(new(
+            WorkLanguageDiscoveryPhase.Clustering, bibliography.Pairs.Count, bibliography.Pairs.Count));
         BookMatchingRunSummary summary = new(
             MatchingPolicyVersion.Current,
             MatchingEvidenceStatus.Available,
@@ -123,7 +136,14 @@ public sealed class DiscoverWorkLanguageCandidatesUseCase(
             content.CacheHits,
             comparisons.Count,
             groups.Count,
-            unknownLanguageCount);
+            unknownLanguageCount,
+            bibliography.QueryCount,
+            bibliography.CacheHits,
+            bibliography.ProviderRequests,
+            bibliography.MatchedRecords,
+            bibliography.Failures,
+            bibliography.RequestLimitReached,
+            bibliography.Enabled);
         return new(groups, summary, false);
     }
 
@@ -134,6 +154,16 @@ public sealed class DiscoverWorkLanguageCandidatesUseCase(
             WorkLanguageDiscoveryPhase.InspectingContent,
             value.CompletedFingerprints,
             value.TotalFingerprints,
+            value.Detail));
+    }
+
+    private sealed class BibliographicProgressAdapter(IProgress<WorkLanguageDiscoveryProgress> progress) :
+        IProgress<BibliographicEvidenceProgress>
+    {
+        public void Report(BibliographicEvidenceProgress value) => progress.Report(new(
+            WorkLanguageDiscoveryPhase.ResolvingBibliographicEvidence,
+            value.CompletedQueries,
+            value.TotalQueries,
             value.Detail));
     }
 }

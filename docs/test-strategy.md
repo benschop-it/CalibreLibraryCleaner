@@ -43,14 +43,20 @@ equality gates. External corpora are opt-in through `CALIBRE_MATCHING_CORPUS_PAT
 and `CALIBRE_RUN_EXTERNAL_MATCHING_EVALUATION=1`; they report only aggregates and
 opaque IDs.
 
-The accepted `exact-metadata/1.1.0` and `work-language-matching/1.3.0` gates require
+The accepted `exact-metadata/1.1.0` and `work-language-matching/1.4.0` gates require
 zero corpus false positives, overmerged groups, cross-language merges, and unknown
-pipeline gaps, with 94.8276% pair recall and 100% candidate-route recall overall and
+pipeline gaps, with 95.6897% pair recall and 100% candidate-route recall overall and
 in each frozen split. Exact policy tests additionally cover language aliases, missing values,
 validated identifier overlap, unique consensus/outliers, tied conflicts,
 determinism, and stale workflow-policy invalidation. Candidate tests cover edition-
 neutral title similarity, marker-only rejection, unchanged thresholds/caps, and stale
 Candidate analysis invalidation.
+
+Open Library tests use fake HTTP handlers and recorded work-resolution oracles only.
+They cover exact transmitted fields/User-Agent, rate/response/request bounds,
+unique/dominant resolution, provenance, decisive-contradiction precedence, cold/warm
+cache behavior, stale/corrupt cache misses, thrown-adapter fallback, and absence of
+raw query metadata in cache files. Ordinary tests never require live network access.
 
 ## Cache and performance tests
 

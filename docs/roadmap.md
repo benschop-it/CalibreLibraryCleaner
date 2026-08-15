@@ -42,14 +42,16 @@ Completed measurement foundation:
 - opaque stage-specific false-positive/false-negative reports and cap diagnostics;
 - contradiction-aware Exact Metadata removed all 20 measured false positives;
 - edition-neutral title similarity recovered all 10 previously unproposed positives;
-- reviewed semantic baseline: 100% precision, 94.8276% recall, 97.3451% F1,
-  100% candidate-route recall, 94.3396% keeper coverage, and 100% keeper
+- enabled-by-default Open Library evidence recovered both sourced public-domain
+   work families with bounded cache-first lookup and local fallback;
+- reviewed semantic baseline: 100% precision, 95.6897% recall, 97.7974% F1,
+   100% candidate-route recall, 95.2830% keeper coverage, and 100% keeper
   accuracy on scored groups.
 
 Next:
 
-1. Improve deterministic evidence for 12 requested pairs with unavailable/weak
-   content outcomes.
+1. Improve local content/model evidence for 10 synthetic requested pairs with
+   unavailable/weak content outcomes.
 2. Calibrate changes on calibration, then require frozen-holdout improvement without
    library-specific aliases.
 
@@ -76,13 +78,18 @@ Next:
 
 ## Priority 4: Bibliographic and local-model evidence
 
-1. Add provider-neutral online bibliographic ports and provenance values.
-2. Enable configured providers by default with field disclosure, bounded requests,
-   rate limits, caches, and local fallback.
-3. Evaluate local embeddings/models for title, author, language, metadata, and
+Completed:
+
+- provider-neutral work resolution, evidence provenance, and Domain fusion;
+- enabled-by-default Open Library search with field disclosure, bounded requests,
+  rate limiting, reduced cache, and local fallback.
+
+Next:
+
+1. Evaluate local embeddings/models for title, author, language, metadata, and
    bounded content similarity.
-4. Version model inputs/outputs and benchmark value against deterministic evidence.
-5. Calibrate evidence fusion; provider/model output remains advisory.
+2. Version model inputs/outputs and benchmark value against deterministic evidence.
+3. Calibrate evidence fusion; provider/model output remains advisory.
 
 ## Priority 5: Review experience
 
