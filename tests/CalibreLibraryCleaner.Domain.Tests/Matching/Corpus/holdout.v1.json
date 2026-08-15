@@ -1,0 +1,193 @@
+{
+  "schemaVersion": "matching-corpus/1.0",
+  "corpusVersion": "matching-corpus-data/1.0",
+  "split": "Holdout",
+  "source": {
+    "id": "synthetic-holdout-v1",
+    "provenance": "Independent hand-reviewed deterministic synthetic templates",
+    "license": "CC0-1.0"
+  },
+  "scenarios": [
+    {
+      "id": "hold-exact",
+      "tags": ["exact-metadata", "unicode-punctuation", "metadata-only"],
+      "sourceFamilyId": "hold-exact-family",
+      "generationTemplateId": "exact-variants",
+      "generationTemplateVersion": "1.0",
+      "records": [
+        {"key":"a1","calibreId":101,"title":"R\u00e9sum\u00e9 Notes","authorSort":"Observer, Nora","authors":[{"name":"Nora Observer","sortName":"Observer, Nora"}],"identifiers":[],"publication":{"languages":["en"]},"formats":[],"workKey":"hold-exact-a","expectedLanguage":"en"},
+        {"key":"a2","calibreId":102,"title":"Re\u0301sume\u0301 Notes","authorSort":"Observer, Nora","authors":[{"name":"Nora Observer","sortName":"Observer, Nora"}],"identifiers":[],"publication":{"languages":["en"]},"formats":[],"workKey":"hold-exact-a","expectedLanguage":"en"},
+        {"key":"b1","calibreId":103,"title":"The Archive: Field Notes","authorSort":"Keeper, Owen","authors":[{"name":"Owen Keeper","sortName":"Keeper, Owen"}],"identifiers":[],"publication":{"languages":["en"]},"formats":[],"workKey":"hold-exact-b","expectedLanguage":"en"},
+        {"key":"b2","calibreId":104,"title":"The  Archive:  Field Notes","authorSort":"Keeper, Owen","authors":[{"name":"Owen Keeper","sortName":"Keeper, Owen"}],"identifiers":[],"publication":{"languages":["en"]},"formats":[],"workKey":"hold-exact-b","expectedLanguage":"en"}
+      ],
+      "contentComparisons": [],
+      "expectedGroups": [
+        {"workKey":"hold-exact-a","language":"en","acceptableKeeperRecordIds":["a1","a2"]},
+        {"workKey":"hold-exact-b","language":"en","acceptableKeeperRecordIds":["b1","b2"]}
+      ],
+      "reviewNote": "Independent canonical Unicode and whitespace variants.",
+      "repeat": 5,
+      "calibreIdStride": 1000
+    },
+    {
+      "id": "hold-content",
+      "tags": ["author-variant", "title-noise", "content-equivalent", "content-high", "content-ambiguous", "edition-variant"],
+      "sourceFamilyId": "hold-content-family",
+      "generationTemplateId": "content-variants",
+      "generationTemplateVersion": "1.0",
+      "records": [
+        {"key":"a1","calibreId":101,"title":"The Southern Archive","authorSort":"Example, Petra","authors":[{"name":"Petra Example","sortName":"Example, Petra"}],"identifiers":[],"publication":{"languages":["en"]},"formats":[],"workKey":"hold-content-a","expectedLanguage":"en"},
+        {"key":"a2","calibreId":102,"title":"Southern Archive Illustrated","authorSort":"Example, P.","authors":[{"name":"P. Example","sortName":"Example, P."}],"identifiers":[],"publication":{"languages":["en"]},"formats":[],"workKey":"hold-content-a","expectedLanguage":"en"},
+        {"key":"b1","calibreId":103,"title":"Bridges Across Mist","authorSort":"Writer, Quinn","authors":[{"name":"Quinn Writer","sortName":"Writer, Quinn"}],"identifiers":[],"publication":{"languages":["en"]},"formats":[],"workKey":"hold-content-b","expectedLanguage":"en"},
+        {"key":"b2","calibreId":104,"title":"Bridges Through Mist Revised","authorSort":"Writer, Q.","authors":[{"name":"Q. Writer","sortName":"Writer, Q."}],"identifiers":[],"publication":{"languages":["en"]},"formats":[],"workKey":"hold-content-b","expectedLanguage":"en"},
+        {"key":"c1","calibreId":105,"title":"Mechanical Orchard","authorSort":"Maker, Rosa","authors":[{"name":"Rosa Maker","sortName":"Maker, Rosa"}],"identifiers":[],"publication":{"languages":["en"]},"formats":[],"workKey":"hold-content-c","expectedLanguage":"en"},
+        {"key":"c2","calibreId":106,"title":"Mechanical Orchard Annotated","authorSort":"Maker, R.","authors":[{"name":"R. Maker","sortName":"Maker, R."}],"identifiers":[],"publication":{"languages":["en"]},"formats":[],"workKey":"hold-content-c","expectedLanguage":"en"}
+      ],
+      "contentComparisons": [
+        {"firstRecordKey":"a1","secondRecordKey":"a2","classification":"EquivalentText","forwardStrictMatches":12,"reverseStrictMatches":12,"forwardRelaxedMatches":12,"reverseRelaxedMatches":12,"matchedRegionCount":4,"tokenCountRatioPermille":1000,"shingleSimilarityPermille":1000},
+        {"firstRecordKey":"b1","secondRecordKey":"b2","classification":"HighSimilarity","forwardStrictMatches":9,"reverseStrictMatches":9,"forwardRelaxedMatches":11,"reverseRelaxedMatches":11,"matchedRegionCount":4,"tokenCountRatioPermille":940,"shingleSimilarityPermille":910},
+        {"firstRecordKey":"c1","secondRecordKey":"c2","classification":"Ambiguous","forwardStrictMatches":3,"reverseStrictMatches":3,"forwardRelaxedMatches":5,"reverseRelaxedMatches":5,"matchedRegionCount":2,"tokenCountRatioPermille":760,"shingleSimilarityPermille":420}
+      ],
+      "expectedGroups": [
+        {"workKey":"hold-content-a","language":"en","acceptableKeeperRecordIds":["a1","a2"]},
+        {"workKey":"hold-content-b","language":"en","acceptableKeeperRecordIds":["b1","b2"]},
+        {"workKey":"hold-content-c","language":"en","acceptableKeeperRecordIds":["c1","c2"]}
+      ],
+      "reviewNote": "Independent content outcomes for title and author variants.",
+      "repeat": 5,
+      "calibreIdStride": 1000
+    },
+    {
+      "id": "hold-identifiers",
+      "tags": ["identifier-anchor", "identifier-conflict", "content-unavailable", "content-different", "same-title-different-work"],
+      "sourceFamilyId": "hold-identifier-family",
+      "generationTemplateId": "identifier-contradictions",
+      "generationTemplateVersion": "1.0",
+      "records": [
+        {"key":"a1","calibreId":101,"title":"Untitled Import 77","authorSort":"Scholar, Sam","authors":[{"name":"Sam Scholar","sortName":"Scholar, Sam"}],"identifiers":[{"type":"isbn","value":"978-0-140-32872-1"}],"publication":{"languages":["en"]},"formats":[],"workKey":"hold-id-a","expectedLanguage":"en"},
+        {"key":"a2","calibreId":102,"title":"The Quiet Longitude","authorSort":"Scholar, S.","authors":[{"name":"S. Scholar","sortName":"Scholar, S."}],"identifiers":[{"type":"isbn","value":"9780140328721"}],"publication":{"languages":["en"]},"formats":[],"workKey":"hold-id-a","expectedLanguage":"en"},
+        {"key":"x1","calibreId":103,"title":"Shared Shelf Label","authorSort":"Writer, Talia","authors":[{"name":"Talia Writer","sortName":"Writer, Talia"}],"identifiers":[{"type":"isbn","value":"978-0-13-110362-7"}],"publication":{"languages":["en"]},"formats":[],"workKey":"hold-id-x1","expectedLanguage":"en"},
+        {"key":"x2","calibreId":104,"title":"Shared Shelf Label","authorSort":"Writer, Talia","authors":[{"name":"Talia Writer","sortName":"Writer, Talia"}],"identifiers":[{"type":"isbn","value":"978-0-201-63361-0"}],"publication":{"languages":["en"]},"formats":[],"workKey":"hold-id-x2","expectedLanguage":"en"}
+      ],
+      "contentComparisons": [
+        {"firstRecordKey":"a1","secondRecordKey":"a2","classification":"Unavailable","forwardStrictMatches":0,"reverseStrictMatches":0,"forwardRelaxedMatches":0,"reverseRelaxedMatches":0,"matchedRegionCount":0,"tokenCountRatioPermille":0,"shingleSimilarityPermille":0},
+        {"firstRecordKey":"x1","secondRecordKey":"x2","classification":"Different","forwardStrictMatches":0,"reverseStrictMatches":0,"forwardRelaxedMatches":0,"reverseRelaxedMatches":0,"matchedRegionCount":0,"tokenCountRatioPermille":250,"shingleSimilarityPermille":40}
+      ],
+      "expectedGroups": [
+        {"workKey":"hold-id-a","language":"en","acceptableKeeperRecordIds":["a1","a2"]}
+      ],
+      "reviewNote": "Independent identifier anchor and contradiction examples.",
+      "repeat": 5,
+      "calibreIdStride": 1000
+    },
+    {
+      "id": "hold-language-series",
+      "tags": ["language-conflict", "missing-language", "series-conflict", "multi-record-chain"],
+      "sourceFamilyId": "hold-language-family",
+      "generationTemplateId": "language-series",
+      "generationTemplateVersion": "1.0",
+      "records": [
+        {"key":"l1","calibreId":101,"title":"The Mirror Atlas","authorSort":"Cartographer, Uma","authors":[{"name":"Uma Cartographer","sortName":"Cartographer, Uma"}],"identifiers":[],"publication":{"languages":["en"]},"formats":[],"workKey":"hold-language-a","expectedLanguage":"en"},
+        {"key":"l2","calibreId":102,"title":"The Mirror Atlas","authorSort":"Cartographer, Uma","authors":[{"name":"Uma Cartographer","sortName":"Cartographer, Uma"}],"identifiers":[],"publication":{"languages":["de"]},"formats":[],"workKey":"hold-language-a","expectedLanguage":"de"},
+        {"key":"s1","calibreId":103,"title":"River Chronicles","authorSort":"Sailor, Victor","authors":[{"name":"Victor Sailor","sortName":"Sailor, Victor"}],"identifiers":[],"publication":{"series":"River Chronicles","seriesIndex":1,"languages":["en"]},"formats":[],"workKey":"hold-series-a","expectedLanguage":"en"},
+        {"key":"s2","calibreId":104,"title":"River Chronicles","authorSort":"Sailor, Victor","authors":[{"name":"Victor Sailor","sortName":"Sailor, Victor"}],"identifiers":[],"publication":{"series":"River Chronicles","seriesIndex":1,"languages":[]},"formats":[],"workKey":"hold-series-a","expectedLanguage":"en"},
+        {"key":"s3","calibreId":105,"title":"River Chronicles","authorSort":"Sailor, Victor","authors":[{"name":"Victor Sailor","sortName":"Sailor, Victor"}],"identifiers":[],"publication":{"series":"River Chronicles","seriesIndex":2,"languages":["en"]},"formats":[],"workKey":"hold-series-a","expectedLanguage":"en"}
+      ],
+      "contentComparisons": [],
+      "expectedGroups": [
+        {"workKey":"hold-series-a","language":"en","acceptableKeeperRecordIds":["s1","s2","s3"]}
+      ],
+      "reviewNote": "Independent translation, unknown-language, and series bridge cases.",
+      "repeat": 5,
+      "calibreIdStride": 1000
+    },
+    {
+      "id": "hold-formats",
+      "tags": ["format-diversity", "keeper-ranking", "pdf-only", "malformed-metadata", "metadata-only"],
+      "sourceFamilyId": "hold-format-family",
+      "generationTemplateId": "format-keeper-malformed",
+      "generationTemplateVersion": "1.0",
+      "records": [
+        {"key":"k1","calibreId":101,"title":"Retention Study","authorSort":"Reviewer, Willow","authors":[{"name":"Willow Reviewer","sortName":"Reviewer, Willow"}],"identifiers":[],"publication":{"languages":["en"]},"formats":[{"format":"EPUB","storedFileName":"retention-low","expectedRelativePath":"synthetic/retention-low.epub","sha256":"eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee","sizeInBytes":100}],"epub":{"status":"Completed","score":35,"analyzerVersion":"epub-inspector/1.0.5","scoringModelVersion":"epub-quality/1.0.3","expectedRelativePath":"synthetic/retention-low.epub","authors":[],"languages":[],"strongIdentifiers":[]},"workKey":"hold-keeper-a","expectedLanguage":"en"},
+        {"key":"k2","calibreId":102,"title":"Retention Study","authorSort":"Reviewer, Willow","authors":[{"name":"Willow Reviewer","sortName":"Reviewer, Willow"}],"identifiers":[],"publication":{"languages":["en"],"hasCover":true},"formats":[{"format":"EPUB","storedFileName":"retention-high","expectedRelativePath":"synthetic/retention-high.epub","sha256":"ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff","sizeInBytes":120}],"epub":{"status":"Completed","score":95,"analyzerVersion":"epub-inspector/1.0.5","scoringModelVersion":"epub-quality/1.0.3","expectedRelativePath":"synthetic/retention-high.epub","authors":[],"languages":[],"strongIdentifiers":[]},"workKey":"hold-keeper-a","expectedLanguage":"en"},
+        {"key":"p1","calibreId":103,"title":"Scanned Register","authorSort":"Archivist, Xander","authors":[{"name":"Xander Archivist","sortName":"Archivist, Xander"}],"identifiers":[],"publication":{"languages":["en"]},"formats":[{"format":"PDF","storedFileName":"register-a","expectedRelativePath":"synthetic/register-a.pdf","sha256":"1111111111111111111111111111111111111111111111111111111111111111","sizeInBytes":500}],"workKey":"hold-pdf-a","expectedLanguage":"en"},
+        {"key":"p2","calibreId":104,"title":"Scanned Register","authorSort":"Archivist, Xander","authors":[{"name":"Xander Archivist","sortName":"Archivist, Xander"}],"identifiers":[],"publication":{"languages":["en"]},"formats":[{"format":"PDF","storedFileName":"register-b","expectedRelativePath":"synthetic/register-b.pdf","sha256":"2222222222222222222222222222222222222222222222222222222222222222","sizeInBytes":480}],"workKey":"hold-pdf-a","expectedLanguage":"en"},
+        {"key":"m1","calibreId":105,"title":"---","authorSort":"Unknown","authors":[{"name":"Unknown","sortName":"Unknown"}],"identifiers":[],"publication":{"languages":[]},"formats":[],"workKey":"hold-malformed-a","expectedLanguage":"und"},
+        {"key":"m2","calibreId":106,"title":"---","authorSort":"Unknown","authors":[{"name":"Unknown","sortName":"Unknown"}],"identifiers":[],"publication":{"languages":[]},"formats":[],"workKey":"hold-malformed-a","expectedLanguage":"und"}
+      ],
+      "contentComparisons": [],
+      "expectedGroups": [
+        {"workKey":"hold-keeper-a","language":"en","acceptableKeeperRecordIds":["k2"]},
+        {"workKey":"hold-pdf-a","language":"en","acceptableKeeperRecordIds":["p1"]},
+        {"workKey":"hold-malformed-a","language":"und","acceptableKeeperRecordIds":["m1","m2"]}
+      ],
+      "reviewNote": "Independent keeper, PDF-only, and unusable metadata outcomes.",
+      "repeat": 5,
+      "calibreIdStride": 1000
+    },
+    {
+      "id": "hold-cap",
+      "tags": ["broad-author-bucket", "candidate-cap", "multi-record-chain"],
+      "sourceFamilyId": "hold-cap-family",
+      "generationTemplateId": "candidate-cap",
+      "generationTemplateVersion": "1.0",
+      "records": [
+        {"key":"c01a","calibreId":101,"title":"Common Topic 01","authorSort":"Author, Frequent","authors":[{"name":"Frequent Author","sortName":"Author, Frequent"}],"identifiers":[],"publication":{"languages":["en"]},"formats":[],"workKey":"hold-cap-w01","expectedLanguage":"en"},
+        {"key":"c01b","calibreId":102,"title":"Common Topic 01","authorSort":"Author, Frequent","authors":[{"name":"Frequent Author","sortName":"Author, Frequent"}],"identifiers":[],"publication":{"languages":["en"]},"formats":[],"workKey":"hold-cap-w01","expectedLanguage":"en"},
+        {"key":"c02a","calibreId":103,"title":"Common Topic 02","authorSort":"Author, Frequent","authors":[{"name":"Frequent Author","sortName":"Author, Frequent"}],"identifiers":[],"publication":{"languages":["en"]},"formats":[],"workKey":"hold-cap-w02","expectedLanguage":"en"},
+        {"key":"c02b","calibreId":104,"title":"Common Topic 02","authorSort":"Author, Frequent","authors":[{"name":"Frequent Author","sortName":"Author, Frequent"}],"identifiers":[],"publication":{"languages":["en"]},"formats":[],"workKey":"hold-cap-w02","expectedLanguage":"en"},
+        {"key":"c03a","calibreId":105,"title":"Common Topic 03","authorSort":"Author, Frequent","authors":[{"name":"Frequent Author","sortName":"Author, Frequent"}],"identifiers":[],"publication":{"languages":["en"]},"formats":[],"workKey":"hold-cap-w03","expectedLanguage":"en"},
+        {"key":"c03b","calibreId":106,"title":"Common Topic 03","authorSort":"Author, Frequent","authors":[{"name":"Frequent Author","sortName":"Author, Frequent"}],"identifiers":[],"publication":{"languages":["en"]},"formats":[],"workKey":"hold-cap-w03","expectedLanguage":"en"},
+        {"key":"c04a","calibreId":107,"title":"Common Topic 04","authorSort":"Author, Frequent","authors":[{"name":"Frequent Author","sortName":"Author, Frequent"}],"identifiers":[],"publication":{"languages":["en"]},"formats":[],"workKey":"hold-cap-w04","expectedLanguage":"en"},
+        {"key":"c04b","calibreId":108,"title":"Common Topic 04","authorSort":"Author, Frequent","authors":[{"name":"Frequent Author","sortName":"Author, Frequent"}],"identifiers":[],"publication":{"languages":["en"]},"formats":[],"workKey":"hold-cap-w04","expectedLanguage":"en"},
+        {"key":"c05a","calibreId":109,"title":"Common Topic 05","authorSort":"Author, Frequent","authors":[{"name":"Frequent Author","sortName":"Author, Frequent"}],"identifiers":[],"publication":{"languages":["en"]},"formats":[],"workKey":"hold-cap-w05","expectedLanguage":"en"},
+        {"key":"c05b","calibreId":110,"title":"Common Topic 05","authorSort":"Author, Frequent","authors":[{"name":"Frequent Author","sortName":"Author, Frequent"}],"identifiers":[],"publication":{"languages":["en"]},"formats":[],"workKey":"hold-cap-w05","expectedLanguage":"en"},
+        {"key":"c06a","calibreId":111,"title":"Common Topic 06","authorSort":"Author, Frequent","authors":[{"name":"Frequent Author","sortName":"Author, Frequent"}],"identifiers":[],"publication":{"languages":["en"]},"formats":[],"workKey":"hold-cap-w06","expectedLanguage":"en"},
+        {"key":"c06b","calibreId":112,"title":"Common Topic 06","authorSort":"Author, Frequent","authors":[{"name":"Frequent Author","sortName":"Author, Frequent"}],"identifiers":[],"publication":{"languages":["en"]},"formats":[],"workKey":"hold-cap-w06","expectedLanguage":"en"},
+        {"key":"c07a","calibreId":113,"title":"Common Topic 07","authorSort":"Author, Frequent","authors":[{"name":"Frequent Author","sortName":"Author, Frequent"}],"identifiers":[],"publication":{"languages":["en"]},"formats":[],"workKey":"hold-cap-w07","expectedLanguage":"en"},
+        {"key":"c07b","calibreId":114,"title":"Common Topic 07","authorSort":"Author, Frequent","authors":[{"name":"Frequent Author","sortName":"Author, Frequent"}],"identifiers":[],"publication":{"languages":["en"]},"formats":[],"workKey":"hold-cap-w07","expectedLanguage":"en"},
+        {"key":"c08a","calibreId":115,"title":"Common Topic 08","authorSort":"Author, Frequent","authors":[{"name":"Frequent Author","sortName":"Author, Frequent"}],"identifiers":[],"publication":{"languages":["en"]},"formats":[],"workKey":"hold-cap-w08","expectedLanguage":"en"},
+        {"key":"c08b","calibreId":116,"title":"Common Topic 08","authorSort":"Author, Frequent","authors":[{"name":"Frequent Author","sortName":"Author, Frequent"}],"identifiers":[],"publication":{"languages":["en"]},"formats":[],"workKey":"hold-cap-w08","expectedLanguage":"en"},
+        {"key":"c09a","calibreId":117,"title":"Common Topic 09","authorSort":"Author, Frequent","authors":[{"name":"Frequent Author","sortName":"Author, Frequent"}],"identifiers":[],"publication":{"languages":["en"]},"formats":[],"workKey":"hold-cap-w09","expectedLanguage":"en"},
+        {"key":"c09b","calibreId":118,"title":"Common Topic 09","authorSort":"Author, Frequent","authors":[{"name":"Frequent Author","sortName":"Author, Frequent"}],"identifiers":[],"publication":{"languages":["en"]},"formats":[],"workKey":"hold-cap-w09","expectedLanguage":"en"},
+        {"key":"c10a","calibreId":119,"title":"Common Topic 10","authorSort":"Author, Frequent","authors":[{"name":"Frequent Author","sortName":"Author, Frequent"}],"identifiers":[],"publication":{"languages":["en"]},"formats":[],"workKey":"hold-cap-w10","expectedLanguage":"en"},
+        {"key":"c10b","calibreId":120,"title":"Common Topic 10","authorSort":"Author, Frequent","authors":[{"name":"Frequent Author","sortName":"Author, Frequent"}],"identifiers":[],"publication":{"languages":["en"]},"formats":[],"workKey":"hold-cap-w10","expectedLanguage":"en"},
+        {"key":"c11a","calibreId":121,"title":"Common Topic 11","authorSort":"Author, Frequent","authors":[{"name":"Frequent Author","sortName":"Author, Frequent"}],"identifiers":[],"publication":{"languages":["en"]},"formats":[],"workKey":"hold-cap-w11","expectedLanguage":"en"},
+        {"key":"c11b","calibreId":122,"title":"Common Topic 11","authorSort":"Author, Frequent","authors":[{"name":"Frequent Author","sortName":"Author, Frequent"}],"identifiers":[],"publication":{"languages":["en"]},"formats":[],"workKey":"hold-cap-w11","expectedLanguage":"en"}
+      ],
+      "contentComparisons": [],
+      "expectedGroups": [
+        {"workKey":"hold-cap-w01","language":"en","acceptableKeeperRecordIds":["c01a","c01b"]},
+        {"workKey":"hold-cap-w02","language":"en","acceptableKeeperRecordIds":["c02a","c02b"]},
+        {"workKey":"hold-cap-w03","language":"en","acceptableKeeperRecordIds":["c03a","c03b"]},
+        {"workKey":"hold-cap-w04","language":"en","acceptableKeeperRecordIds":["c04a","c04b"]},
+        {"workKey":"hold-cap-w05","language":"en","acceptableKeeperRecordIds":["c05a","c05b"]},
+        {"workKey":"hold-cap-w06","language":"en","acceptableKeeperRecordIds":["c06a","c06b"]},
+        {"workKey":"hold-cap-w07","language":"en","acceptableKeeperRecordIds":["c07a","c07b"]},
+        {"workKey":"hold-cap-w08","language":"en","acceptableKeeperRecordIds":["c08a","c08b"]},
+        {"workKey":"hold-cap-w09","language":"en","acceptableKeeperRecordIds":["c09a","c09b"]},
+        {"workKey":"hold-cap-w10","language":"en","acceptableKeeperRecordIds":["c10a","c10b"]},
+        {"workKey":"hold-cap-w11","language":"en","acceptableKeeperRecordIds":["c11a","c11b"]}
+      ],
+      "reviewNote": "Independent twenty-two-record ordinary-cap stress fixture.",
+      "repeat": 5,
+      "calibreIdStride": 1000
+    },
+    {
+      "id": "hold-wikidata-q170583",
+      "tags": ["title-noise", "author-variant", "edition-variant", "metadata-only"],
+      "sourceFamilyId": "wikidata-q170583",
+      "generationTemplateId": null,
+      "generationTemplateVersion": null,
+      "records": [
+        {"key":"pride-a","calibreId":90101,"title":"Pride and Prejudice","authorSort":"Austen, Jane","authors":[{"name":"Jane Austen","sortName":"Austen, Jane"}],"identifiers":[],"publication":{"languages":["en"]},"formats":[],"workKey":"wikidata-work-q170583","expectedLanguage":"en"},
+        {"key":"pride-b","calibreId":90102,"title":"Pride & Prejudice Annotated","authorSort":"Austen, J.","authors":[{"name":"J. Austen","sortName":"Austen, J."}],"identifiers":[],"publication":{"languages":["en"]},"formats":[],"workKey":"wikidata-work-q170583","expectedLanguage":"en"}
+      ],
+      "contentComparisons": [],
+      "expectedGroups": [
+        {"workKey":"wikidata-work-q170583","language":"en","acceptableKeeperRecordIds":["pride-a","pride-b"]}
+      ],
+      "reviewNote": "Minimal CC0 Wikidata facts for public-domain work Q170583; variant marker is synthetic."
+    }
+  ]
+}

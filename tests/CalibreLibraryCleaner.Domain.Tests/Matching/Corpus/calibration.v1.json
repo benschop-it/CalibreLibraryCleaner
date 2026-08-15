@@ -1,0 +1,193 @@
+{
+  "schemaVersion": "matching-corpus/1.0",
+  "corpusVersion": "matching-corpus-data/1.0",
+  "split": "Calibration",
+  "source": {
+    "id": "synthetic-calibration-v1",
+    "provenance": "Hand-reviewed deterministic synthetic templates",
+    "license": "CC0-1.0"
+  },
+  "scenarios": [
+    {
+      "id": "cal-exact",
+      "tags": ["exact-metadata", "unicode-punctuation", "metadata-only"],
+      "sourceFamilyId": "cal-exact-family",
+      "generationTemplateId": "exact-variants",
+      "generationTemplateVersion": "1.0",
+      "records": [
+        {"key":"a1","calibreId":1,"title":"Caf\u00e9 Signals","authorSort":"Example, Alice","authors":[{"name":"Alice Example","sortName":"Example, Alice"}],"identifiers":[],"publication":{"languages":["en"]},"formats":[],"workKey":"cal-exact-a","expectedLanguage":"en"},
+        {"key":"a2","calibreId":2,"title":"Cafe\u0301 Signals","authorSort":"Example, Alice","authors":[{"name":"Alice Example","sortName":"Example, Alice"}],"identifiers":[],"publication":{"languages":["en"]},"formats":[],"workKey":"cal-exact-a","expectedLanguage":"en"},
+        {"key":"b1","calibreId":3,"title":"The Signal: A Study","authorSort":"Writer, Bob","authors":[{"name":"Bob Writer","sortName":"Writer, Bob"}],"identifiers":[],"publication":{"languages":["en"]},"formats":[],"workKey":"cal-exact-b","expectedLanguage":"en"},
+        {"key":"b2","calibreId":4,"title":"The  Signal:  A Study","authorSort":"Writer, Bob","authors":[{"name":"Bob Writer","sortName":"Writer, Bob"}],"identifiers":[],"publication":{"languages":["en"]},"formats":[],"workKey":"cal-exact-b","expectedLanguage":"en"}
+      ],
+      "contentComparisons": [],
+      "expectedGroups": [
+        {"workKey":"cal-exact-a","language":"en","acceptableKeeperRecordIds":["a1","a2"]},
+        {"workKey":"cal-exact-b","language":"en","acceptableKeeperRecordIds":["b1","b2"]}
+      ],
+      "reviewNote": "Canonical Unicode and whitespace variants should reach Exact Metadata.",
+      "repeat": 5,
+      "calibreIdStride": 1000
+    },
+    {
+      "id": "cal-content",
+      "tags": ["author-variant", "title-noise", "content-equivalent", "content-high", "content-ambiguous", "edition-variant"],
+      "sourceFamilyId": "cal-content-family",
+      "generationTemplateId": "content-variants",
+      "generationTemplateVersion": "1.0",
+      "records": [
+        {"key":"a1","calibreId":1,"title":"The Northern Observatory","authorSort":"Example, Alice","authors":[{"name":"Alice Example","sortName":"Example, Alice"}],"identifiers":[],"publication":{"languages":["en"]},"formats":[],"workKey":"cal-content-a","expectedLanguage":"en"},
+        {"key":"a2","calibreId":2,"title":"Northern Observatory Illustrated","authorSort":"Example, A.","authors":[{"name":"A. Example","sortName":"Example, A."}],"identifiers":[],"publication":{"languages":["en"]},"formats":[],"workKey":"cal-content-a","expectedLanguage":"en"},
+        {"key":"b1","calibreId":3,"title":"Gardens Beneath Glass","authorSort":"Writer, Beatrice","authors":[{"name":"Beatrice Writer","sortName":"Writer, Beatrice"}],"identifiers":[],"publication":{"languages":["en"]},"formats":[],"workKey":"cal-content-b","expectedLanguage":"en"},
+        {"key":"b2","calibreId":4,"title":"Gardens Under Glass Revised","authorSort":"Writer, B.","authors":[{"name":"B. Writer","sortName":"Writer, B."}],"identifiers":[],"publication":{"languages":["en"]},"formats":[],"workKey":"cal-content-b","expectedLanguage":"en"},
+        {"key":"c1","calibreId":5,"title":"Clockwork Harbor","authorSort":"Maker, Clara","authors":[{"name":"Clara Maker","sortName":"Maker, Clara"}],"identifiers":[],"publication":{"languages":["en"]},"formats":[],"workKey":"cal-content-c","expectedLanguage":"en"},
+        {"key":"c2","calibreId":6,"title":"Clockwork Harbor Annotated","authorSort":"Maker, C.","authors":[{"name":"C. Maker","sortName":"Maker, C."}],"identifiers":[],"publication":{"languages":["en"]},"formats":[],"workKey":"cal-content-c","expectedLanguage":"en"}
+      ],
+      "contentComparisons": [
+        {"firstRecordKey":"a1","secondRecordKey":"a2","classification":"EquivalentText","forwardStrictMatches":12,"reverseStrictMatches":12,"forwardRelaxedMatches":12,"reverseRelaxedMatches":12,"matchedRegionCount":4,"tokenCountRatioPermille":1000,"shingleSimilarityPermille":1000},
+        {"firstRecordKey":"b1","secondRecordKey":"b2","classification":"HighSimilarity","forwardStrictMatches":9,"reverseStrictMatches":9,"forwardRelaxedMatches":11,"reverseRelaxedMatches":11,"matchedRegionCount":4,"tokenCountRatioPermille":940,"shingleSimilarityPermille":910},
+        {"firstRecordKey":"c1","secondRecordKey":"c2","classification":"Ambiguous","forwardStrictMatches":3,"reverseStrictMatches":3,"forwardRelaxedMatches":5,"reverseRelaxedMatches":5,"matchedRegionCount":2,"tokenCountRatioPermille":760,"shingleSimilarityPermille":420}
+      ],
+      "expectedGroups": [
+        {"workKey":"cal-content-a","language":"en","acceptableKeeperRecordIds":["a1","a2"]},
+        {"workKey":"cal-content-b","language":"en","acceptableKeeperRecordIds":["b1","b2"]},
+        {"workKey":"cal-content-c","language":"en","acceptableKeeperRecordIds":["c1","c2"]}
+      ],
+      "reviewNote": "Content evidence distinguishes equivalent, high-similarity, and ambiguous title/author variants.",
+      "repeat": 5,
+      "calibreIdStride": 1000
+    },
+    {
+      "id": "cal-identifiers",
+      "tags": ["identifier-anchor", "identifier-conflict", "content-unavailable", "content-different", "same-title-different-work"],
+      "sourceFamilyId": "cal-identifier-family",
+      "generationTemplateId": "identifier-contradictions",
+      "generationTemplateVersion": "1.0",
+      "records": [
+        {"key":"a1","calibreId":1,"title":"Imported Document 42","authorSort":"Scholar, Dana","authors":[{"name":"Dana Scholar","sortName":"Scholar, Dana"}],"identifiers":[{"type":"isbn","value":"978-0-306-40615-7"}],"publication":{"languages":["en"]},"formats":[],"workKey":"cal-id-a","expectedLanguage":"en"},
+        {"key":"a2","calibreId":2,"title":"The Hidden Meridian","authorSort":"Scholar, D.","authors":[{"name":"D. Scholar","sortName":"Scholar, D."}],"identifiers":[{"type":"isbn","value":"9780306406157"}],"publication":{"languages":["en"]},"formats":[],"workKey":"cal-id-a","expectedLanguage":"en"},
+        {"key":"x1","calibreId":3,"title":"A Common Catalog Title","authorSort":"Writer, Evan","authors":[{"name":"Evan Writer","sortName":"Writer, Evan"}],"identifiers":[{"type":"isbn","value":"978-1-86197-271-2"}],"publication":{"languages":["en"]},"formats":[],"workKey":"cal-id-x1","expectedLanguage":"en"},
+        {"key":"x2","calibreId":4,"title":"A Common Catalog Title","authorSort":"Writer, Evan","authors":[{"name":"Evan Writer","sortName":"Writer, Evan"}],"identifiers":[{"type":"isbn","value":"978-3-16-148410-0"}],"publication":{"languages":["en"]},"formats":[],"workKey":"cal-id-x2","expectedLanguage":"en"}
+      ],
+      "contentComparisons": [
+        {"firstRecordKey":"a1","secondRecordKey":"a2","classification":"Unavailable","forwardStrictMatches":0,"reverseStrictMatches":0,"forwardRelaxedMatches":0,"reverseRelaxedMatches":0,"matchedRegionCount":0,"tokenCountRatioPermille":0,"shingleSimilarityPermille":0},
+        {"firstRecordKey":"x1","secondRecordKey":"x2","classification":"Different","forwardStrictMatches":0,"reverseStrictMatches":0,"forwardRelaxedMatches":0,"reverseRelaxedMatches":0,"matchedRegionCount":0,"tokenCountRatioPermille":250,"shingleSimilarityPermille":40}
+      ],
+      "expectedGroups": [
+        {"workKey":"cal-id-a","language":"en","acceptableKeeperRecordIds":["a1","a2"]}
+      ],
+      "reviewNote": "A validated identifier anchors damaged metadata while conflicting identifiers and different content remain a hard negative.",
+      "repeat": 5,
+      "calibreIdStride": 1000
+    },
+    {
+      "id": "cal-language-series",
+      "tags": ["language-conflict", "missing-language", "series-conflict", "multi-record-chain"],
+      "sourceFamilyId": "cal-language-family",
+      "generationTemplateId": "language-series",
+      "generationTemplateVersion": "1.0",
+      "records": [
+        {"key":"l1","calibreId":1,"title":"The Glass Atlas","authorSort":"Cartographer, Faye","authors":[{"name":"Faye Cartographer","sortName":"Cartographer, Faye"}],"identifiers":[],"publication":{"languages":["en"]},"formats":[],"workKey":"cal-language-a","expectedLanguage":"en"},
+        {"key":"l2","calibreId":2,"title":"The Glass Atlas","authorSort":"Cartographer, Faye","authors":[{"name":"Faye Cartographer","sortName":"Cartographer, Faye"}],"identifiers":[],"publication":{"languages":["fr"]},"formats":[],"workKey":"cal-language-a","expectedLanguage":"fr"},
+        {"key":"s1","calibreId":3,"title":"Harbor Chronicles","authorSort":"Sailor, Gideon","authors":[{"name":"Gideon Sailor","sortName":"Sailor, Gideon"}],"identifiers":[],"publication":{"series":"Harbor Chronicles","seriesIndex":1,"languages":["en"]},"formats":[],"workKey":"cal-series-a","expectedLanguage":"en"},
+        {"key":"s2","calibreId":4,"title":"Harbor Chronicles","authorSort":"Sailor, Gideon","authors":[{"name":"Gideon Sailor","sortName":"Sailor, Gideon"}],"identifiers":[],"publication":{"series":"Harbor Chronicles","seriesIndex":1,"languages":[]},"formats":[],"workKey":"cal-series-a","expectedLanguage":"en"},
+        {"key":"s3","calibreId":5,"title":"Harbor Chronicles","authorSort":"Sailor, Gideon","authors":[{"name":"Gideon Sailor","sortName":"Sailor, Gideon"}],"identifiers":[],"publication":{"series":"Harbor Chronicles","seriesIndex":2,"languages":["en"]},"formats":[],"workKey":"cal-series-a","expectedLanguage":"en"}
+      ],
+      "contentComparisons": [],
+      "expectedGroups": [
+        {"workKey":"cal-series-a","language":"en","acceptableKeeperRecordIds":["s1","s2","s3"]}
+      ],
+      "reviewNote": "Translations must remain separate; unknown language and a contradictory series bridge exercise complete-group behavior.",
+      "repeat": 5,
+      "calibreIdStride": 1000
+    },
+    {
+      "id": "cal-formats",
+      "tags": ["format-diversity", "keeper-ranking", "pdf-only", "malformed-metadata", "metadata-only"],
+      "sourceFamilyId": "cal-format-family",
+      "generationTemplateId": "format-keeper-malformed",
+      "generationTemplateVersion": "1.0",
+      "records": [
+        {"key":"k1","calibreId":1,"title":"Keeper Study","authorSort":"Reviewer, Hana","authors":[{"name":"Hana Reviewer","sortName":"Reviewer, Hana"}],"identifiers":[],"publication":{"languages":["en"]},"formats":[{"format":"EPUB","storedFileName":"keeper-low","expectedRelativePath":"synthetic/keeper-low.epub","sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","sizeInBytes":100}],"epub":{"status":"Completed","score":40,"analyzerVersion":"epub-inspector/1.0.5","scoringModelVersion":"epub-quality/1.0.3","expectedRelativePath":"synthetic/keeper-low.epub","authors":[],"languages":[],"strongIdentifiers":[]},"workKey":"cal-keeper-a","expectedLanguage":"en"},
+        {"key":"k2","calibreId":2,"title":"Keeper Study","authorSort":"Reviewer, Hana","authors":[{"name":"Hana Reviewer","sortName":"Reviewer, Hana"}],"identifiers":[],"publication":{"languages":["en"],"hasCover":true},"formats":[{"format":"EPUB","storedFileName":"keeper-high","expectedRelativePath":"synthetic/keeper-high.epub","sha256":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","sizeInBytes":120}],"epub":{"status":"Completed","score":90,"analyzerVersion":"epub-inspector/1.0.5","scoringModelVersion":"epub-quality/1.0.3","expectedRelativePath":"synthetic/keeper-high.epub","authors":[],"languages":[],"strongIdentifiers":[]},"workKey":"cal-keeper-a","expectedLanguage":"en"},
+        {"key":"p1","calibreId":3,"title":"Scanned Ledger","authorSort":"Archivist, Ivan","authors":[{"name":"Ivan Archivist","sortName":"Archivist, Ivan"}],"identifiers":[],"publication":{"languages":["en"]},"formats":[{"format":"PDF","storedFileName":"ledger-a","expectedRelativePath":"synthetic/ledger-a.pdf","sha256":"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc","sizeInBytes":500}],"workKey":"cal-pdf-a","expectedLanguage":"en"},
+        {"key":"p2","calibreId":4,"title":"Scanned Ledger","authorSort":"Archivist, Ivan","authors":[{"name":"Ivan Archivist","sortName":"Archivist, Ivan"}],"identifiers":[],"publication":{"languages":["en"]},"formats":[{"format":"PDF","storedFileName":"ledger-b","expectedRelativePath":"synthetic/ledger-b.pdf","sha256":"dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd","sizeInBytes":480}],"workKey":"cal-pdf-a","expectedLanguage":"en"},
+        {"key":"m1","calibreId":5,"title":"---","authorSort":"Unknown","authors":[{"name":"Unknown","sortName":"Unknown"}],"identifiers":[],"publication":{"languages":[]},"formats":[],"workKey":"cal-malformed-a","expectedLanguage":"und"},
+        {"key":"m2","calibreId":6,"title":"---","authorSort":"Unknown","authors":[{"name":"Unknown","sortName":"Unknown"}],"identifiers":[],"publication":{"languages":[]},"formats":[],"workKey":"cal-malformed-a","expectedLanguage":"und"}
+      ],
+      "contentComparisons": [],
+      "expectedGroups": [
+        {"workKey":"cal-keeper-a","language":"en","acceptableKeeperRecordIds":["k2"]},
+        {"workKey":"cal-pdf-a","language":"en","acceptableKeeperRecordIds":["p1"]},
+        {"workKey":"cal-malformed-a","language":"und","acceptableKeeperRecordIds":["m1","m2"]}
+      ],
+      "reviewNote": "Assessment quality selects the keeper; PDF-only and unusable metadata remain visible in separate outcomes.",
+      "repeat": 5,
+      "calibreIdStride": 1000
+    },
+    {
+      "id": "cal-cap",
+      "tags": ["broad-author-bucket", "candidate-cap", "multi-record-chain"],
+      "sourceFamilyId": "cal-cap-family",
+      "generationTemplateId": "candidate-cap",
+      "generationTemplateVersion": "1.0",
+      "records": [
+        {"key":"c01a","calibreId":1,"title":"Shared Subject 01","authorSort":"Writer, Common","authors":[{"name":"Common Writer","sortName":"Writer, Common"}],"identifiers":[],"publication":{"languages":["en"]},"formats":[],"workKey":"cal-cap-w01","expectedLanguage":"en"},
+        {"key":"c01b","calibreId":2,"title":"Shared Subject 01","authorSort":"Writer, Common","authors":[{"name":"Common Writer","sortName":"Writer, Common"}],"identifiers":[],"publication":{"languages":["en"]},"formats":[],"workKey":"cal-cap-w01","expectedLanguage":"en"},
+        {"key":"c02a","calibreId":3,"title":"Shared Subject 02","authorSort":"Writer, Common","authors":[{"name":"Common Writer","sortName":"Writer, Common"}],"identifiers":[],"publication":{"languages":["en"]},"formats":[],"workKey":"cal-cap-w02","expectedLanguage":"en"},
+        {"key":"c02b","calibreId":4,"title":"Shared Subject 02","authorSort":"Writer, Common","authors":[{"name":"Common Writer","sortName":"Writer, Common"}],"identifiers":[],"publication":{"languages":["en"]},"formats":[],"workKey":"cal-cap-w02","expectedLanguage":"en"},
+        {"key":"c03a","calibreId":5,"title":"Shared Subject 03","authorSort":"Writer, Common","authors":[{"name":"Common Writer","sortName":"Writer, Common"}],"identifiers":[],"publication":{"languages":["en"]},"formats":[],"workKey":"cal-cap-w03","expectedLanguage":"en"},
+        {"key":"c03b","calibreId":6,"title":"Shared Subject 03","authorSort":"Writer, Common","authors":[{"name":"Common Writer","sortName":"Writer, Common"}],"identifiers":[],"publication":{"languages":["en"]},"formats":[],"workKey":"cal-cap-w03","expectedLanguage":"en"},
+        {"key":"c04a","calibreId":7,"title":"Shared Subject 04","authorSort":"Writer, Common","authors":[{"name":"Common Writer","sortName":"Writer, Common"}],"identifiers":[],"publication":{"languages":["en"]},"formats":[],"workKey":"cal-cap-w04","expectedLanguage":"en"},
+        {"key":"c04b","calibreId":8,"title":"Shared Subject 04","authorSort":"Writer, Common","authors":[{"name":"Common Writer","sortName":"Writer, Common"}],"identifiers":[],"publication":{"languages":["en"]},"formats":[],"workKey":"cal-cap-w04","expectedLanguage":"en"},
+        {"key":"c05a","calibreId":9,"title":"Shared Subject 05","authorSort":"Writer, Common","authors":[{"name":"Common Writer","sortName":"Writer, Common"}],"identifiers":[],"publication":{"languages":["en"]},"formats":[],"workKey":"cal-cap-w05","expectedLanguage":"en"},
+        {"key":"c05b","calibreId":10,"title":"Shared Subject 05","authorSort":"Writer, Common","authors":[{"name":"Common Writer","sortName":"Writer, Common"}],"identifiers":[],"publication":{"languages":["en"]},"formats":[],"workKey":"cal-cap-w05","expectedLanguage":"en"},
+        {"key":"c06a","calibreId":11,"title":"Shared Subject 06","authorSort":"Writer, Common","authors":[{"name":"Common Writer","sortName":"Writer, Common"}],"identifiers":[],"publication":{"languages":["en"]},"formats":[],"workKey":"cal-cap-w06","expectedLanguage":"en"},
+        {"key":"c06b","calibreId":12,"title":"Shared Subject 06","authorSort":"Writer, Common","authors":[{"name":"Common Writer","sortName":"Writer, Common"}],"identifiers":[],"publication":{"languages":["en"]},"formats":[],"workKey":"cal-cap-w06","expectedLanguage":"en"},
+        {"key":"c07a","calibreId":13,"title":"Shared Subject 07","authorSort":"Writer, Common","authors":[{"name":"Common Writer","sortName":"Writer, Common"}],"identifiers":[],"publication":{"languages":["en"]},"formats":[],"workKey":"cal-cap-w07","expectedLanguage":"en"},
+        {"key":"c07b","calibreId":14,"title":"Shared Subject 07","authorSort":"Writer, Common","authors":[{"name":"Common Writer","sortName":"Writer, Common"}],"identifiers":[],"publication":{"languages":["en"]},"formats":[],"workKey":"cal-cap-w07","expectedLanguage":"en"},
+        {"key":"c08a","calibreId":15,"title":"Shared Subject 08","authorSort":"Writer, Common","authors":[{"name":"Common Writer","sortName":"Writer, Common"}],"identifiers":[],"publication":{"languages":["en"]},"formats":[],"workKey":"cal-cap-w08","expectedLanguage":"en"},
+        {"key":"c08b","calibreId":16,"title":"Shared Subject 08","authorSort":"Writer, Common","authors":[{"name":"Common Writer","sortName":"Writer, Common"}],"identifiers":[],"publication":{"languages":["en"]},"formats":[],"workKey":"cal-cap-w08","expectedLanguage":"en"},
+        {"key":"c09a","calibreId":17,"title":"Shared Subject 09","authorSort":"Writer, Common","authors":[{"name":"Common Writer","sortName":"Writer, Common"}],"identifiers":[],"publication":{"languages":["en"]},"formats":[],"workKey":"cal-cap-w09","expectedLanguage":"en"},
+        {"key":"c09b","calibreId":18,"title":"Shared Subject 09","authorSort":"Writer, Common","authors":[{"name":"Common Writer","sortName":"Writer, Common"}],"identifiers":[],"publication":{"languages":["en"]},"formats":[],"workKey":"cal-cap-w09","expectedLanguage":"en"},
+        {"key":"c10a","calibreId":19,"title":"Shared Subject 10","authorSort":"Writer, Common","authors":[{"name":"Common Writer","sortName":"Writer, Common"}],"identifiers":[],"publication":{"languages":["en"]},"formats":[],"workKey":"cal-cap-w10","expectedLanguage":"en"},
+        {"key":"c10b","calibreId":20,"title":"Shared Subject 10","authorSort":"Writer, Common","authors":[{"name":"Common Writer","sortName":"Writer, Common"}],"identifiers":[],"publication":{"languages":["en"]},"formats":[],"workKey":"cal-cap-w10","expectedLanguage":"en"},
+        {"key":"c11a","calibreId":21,"title":"Shared Subject 11","authorSort":"Writer, Common","authors":[{"name":"Common Writer","sortName":"Writer, Common"}],"identifiers":[],"publication":{"languages":["en"]},"formats":[],"workKey":"cal-cap-w11","expectedLanguage":"en"},
+        {"key":"c11b","calibreId":22,"title":"Shared Subject 11","authorSort":"Writer, Common","authors":[{"name":"Common Writer","sortName":"Writer, Common"}],"identifiers":[],"publication":{"languages":["en"]},"formats":[],"workKey":"cal-cap-w11","expectedLanguage":"en"}
+      ],
+      "contentComparisons": [],
+      "expectedGroups": [
+        {"workKey":"cal-cap-w01","language":"en","acceptableKeeperRecordIds":["c01a","c01b"]},
+        {"workKey":"cal-cap-w02","language":"en","acceptableKeeperRecordIds":["c02a","c02b"]},
+        {"workKey":"cal-cap-w03","language":"en","acceptableKeeperRecordIds":["c03a","c03b"]},
+        {"workKey":"cal-cap-w04","language":"en","acceptableKeeperRecordIds":["c04a","c04b"]},
+        {"workKey":"cal-cap-w05","language":"en","acceptableKeeperRecordIds":["c05a","c05b"]},
+        {"workKey":"cal-cap-w06","language":"en","acceptableKeeperRecordIds":["c06a","c06b"]},
+        {"workKey":"cal-cap-w07","language":"en","acceptableKeeperRecordIds":["c07a","c07b"]},
+        {"workKey":"cal-cap-w08","language":"en","acceptableKeeperRecordIds":["c08a","c08b"]},
+        {"workKey":"cal-cap-w09","language":"en","acceptableKeeperRecordIds":["c09a","c09b"]},
+        {"workKey":"cal-cap-w10","language":"en","acceptableKeeperRecordIds":["c10a","c10b"]},
+        {"workKey":"cal-cap-w11","language":"en","acceptableKeeperRecordIds":["c11a","c11b"]}
+      ],
+      "reviewNote": "Twenty-two mutually similar records trigger the ordinary top-20 cap while Exact Metadata protects each labeled pair.",
+      "repeat": 5,
+      "calibreIdStride": 1000
+    },
+    {
+      "id": "cal-wikidata-q92640",
+      "tags": ["title-noise", "author-variant", "edition-variant", "metadata-only"],
+      "sourceFamilyId": "wikidata-q92640",
+      "generationTemplateId": null,
+      "generationTemplateVersion": null,
+      "records": [
+        {"key":"alice-a","calibreId":90001,"title":"Alice's Adventures in Wonderland","authorSort":"Carroll, Lewis","authors":[{"name":"Lewis Carroll","sortName":"Carroll, Lewis"}],"identifiers":[],"publication":{"languages":["en"]},"formats":[],"workKey":"wikidata-work-q92640","expectedLanguage":"en"},
+        {"key":"alice-b","calibreId":90002,"title":"Alice in Wonderland Illustrated","authorSort":"Carroll, L.","authors":[{"name":"L. Carroll","sortName":"Carroll, L."}],"identifiers":[],"publication":{"languages":["en"]},"formats":[],"workKey":"wikidata-work-q92640","expectedLanguage":"en"}
+      ],
+      "contentComparisons": [],
+      "expectedGroups": [
+        {"workKey":"wikidata-work-q92640","language":"en","acceptableKeeperRecordIds":["alice-a","alice-b"]}
+      ],
+      "reviewNote": "Minimal CC0 Wikidata facts for public-domain work Q92640; variant marker is synthetic."
+    }
+  ]
+}

@@ -106,16 +106,40 @@ quality-ranked physical source. The keeper's existing same-format file wins.
   incrementally.
 - Exact Scan currently rereads every resolvable file for SHA-256.
 
+## Matching evaluation baseline
+
+`matching-corpus/1.0` now evaluates the complete current Domain matching pipeline on
+strict embedded calibration and holdout data. The corpus expands to 62 scenarios and
+includes 474 records, 232 positive pairs, 2,600 definitive negative pairs, synthetic
+hard cases, and two minimal CC0 Wikidata public-domain work families. It contains no
+ebook prose or personal-library data.
+
+The reviewed `matching-evaluation/1.0` baseline for current policies records:
+
+- pair precision: 210/230, 91.3043%;
+- pair recall: 210/232, 90.5172%;
+- F1: 420/462, 90.9091%;
+- candidate-route recall: 222/232, 95.6897%;
+- exact final components: 190/212, 89.6226%; and
+- keeper coverage: 190/212 expected groups, 89.6226%; and
+- keeper accuracy among those complete predicted groups: 190/190, 100%.
+
+The 20 false positives are Exact Metadata overmerges in explicit identifier/content
+or language-conflict scenarios. The 22 false negatives are 10 candidates not
+proposed and 12 requested-but-unavailable/weak content outcomes. These are corpus
+measurements, not universal library accuracy claims. Later policy changes must report
+calibration and frozen-holdout deltas against the committed semantic baseline.
+
 ## Target matching program
 
-1. Build a labeled corpus with same-work/language positives and hard negatives.
-2. Measure current candidate-generation recall and final group precision/recall.
-3. Add PDF fingerprints with all-page versus sampled coverage.
-4. Add calibrated language, cover/visual, and structural evidence.
-5. Add configured online provider evidence with provenance and local fallback.
-6. Evaluate local embeddings/models against deterministic baselines.
-7. Calibrate evidence fusion and confidence on held-out data.
-8. Add incremental candidate/evidence invalidation and cold/warm performance budgets.
+1. Improve normalization/evidence against the committed calibration and frozen
+  holdout baseline without weakening decisive contradictions.
+2. Add PDF fingerprints with all-page versus sampled coverage.
+3. Add calibrated language, cover/visual, and structural evidence.
+4. Add configured online provider evidence with provenance and local fallback.
+5. Evaluate local embeddings/models against deterministic baselines.
+6. Calibrate evidence fusion and confidence on held-out data.
+7. Add incremental candidate/evidence invalidation and cold/warm performance budgets.
 
 A new evidence source is accepted only when it improves measured quality or
 performance without unbounded resource use or hidden library-specific rules.

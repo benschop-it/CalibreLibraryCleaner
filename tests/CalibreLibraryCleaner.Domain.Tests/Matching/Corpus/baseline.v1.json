@@ -1,0 +1,2800 @@
+{
+  "schemaVersion": "matching-evaluation/1.0",
+  "corpusVersion": "matching-corpus-data/1.0",
+  "calibrationDigest": "e2caad058508d12da3fda2b2d7fd23ea6b02f9265b27a00d4dc41d510c41c019",
+  "holdoutDigest": "c991ae9d6d692dfa57da9fcbceaa0a1a553bf33c098c1852643af1fdfe181d14",
+  "policies": {
+    "exactMetadata": "exact-metadata/1.0.0",
+    "matching": "work-language-matching/1.2.0",
+    "unified": "unified-candidates/1.0.0",
+    "keeper": "expanded-candidate-keeper/1.0.0"
+  },
+  "generationTemplates": [
+    {
+      "name": "candidate-cap",
+      "count": 10
+    },
+    {
+      "name": "content-variants",
+      "count": 10
+    },
+    {
+      "name": "exact-variants",
+      "count": 10
+    },
+    {
+      "name": "format-keeper-malformed",
+      "count": 10
+    },
+    {
+      "name": "identifier-contradictions",
+      "count": 10
+    },
+    {
+      "name": "language-series",
+      "count": 10
+    }
+  ],
+  "overall": {
+    "name": "Overall",
+    "pairs": {
+      "truePositives": 210,
+      "falsePositives": 20,
+      "falseNegatives": 22,
+      "trueNegatives": 2580
+    },
+    "precision": {
+      "numerator": 210,
+      "denominator": 230,
+      "percentage": 91.3043
+    },
+    "recall": {
+      "numerator": 210,
+      "denominator": 232,
+      "percentage": 90.5172
+    },
+    "f1": {
+      "numerator": 420,
+      "denominator": 462,
+      "percentage": 90.9091
+    },
+    "candidateRouteRecall": {
+      "numerator": 222,
+      "denominator": 232,
+      "percentage": 95.6897
+    },
+    "expandedCandidateRecall": {
+      "numerator": 32,
+      "denominator": 42,
+      "percentage": 76.1905
+    },
+    "exactComponentRate": {
+      "numerator": 190,
+      "denominator": 212,
+      "percentage": 89.6226
+    },
+    "languageAccuracy": {
+      "numerator": 200,
+      "denominator": 210,
+      "percentage": 95.2381
+    },
+    "keeperCoverage": {
+      "numerator": 190,
+      "denominator": 212,
+      "percentage": 89.6226
+    },
+    "keeperAccuracy": {
+      "numerator": 190,
+      "denominator": 190,
+      "percentage": 100
+    },
+    "expectedGroups": 212,
+    "predictedGroups": 210,
+    "overmergedGroups": 20,
+    "fragmentedGroups": 22,
+    "crossLanguageMerges": 10,
+    "contentRequestedPairs": 2192,
+    "contentOracleAvailablePairs": 40,
+    "proposedDirectedPairs": 4864,
+    "retainedCandidatePairs": 2222,
+    "recordsCapped": 220,
+    "ordinaryCapDroppedDirectedPairs": 420,
+    "maximumObservedBucketSize": 22,
+    "oversizedBucketOutcomes": 0,
+    "globalLimitOutcomes": 0,
+    "decisionDispositions": [
+      {
+        "name": "Anchor",
+        "count": 20
+      },
+      {
+        "name": "Rejected",
+        "count": 40
+      },
+      {
+        "name": "Weak",
+        "count": 2162
+      }
+    ],
+    "failureCategories": [
+      {
+        "name": "CANDIDATE_NOT_PROPOSED",
+        "count": 10
+      },
+      {
+        "name": "CONTENT_UNAVAILABLE_OR_WEAK",
+        "count": 12
+      }
+    ],
+    "unifiedClassifications": [
+      {
+        "name": "CleanupEligible",
+        "count": 10
+      },
+      {
+        "name": "ToBeReviewed",
+        "count": 200
+      }
+    ],
+    "unifiedFindings": []
+  },
+  "splits": [
+    {
+      "name": "Calibration",
+      "pairs": {
+        "truePositives": 105,
+        "falsePositives": 10,
+        "falseNegatives": 11,
+        "trueNegatives": 1290
+      },
+      "precision": {
+        "numerator": 105,
+        "denominator": 115,
+        "percentage": 91.3043
+      },
+      "recall": {
+        "numerator": 105,
+        "denominator": 116,
+        "percentage": 90.5172
+      },
+      "f1": {
+        "numerator": 210,
+        "denominator": 231,
+        "percentage": 90.9091
+      },
+      "candidateRouteRecall": {
+        "numerator": 111,
+        "denominator": 116,
+        "percentage": 95.6897
+      },
+      "expandedCandidateRecall": {
+        "numerator": 16,
+        "denominator": 21,
+        "percentage": 76.1905
+      },
+      "exactComponentRate": {
+        "numerator": 95,
+        "denominator": 106,
+        "percentage": 89.6226
+      },
+      "languageAccuracy": {
+        "numerator": 100,
+        "denominator": 105,
+        "percentage": 95.2381
+      },
+      "keeperCoverage": {
+        "numerator": 95,
+        "denominator": 106,
+        "percentage": 89.6226
+      },
+      "keeperAccuracy": {
+        "numerator": 95,
+        "denominator": 95,
+        "percentage": 100
+      },
+      "expectedGroups": 106,
+      "predictedGroups": 105,
+      "overmergedGroups": 10,
+      "fragmentedGroups": 11,
+      "crossLanguageMerges": 5,
+      "contentRequestedPairs": 1096,
+      "contentOracleAvailablePairs": 20,
+      "proposedDirectedPairs": 2432,
+      "retainedCandidatePairs": 1111,
+      "recordsCapped": 110,
+      "ordinaryCapDroppedDirectedPairs": 210,
+      "maximumObservedBucketSize": 22,
+      "oversizedBucketOutcomes": 0,
+      "globalLimitOutcomes": 0,
+      "decisionDispositions": [
+        {
+          "name": "Anchor",
+          "count": 10
+        },
+        {
+          "name": "Rejected",
+          "count": 20
+        },
+        {
+          "name": "Weak",
+          "count": 1081
+        }
+      ],
+      "failureCategories": [
+        {
+          "name": "CANDIDATE_NOT_PROPOSED",
+          "count": 5
+        },
+        {
+          "name": "CONTENT_UNAVAILABLE_OR_WEAK",
+          "count": 6
+        }
+      ],
+      "unifiedClassifications": [
+        {
+          "name": "CleanupEligible",
+          "count": 5
+        },
+        {
+          "name": "ToBeReviewed",
+          "count": 100
+        }
+      ],
+      "unifiedFindings": []
+    },
+    {
+      "name": "Holdout",
+      "pairs": {
+        "truePositives": 105,
+        "falsePositives": 10,
+        "falseNegatives": 11,
+        "trueNegatives": 1290
+      },
+      "precision": {
+        "numerator": 105,
+        "denominator": 115,
+        "percentage": 91.3043
+      },
+      "recall": {
+        "numerator": 105,
+        "denominator": 116,
+        "percentage": 90.5172
+      },
+      "f1": {
+        "numerator": 210,
+        "denominator": 231,
+        "percentage": 90.9091
+      },
+      "candidateRouteRecall": {
+        "numerator": 111,
+        "denominator": 116,
+        "percentage": 95.6897
+      },
+      "expandedCandidateRecall": {
+        "numerator": 16,
+        "denominator": 21,
+        "percentage": 76.1905
+      },
+      "exactComponentRate": {
+        "numerator": 95,
+        "denominator": 106,
+        "percentage": 89.6226
+      },
+      "languageAccuracy": {
+        "numerator": 100,
+        "denominator": 105,
+        "percentage": 95.2381
+      },
+      "keeperCoverage": {
+        "numerator": 95,
+        "denominator": 106,
+        "percentage": 89.6226
+      },
+      "keeperAccuracy": {
+        "numerator": 95,
+        "denominator": 95,
+        "percentage": 100
+      },
+      "expectedGroups": 106,
+      "predictedGroups": 105,
+      "overmergedGroups": 10,
+      "fragmentedGroups": 11,
+      "crossLanguageMerges": 5,
+      "contentRequestedPairs": 1096,
+      "contentOracleAvailablePairs": 20,
+      "proposedDirectedPairs": 2432,
+      "retainedCandidatePairs": 1111,
+      "recordsCapped": 110,
+      "ordinaryCapDroppedDirectedPairs": 210,
+      "maximumObservedBucketSize": 22,
+      "oversizedBucketOutcomes": 0,
+      "globalLimitOutcomes": 0,
+      "decisionDispositions": [
+        {
+          "name": "Anchor",
+          "count": 10
+        },
+        {
+          "name": "Rejected",
+          "count": 20
+        },
+        {
+          "name": "Weak",
+          "count": 1081
+        }
+      ],
+      "failureCategories": [
+        {
+          "name": "CANDIDATE_NOT_PROPOSED",
+          "count": 5
+        },
+        {
+          "name": "CONTENT_UNAVAILABLE_OR_WEAK",
+          "count": 6
+        }
+      ],
+      "unifiedClassifications": [
+        {
+          "name": "CleanupEligible",
+          "count": 5
+        },
+        {
+          "name": "ToBeReviewed",
+          "count": 100
+        }
+      ],
+      "unifiedFindings": []
+    }
+  ],
+  "tags": [
+    {
+      "name": "author-variant",
+      "pairs": {
+        "truePositives": 10,
+        "falsePositives": 0,
+        "falseNegatives": 22,
+        "trueNegatives": 120
+      },
+      "precision": {
+        "numerator": 10,
+        "denominator": 10,
+        "percentage": 100
+      },
+      "recall": {
+        "numerator": 10,
+        "denominator": 32,
+        "percentage": 31.25
+      },
+      "f1": {
+        "numerator": 20,
+        "denominator": 42,
+        "percentage": 47.6190
+      },
+      "candidateRouteRecall": {
+        "numerator": 22,
+        "denominator": 32,
+        "percentage": 68.75
+      },
+      "expandedCandidateRecall": {
+        "numerator": 22,
+        "denominator": 32,
+        "percentage": 68.75
+      },
+      "exactComponentRate": {
+        "numerator": 10,
+        "denominator": 32,
+        "percentage": 31.25
+      },
+      "languageAccuracy": {
+        "numerator": 10,
+        "denominator": 10,
+        "percentage": 100
+      },
+      "keeperCoverage": {
+        "numerator": 10,
+        "denominator": 32,
+        "percentage": 31.25
+      },
+      "keeperAccuracy": {
+        "numerator": 10,
+        "denominator": 10,
+        "percentage": 100
+      },
+      "expectedGroups": 32,
+      "predictedGroups": 10,
+      "overmergedGroups": 0,
+      "fragmentedGroups": 22,
+      "crossLanguageMerges": 0,
+      "contentRequestedPairs": 22,
+      "contentOracleAvailablePairs": 20,
+      "proposedDirectedPairs": 44,
+      "retainedCandidatePairs": 22,
+      "recordsCapped": 0,
+      "ordinaryCapDroppedDirectedPairs": 0,
+      "maximumObservedBucketSize": 2,
+      "oversizedBucketOutcomes": 0,
+      "globalLimitOutcomes": 0,
+      "decisionDispositions": [
+        {
+          "name": "Anchor",
+          "count": 10
+        },
+        {
+          "name": "Weak",
+          "count": 12
+        }
+      ],
+      "failureCategories": [
+        {
+          "name": "CANDIDATE_NOT_PROPOSED",
+          "count": 10
+        },
+        {
+          "name": "CONTENT_UNAVAILABLE_OR_WEAK",
+          "count": 12
+        }
+      ],
+      "unifiedClassifications": [
+        {
+          "name": "CleanupEligible",
+          "count": 10
+        }
+      ],
+      "unifiedFindings": []
+    },
+    {
+      "name": "broad-author-bucket",
+      "pairs": {
+        "truePositives": 110,
+        "falsePositives": 0,
+        "falseNegatives": 0,
+        "trueNegatives": 2200
+      },
+      "precision": {
+        "numerator": 110,
+        "denominator": 110,
+        "percentage": 100
+      },
+      "recall": {
+        "numerator": 110,
+        "denominator": 110,
+        "percentage": 100
+      },
+      "f1": {
+        "numerator": 220,
+        "denominator": 220,
+        "percentage": 100
+      },
+      "candidateRouteRecall": {
+        "numerator": 110,
+        "denominator": 110,
+        "percentage": 100
+      },
+      "expandedCandidateRecall": {
+        "numerator": 0,
+        "denominator": 0,
+        "percentage": null
+      },
+      "exactComponentRate": {
+        "numerator": 110,
+        "denominator": 110,
+        "percentage": 100
+      },
+      "languageAccuracy": {
+        "numerator": 110,
+        "denominator": 110,
+        "percentage": 100
+      },
+      "keeperCoverage": {
+        "numerator": 110,
+        "denominator": 110,
+        "percentage": 100
+      },
+      "keeperAccuracy": {
+        "numerator": 110,
+        "denominator": 110,
+        "percentage": 100
+      },
+      "expectedGroups": 110,
+      "predictedGroups": 110,
+      "overmergedGroups": 0,
+      "fragmentedGroups": 0,
+      "crossLanguageMerges": 0,
+      "contentRequestedPairs": 2100,
+      "contentOracleAvailablePairs": 0,
+      "proposedDirectedPairs": 4620,
+      "retainedCandidatePairs": 2100,
+      "recordsCapped": 220,
+      "ordinaryCapDroppedDirectedPairs": 420,
+      "maximumObservedBucketSize": 22,
+      "oversizedBucketOutcomes": 0,
+      "globalLimitOutcomes": 0,
+      "decisionDispositions": [
+        {
+          "name": "Weak",
+          "count": 2100
+        }
+      ],
+      "failureCategories": [],
+      "unifiedClassifications": [
+        {
+          "name": "ToBeReviewed",
+          "count": 110
+        }
+      ],
+      "unifiedFindings": []
+    },
+    {
+      "name": "candidate-cap",
+      "pairs": {
+        "truePositives": 110,
+        "falsePositives": 0,
+        "falseNegatives": 0,
+        "trueNegatives": 2200
+      },
+      "precision": {
+        "numerator": 110,
+        "denominator": 110,
+        "percentage": 100
+      },
+      "recall": {
+        "numerator": 110,
+        "denominator": 110,
+        "percentage": 100
+      },
+      "f1": {
+        "numerator": 220,
+        "denominator": 220,
+        "percentage": 100
+      },
+      "candidateRouteRecall": {
+        "numerator": 110,
+        "denominator": 110,
+        "percentage": 100
+      },
+      "expandedCandidateRecall": {
+        "numerator": 0,
+        "denominator": 0,
+        "percentage": null
+      },
+      "exactComponentRate": {
+        "numerator": 110,
+        "denominator": 110,
+        "percentage": 100
+      },
+      "languageAccuracy": {
+        "numerator": 110,
+        "denominator": 110,
+        "percentage": 100
+      },
+      "keeperCoverage": {
+        "numerator": 110,
+        "denominator": 110,
+        "percentage": 100
+      },
+      "keeperAccuracy": {
+        "numerator": 110,
+        "denominator": 110,
+        "percentage": 100
+      },
+      "expectedGroups": 110,
+      "predictedGroups": 110,
+      "overmergedGroups": 0,
+      "fragmentedGroups": 0,
+      "crossLanguageMerges": 0,
+      "contentRequestedPairs": 2100,
+      "contentOracleAvailablePairs": 0,
+      "proposedDirectedPairs": 4620,
+      "retainedCandidatePairs": 2100,
+      "recordsCapped": 220,
+      "ordinaryCapDroppedDirectedPairs": 420,
+      "maximumObservedBucketSize": 22,
+      "oversizedBucketOutcomes": 0,
+      "globalLimitOutcomes": 0,
+      "decisionDispositions": [
+        {
+          "name": "Weak",
+          "count": 2100
+        }
+      ],
+      "failureCategories": [],
+      "unifiedClassifications": [
+        {
+          "name": "ToBeReviewed",
+          "count": 110
+        }
+      ],
+      "unifiedFindings": []
+    },
+    {
+      "name": "content-ambiguous",
+      "pairs": {
+        "truePositives": 10,
+        "falsePositives": 0,
+        "falseNegatives": 20,
+        "trueNegatives": 120
+      },
+      "precision": {
+        "numerator": 10,
+        "denominator": 10,
+        "percentage": 100
+      },
+      "recall": {
+        "numerator": 10,
+        "denominator": 30,
+        "percentage": 33.3333
+      },
+      "f1": {
+        "numerator": 20,
+        "denominator": 40,
+        "percentage": 50
+      },
+      "candidateRouteRecall": {
+        "numerator": 20,
+        "denominator": 30,
+        "percentage": 66.6667
+      },
+      "expandedCandidateRecall": {
+        "numerator": 20,
+        "denominator": 30,
+        "percentage": 66.6667
+      },
+      "exactComponentRate": {
+        "numerator": 10,
+        "denominator": 30,
+        "percentage": 33.3333
+      },
+      "languageAccuracy": {
+        "numerator": 10,
+        "denominator": 10,
+        "percentage": 100
+      },
+      "keeperCoverage": {
+        "numerator": 10,
+        "denominator": 30,
+        "percentage": 33.3333
+      },
+      "keeperAccuracy": {
+        "numerator": 10,
+        "denominator": 10,
+        "percentage": 100
+      },
+      "expectedGroups": 30,
+      "predictedGroups": 10,
+      "overmergedGroups": 0,
+      "fragmentedGroups": 20,
+      "crossLanguageMerges": 0,
+      "contentRequestedPairs": 20,
+      "contentOracleAvailablePairs": 20,
+      "proposedDirectedPairs": 40,
+      "retainedCandidatePairs": 20,
+      "recordsCapped": 0,
+      "ordinaryCapDroppedDirectedPairs": 0,
+      "maximumObservedBucketSize": 2,
+      "oversizedBucketOutcomes": 0,
+      "globalLimitOutcomes": 0,
+      "decisionDispositions": [
+        {
+          "name": "Anchor",
+          "count": 10
+        },
+        {
+          "name": "Weak",
+          "count": 10
+        }
+      ],
+      "failureCategories": [
+        {
+          "name": "CANDIDATE_NOT_PROPOSED",
+          "count": 10
+        },
+        {
+          "name": "CONTENT_UNAVAILABLE_OR_WEAK",
+          "count": 10
+        }
+      ],
+      "unifiedClassifications": [
+        {
+          "name": "CleanupEligible",
+          "count": 10
+        }
+      ],
+      "unifiedFindings": []
+    },
+    {
+      "name": "content-different",
+      "pairs": {
+        "truePositives": 10,
+        "falsePositives": 10,
+        "falseNegatives": 0,
+        "trueNegatives": 40
+      },
+      "precision": {
+        "numerator": 10,
+        "denominator": 20,
+        "percentage": 50
+      },
+      "recall": {
+        "numerator": 10,
+        "denominator": 10,
+        "percentage": 100
+      },
+      "f1": {
+        "numerator": 20,
+        "denominator": 30,
+        "percentage": 66.6667
+      },
+      "candidateRouteRecall": {
+        "numerator": 10,
+        "denominator": 10,
+        "percentage": 100
+      },
+      "expandedCandidateRecall": {
+        "numerator": 10,
+        "denominator": 10,
+        "percentage": 100
+      },
+      "exactComponentRate": {
+        "numerator": 10,
+        "denominator": 10,
+        "percentage": 100
+      },
+      "languageAccuracy": {
+        "numerator": 20,
+        "denominator": 20,
+        "percentage": 100
+      },
+      "keeperCoverage": {
+        "numerator": 10,
+        "denominator": 10,
+        "percentage": 100
+      },
+      "keeperAccuracy": {
+        "numerator": 10,
+        "denominator": 10,
+        "percentage": 100
+      },
+      "expectedGroups": 10,
+      "predictedGroups": 20,
+      "overmergedGroups": 10,
+      "fragmentedGroups": 0,
+      "crossLanguageMerges": 0,
+      "contentRequestedPairs": 20,
+      "contentOracleAvailablePairs": 20,
+      "proposedDirectedPairs": 40,
+      "retainedCandidatePairs": 20,
+      "recordsCapped": 0,
+      "ordinaryCapDroppedDirectedPairs": 0,
+      "maximumObservedBucketSize": 2,
+      "oversizedBucketOutcomes": 0,
+      "globalLimitOutcomes": 0,
+      "decisionDispositions": [
+        {
+          "name": "Anchor",
+          "count": 10
+        },
+        {
+          "name": "Rejected",
+          "count": 10
+        }
+      ],
+      "failureCategories": [],
+      "unifiedClassifications": [
+        {
+          "name": "ToBeReviewed",
+          "count": 20
+        }
+      ],
+      "unifiedFindings": []
+    },
+    {
+      "name": "content-equivalent",
+      "pairs": {
+        "truePositives": 10,
+        "falsePositives": 0,
+        "falseNegatives": 20,
+        "trueNegatives": 120
+      },
+      "precision": {
+        "numerator": 10,
+        "denominator": 10,
+        "percentage": 100
+      },
+      "recall": {
+        "numerator": 10,
+        "denominator": 30,
+        "percentage": 33.3333
+      },
+      "f1": {
+        "numerator": 20,
+        "denominator": 40,
+        "percentage": 50
+      },
+      "candidateRouteRecall": {
+        "numerator": 20,
+        "denominator": 30,
+        "percentage": 66.6667
+      },
+      "expandedCandidateRecall": {
+        "numerator": 20,
+        "denominator": 30,
+        "percentage": 66.6667
+      },
+      "exactComponentRate": {
+        "numerator": 10,
+        "denominator": 30,
+        "percentage": 33.3333
+      },
+      "languageAccuracy": {
+        "numerator": 10,
+        "denominator": 10,
+        "percentage": 100
+      },
+      "keeperCoverage": {
+        "numerator": 10,
+        "denominator": 30,
+        "percentage": 33.3333
+      },
+      "keeperAccuracy": {
+        "numerator": 10,
+        "denominator": 10,
+        "percentage": 100
+      },
+      "expectedGroups": 30,
+      "predictedGroups": 10,
+      "overmergedGroups": 0,
+      "fragmentedGroups": 20,
+      "crossLanguageMerges": 0,
+      "contentRequestedPairs": 20,
+      "contentOracleAvailablePairs": 20,
+      "proposedDirectedPairs": 40,
+      "retainedCandidatePairs": 20,
+      "recordsCapped": 0,
+      "ordinaryCapDroppedDirectedPairs": 0,
+      "maximumObservedBucketSize": 2,
+      "oversizedBucketOutcomes": 0,
+      "globalLimitOutcomes": 0,
+      "decisionDispositions": [
+        {
+          "name": "Anchor",
+          "count": 10
+        },
+        {
+          "name": "Weak",
+          "count": 10
+        }
+      ],
+      "failureCategories": [
+        {
+          "name": "CANDIDATE_NOT_PROPOSED",
+          "count": 10
+        },
+        {
+          "name": "CONTENT_UNAVAILABLE_OR_WEAK",
+          "count": 10
+        }
+      ],
+      "unifiedClassifications": [
+        {
+          "name": "CleanupEligible",
+          "count": 10
+        }
+      ],
+      "unifiedFindings": []
+    },
+    {
+      "name": "content-high",
+      "pairs": {
+        "truePositives": 10,
+        "falsePositives": 0,
+        "falseNegatives": 20,
+        "trueNegatives": 120
+      },
+      "precision": {
+        "numerator": 10,
+        "denominator": 10,
+        "percentage": 100
+      },
+      "recall": {
+        "numerator": 10,
+        "denominator": 30,
+        "percentage": 33.3333
+      },
+      "f1": {
+        "numerator": 20,
+        "denominator": 40,
+        "percentage": 50
+      },
+      "candidateRouteRecall": {
+        "numerator": 20,
+        "denominator": 30,
+        "percentage": 66.6667
+      },
+      "expandedCandidateRecall": {
+        "numerator": 20,
+        "denominator": 30,
+        "percentage": 66.6667
+      },
+      "exactComponentRate": {
+        "numerator": 10,
+        "denominator": 30,
+        "percentage": 33.3333
+      },
+      "languageAccuracy": {
+        "numerator": 10,
+        "denominator": 10,
+        "percentage": 100
+      },
+      "keeperCoverage": {
+        "numerator": 10,
+        "denominator": 30,
+        "percentage": 33.3333
+      },
+      "keeperAccuracy": {
+        "numerator": 10,
+        "denominator": 10,
+        "percentage": 100
+      },
+      "expectedGroups": 30,
+      "predictedGroups": 10,
+      "overmergedGroups": 0,
+      "fragmentedGroups": 20,
+      "crossLanguageMerges": 0,
+      "contentRequestedPairs": 20,
+      "contentOracleAvailablePairs": 20,
+      "proposedDirectedPairs": 40,
+      "retainedCandidatePairs": 20,
+      "recordsCapped": 0,
+      "ordinaryCapDroppedDirectedPairs": 0,
+      "maximumObservedBucketSize": 2,
+      "oversizedBucketOutcomes": 0,
+      "globalLimitOutcomes": 0,
+      "decisionDispositions": [
+        {
+          "name": "Anchor",
+          "count": 10
+        },
+        {
+          "name": "Weak",
+          "count": 10
+        }
+      ],
+      "failureCategories": [
+        {
+          "name": "CANDIDATE_NOT_PROPOSED",
+          "count": 10
+        },
+        {
+          "name": "CONTENT_UNAVAILABLE_OR_WEAK",
+          "count": 10
+        }
+      ],
+      "unifiedClassifications": [
+        {
+          "name": "CleanupEligible",
+          "count": 10
+        }
+      ],
+      "unifiedFindings": []
+    },
+    {
+      "name": "content-unavailable",
+      "pairs": {
+        "truePositives": 10,
+        "falsePositives": 10,
+        "falseNegatives": 0,
+        "trueNegatives": 40
+      },
+      "precision": {
+        "numerator": 10,
+        "denominator": 20,
+        "percentage": 50
+      },
+      "recall": {
+        "numerator": 10,
+        "denominator": 10,
+        "percentage": 100
+      },
+      "f1": {
+        "numerator": 20,
+        "denominator": 30,
+        "percentage": 66.6667
+      },
+      "candidateRouteRecall": {
+        "numerator": 10,
+        "denominator": 10,
+        "percentage": 100
+      },
+      "expandedCandidateRecall": {
+        "numerator": 10,
+        "denominator": 10,
+        "percentage": 100
+      },
+      "exactComponentRate": {
+        "numerator": 10,
+        "denominator": 10,
+        "percentage": 100
+      },
+      "languageAccuracy": {
+        "numerator": 20,
+        "denominator": 20,
+        "percentage": 100
+      },
+      "keeperCoverage": {
+        "numerator": 10,
+        "denominator": 10,
+        "percentage": 100
+      },
+      "keeperAccuracy": {
+        "numerator": 10,
+        "denominator": 10,
+        "percentage": 100
+      },
+      "expectedGroups": 10,
+      "predictedGroups": 20,
+      "overmergedGroups": 10,
+      "fragmentedGroups": 0,
+      "crossLanguageMerges": 0,
+      "contentRequestedPairs": 20,
+      "contentOracleAvailablePairs": 20,
+      "proposedDirectedPairs": 40,
+      "retainedCandidatePairs": 20,
+      "recordsCapped": 0,
+      "ordinaryCapDroppedDirectedPairs": 0,
+      "maximumObservedBucketSize": 2,
+      "oversizedBucketOutcomes": 0,
+      "globalLimitOutcomes": 0,
+      "decisionDispositions": [
+        {
+          "name": "Anchor",
+          "count": 10
+        },
+        {
+          "name": "Rejected",
+          "count": 10
+        }
+      ],
+      "failureCategories": [],
+      "unifiedClassifications": [
+        {
+          "name": "ToBeReviewed",
+          "count": 20
+        }
+      ],
+      "unifiedFindings": []
+    },
+    {
+      "name": "edition-variant",
+      "pairs": {
+        "truePositives": 10,
+        "falsePositives": 0,
+        "falseNegatives": 22,
+        "trueNegatives": 120
+      },
+      "precision": {
+        "numerator": 10,
+        "denominator": 10,
+        "percentage": 100
+      },
+      "recall": {
+        "numerator": 10,
+        "denominator": 32,
+        "percentage": 31.25
+      },
+      "f1": {
+        "numerator": 20,
+        "denominator": 42,
+        "percentage": 47.6190
+      },
+      "candidateRouteRecall": {
+        "numerator": 22,
+        "denominator": 32,
+        "percentage": 68.75
+      },
+      "expandedCandidateRecall": {
+        "numerator": 22,
+        "denominator": 32,
+        "percentage": 68.75
+      },
+      "exactComponentRate": {
+        "numerator": 10,
+        "denominator": 32,
+        "percentage": 31.25
+      },
+      "languageAccuracy": {
+        "numerator": 10,
+        "denominator": 10,
+        "percentage": 100
+      },
+      "keeperCoverage": {
+        "numerator": 10,
+        "denominator": 32,
+        "percentage": 31.25
+      },
+      "keeperAccuracy": {
+        "numerator": 10,
+        "denominator": 10,
+        "percentage": 100
+      },
+      "expectedGroups": 32,
+      "predictedGroups": 10,
+      "overmergedGroups": 0,
+      "fragmentedGroups": 22,
+      "crossLanguageMerges": 0,
+      "contentRequestedPairs": 22,
+      "contentOracleAvailablePairs": 20,
+      "proposedDirectedPairs": 44,
+      "retainedCandidatePairs": 22,
+      "recordsCapped": 0,
+      "ordinaryCapDroppedDirectedPairs": 0,
+      "maximumObservedBucketSize": 2,
+      "oversizedBucketOutcomes": 0,
+      "globalLimitOutcomes": 0,
+      "decisionDispositions": [
+        {
+          "name": "Anchor",
+          "count": 10
+        },
+        {
+          "name": "Weak",
+          "count": 12
+        }
+      ],
+      "failureCategories": [
+        {
+          "name": "CANDIDATE_NOT_PROPOSED",
+          "count": 10
+        },
+        {
+          "name": "CONTENT_UNAVAILABLE_OR_WEAK",
+          "count": 12
+        }
+      ],
+      "unifiedClassifications": [
+        {
+          "name": "CleanupEligible",
+          "count": 10
+        }
+      ],
+      "unifiedFindings": []
+    },
+    {
+      "name": "exact-metadata",
+      "pairs": {
+        "truePositives": 20,
+        "falsePositives": 0,
+        "falseNegatives": 0,
+        "trueNegatives": 40
+      },
+      "precision": {
+        "numerator": 20,
+        "denominator": 20,
+        "percentage": 100
+      },
+      "recall": {
+        "numerator": 20,
+        "denominator": 20,
+        "percentage": 100
+      },
+      "f1": {
+        "numerator": 40,
+        "denominator": 40,
+        "percentage": 100
+      },
+      "candidateRouteRecall": {
+        "numerator": 20,
+        "denominator": 20,
+        "percentage": 100
+      },
+      "expandedCandidateRecall": {
+        "numerator": 0,
+        "denominator": 0,
+        "percentage": null
+      },
+      "exactComponentRate": {
+        "numerator": 20,
+        "denominator": 20,
+        "percentage": 100
+      },
+      "languageAccuracy": {
+        "numerator": 20,
+        "denominator": 20,
+        "percentage": 100
+      },
+      "keeperCoverage": {
+        "numerator": 20,
+        "denominator": 20,
+        "percentage": 100
+      },
+      "keeperAccuracy": {
+        "numerator": 20,
+        "denominator": 20,
+        "percentage": 100
+      },
+      "expectedGroups": 20,
+      "predictedGroups": 20,
+      "overmergedGroups": 0,
+      "fragmentedGroups": 0,
+      "crossLanguageMerges": 0,
+      "contentRequestedPairs": 20,
+      "contentOracleAvailablePairs": 0,
+      "proposedDirectedPairs": 40,
+      "retainedCandidatePairs": 20,
+      "recordsCapped": 0,
+      "ordinaryCapDroppedDirectedPairs": 0,
+      "maximumObservedBucketSize": 2,
+      "oversizedBucketOutcomes": 0,
+      "globalLimitOutcomes": 0,
+      "decisionDispositions": [
+        {
+          "name": "Weak",
+          "count": 20
+        }
+      ],
+      "failureCategories": [],
+      "unifiedClassifications": [
+        {
+          "name": "ToBeReviewed",
+          "count": 20
+        }
+      ],
+      "unifiedFindings": []
+    },
+    {
+      "name": "format-diversity",
+      "pairs": {
+        "truePositives": 30,
+        "falsePositives": 0,
+        "falseNegatives": 0,
+        "trueNegatives": 120
+      },
+      "precision": {
+        "numerator": 30,
+        "denominator": 30,
+        "percentage": 100
+      },
+      "recall": {
+        "numerator": 30,
+        "denominator": 30,
+        "percentage": 100
+      },
+      "f1": {
+        "numerator": 60,
+        "denominator": 60,
+        "percentage": 100
+      },
+      "candidateRouteRecall": {
+        "numerator": 30,
+        "denominator": 30,
+        "percentage": 100
+      },
+      "expandedCandidateRecall": {
+        "numerator": 0,
+        "denominator": 0,
+        "percentage": null
+      },
+      "exactComponentRate": {
+        "numerator": 30,
+        "denominator": 30,
+        "percentage": 100
+      },
+      "languageAccuracy": {
+        "numerator": 30,
+        "denominator": 30,
+        "percentage": 100
+      },
+      "keeperCoverage": {
+        "numerator": 30,
+        "denominator": 30,
+        "percentage": 100
+      },
+      "keeperAccuracy": {
+        "numerator": 30,
+        "denominator": 30,
+        "percentage": 100
+      },
+      "expectedGroups": 30,
+      "predictedGroups": 30,
+      "overmergedGroups": 0,
+      "fragmentedGroups": 0,
+      "crossLanguageMerges": 0,
+      "contentRequestedPairs": 20,
+      "contentOracleAvailablePairs": 0,
+      "proposedDirectedPairs": 40,
+      "retainedCandidatePairs": 20,
+      "recordsCapped": 0,
+      "ordinaryCapDroppedDirectedPairs": 0,
+      "maximumObservedBucketSize": 2,
+      "oversizedBucketOutcomes": 0,
+      "globalLimitOutcomes": 0,
+      "decisionDispositions": [
+        {
+          "name": "Weak",
+          "count": 20
+        }
+      ],
+      "failureCategories": [],
+      "unifiedClassifications": [
+        {
+          "name": "ToBeReviewed",
+          "count": 30
+        }
+      ],
+      "unifiedFindings": []
+    },
+    {
+      "name": "identifier-anchor",
+      "pairs": {
+        "truePositives": 10,
+        "falsePositives": 10,
+        "falseNegatives": 0,
+        "trueNegatives": 40
+      },
+      "precision": {
+        "numerator": 10,
+        "denominator": 20,
+        "percentage": 50
+      },
+      "recall": {
+        "numerator": 10,
+        "denominator": 10,
+        "percentage": 100
+      },
+      "f1": {
+        "numerator": 20,
+        "denominator": 30,
+        "percentage": 66.6667
+      },
+      "candidateRouteRecall": {
+        "numerator": 10,
+        "denominator": 10,
+        "percentage": 100
+      },
+      "expandedCandidateRecall": {
+        "numerator": 10,
+        "denominator": 10,
+        "percentage": 100
+      },
+      "exactComponentRate": {
+        "numerator": 10,
+        "denominator": 10,
+        "percentage": 100
+      },
+      "languageAccuracy": {
+        "numerator": 20,
+        "denominator": 20,
+        "percentage": 100
+      },
+      "keeperCoverage": {
+        "numerator": 10,
+        "denominator": 10,
+        "percentage": 100
+      },
+      "keeperAccuracy": {
+        "numerator": 10,
+        "denominator": 10,
+        "percentage": 100
+      },
+      "expectedGroups": 10,
+      "predictedGroups": 20,
+      "overmergedGroups": 10,
+      "fragmentedGroups": 0,
+      "crossLanguageMerges": 0,
+      "contentRequestedPairs": 20,
+      "contentOracleAvailablePairs": 20,
+      "proposedDirectedPairs": 40,
+      "retainedCandidatePairs": 20,
+      "recordsCapped": 0,
+      "ordinaryCapDroppedDirectedPairs": 0,
+      "maximumObservedBucketSize": 2,
+      "oversizedBucketOutcomes": 0,
+      "globalLimitOutcomes": 0,
+      "decisionDispositions": [
+        {
+          "name": "Anchor",
+          "count": 10
+        },
+        {
+          "name": "Rejected",
+          "count": 10
+        }
+      ],
+      "failureCategories": [],
+      "unifiedClassifications": [
+        {
+          "name": "ToBeReviewed",
+          "count": 20
+        }
+      ],
+      "unifiedFindings": []
+    },
+    {
+      "name": "identifier-conflict",
+      "pairs": {
+        "truePositives": 10,
+        "falsePositives": 10,
+        "falseNegatives": 0,
+        "trueNegatives": 40
+      },
+      "precision": {
+        "numerator": 10,
+        "denominator": 20,
+        "percentage": 50
+      },
+      "recall": {
+        "numerator": 10,
+        "denominator": 10,
+        "percentage": 100
+      },
+      "f1": {
+        "numerator": 20,
+        "denominator": 30,
+        "percentage": 66.6667
+      },
+      "candidateRouteRecall": {
+        "numerator": 10,
+        "denominator": 10,
+        "percentage": 100
+      },
+      "expandedCandidateRecall": {
+        "numerator": 10,
+        "denominator": 10,
+        "percentage": 100
+      },
+      "exactComponentRate": {
+        "numerator": 10,
+        "denominator": 10,
+        "percentage": 100
+      },
+      "languageAccuracy": {
+        "numerator": 20,
+        "denominator": 20,
+        "percentage": 100
+      },
+      "keeperCoverage": {
+        "numerator": 10,
+        "denominator": 10,
+        "percentage": 100
+      },
+      "keeperAccuracy": {
+        "numerator": 10,
+        "denominator": 10,
+        "percentage": 100
+      },
+      "expectedGroups": 10,
+      "predictedGroups": 20,
+      "overmergedGroups": 10,
+      "fragmentedGroups": 0,
+      "crossLanguageMerges": 0,
+      "contentRequestedPairs": 20,
+      "contentOracleAvailablePairs": 20,
+      "proposedDirectedPairs": 40,
+      "retainedCandidatePairs": 20,
+      "recordsCapped": 0,
+      "ordinaryCapDroppedDirectedPairs": 0,
+      "maximumObservedBucketSize": 2,
+      "oversizedBucketOutcomes": 0,
+      "globalLimitOutcomes": 0,
+      "decisionDispositions": [
+        {
+          "name": "Anchor",
+          "count": 10
+        },
+        {
+          "name": "Rejected",
+          "count": 10
+        }
+      ],
+      "failureCategories": [],
+      "unifiedClassifications": [
+        {
+          "name": "ToBeReviewed",
+          "count": 20
+        }
+      ],
+      "unifiedFindings": []
+    },
+    {
+      "name": "keeper-ranking",
+      "pairs": {
+        "truePositives": 30,
+        "falsePositives": 0,
+        "falseNegatives": 0,
+        "trueNegatives": 120
+      },
+      "precision": {
+        "numerator": 30,
+        "denominator": 30,
+        "percentage": 100
+      },
+      "recall": {
+        "numerator": 30,
+        "denominator": 30,
+        "percentage": 100
+      },
+      "f1": {
+        "numerator": 60,
+        "denominator": 60,
+        "percentage": 100
+      },
+      "candidateRouteRecall": {
+        "numerator": 30,
+        "denominator": 30,
+        "percentage": 100
+      },
+      "expandedCandidateRecall": {
+        "numerator": 0,
+        "denominator": 0,
+        "percentage": null
+      },
+      "exactComponentRate": {
+        "numerator": 30,
+        "denominator": 30,
+        "percentage": 100
+      },
+      "languageAccuracy": {
+        "numerator": 30,
+        "denominator": 30,
+        "percentage": 100
+      },
+      "keeperCoverage": {
+        "numerator": 30,
+        "denominator": 30,
+        "percentage": 100
+      },
+      "keeperAccuracy": {
+        "numerator": 30,
+        "denominator": 30,
+        "percentage": 100
+      },
+      "expectedGroups": 30,
+      "predictedGroups": 30,
+      "overmergedGroups": 0,
+      "fragmentedGroups": 0,
+      "crossLanguageMerges": 0,
+      "contentRequestedPairs": 20,
+      "contentOracleAvailablePairs": 0,
+      "proposedDirectedPairs": 40,
+      "retainedCandidatePairs": 20,
+      "recordsCapped": 0,
+      "ordinaryCapDroppedDirectedPairs": 0,
+      "maximumObservedBucketSize": 2,
+      "oversizedBucketOutcomes": 0,
+      "globalLimitOutcomes": 0,
+      "decisionDispositions": [
+        {
+          "name": "Weak",
+          "count": 20
+        }
+      ],
+      "failureCategories": [],
+      "unifiedClassifications": [
+        {
+          "name": "ToBeReviewed",
+          "count": 30
+        }
+      ],
+      "unifiedFindings": []
+    },
+    {
+      "name": "language-conflict",
+      "pairs": {
+        "truePositives": 30,
+        "falsePositives": 10,
+        "falseNegatives": 0,
+        "trueNegatives": 60
+      },
+      "precision": {
+        "numerator": 30,
+        "denominator": 40,
+        "percentage": 75
+      },
+      "recall": {
+        "numerator": 30,
+        "denominator": 30,
+        "percentage": 100
+      },
+      "f1": {
+        "numerator": 60,
+        "denominator": 70,
+        "percentage": 85.7143
+      },
+      "candidateRouteRecall": {
+        "numerator": 30,
+        "denominator": 30,
+        "percentage": 100
+      },
+      "expandedCandidateRecall": {
+        "numerator": 0,
+        "denominator": 0,
+        "percentage": null
+      },
+      "exactComponentRate": {
+        "numerator": 10,
+        "denominator": 10,
+        "percentage": 100
+      },
+      "languageAccuracy": {
+        "numerator": 10,
+        "denominator": 20,
+        "percentage": 50
+      },
+      "keeperCoverage": {
+        "numerator": 10,
+        "denominator": 10,
+        "percentage": 100
+      },
+      "keeperAccuracy": {
+        "numerator": 10,
+        "denominator": 10,
+        "percentage": 100
+      },
+      "expectedGroups": 10,
+      "predictedGroups": 20,
+      "overmergedGroups": 10,
+      "fragmentedGroups": 0,
+      "crossLanguageMerges": 10,
+      "contentRequestedPairs": 10,
+      "contentOracleAvailablePairs": 0,
+      "proposedDirectedPairs": 80,
+      "retainedCandidatePairs": 40,
+      "recordsCapped": 0,
+      "ordinaryCapDroppedDirectedPairs": 0,
+      "maximumObservedBucketSize": 3,
+      "oversizedBucketOutcomes": 0,
+      "globalLimitOutcomes": 0,
+      "decisionDispositions": [
+        {
+          "name": "Rejected",
+          "count": 30
+        },
+        {
+          "name": "Weak",
+          "count": 10
+        }
+      ],
+      "failureCategories": [],
+      "unifiedClassifications": [
+        {
+          "name": "ToBeReviewed",
+          "count": 20
+        }
+      ],
+      "unifiedFindings": []
+    },
+    {
+      "name": "malformed-metadata",
+      "pairs": {
+        "truePositives": 30,
+        "falsePositives": 0,
+        "falseNegatives": 0,
+        "trueNegatives": 120
+      },
+      "precision": {
+        "numerator": 30,
+        "denominator": 30,
+        "percentage": 100
+      },
+      "recall": {
+        "numerator": 30,
+        "denominator": 30,
+        "percentage": 100
+      },
+      "f1": {
+        "numerator": 60,
+        "denominator": 60,
+        "percentage": 100
+      },
+      "candidateRouteRecall": {
+        "numerator": 30,
+        "denominator": 30,
+        "percentage": 100
+      },
+      "expandedCandidateRecall": {
+        "numerator": 0,
+        "denominator": 0,
+        "percentage": null
+      },
+      "exactComponentRate": {
+        "numerator": 30,
+        "denominator": 30,
+        "percentage": 100
+      },
+      "languageAccuracy": {
+        "numerator": 30,
+        "denominator": 30,
+        "percentage": 100
+      },
+      "keeperCoverage": {
+        "numerator": 30,
+        "denominator": 30,
+        "percentage": 100
+      },
+      "keeperAccuracy": {
+        "numerator": 30,
+        "denominator": 30,
+        "percentage": 100
+      },
+      "expectedGroups": 30,
+      "predictedGroups": 30,
+      "overmergedGroups": 0,
+      "fragmentedGroups": 0,
+      "crossLanguageMerges": 0,
+      "contentRequestedPairs": 20,
+      "contentOracleAvailablePairs": 0,
+      "proposedDirectedPairs": 40,
+      "retainedCandidatePairs": 20,
+      "recordsCapped": 0,
+      "ordinaryCapDroppedDirectedPairs": 0,
+      "maximumObservedBucketSize": 2,
+      "oversizedBucketOutcomes": 0,
+      "globalLimitOutcomes": 0,
+      "decisionDispositions": [
+        {
+          "name": "Weak",
+          "count": 20
+        }
+      ],
+      "failureCategories": [],
+      "unifiedClassifications": [
+        {
+          "name": "ToBeReviewed",
+          "count": 30
+        }
+      ],
+      "unifiedFindings": []
+    },
+    {
+      "name": "metadata-only",
+      "pairs": {
+        "truePositives": 50,
+        "falsePositives": 0,
+        "falseNegatives": 2,
+        "trueNegatives": 160
+      },
+      "precision": {
+        "numerator": 50,
+        "denominator": 50,
+        "percentage": 100
+      },
+      "recall": {
+        "numerator": 50,
+        "denominator": 52,
+        "percentage": 96.1538
+      },
+      "f1": {
+        "numerator": 100,
+        "denominator": 102,
+        "percentage": 98.0392
+      },
+      "candidateRouteRecall": {
+        "numerator": 52,
+        "denominator": 52,
+        "percentage": 100
+      },
+      "expandedCandidateRecall": {
+        "numerator": 2,
+        "denominator": 2,
+        "percentage": 100
+      },
+      "exactComponentRate": {
+        "numerator": 50,
+        "denominator": 52,
+        "percentage": 96.1538
+      },
+      "languageAccuracy": {
+        "numerator": 50,
+        "denominator": 50,
+        "percentage": 100
+      },
+      "keeperCoverage": {
+        "numerator": 50,
+        "denominator": 52,
+        "percentage": 96.1538
+      },
+      "keeperAccuracy": {
+        "numerator": 50,
+        "denominator": 50,
+        "percentage": 100
+      },
+      "expectedGroups": 52,
+      "predictedGroups": 50,
+      "overmergedGroups": 0,
+      "fragmentedGroups": 2,
+      "crossLanguageMerges": 0,
+      "contentRequestedPairs": 42,
+      "contentOracleAvailablePairs": 0,
+      "proposedDirectedPairs": 84,
+      "retainedCandidatePairs": 42,
+      "recordsCapped": 0,
+      "ordinaryCapDroppedDirectedPairs": 0,
+      "maximumObservedBucketSize": 2,
+      "oversizedBucketOutcomes": 0,
+      "globalLimitOutcomes": 0,
+      "decisionDispositions": [
+        {
+          "name": "Weak",
+          "count": 42
+        }
+      ],
+      "failureCategories": [
+        {
+          "name": "CONTENT_UNAVAILABLE_OR_WEAK",
+          "count": 2
+        }
+      ],
+      "unifiedClassifications": [
+        {
+          "name": "ToBeReviewed",
+          "count": 50
+        }
+      ],
+      "unifiedFindings": []
+    },
+    {
+      "name": "missing-language",
+      "pairs": {
+        "truePositives": 30,
+        "falsePositives": 10,
+        "falseNegatives": 0,
+        "trueNegatives": 60
+      },
+      "precision": {
+        "numerator": 30,
+        "denominator": 40,
+        "percentage": 75
+      },
+      "recall": {
+        "numerator": 30,
+        "denominator": 30,
+        "percentage": 100
+      },
+      "f1": {
+        "numerator": 60,
+        "denominator": 70,
+        "percentage": 85.7143
+      },
+      "candidateRouteRecall": {
+        "numerator": 30,
+        "denominator": 30,
+        "percentage": 100
+      },
+      "expandedCandidateRecall": {
+        "numerator": 0,
+        "denominator": 0,
+        "percentage": null
+      },
+      "exactComponentRate": {
+        "numerator": 10,
+        "denominator": 10,
+        "percentage": 100
+      },
+      "languageAccuracy": {
+        "numerator": 10,
+        "denominator": 20,
+        "percentage": 50
+      },
+      "keeperCoverage": {
+        "numerator": 10,
+        "denominator": 10,
+        "percentage": 100
+      },
+      "keeperAccuracy": {
+        "numerator": 10,
+        "denominator": 10,
+        "percentage": 100
+      },
+      "expectedGroups": 10,
+      "predictedGroups": 20,
+      "overmergedGroups": 10,
+      "fragmentedGroups": 0,
+      "crossLanguageMerges": 10,
+      "contentRequestedPairs": 10,
+      "contentOracleAvailablePairs": 0,
+      "proposedDirectedPairs": 80,
+      "retainedCandidatePairs": 40,
+      "recordsCapped": 0,
+      "ordinaryCapDroppedDirectedPairs": 0,
+      "maximumObservedBucketSize": 3,
+      "oversizedBucketOutcomes": 0,
+      "globalLimitOutcomes": 0,
+      "decisionDispositions": [
+        {
+          "name": "Rejected",
+          "count": 30
+        },
+        {
+          "name": "Weak",
+          "count": 10
+        }
+      ],
+      "failureCategories": [],
+      "unifiedClassifications": [
+        {
+          "name": "ToBeReviewed",
+          "count": 20
+        }
+      ],
+      "unifiedFindings": []
+    },
+    {
+      "name": "multi-record-chain",
+      "pairs": {
+        "truePositives": 140,
+        "falsePositives": 10,
+        "falseNegatives": 0,
+        "trueNegatives": 2260
+      },
+      "precision": {
+        "numerator": 140,
+        "denominator": 150,
+        "percentage": 93.3333
+      },
+      "recall": {
+        "numerator": 140,
+        "denominator": 140,
+        "percentage": 100
+      },
+      "f1": {
+        "numerator": 280,
+        "denominator": 290,
+        "percentage": 96.5517
+      },
+      "candidateRouteRecall": {
+        "numerator": 140,
+        "denominator": 140,
+        "percentage": 100
+      },
+      "expandedCandidateRecall": {
+        "numerator": 0,
+        "denominator": 0,
+        "percentage": null
+      },
+      "exactComponentRate": {
+        "numerator": 120,
+        "denominator": 120,
+        "percentage": 100
+      },
+      "languageAccuracy": {
+        "numerator": 120,
+        "denominator": 130,
+        "percentage": 92.3077
+      },
+      "keeperCoverage": {
+        "numerator": 120,
+        "denominator": 120,
+        "percentage": 100
+      },
+      "keeperAccuracy": {
+        "numerator": 120,
+        "denominator": 120,
+        "percentage": 100
+      },
+      "expectedGroups": 120,
+      "predictedGroups": 130,
+      "overmergedGroups": 10,
+      "fragmentedGroups": 0,
+      "crossLanguageMerges": 10,
+      "contentRequestedPairs": 2110,
+      "contentOracleAvailablePairs": 0,
+      "proposedDirectedPairs": 4700,
+      "retainedCandidatePairs": 2140,
+      "recordsCapped": 220,
+      "ordinaryCapDroppedDirectedPairs": 420,
+      "maximumObservedBucketSize": 22,
+      "oversizedBucketOutcomes": 0,
+      "globalLimitOutcomes": 0,
+      "decisionDispositions": [
+        {
+          "name": "Rejected",
+          "count": 30
+        },
+        {
+          "name": "Weak",
+          "count": 2110
+        }
+      ],
+      "failureCategories": [],
+      "unifiedClassifications": [
+        {
+          "name": "ToBeReviewed",
+          "count": 130
+        }
+      ],
+      "unifiedFindings": []
+    },
+    {
+      "name": "pdf-only",
+      "pairs": {
+        "truePositives": 30,
+        "falsePositives": 0,
+        "falseNegatives": 0,
+        "trueNegatives": 120
+      },
+      "precision": {
+        "numerator": 30,
+        "denominator": 30,
+        "percentage": 100
+      },
+      "recall": {
+        "numerator": 30,
+        "denominator": 30,
+        "percentage": 100
+      },
+      "f1": {
+        "numerator": 60,
+        "denominator": 60,
+        "percentage": 100
+      },
+      "candidateRouteRecall": {
+        "numerator": 30,
+        "denominator": 30,
+        "percentage": 100
+      },
+      "expandedCandidateRecall": {
+        "numerator": 0,
+        "denominator": 0,
+        "percentage": null
+      },
+      "exactComponentRate": {
+        "numerator": 30,
+        "denominator": 30,
+        "percentage": 100
+      },
+      "languageAccuracy": {
+        "numerator": 30,
+        "denominator": 30,
+        "percentage": 100
+      },
+      "keeperCoverage": {
+        "numerator": 30,
+        "denominator": 30,
+        "percentage": 100
+      },
+      "keeperAccuracy": {
+        "numerator": 30,
+        "denominator": 30,
+        "percentage": 100
+      },
+      "expectedGroups": 30,
+      "predictedGroups": 30,
+      "overmergedGroups": 0,
+      "fragmentedGroups": 0,
+      "crossLanguageMerges": 0,
+      "contentRequestedPairs": 20,
+      "contentOracleAvailablePairs": 0,
+      "proposedDirectedPairs": 40,
+      "retainedCandidatePairs": 20,
+      "recordsCapped": 0,
+      "ordinaryCapDroppedDirectedPairs": 0,
+      "maximumObservedBucketSize": 2,
+      "oversizedBucketOutcomes": 0,
+      "globalLimitOutcomes": 0,
+      "decisionDispositions": [
+        {
+          "name": "Weak",
+          "count": 20
+        }
+      ],
+      "failureCategories": [],
+      "unifiedClassifications": [
+        {
+          "name": "ToBeReviewed",
+          "count": 30
+        }
+      ],
+      "unifiedFindings": []
+    },
+    {
+      "name": "same-title-different-work",
+      "pairs": {
+        "truePositives": 10,
+        "falsePositives": 10,
+        "falseNegatives": 0,
+        "trueNegatives": 40
+      },
+      "precision": {
+        "numerator": 10,
+        "denominator": 20,
+        "percentage": 50
+      },
+      "recall": {
+        "numerator": 10,
+        "denominator": 10,
+        "percentage": 100
+      },
+      "f1": {
+        "numerator": 20,
+        "denominator": 30,
+        "percentage": 66.6667
+      },
+      "candidateRouteRecall": {
+        "numerator": 10,
+        "denominator": 10,
+        "percentage": 100
+      },
+      "expandedCandidateRecall": {
+        "numerator": 10,
+        "denominator": 10,
+        "percentage": 100
+      },
+      "exactComponentRate": {
+        "numerator": 10,
+        "denominator": 10,
+        "percentage": 100
+      },
+      "languageAccuracy": {
+        "numerator": 20,
+        "denominator": 20,
+        "percentage": 100
+      },
+      "keeperCoverage": {
+        "numerator": 10,
+        "denominator": 10,
+        "percentage": 100
+      },
+      "keeperAccuracy": {
+        "numerator": 10,
+        "denominator": 10,
+        "percentage": 100
+      },
+      "expectedGroups": 10,
+      "predictedGroups": 20,
+      "overmergedGroups": 10,
+      "fragmentedGroups": 0,
+      "crossLanguageMerges": 0,
+      "contentRequestedPairs": 20,
+      "contentOracleAvailablePairs": 20,
+      "proposedDirectedPairs": 40,
+      "retainedCandidatePairs": 20,
+      "recordsCapped": 0,
+      "ordinaryCapDroppedDirectedPairs": 0,
+      "maximumObservedBucketSize": 2,
+      "oversizedBucketOutcomes": 0,
+      "globalLimitOutcomes": 0,
+      "decisionDispositions": [
+        {
+          "name": "Anchor",
+          "count": 10
+        },
+        {
+          "name": "Rejected",
+          "count": 10
+        }
+      ],
+      "failureCategories": [],
+      "unifiedClassifications": [
+        {
+          "name": "ToBeReviewed",
+          "count": 20
+        }
+      ],
+      "unifiedFindings": []
+    },
+    {
+      "name": "series-conflict",
+      "pairs": {
+        "truePositives": 30,
+        "falsePositives": 10,
+        "falseNegatives": 0,
+        "trueNegatives": 60
+      },
+      "precision": {
+        "numerator": 30,
+        "denominator": 40,
+        "percentage": 75
+      },
+      "recall": {
+        "numerator": 30,
+        "denominator": 30,
+        "percentage": 100
+      },
+      "f1": {
+        "numerator": 60,
+        "denominator": 70,
+        "percentage": 85.7143
+      },
+      "candidateRouteRecall": {
+        "numerator": 30,
+        "denominator": 30,
+        "percentage": 100
+      },
+      "expandedCandidateRecall": {
+        "numerator": 0,
+        "denominator": 0,
+        "percentage": null
+      },
+      "exactComponentRate": {
+        "numerator": 10,
+        "denominator": 10,
+        "percentage": 100
+      },
+      "languageAccuracy": {
+        "numerator": 10,
+        "denominator": 20,
+        "percentage": 50
+      },
+      "keeperCoverage": {
+        "numerator": 10,
+        "denominator": 10,
+        "percentage": 100
+      },
+      "keeperAccuracy": {
+        "numerator": 10,
+        "denominator": 10,
+        "percentage": 100
+      },
+      "expectedGroups": 10,
+      "predictedGroups": 20,
+      "overmergedGroups": 10,
+      "fragmentedGroups": 0,
+      "crossLanguageMerges": 10,
+      "contentRequestedPairs": 10,
+      "contentOracleAvailablePairs": 0,
+      "proposedDirectedPairs": 80,
+      "retainedCandidatePairs": 40,
+      "recordsCapped": 0,
+      "ordinaryCapDroppedDirectedPairs": 0,
+      "maximumObservedBucketSize": 3,
+      "oversizedBucketOutcomes": 0,
+      "globalLimitOutcomes": 0,
+      "decisionDispositions": [
+        {
+          "name": "Rejected",
+          "count": 30
+        },
+        {
+          "name": "Weak",
+          "count": 10
+        }
+      ],
+      "failureCategories": [],
+      "unifiedClassifications": [
+        {
+          "name": "ToBeReviewed",
+          "count": 20
+        }
+      ],
+      "unifiedFindings": []
+    },
+    {
+      "name": "title-noise",
+      "pairs": {
+        "truePositives": 10,
+        "falsePositives": 0,
+        "falseNegatives": 22,
+        "trueNegatives": 120
+      },
+      "precision": {
+        "numerator": 10,
+        "denominator": 10,
+        "percentage": 100
+      },
+      "recall": {
+        "numerator": 10,
+        "denominator": 32,
+        "percentage": 31.25
+      },
+      "f1": {
+        "numerator": 20,
+        "denominator": 42,
+        "percentage": 47.6190
+      },
+      "candidateRouteRecall": {
+        "numerator": 22,
+        "denominator": 32,
+        "percentage": 68.75
+      },
+      "expandedCandidateRecall": {
+        "numerator": 22,
+        "denominator": 32,
+        "percentage": 68.75
+      },
+      "exactComponentRate": {
+        "numerator": 10,
+        "denominator": 32,
+        "percentage": 31.25
+      },
+      "languageAccuracy": {
+        "numerator": 10,
+        "denominator": 10,
+        "percentage": 100
+      },
+      "keeperCoverage": {
+        "numerator": 10,
+        "denominator": 32,
+        "percentage": 31.25
+      },
+      "keeperAccuracy": {
+        "numerator": 10,
+        "denominator": 10,
+        "percentage": 100
+      },
+      "expectedGroups": 32,
+      "predictedGroups": 10,
+      "overmergedGroups": 0,
+      "fragmentedGroups": 22,
+      "crossLanguageMerges": 0,
+      "contentRequestedPairs": 22,
+      "contentOracleAvailablePairs": 20,
+      "proposedDirectedPairs": 44,
+      "retainedCandidatePairs": 22,
+      "recordsCapped": 0,
+      "ordinaryCapDroppedDirectedPairs": 0,
+      "maximumObservedBucketSize": 2,
+      "oversizedBucketOutcomes": 0,
+      "globalLimitOutcomes": 0,
+      "decisionDispositions": [
+        {
+          "name": "Anchor",
+          "count": 10
+        },
+        {
+          "name": "Weak",
+          "count": 12
+        }
+      ],
+      "failureCategories": [
+        {
+          "name": "CANDIDATE_NOT_PROPOSED",
+          "count": 10
+        },
+        {
+          "name": "CONTENT_UNAVAILABLE_OR_WEAK",
+          "count": 12
+        }
+      ],
+      "unifiedClassifications": [
+        {
+          "name": "CleanupEligible",
+          "count": 10
+        }
+      ],
+      "unifiedFindings": []
+    },
+    {
+      "name": "unicode-punctuation",
+      "pairs": {
+        "truePositives": 20,
+        "falsePositives": 0,
+        "falseNegatives": 0,
+        "trueNegatives": 40
+      },
+      "precision": {
+        "numerator": 20,
+        "denominator": 20,
+        "percentage": 100
+      },
+      "recall": {
+        "numerator": 20,
+        "denominator": 20,
+        "percentage": 100
+      },
+      "f1": {
+        "numerator": 40,
+        "denominator": 40,
+        "percentage": 100
+      },
+      "candidateRouteRecall": {
+        "numerator": 20,
+        "denominator": 20,
+        "percentage": 100
+      },
+      "expandedCandidateRecall": {
+        "numerator": 0,
+        "denominator": 0,
+        "percentage": null
+      },
+      "exactComponentRate": {
+        "numerator": 20,
+        "denominator": 20,
+        "percentage": 100
+      },
+      "languageAccuracy": {
+        "numerator": 20,
+        "denominator": 20,
+        "percentage": 100
+      },
+      "keeperCoverage": {
+        "numerator": 20,
+        "denominator": 20,
+        "percentage": 100
+      },
+      "keeperAccuracy": {
+        "numerator": 20,
+        "denominator": 20,
+        "percentage": 100
+      },
+      "expectedGroups": 20,
+      "predictedGroups": 20,
+      "overmergedGroups": 0,
+      "fragmentedGroups": 0,
+      "crossLanguageMerges": 0,
+      "contentRequestedPairs": 20,
+      "contentOracleAvailablePairs": 0,
+      "proposedDirectedPairs": 40,
+      "retainedCandidatePairs": 20,
+      "recordsCapped": 0,
+      "ordinaryCapDroppedDirectedPairs": 0,
+      "maximumObservedBucketSize": 2,
+      "oversizedBucketOutcomes": 0,
+      "globalLimitOutcomes": 0,
+      "decisionDispositions": [
+        {
+          "name": "Weak",
+          "count": 20
+        }
+      ],
+      "failureCategories": [],
+      "unifiedClassifications": [
+        {
+          "name": "ToBeReviewed",
+          "count": 20
+        }
+      ],
+      "unifiedFindings": []
+    }
+  ],
+  "falseNegatives": [
+    {
+      "scenarioId": "cal-content-g01",
+      "firstRecordId": "b1",
+      "secondRecordId": "b2",
+      "category": "CANDIDATE_NOT_PROPOSED"
+    },
+    {
+      "scenarioId": "cal-content-g01",
+      "firstRecordId": "c1",
+      "secondRecordId": "c2",
+      "category": "CONTENT_UNAVAILABLE_OR_WEAK"
+    },
+    {
+      "scenarioId": "cal-content-g02",
+      "firstRecordId": "b1",
+      "secondRecordId": "b2",
+      "category": "CANDIDATE_NOT_PROPOSED"
+    },
+    {
+      "scenarioId": "cal-content-g02",
+      "firstRecordId": "c1",
+      "secondRecordId": "c2",
+      "category": "CONTENT_UNAVAILABLE_OR_WEAK"
+    },
+    {
+      "scenarioId": "cal-content-g03",
+      "firstRecordId": "b1",
+      "secondRecordId": "b2",
+      "category": "CANDIDATE_NOT_PROPOSED"
+    },
+    {
+      "scenarioId": "cal-content-g03",
+      "firstRecordId": "c1",
+      "secondRecordId": "c2",
+      "category": "CONTENT_UNAVAILABLE_OR_WEAK"
+    },
+    {
+      "scenarioId": "cal-content-g04",
+      "firstRecordId": "b1",
+      "secondRecordId": "b2",
+      "category": "CANDIDATE_NOT_PROPOSED"
+    },
+    {
+      "scenarioId": "cal-content-g04",
+      "firstRecordId": "c1",
+      "secondRecordId": "c2",
+      "category": "CONTENT_UNAVAILABLE_OR_WEAK"
+    },
+    {
+      "scenarioId": "cal-content-g05",
+      "firstRecordId": "b1",
+      "secondRecordId": "b2",
+      "category": "CANDIDATE_NOT_PROPOSED"
+    },
+    {
+      "scenarioId": "cal-content-g05",
+      "firstRecordId": "c1",
+      "secondRecordId": "c2",
+      "category": "CONTENT_UNAVAILABLE_OR_WEAK"
+    },
+    {
+      "scenarioId": "cal-wikidata-q92640",
+      "firstRecordId": "alice-a",
+      "secondRecordId": "alice-b",
+      "category": "CONTENT_UNAVAILABLE_OR_WEAK"
+    },
+    {
+      "scenarioId": "hold-content-g01",
+      "firstRecordId": "b1",
+      "secondRecordId": "b2",
+      "category": "CANDIDATE_NOT_PROPOSED"
+    },
+    {
+      "scenarioId": "hold-content-g01",
+      "firstRecordId": "c1",
+      "secondRecordId": "c2",
+      "category": "CONTENT_UNAVAILABLE_OR_WEAK"
+    },
+    {
+      "scenarioId": "hold-content-g02",
+      "firstRecordId": "b1",
+      "secondRecordId": "b2",
+      "category": "CANDIDATE_NOT_PROPOSED"
+    },
+    {
+      "scenarioId": "hold-content-g02",
+      "firstRecordId": "c1",
+      "secondRecordId": "c2",
+      "category": "CONTENT_UNAVAILABLE_OR_WEAK"
+    },
+    {
+      "scenarioId": "hold-content-g03",
+      "firstRecordId": "b1",
+      "secondRecordId": "b2",
+      "category": "CANDIDATE_NOT_PROPOSED"
+    },
+    {
+      "scenarioId": "hold-content-g03",
+      "firstRecordId": "c1",
+      "secondRecordId": "c2",
+      "category": "CONTENT_UNAVAILABLE_OR_WEAK"
+    },
+    {
+      "scenarioId": "hold-content-g04",
+      "firstRecordId": "b1",
+      "secondRecordId": "b2",
+      "category": "CANDIDATE_NOT_PROPOSED"
+    },
+    {
+      "scenarioId": "hold-content-g04",
+      "firstRecordId": "c1",
+      "secondRecordId": "c2",
+      "category": "CONTENT_UNAVAILABLE_OR_WEAK"
+    },
+    {
+      "scenarioId": "hold-content-g05",
+      "firstRecordId": "b1",
+      "secondRecordId": "b2",
+      "category": "CANDIDATE_NOT_PROPOSED"
+    },
+    {
+      "scenarioId": "hold-content-g05",
+      "firstRecordId": "c1",
+      "secondRecordId": "c2",
+      "category": "CONTENT_UNAVAILABLE_OR_WEAK"
+    },
+    {
+      "scenarioId": "hold-wikidata-q170583",
+      "firstRecordId": "pride-a",
+      "secondRecordId": "pride-b",
+      "category": "CONTENT_UNAVAILABLE_OR_WEAK"
+    }
+  ],
+  "falsePositives": [
+    {
+      "scenarioId": "cal-identifiers-g01",
+      "firstRecordId": "x1",
+      "secondRecordId": "x2",
+      "unifiedGroupId": "unified-candidate:v1:5e4c517a8624016a45474a5a7abd34aaef1d2790424dfc702aea86435ca990f6",
+      "evidenceCodes": [
+        "MATCH.METADATA.EXACT_TITLE_AUTHOR"
+      ],
+      "contradictionCodes": [],
+      "findingCodes": []
+    },
+    {
+      "scenarioId": "cal-identifiers-g02",
+      "firstRecordId": "x1",
+      "secondRecordId": "x2",
+      "unifiedGroupId": "unified-candidate:v1:6c1c5e93ccf610481b297c68f8e50a20e29ff0b6231b678d3db0432cebbb9f27",
+      "evidenceCodes": [
+        "MATCH.METADATA.EXACT_TITLE_AUTHOR"
+      ],
+      "contradictionCodes": [],
+      "findingCodes": []
+    },
+    {
+      "scenarioId": "cal-identifiers-g03",
+      "firstRecordId": "x1",
+      "secondRecordId": "x2",
+      "unifiedGroupId": "unified-candidate:v1:6151c1d319dcbc10d81af290f61a6a375283d772fbf77ba62f2831c782b8bf84",
+      "evidenceCodes": [
+        "MATCH.METADATA.EXACT_TITLE_AUTHOR"
+      ],
+      "contradictionCodes": [],
+      "findingCodes": []
+    },
+    {
+      "scenarioId": "cal-identifiers-g04",
+      "firstRecordId": "x1",
+      "secondRecordId": "x2",
+      "unifiedGroupId": "unified-candidate:v1:500e92ac52fa80f323293951c8f8be274e0e8e7ed0d2546c4b4ffa900422403b",
+      "evidenceCodes": [
+        "MATCH.METADATA.EXACT_TITLE_AUTHOR"
+      ],
+      "contradictionCodes": [],
+      "findingCodes": []
+    },
+    {
+      "scenarioId": "cal-identifiers-g05",
+      "firstRecordId": "x1",
+      "secondRecordId": "x2",
+      "unifiedGroupId": "unified-candidate:v1:4b53ad66072a90a49199934e06f9ae293613c24c54180c4637cb0cc6289b49c4",
+      "evidenceCodes": [
+        "MATCH.METADATA.EXACT_TITLE_AUTHOR"
+      ],
+      "contradictionCodes": [],
+      "findingCodes": []
+    },
+    {
+      "scenarioId": "cal-language-series-g01",
+      "firstRecordId": "l1",
+      "secondRecordId": "l2",
+      "unifiedGroupId": "unified-candidate:v1:b07a08e96d861c8042aaacea9366bee751ee00dda85f18cf174589c50a055382",
+      "evidenceCodes": [
+        "MATCH.METADATA.EXACT_TITLE_AUTHOR"
+      ],
+      "contradictionCodes": [],
+      "findingCodes": []
+    },
+    {
+      "scenarioId": "cal-language-series-g02",
+      "firstRecordId": "l1",
+      "secondRecordId": "l2",
+      "unifiedGroupId": "unified-candidate:v1:c56ef7ae8b964368f121563350e396b01399a73d706d67f0885796415d433610",
+      "evidenceCodes": [
+        "MATCH.METADATA.EXACT_TITLE_AUTHOR"
+      ],
+      "contradictionCodes": [],
+      "findingCodes": []
+    },
+    {
+      "scenarioId": "cal-language-series-g03",
+      "firstRecordId": "l1",
+      "secondRecordId": "l2",
+      "unifiedGroupId": "unified-candidate:v1:92831b9928cc23bbd2c0b948d034e116ab7cfcef87d40c8fd2b90bfa5cb8932e",
+      "evidenceCodes": [
+        "MATCH.METADATA.EXACT_TITLE_AUTHOR"
+      ],
+      "contradictionCodes": [],
+      "findingCodes": []
+    },
+    {
+      "scenarioId": "cal-language-series-g04",
+      "firstRecordId": "l1",
+      "secondRecordId": "l2",
+      "unifiedGroupId": "unified-candidate:v1:db7a9f1116b5ba8b963c0fc8102247bcef084ed876f0d9e2c66403b25eec36e6",
+      "evidenceCodes": [
+        "MATCH.METADATA.EXACT_TITLE_AUTHOR"
+      ],
+      "contradictionCodes": [],
+      "findingCodes": []
+    },
+    {
+      "scenarioId": "cal-language-series-g05",
+      "firstRecordId": "l1",
+      "secondRecordId": "l2",
+      "unifiedGroupId": "unified-candidate:v1:1890e396b52e8af98100650c10fe49758c6414c71a72f8dd9b5a56df2a75042b",
+      "evidenceCodes": [
+        "MATCH.METADATA.EXACT_TITLE_AUTHOR"
+      ],
+      "contradictionCodes": [],
+      "findingCodes": []
+    },
+    {
+      "scenarioId": "hold-identifiers-g01",
+      "firstRecordId": "x1",
+      "secondRecordId": "x2",
+      "unifiedGroupId": "unified-candidate:v1:338fcc454c057311bf62b87e9b8210ad910e416371333792466f2a0deddb0c7e",
+      "evidenceCodes": [
+        "MATCH.METADATA.EXACT_TITLE_AUTHOR"
+      ],
+      "contradictionCodes": [],
+      "findingCodes": []
+    },
+    {
+      "scenarioId": "hold-identifiers-g02",
+      "firstRecordId": "x1",
+      "secondRecordId": "x2",
+      "unifiedGroupId": "unified-candidate:v1:b54f17b16915027896fdb25d84c2a734ce2a8a7847c609b043fcf3db2b44820c",
+      "evidenceCodes": [
+        "MATCH.METADATA.EXACT_TITLE_AUTHOR"
+      ],
+      "contradictionCodes": [],
+      "findingCodes": []
+    },
+    {
+      "scenarioId": "hold-identifiers-g03",
+      "firstRecordId": "x1",
+      "secondRecordId": "x2",
+      "unifiedGroupId": "unified-candidate:v1:af84cc8cf79bd54ea50e50986d28b5967f30372266f07a443f12bc77a43c61b6",
+      "evidenceCodes": [
+        "MATCH.METADATA.EXACT_TITLE_AUTHOR"
+      ],
+      "contradictionCodes": [],
+      "findingCodes": []
+    },
+    {
+      "scenarioId": "hold-identifiers-g04",
+      "firstRecordId": "x1",
+      "secondRecordId": "x2",
+      "unifiedGroupId": "unified-candidate:v1:96990cbf00d04c54711113e65c8802cd289fb2e0ab6ceadd84ad21dd2a53a627",
+      "evidenceCodes": [
+        "MATCH.METADATA.EXACT_TITLE_AUTHOR"
+      ],
+      "contradictionCodes": [],
+      "findingCodes": []
+    },
+    {
+      "scenarioId": "hold-identifiers-g05",
+      "firstRecordId": "x1",
+      "secondRecordId": "x2",
+      "unifiedGroupId": "unified-candidate:v1:dde2a225d49526900faf6f356da2cc1092cc6eb265e212b04905b36c721427ec",
+      "evidenceCodes": [
+        "MATCH.METADATA.EXACT_TITLE_AUTHOR"
+      ],
+      "contradictionCodes": [],
+      "findingCodes": []
+    },
+    {
+      "scenarioId": "hold-language-series-g01",
+      "firstRecordId": "l1",
+      "secondRecordId": "l2",
+      "unifiedGroupId": "unified-candidate:v1:2b850282776a065b5aab2bffe970f639ba5c632983a27b748cbf158586c80c64",
+      "evidenceCodes": [
+        "MATCH.METADATA.EXACT_TITLE_AUTHOR"
+      ],
+      "contradictionCodes": [],
+      "findingCodes": []
+    },
+    {
+      "scenarioId": "hold-language-series-g02",
+      "firstRecordId": "l1",
+      "secondRecordId": "l2",
+      "unifiedGroupId": "unified-candidate:v1:c26e8769e1c5e51ae71a7f47f46a82031bec8e08470ea6d3fa0353a1b67e5650",
+      "evidenceCodes": [
+        "MATCH.METADATA.EXACT_TITLE_AUTHOR"
+      ],
+      "contradictionCodes": [],
+      "findingCodes": []
+    },
+    {
+      "scenarioId": "hold-language-series-g03",
+      "firstRecordId": "l1",
+      "secondRecordId": "l2",
+      "unifiedGroupId": "unified-candidate:v1:c392149f45ab96bdf5d5370a230d30c9c679c081bb388cce1c54d99940bde35f",
+      "evidenceCodes": [
+        "MATCH.METADATA.EXACT_TITLE_AUTHOR"
+      ],
+      "contradictionCodes": [],
+      "findingCodes": []
+    },
+    {
+      "scenarioId": "hold-language-series-g04",
+      "firstRecordId": "l1",
+      "secondRecordId": "l2",
+      "unifiedGroupId": "unified-candidate:v1:18686a03db152816360ebda73d2b3fc777f24431a84b0bb39f2fa8ca454fbba9",
+      "evidenceCodes": [
+        "MATCH.METADATA.EXACT_TITLE_AUTHOR"
+      ],
+      "contradictionCodes": [],
+      "findingCodes": []
+    },
+    {
+      "scenarioId": "hold-language-series-g05",
+      "firstRecordId": "l1",
+      "secondRecordId": "l2",
+      "unifiedGroupId": "unified-candidate:v1:08d0c8bedcd4461d7f0a64c96fcf6fe5f0e66bbb25ee7f0d30e5f5fc5cf2a372",
+      "evidenceCodes": [
+        "MATCH.METADATA.EXACT_TITLE_AUTHOR"
+      ],
+      "contradictionCodes": [],
+      "findingCodes": []
+    }
+  ],
+  "keeperErrors": [],
+  "observations": {
+    "elapsedMilliseconds": 0,
+    "allocatedBytes": 0,
+    "runtimeVersion": "10.0.9"
+  }
+}

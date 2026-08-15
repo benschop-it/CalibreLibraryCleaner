@@ -34,13 +34,23 @@ the current prioritized product direction.
 
 ## Priority 1: Measure and improve matching
 
-1. Build and version a labeled same-work/language corpus with hard negatives,
-   editions, translations, damaged metadata, and format diversity.
-2. Establish candidate-generation recall and final group precision/recall baselines.
-3. Add explainable false-positive/false-negative reports and threshold calibration.
-4. Improve normalization/evidence only when holdout metrics improve; avoid
+Completed measurement foundation:
+
+- versioned labeled calibration/holdout corpus with hard negatives, editions,
+  translations, damaged metadata, format diversity, and minimal CC0 sourced works;
+- full Domain pipeline evaluator with pair/group/candidate/language/keeper metrics;
+- opaque stage-specific false-positive/false-negative reports and cap diagnostics;
+- reviewed semantic baseline: 91.3043% precision, 90.5172% recall, 90.9091% F1,
+   95.6897% candidate-route recall, 89.6226% keeper coverage, and 100% keeper
+   accuracy on scored groups.
+
+Next:
+
+1. Improve normalization and deterministic evidence for current false negatives.
+2. Prevent Exact Metadata overmerge across decisive language/identifier/content
+   contradictions before Unified publication.
+3. Calibrate changes on calibration, then require frozen-holdout improvement without
    library-specific aliases.
-5. Measure keeper correctness separately from group correctness.
 
 ## Priority 2: Fast incremental analysis and caches
 

@@ -545,17 +545,29 @@ Remove-Item Env:CALIBRE_RUN_MATCHING_BENCHMARK
 - [x] Corpus schema, split discipline, metrics, evaluator stages, and baseline update
   policy designed.
 - [x] Execution plan written.
-- [ ] Corpus contract and strict loader implemented.
-- [ ] Metric and stage-diagnostic evaluator implemented.
-- [ ] Calibration corpus completed.
-- [ ] Holdout corpus completed and frozen.
-- [ ] Current baseline recorded and reviewed.
-- [ ] Automated and scale verification completed.
-- [ ] Actual results documented and next policy slice selected.
+- [x] Corpus contract and strict loader implemented.
+- [x] Metric and stage-diagnostic evaluator implemented.
+- [x] Calibration corpus completed.
+- [x] Holdout corpus completed and frozen.
+- [x] Current baseline recorded and reviewed.
+- [x] Full standard verification completed with 646/646 tests passing; existing
+  scale evidence remains the performance baseline because production policy did not
+  change.
+- [x] Actual results documented and next policy slice selected.
 
 ## Final outcome
 
-Planning complete. No matching policy or production behavior has changed. The first
-implementation slice is the corpus contract, evaluator, and small representative
-seed; policy tuning begins only after the full calibration/holdout baseline is
-reviewed.
+Implemented without changing matching policy or production behavior. The strict
+embedded corpus expands to 62 scenarios, 474 records, 232 positive pairs, and 2,600
+negative pairs, including independent minimal CC0 Wikidata families. The current
+baseline is 91.3043% pair precision, 90.5172% recall, 90.9091% F1, 95.6897%
+candidate-route recall, 89.6226% exact-component/keeper coverage, and 100% keeper
+accuracy on complete predicted groups. It records 20 false positives and 22 false negatives with
+no unknown pipeline gaps. The next slice may tune deterministic matching against
+calibration but must demonstrate the frozen-holdout delta.
+
+The public generator exposes proposed/retained counts and maximum bucket size, not
+the exact members suppressed by an oversized bucket. The report therefore derives
+ordinary directed cap loss, records scenarios crossing the current bucket threshold,
+and leaves exact oversized-pair loss to focused generator tests. No evaluation-only
+production hook was added.

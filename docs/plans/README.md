@@ -2,9 +2,8 @@
 
 This directory contains only active execution plans.
 
-Current plan:
-
-- [Priority 1: Matching Corpus and Baseline Measurement](priority-1-matching-corpus-and-baseline.md)
+There is no active execution plan. The next plan should improve deterministic
+matching against the committed calibration and frozen-holdout baseline.
 
 Keep active plans current during implementation, then move them to
 `../archive/plans/` after completion and documentation reconciliation.

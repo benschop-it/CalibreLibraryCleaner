@@ -33,6 +33,16 @@ Do not tune against the developer's library alone or add library-specific aliase
 Online/provider and local-model tests use recorded/generated fixtures, not live
 network/model downloads in the ordinary suite.
 
+The committed `matching-corpus/1.0` resources run through the real public Domain
+policies and are bound to a reviewed `matching-evaluation/1.0` semantic baseline.
+Tests enforce strict bounded parsing, opaque validation errors, calibration/holdout
+leakage rules, order-independent canonical digests/reports, candidate-cap metrics,
+failure categories, keeper sets, and no Domain.Tests reference to Application or
+Infrastructure. Runtime/allocation observations are emitted but are not golden
+equality gates. External corpora are opt-in through `CALIBRE_MATCHING_CORPUS_PATH`
+and `CALIBRE_RUN_EXTERNAL_MATCHING_EVALUATION=1`; they report only aggregates and
+opaque IDs.
+
 ## Cache and performance tests
 
 Every cache test covers:
