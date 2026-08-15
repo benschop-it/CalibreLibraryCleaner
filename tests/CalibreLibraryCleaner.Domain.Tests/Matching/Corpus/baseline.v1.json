@@ -5,7 +5,7 @@
   "holdoutDigest": "c991ae9d6d692dfa57da9fcbceaa0a1a553bf33c098c1852643af1fdfe181d14",
   "policies": {
     "exactMetadata": "exact-metadata/1.1.0",
-    "matching": "work-language-matching/1.2.0",
+    "matching": "work-language-matching/1.3.0",
     "unified": "unified-candidates/1.0.0",
     "keeper": "expanded-candidate-keeper/1.0.0"
   },
@@ -38,65 +38,65 @@
   "overall": {
     "name": "Overall",
     "pairs": {
-      "truePositives": 210,
+      "truePositives": 220,
       "falsePositives": 0,
-      "falseNegatives": 22,
+      "falseNegatives": 12,
       "trueNegatives": 2600
     },
     "precision": {
-      "numerator": 210,
-      "denominator": 210,
+      "numerator": 220,
+      "denominator": 220,
       "percentage": 100
     },
     "recall": {
-      "numerator": 210,
+      "numerator": 220,
       "denominator": 232,
-      "percentage": 90.5172
+      "percentage": 94.8276
     },
     "f1": {
-      "numerator": 420,
-      "denominator": 442,
-      "percentage": 95.0226
+      "numerator": 440,
+      "denominator": 452,
+      "percentage": 97.3451
     },
     "candidateRouteRecall": {
-      "numerator": 222,
+      "numerator": 232,
       "denominator": 232,
-      "percentage": 95.6897
+      "percentage": 100
     },
     "expandedCandidateRecall": {
-      "numerator": 32,
+      "numerator": 42,
       "denominator": 42,
-      "percentage": 76.1905
+      "percentage": 100
     },
     "exactComponentRate": {
-      "numerator": 190,
+      "numerator": 200,
       "denominator": 212,
-      "percentage": 89.6226
+      "percentage": 94.3396
     },
     "languageAccuracy": {
-      "numerator": 190,
-      "denominator": 190,
+      "numerator": 200,
+      "denominator": 200,
       "percentage": 100
     },
     "keeperCoverage": {
-      "numerator": 190,
+      "numerator": 200,
       "denominator": 212,
-      "percentage": 89.6226
+      "percentage": 94.3396
     },
     "keeperAccuracy": {
-      "numerator": 190,
-      "denominator": 190,
+      "numerator": 200,
+      "denominator": 200,
       "percentage": 100
     },
     "expectedGroups": 212,
-    "predictedGroups": 190,
+    "predictedGroups": 200,
     "overmergedGroups": 0,
-    "fragmentedGroups": 22,
+    "fragmentedGroups": 12,
     "crossLanguageMerges": 0,
-    "contentRequestedPairs": 2192,
-    "contentOracleAvailablePairs": 40,
-    "proposedDirectedPairs": 4864,
-    "retainedCandidatePairs": 2222,
+    "contentRequestedPairs": 2202,
+    "contentOracleAvailablePairs": 50,
+    "proposedDirectedPairs": 4884,
+    "retainedCandidatePairs": 2232,
     "recordsCapped": 220,
     "ordinaryCapDroppedDirectedPairs": 420,
     "maximumObservedBucketSize": 22,
@@ -105,7 +105,7 @@
     "decisionDispositions": [
       {
         "name": "Anchor",
-        "count": 20
+        "count": 30
       },
       {
         "name": "Rejected",
@@ -118,10 +118,6 @@
     ],
     "failureCategories": [
       {
-        "name": "CANDIDATE_NOT_PROPOSED",
-        "count": 10
-      },
-      {
         "name": "CONTENT_UNAVAILABLE_OR_WEAK",
         "count": 12
       }
@@ -129,7 +125,7 @@
     "unifiedClassifications": [
       {
         "name": "CleanupEligible",
-        "count": 10
+        "count": 20
       },
       {
         "name": "ToBeReviewed",
@@ -142,65 +138,65 @@
     {
       "name": "Calibration",
       "pairs": {
-        "truePositives": 105,
+        "truePositives": 110,
         "falsePositives": 0,
-        "falseNegatives": 11,
+        "falseNegatives": 6,
         "trueNegatives": 1300
       },
       "precision": {
-        "numerator": 105,
-        "denominator": 105,
+        "numerator": 110,
+        "denominator": 110,
         "percentage": 100
       },
       "recall": {
-        "numerator": 105,
+        "numerator": 110,
         "denominator": 116,
-        "percentage": 90.5172
+        "percentage": 94.8276
       },
       "f1": {
-        "numerator": 210,
-        "denominator": 221,
-        "percentage": 95.0226
+        "numerator": 220,
+        "denominator": 226,
+        "percentage": 97.3451
       },
       "candidateRouteRecall": {
-        "numerator": 111,
+        "numerator": 116,
         "denominator": 116,
-        "percentage": 95.6897
+        "percentage": 100
       },
       "expandedCandidateRecall": {
-        "numerator": 16,
+        "numerator": 21,
         "denominator": 21,
-        "percentage": 76.1905
+        "percentage": 100
       },
       "exactComponentRate": {
-        "numerator": 95,
+        "numerator": 100,
         "denominator": 106,
-        "percentage": 89.6226
+        "percentage": 94.3396
       },
       "languageAccuracy": {
-        "numerator": 95,
-        "denominator": 95,
+        "numerator": 100,
+        "denominator": 100,
         "percentage": 100
       },
       "keeperCoverage": {
-        "numerator": 95,
+        "numerator": 100,
         "denominator": 106,
-        "percentage": 89.6226
+        "percentage": 94.3396
       },
       "keeperAccuracy": {
-        "numerator": 95,
-        "denominator": 95,
+        "numerator": 100,
+        "denominator": 100,
         "percentage": 100
       },
       "expectedGroups": 106,
-      "predictedGroups": 95,
+      "predictedGroups": 100,
       "overmergedGroups": 0,
-      "fragmentedGroups": 11,
+      "fragmentedGroups": 6,
       "crossLanguageMerges": 0,
-      "contentRequestedPairs": 1096,
-      "contentOracleAvailablePairs": 20,
-      "proposedDirectedPairs": 2432,
-      "retainedCandidatePairs": 1111,
+      "contentRequestedPairs": 1101,
+      "contentOracleAvailablePairs": 25,
+      "proposedDirectedPairs": 2442,
+      "retainedCandidatePairs": 1116,
       "recordsCapped": 110,
       "ordinaryCapDroppedDirectedPairs": 210,
       "maximumObservedBucketSize": 22,
@@ -209,7 +205,7 @@
       "decisionDispositions": [
         {
           "name": "Anchor",
-          "count": 10
+          "count": 15
         },
         {
           "name": "Rejected",
@@ -222,10 +218,6 @@
       ],
       "failureCategories": [
         {
-          "name": "CANDIDATE_NOT_PROPOSED",
-          "count": 5
-        },
-        {
           "name": "CONTENT_UNAVAILABLE_OR_WEAK",
           "count": 6
         }
@@ -233,7 +225,7 @@
       "unifiedClassifications": [
         {
           "name": "CleanupEligible",
-          "count": 5
+          "count": 10
         },
         {
           "name": "ToBeReviewed",
@@ -245,65 +237,65 @@
     {
       "name": "Holdout",
       "pairs": {
-        "truePositives": 105,
+        "truePositives": 110,
         "falsePositives": 0,
-        "falseNegatives": 11,
+        "falseNegatives": 6,
         "trueNegatives": 1300
       },
       "precision": {
-        "numerator": 105,
-        "denominator": 105,
+        "numerator": 110,
+        "denominator": 110,
         "percentage": 100
       },
       "recall": {
-        "numerator": 105,
+        "numerator": 110,
         "denominator": 116,
-        "percentage": 90.5172
+        "percentage": 94.8276
       },
       "f1": {
-        "numerator": 210,
-        "denominator": 221,
-        "percentage": 95.0226
+        "numerator": 220,
+        "denominator": 226,
+        "percentage": 97.3451
       },
       "candidateRouteRecall": {
-        "numerator": 111,
+        "numerator": 116,
         "denominator": 116,
-        "percentage": 95.6897
+        "percentage": 100
       },
       "expandedCandidateRecall": {
-        "numerator": 16,
+        "numerator": 21,
         "denominator": 21,
-        "percentage": 76.1905
+        "percentage": 100
       },
       "exactComponentRate": {
-        "numerator": 95,
+        "numerator": 100,
         "denominator": 106,
-        "percentage": 89.6226
+        "percentage": 94.3396
       },
       "languageAccuracy": {
-        "numerator": 95,
-        "denominator": 95,
+        "numerator": 100,
+        "denominator": 100,
         "percentage": 100
       },
       "keeperCoverage": {
-        "numerator": 95,
+        "numerator": 100,
         "denominator": 106,
-        "percentage": 89.6226
+        "percentage": 94.3396
       },
       "keeperAccuracy": {
-        "numerator": 95,
-        "denominator": 95,
+        "numerator": 100,
+        "denominator": 100,
         "percentage": 100
       },
       "expectedGroups": 106,
-      "predictedGroups": 95,
+      "predictedGroups": 100,
       "overmergedGroups": 0,
-      "fragmentedGroups": 11,
+      "fragmentedGroups": 6,
       "crossLanguageMerges": 0,
-      "contentRequestedPairs": 1096,
-      "contentOracleAvailablePairs": 20,
-      "proposedDirectedPairs": 2432,
-      "retainedCandidatePairs": 1111,
+      "contentRequestedPairs": 1101,
+      "contentOracleAvailablePairs": 25,
+      "proposedDirectedPairs": 2442,
+      "retainedCandidatePairs": 1116,
       "recordsCapped": 110,
       "ordinaryCapDroppedDirectedPairs": 210,
       "maximumObservedBucketSize": 22,
@@ -312,7 +304,7 @@
       "decisionDispositions": [
         {
           "name": "Anchor",
-          "count": 10
+          "count": 15
         },
         {
           "name": "Rejected",
@@ -325,10 +317,6 @@
       ],
       "failureCategories": [
         {
-          "name": "CANDIDATE_NOT_PROPOSED",
-          "count": 5
-        },
-        {
           "name": "CONTENT_UNAVAILABLE_OR_WEAK",
           "count": 6
         }
@@ -336,7 +324,7 @@
       "unifiedClassifications": [
         {
           "name": "CleanupEligible",
-          "count": 5
+          "count": 10
         },
         {
           "name": "ToBeReviewed",
@@ -350,65 +338,65 @@
     {
       "name": "author-variant",
       "pairs": {
-        "truePositives": 10,
+        "truePositives": 20,
         "falsePositives": 0,
-        "falseNegatives": 22,
+        "falseNegatives": 12,
         "trueNegatives": 120
       },
       "precision": {
-        "numerator": 10,
-        "denominator": 10,
+        "numerator": 20,
+        "denominator": 20,
         "percentage": 100
       },
       "recall": {
-        "numerator": 10,
+        "numerator": 20,
         "denominator": 32,
-        "percentage": 31.25
+        "percentage": 62.5
       },
       "f1": {
-        "numerator": 20,
-        "denominator": 42,
-        "percentage": 47.6190
+        "numerator": 40,
+        "denominator": 52,
+        "percentage": 76.9231
       },
       "candidateRouteRecall": {
-        "numerator": 22,
+        "numerator": 32,
         "denominator": 32,
-        "percentage": 68.75
+        "percentage": 100
       },
       "expandedCandidateRecall": {
-        "numerator": 22,
+        "numerator": 32,
         "denominator": 32,
-        "percentage": 68.75
+        "percentage": 100
       },
       "exactComponentRate": {
-        "numerator": 10,
+        "numerator": 20,
         "denominator": 32,
-        "percentage": 31.25
+        "percentage": 62.5
       },
       "languageAccuracy": {
-        "numerator": 10,
-        "denominator": 10,
+        "numerator": 20,
+        "denominator": 20,
         "percentage": 100
       },
       "keeperCoverage": {
-        "numerator": 10,
+        "numerator": 20,
         "denominator": 32,
-        "percentage": 31.25
+        "percentage": 62.5
       },
       "keeperAccuracy": {
-        "numerator": 10,
-        "denominator": 10,
+        "numerator": 20,
+        "denominator": 20,
         "percentage": 100
       },
       "expectedGroups": 32,
-      "predictedGroups": 10,
+      "predictedGroups": 20,
       "overmergedGroups": 0,
-      "fragmentedGroups": 22,
+      "fragmentedGroups": 12,
       "crossLanguageMerges": 0,
-      "contentRequestedPairs": 22,
-      "contentOracleAvailablePairs": 20,
-      "proposedDirectedPairs": 44,
-      "retainedCandidatePairs": 22,
+      "contentRequestedPairs": 32,
+      "contentOracleAvailablePairs": 30,
+      "proposedDirectedPairs": 64,
+      "retainedCandidatePairs": 32,
       "recordsCapped": 0,
       "ordinaryCapDroppedDirectedPairs": 0,
       "maximumObservedBucketSize": 2,
@@ -417,7 +405,7 @@
       "decisionDispositions": [
         {
           "name": "Anchor",
-          "count": 10
+          "count": 20
         },
         {
           "name": "Weak",
@@ -426,10 +414,6 @@
       ],
       "failureCategories": [
         {
-          "name": "CANDIDATE_NOT_PROPOSED",
-          "count": 10
-        },
-        {
           "name": "CONTENT_UNAVAILABLE_OR_WEAK",
           "count": 12
         }
@@ -437,7 +421,7 @@
       "unifiedClassifications": [
         {
           "name": "CleanupEligible",
-          "count": 10
+          "count": 20
         }
       ],
       "unifiedFindings": []
@@ -609,65 +593,65 @@
     {
       "name": "content-ambiguous",
       "pairs": {
-        "truePositives": 10,
+        "truePositives": 20,
         "falsePositives": 0,
-        "falseNegatives": 20,
+        "falseNegatives": 10,
         "trueNegatives": 120
       },
       "precision": {
-        "numerator": 10,
-        "denominator": 10,
+        "numerator": 20,
+        "denominator": 20,
         "percentage": 100
       },
       "recall": {
-        "numerator": 10,
+        "numerator": 20,
         "denominator": 30,
-        "percentage": 33.3333
+        "percentage": 66.6667
       },
       "f1": {
-        "numerator": 20,
-        "denominator": 40,
-        "percentage": 50
+        "numerator": 40,
+        "denominator": 50,
+        "percentage": 80
       },
       "candidateRouteRecall": {
-        "numerator": 20,
+        "numerator": 30,
         "denominator": 30,
-        "percentage": 66.6667
+        "percentage": 100
       },
       "expandedCandidateRecall": {
+        "numerator": 30,
+        "denominator": 30,
+        "percentage": 100
+      },
+      "exactComponentRate": {
         "numerator": 20,
         "denominator": 30,
         "percentage": 66.6667
       },
-      "exactComponentRate": {
-        "numerator": 10,
-        "denominator": 30,
-        "percentage": 33.3333
-      },
       "languageAccuracy": {
-        "numerator": 10,
-        "denominator": 10,
+        "numerator": 20,
+        "denominator": 20,
         "percentage": 100
       },
       "keeperCoverage": {
-        "numerator": 10,
+        "numerator": 20,
         "denominator": 30,
-        "percentage": 33.3333
+        "percentage": 66.6667
       },
       "keeperAccuracy": {
-        "numerator": 10,
-        "denominator": 10,
+        "numerator": 20,
+        "denominator": 20,
         "percentage": 100
       },
       "expectedGroups": 30,
-      "predictedGroups": 10,
+      "predictedGroups": 20,
       "overmergedGroups": 0,
-      "fragmentedGroups": 20,
+      "fragmentedGroups": 10,
       "crossLanguageMerges": 0,
-      "contentRequestedPairs": 20,
-      "contentOracleAvailablePairs": 20,
-      "proposedDirectedPairs": 40,
-      "retainedCandidatePairs": 20,
+      "contentRequestedPairs": 30,
+      "contentOracleAvailablePairs": 30,
+      "proposedDirectedPairs": 60,
+      "retainedCandidatePairs": 30,
       "recordsCapped": 0,
       "ordinaryCapDroppedDirectedPairs": 0,
       "maximumObservedBucketSize": 2,
@@ -676,7 +660,7 @@
       "decisionDispositions": [
         {
           "name": "Anchor",
-          "count": 10
+          "count": 20
         },
         {
           "name": "Weak",
@@ -685,10 +669,6 @@
       ],
       "failureCategories": [
         {
-          "name": "CANDIDATE_NOT_PROPOSED",
-          "count": 10
-        },
-        {
           "name": "CONTENT_UNAVAILABLE_OR_WEAK",
           "count": 10
         }
@@ -696,7 +676,7 @@
       "unifiedClassifications": [
         {
           "name": "CleanupEligible",
-          "count": 10
+          "count": 20
         }
       ],
       "unifiedFindings": []
@@ -790,65 +770,65 @@
     {
       "name": "content-equivalent",
       "pairs": {
-        "truePositives": 10,
+        "truePositives": 20,
         "falsePositives": 0,
-        "falseNegatives": 20,
+        "falseNegatives": 10,
         "trueNegatives": 120
       },
       "precision": {
-        "numerator": 10,
-        "denominator": 10,
+        "numerator": 20,
+        "denominator": 20,
         "percentage": 100
       },
       "recall": {
-        "numerator": 10,
+        "numerator": 20,
         "denominator": 30,
-        "percentage": 33.3333
+        "percentage": 66.6667
       },
       "f1": {
-        "numerator": 20,
-        "denominator": 40,
-        "percentage": 50
+        "numerator": 40,
+        "denominator": 50,
+        "percentage": 80
       },
       "candidateRouteRecall": {
-        "numerator": 20,
+        "numerator": 30,
         "denominator": 30,
-        "percentage": 66.6667
+        "percentage": 100
       },
       "expandedCandidateRecall": {
+        "numerator": 30,
+        "denominator": 30,
+        "percentage": 100
+      },
+      "exactComponentRate": {
         "numerator": 20,
         "denominator": 30,
         "percentage": 66.6667
       },
-      "exactComponentRate": {
-        "numerator": 10,
-        "denominator": 30,
-        "percentage": 33.3333
-      },
       "languageAccuracy": {
-        "numerator": 10,
-        "denominator": 10,
+        "numerator": 20,
+        "denominator": 20,
         "percentage": 100
       },
       "keeperCoverage": {
-        "numerator": 10,
+        "numerator": 20,
         "denominator": 30,
-        "percentage": 33.3333
+        "percentage": 66.6667
       },
       "keeperAccuracy": {
-        "numerator": 10,
-        "denominator": 10,
+        "numerator": 20,
+        "denominator": 20,
         "percentage": 100
       },
       "expectedGroups": 30,
-      "predictedGroups": 10,
+      "predictedGroups": 20,
       "overmergedGroups": 0,
-      "fragmentedGroups": 20,
+      "fragmentedGroups": 10,
       "crossLanguageMerges": 0,
-      "contentRequestedPairs": 20,
-      "contentOracleAvailablePairs": 20,
-      "proposedDirectedPairs": 40,
-      "retainedCandidatePairs": 20,
+      "contentRequestedPairs": 30,
+      "contentOracleAvailablePairs": 30,
+      "proposedDirectedPairs": 60,
+      "retainedCandidatePairs": 30,
       "recordsCapped": 0,
       "ordinaryCapDroppedDirectedPairs": 0,
       "maximumObservedBucketSize": 2,
@@ -857,7 +837,7 @@
       "decisionDispositions": [
         {
           "name": "Anchor",
-          "count": 10
+          "count": 20
         },
         {
           "name": "Weak",
@@ -866,10 +846,6 @@
       ],
       "failureCategories": [
         {
-          "name": "CANDIDATE_NOT_PROPOSED",
-          "count": 10
-        },
-        {
           "name": "CONTENT_UNAVAILABLE_OR_WEAK",
           "count": 10
         }
@@ -877,7 +853,7 @@
       "unifiedClassifications": [
         {
           "name": "CleanupEligible",
-          "count": 10
+          "count": 20
         }
       ],
       "unifiedFindings": []
@@ -885,65 +861,65 @@
     {
       "name": "content-high",
       "pairs": {
-        "truePositives": 10,
+        "truePositives": 20,
         "falsePositives": 0,
-        "falseNegatives": 20,
+        "falseNegatives": 10,
         "trueNegatives": 120
       },
       "precision": {
-        "numerator": 10,
-        "denominator": 10,
+        "numerator": 20,
+        "denominator": 20,
         "percentage": 100
       },
       "recall": {
-        "numerator": 10,
+        "numerator": 20,
         "denominator": 30,
-        "percentage": 33.3333
+        "percentage": 66.6667
       },
       "f1": {
-        "numerator": 20,
-        "denominator": 40,
-        "percentage": 50
+        "numerator": 40,
+        "denominator": 50,
+        "percentage": 80
       },
       "candidateRouteRecall": {
-        "numerator": 20,
+        "numerator": 30,
         "denominator": 30,
-        "percentage": 66.6667
+        "percentage": 100
       },
       "expandedCandidateRecall": {
+        "numerator": 30,
+        "denominator": 30,
+        "percentage": 100
+      },
+      "exactComponentRate": {
         "numerator": 20,
         "denominator": 30,
         "percentage": 66.6667
       },
-      "exactComponentRate": {
-        "numerator": 10,
-        "denominator": 30,
-        "percentage": 33.3333
-      },
       "languageAccuracy": {
-        "numerator": 10,
-        "denominator": 10,
+        "numerator": 20,
+        "denominator": 20,
         "percentage": 100
       },
       "keeperCoverage": {
-        "numerator": 10,
+        "numerator": 20,
         "denominator": 30,
-        "percentage": 33.3333
+        "percentage": 66.6667
       },
       "keeperAccuracy": {
-        "numerator": 10,
-        "denominator": 10,
+        "numerator": 20,
+        "denominator": 20,
         "percentage": 100
       },
       "expectedGroups": 30,
-      "predictedGroups": 10,
+      "predictedGroups": 20,
       "overmergedGroups": 0,
-      "fragmentedGroups": 20,
+      "fragmentedGroups": 10,
       "crossLanguageMerges": 0,
-      "contentRequestedPairs": 20,
-      "contentOracleAvailablePairs": 20,
-      "proposedDirectedPairs": 40,
-      "retainedCandidatePairs": 20,
+      "contentRequestedPairs": 30,
+      "contentOracleAvailablePairs": 30,
+      "proposedDirectedPairs": 60,
+      "retainedCandidatePairs": 30,
       "recordsCapped": 0,
       "ordinaryCapDroppedDirectedPairs": 0,
       "maximumObservedBucketSize": 2,
@@ -952,7 +928,7 @@
       "decisionDispositions": [
         {
           "name": "Anchor",
-          "count": 10
+          "count": 20
         },
         {
           "name": "Weak",
@@ -961,10 +937,6 @@
       ],
       "failureCategories": [
         {
-          "name": "CANDIDATE_NOT_PROPOSED",
-          "count": 10
-        },
-        {
           "name": "CONTENT_UNAVAILABLE_OR_WEAK",
           "count": 10
         }
@@ -972,7 +944,7 @@
       "unifiedClassifications": [
         {
           "name": "CleanupEligible",
-          "count": 10
+          "count": 20
         }
       ],
       "unifiedFindings": []
@@ -1066,65 +1038,65 @@
     {
       "name": "edition-variant",
       "pairs": {
-        "truePositives": 10,
+        "truePositives": 20,
         "falsePositives": 0,
-        "falseNegatives": 22,
+        "falseNegatives": 12,
         "trueNegatives": 120
       },
       "precision": {
-        "numerator": 10,
-        "denominator": 10,
+        "numerator": 20,
+        "denominator": 20,
         "percentage": 100
       },
       "recall": {
-        "numerator": 10,
+        "numerator": 20,
         "denominator": 32,
-        "percentage": 31.25
+        "percentage": 62.5
       },
       "f1": {
-        "numerator": 20,
-        "denominator": 42,
-        "percentage": 47.6190
+        "numerator": 40,
+        "denominator": 52,
+        "percentage": 76.9231
       },
       "candidateRouteRecall": {
-        "numerator": 22,
+        "numerator": 32,
         "denominator": 32,
-        "percentage": 68.75
+        "percentage": 100
       },
       "expandedCandidateRecall": {
-        "numerator": 22,
+        "numerator": 32,
         "denominator": 32,
-        "percentage": 68.75
+        "percentage": 100
       },
       "exactComponentRate": {
-        "numerator": 10,
+        "numerator": 20,
         "denominator": 32,
-        "percentage": 31.25
+        "percentage": 62.5
       },
       "languageAccuracy": {
-        "numerator": 10,
-        "denominator": 10,
+        "numerator": 20,
+        "denominator": 20,
         "percentage": 100
       },
       "keeperCoverage": {
-        "numerator": 10,
+        "numerator": 20,
         "denominator": 32,
-        "percentage": 31.25
+        "percentage": 62.5
       },
       "keeperAccuracy": {
-        "numerator": 10,
-        "denominator": 10,
+        "numerator": 20,
+        "denominator": 20,
         "percentage": 100
       },
       "expectedGroups": 32,
-      "predictedGroups": 10,
+      "predictedGroups": 20,
       "overmergedGroups": 0,
-      "fragmentedGroups": 22,
+      "fragmentedGroups": 12,
       "crossLanguageMerges": 0,
-      "contentRequestedPairs": 22,
-      "contentOracleAvailablePairs": 20,
-      "proposedDirectedPairs": 44,
-      "retainedCandidatePairs": 22,
+      "contentRequestedPairs": 32,
+      "contentOracleAvailablePairs": 30,
+      "proposedDirectedPairs": 64,
+      "retainedCandidatePairs": 32,
       "recordsCapped": 0,
       "ordinaryCapDroppedDirectedPairs": 0,
       "maximumObservedBucketSize": 2,
@@ -1133,7 +1105,7 @@
       "decisionDispositions": [
         {
           "name": "Anchor",
-          "count": 10
+          "count": 20
         },
         {
           "name": "Weak",
@@ -1142,10 +1114,6 @@
       ],
       "failureCategories": [
         {
-          "name": "CANDIDATE_NOT_PROPOSED",
-          "count": 10
-        },
-        {
           "name": "CONTENT_UNAVAILABLE_OR_WEAK",
           "count": 12
         }
@@ -1153,7 +1121,7 @@
       "unifiedClassifications": [
         {
           "name": "CleanupEligible",
-          "count": 10
+          "count": 20
         }
       ],
       "unifiedFindings": []
@@ -2260,65 +2228,65 @@
     {
       "name": "title-noise",
       "pairs": {
-        "truePositives": 10,
+        "truePositives": 20,
         "falsePositives": 0,
-        "falseNegatives": 22,
+        "falseNegatives": 12,
         "trueNegatives": 120
       },
       "precision": {
-        "numerator": 10,
-        "denominator": 10,
+        "numerator": 20,
+        "denominator": 20,
         "percentage": 100
       },
       "recall": {
-        "numerator": 10,
+        "numerator": 20,
         "denominator": 32,
-        "percentage": 31.25
+        "percentage": 62.5
       },
       "f1": {
-        "numerator": 20,
-        "denominator": 42,
-        "percentage": 47.6190
+        "numerator": 40,
+        "denominator": 52,
+        "percentage": 76.9231
       },
       "candidateRouteRecall": {
-        "numerator": 22,
+        "numerator": 32,
         "denominator": 32,
-        "percentage": 68.75
+        "percentage": 100
       },
       "expandedCandidateRecall": {
-        "numerator": 22,
+        "numerator": 32,
         "denominator": 32,
-        "percentage": 68.75
+        "percentage": 100
       },
       "exactComponentRate": {
-        "numerator": 10,
+        "numerator": 20,
         "denominator": 32,
-        "percentage": 31.25
+        "percentage": 62.5
       },
       "languageAccuracy": {
-        "numerator": 10,
-        "denominator": 10,
+        "numerator": 20,
+        "denominator": 20,
         "percentage": 100
       },
       "keeperCoverage": {
-        "numerator": 10,
+        "numerator": 20,
         "denominator": 32,
-        "percentage": 31.25
+        "percentage": 62.5
       },
       "keeperAccuracy": {
-        "numerator": 10,
-        "denominator": 10,
+        "numerator": 20,
+        "denominator": 20,
         "percentage": 100
       },
       "expectedGroups": 32,
-      "predictedGroups": 10,
+      "predictedGroups": 20,
       "overmergedGroups": 0,
-      "fragmentedGroups": 22,
+      "fragmentedGroups": 12,
       "crossLanguageMerges": 0,
-      "contentRequestedPairs": 22,
-      "contentOracleAvailablePairs": 20,
-      "proposedDirectedPairs": 44,
-      "retainedCandidatePairs": 22,
+      "contentRequestedPairs": 32,
+      "contentOracleAvailablePairs": 30,
+      "proposedDirectedPairs": 64,
+      "retainedCandidatePairs": 32,
       "recordsCapped": 0,
       "ordinaryCapDroppedDirectedPairs": 0,
       "maximumObservedBucketSize": 2,
@@ -2327,7 +2295,7 @@
       "decisionDispositions": [
         {
           "name": "Anchor",
-          "count": 10
+          "count": 20
         },
         {
           "name": "Weak",
@@ -2336,10 +2304,6 @@
       ],
       "failureCategories": [
         {
-          "name": "CANDIDATE_NOT_PROPOSED",
-          "count": 10
-        },
-        {
           "name": "CONTENT_UNAVAILABLE_OR_WEAK",
           "count": 12
         }
@@ -2347,7 +2311,7 @@
       "unifiedClassifications": [
         {
           "name": "CleanupEligible",
-          "count": 10
+          "count": 20
         }
       ],
       "unifiedFindings": []
@@ -2438,21 +2402,9 @@
   "falseNegatives": [
     {
       "scenarioId": "cal-content-g01",
-      "firstRecordId": "b1",
-      "secondRecordId": "b2",
-      "category": "CANDIDATE_NOT_PROPOSED"
-    },
-    {
-      "scenarioId": "cal-content-g01",
       "firstRecordId": "c1",
       "secondRecordId": "c2",
       "category": "CONTENT_UNAVAILABLE_OR_WEAK"
-    },
-    {
-      "scenarioId": "cal-content-g02",
-      "firstRecordId": "b1",
-      "secondRecordId": "b2",
-      "category": "CANDIDATE_NOT_PROPOSED"
     },
     {
       "scenarioId": "cal-content-g02",
@@ -2462,33 +2414,15 @@
     },
     {
       "scenarioId": "cal-content-g03",
-      "firstRecordId": "b1",
-      "secondRecordId": "b2",
-      "category": "CANDIDATE_NOT_PROPOSED"
-    },
-    {
-      "scenarioId": "cal-content-g03",
       "firstRecordId": "c1",
       "secondRecordId": "c2",
       "category": "CONTENT_UNAVAILABLE_OR_WEAK"
     },
     {
       "scenarioId": "cal-content-g04",
-      "firstRecordId": "b1",
-      "secondRecordId": "b2",
-      "category": "CANDIDATE_NOT_PROPOSED"
-    },
-    {
-      "scenarioId": "cal-content-g04",
       "firstRecordId": "c1",
       "secondRecordId": "c2",
       "category": "CONTENT_UNAVAILABLE_OR_WEAK"
-    },
-    {
-      "scenarioId": "cal-content-g05",
-      "firstRecordId": "b1",
-      "secondRecordId": "b2",
-      "category": "CANDIDATE_NOT_PROPOSED"
     },
     {
       "scenarioId": "cal-content-g05",
@@ -2504,21 +2438,9 @@
     },
     {
       "scenarioId": "hold-content-g01",
-      "firstRecordId": "b1",
-      "secondRecordId": "b2",
-      "category": "CANDIDATE_NOT_PROPOSED"
-    },
-    {
-      "scenarioId": "hold-content-g01",
       "firstRecordId": "c1",
       "secondRecordId": "c2",
       "category": "CONTENT_UNAVAILABLE_OR_WEAK"
-    },
-    {
-      "scenarioId": "hold-content-g02",
-      "firstRecordId": "b1",
-      "secondRecordId": "b2",
-      "category": "CANDIDATE_NOT_PROPOSED"
     },
     {
       "scenarioId": "hold-content-g02",
@@ -2528,33 +2450,15 @@
     },
     {
       "scenarioId": "hold-content-g03",
-      "firstRecordId": "b1",
-      "secondRecordId": "b2",
-      "category": "CANDIDATE_NOT_PROPOSED"
-    },
-    {
-      "scenarioId": "hold-content-g03",
       "firstRecordId": "c1",
       "secondRecordId": "c2",
       "category": "CONTENT_UNAVAILABLE_OR_WEAK"
     },
     {
       "scenarioId": "hold-content-g04",
-      "firstRecordId": "b1",
-      "secondRecordId": "b2",
-      "category": "CANDIDATE_NOT_PROPOSED"
-    },
-    {
-      "scenarioId": "hold-content-g04",
       "firstRecordId": "c1",
       "secondRecordId": "c2",
       "category": "CONTENT_UNAVAILABLE_OR_WEAK"
-    },
-    {
-      "scenarioId": "hold-content-g05",
-      "firstRecordId": "b1",
-      "secondRecordId": "b2",
-      "category": "CANDIDATE_NOT_PROPOSED"
     },
     {
       "scenarioId": "hold-content-g05",

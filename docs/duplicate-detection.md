@@ -46,6 +46,12 @@ Implemented profiles combine:
 - format/assessment metadata; and
 - candidate-only EPUB content comparison.
 
+Cheap title-token similarity ignores only the fixed edition markers `abridged`,
+`annotated`, `expanded`, `illustrated`, `revised`, and `unabridged`. Original title
+evidence remains visible, thresholds are unchanged, and marker overlap alone cannot
+propose a work. This lets connector-damaged revised/illustrated variants reach
+content comparison without introducing aliases or fuzzy string matching.
+
 Author similarity alone cannot propose a work. Known author expansion, language,
 series/index, identifier, edition-marker, and different-content contradictions can
 reject a pair or component.
@@ -124,20 +130,20 @@ ebook prose or personal-library data.
 
 The reviewed `matching-evaluation/1.0` baseline for current policies records:
 
-- pair precision: 210/210, 100%;
-- pair recall: 210/232, 90.5172%;
-- F1: 420/442, 95.0226%;
-- candidate-route recall: 222/232, 95.6897%;
-- exact final components: 190/212, 89.6226%;
-- keeper coverage: 190/212 expected groups, 89.6226%; and
-- keeper accuracy among those complete predicted groups: 190/190, 100%.
+- pair precision: 220/220, 100%;
+- pair recall: 220/232, 94.8276%;
+- F1: 440/452, 97.3451%;
+- candidate-route recall: 232/232, 100%;
+- exact final components: 200/212, 94.3396%;
+- keeper coverage: 200/212 expected groups, 94.3396%; and
+- keeper accuracy among those complete predicted groups: 200/200, 100%.
 
-Contradiction-aware Exact Metadata removed all 20 prior false positives in both
-calibration and holdout without changing recall or candidate-route recall. The 22
-remaining false negatives are 10 candidates not proposed and 12
-requested-but-unavailable/weak content outcomes. These are corpus measurements, not
-universal library accuracy claims. Later policy changes must report calibration and
-frozen-holdout deltas against the committed semantic baseline.
+Contradiction-aware Exact Metadata removed all 20 prior false positives. Edition-
+neutral title similarity then recovered all ten previously unproposed positive pairs
+without changing precision. The 12 remaining false negatives all reached candidate
+generation but had requested-yet-unavailable/weak content outcomes. These are corpus
+measurements, not universal library accuracy claims. Later policy changes must report
+calibration and frozen-holdout deltas against the committed semantic baseline.
 
 ## Target matching program
 

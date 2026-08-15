@@ -83,6 +83,10 @@ public static class CandidateMetadataNormalizer
     private const string AuthorAliasPrefix = "AUTHOR_ALIAS:";
     private const string AuthorGivenPrefix = "AUTHOR_GIVEN:";
     private static readonly Dictionary<string, string> LanguageAliases = CreateLanguageAliases();
+    private static readonly HashSet<string> EditionMarkers = new(StringComparer.Ordinal)
+    {
+        "ABRIDGED", "ANNOTATED", "EXPANDED", "ILLUSTRATED", "REVISED", "UNABRIDGED",
+    };
 
     private static readonly HashSet<string> UnknownAuthorTokens = new(StringComparer.Ordinal)
     {
@@ -90,6 +94,8 @@ public static class CandidateMetadataNormalizer
     };
 
     public static string[] TitleTokens(string value) => Tokenize(value);
+
+    public static bool IsEditionMarker(string token) => EditionMarkers.Contains(token);
 
     public static string[] TitleKeys(string value)
     {

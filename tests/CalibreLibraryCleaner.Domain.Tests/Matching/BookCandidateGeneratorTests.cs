@@ -62,6 +62,32 @@ public sealed class BookCandidateGeneratorTests
     }
 
     [Fact]
+    public void EditionMarkerDoesNotDiluteOtherwiseSufficientTitleSimilarity()
+    {
+        BookMatchingProfile first = Profile(
+            1, "Gardens Beneath Glass", ["Beatrice Writer"], ["eng"]);
+        BookMatchingProfile second = Profile(
+            2, "Gardens Under Glass Revised", ["B. Writer"], ["eng"]);
+
+        BookCandidatePair pair = BookCandidateGenerator.Generate([first, second]).Pairs.Single();
+
+        pair.Evidence.Should().Contain(value => value.Code == "MATCH.TITLE.TOKEN_MEDIUM");
+        pair.NeedsContentEvidence.Should().BeTrue();
+        pair.HasAnchor.Should().BeFalse();
+    }
+
+    [Fact]
+    public void SharedEditionMarkerAloneDoesNotCreateWorkEvidence()
+    {
+        BookMatchingProfile first = Profile(
+            1, "Northern Observatory Revised", ["Alice Example"], ["eng"]);
+        BookMatchingProfile second = Profile(
+            2, "Gardens Beneath Glass Revised", ["Alice Example"], ["eng"]);
+
+        BookCandidateGenerator.Generate([first, second]).Pairs.Should().BeEmpty();
+    }
+
+    [Fact]
     public void OrdinaryCandidatesAreCappedDeterministicallyPerRecord()
     {
         BookMatchingProfile seed = Profile(1, "Shared Subject Alpha", ["Common Author"]);

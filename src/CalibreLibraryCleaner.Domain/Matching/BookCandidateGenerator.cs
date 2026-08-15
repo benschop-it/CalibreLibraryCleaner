@@ -204,7 +204,7 @@ public static class BookCandidateGenerator
         bool exactTitle = Overlaps(first.TitleKeys, second.TitleKeys);
         bool exactAuthor = CandidateMetadataNormalizer.HaveExactAuthorIdentity(
             first.AuthorKeys, second.AuthorKeys);
-        int titleSimilarity = JaccardPermille(first.TitleTokens, second.TitleTokens);
+        int titleSimilarity = TitleJaccardPermille(first.TitleTokens, second.TitleTokens);
         int authorSimilarity = JaccardPermille(first.AuthorTokens, second.AuthorTokens);
         bool sameSeries = first.SeriesKey is not null && second.SeriesKey is not null
             && string.Equals(first.SeriesKey, second.SeriesKey, StringComparison.Ordinal)
@@ -261,6 +261,23 @@ public static class BookCandidateGenerator
         if (first.Count == 0 || second.Count == 0) return 0;
         HashSet<string> left = first.ToHashSet(StringComparer.Ordinal);
         HashSet<string> right = second.ToHashSet(StringComparer.Ordinal);
+        return JaccardPermille(left, right);
+    }
+
+    private static int TitleJaccardPermille(
+        IReadOnlyList<string> first,
+        IReadOnlyList<string> second)
+    {
+        HashSet<string> left = first.Where(value => !CandidateMetadataNormalizer.IsEditionMarker(value))
+            .ToHashSet(StringComparer.Ordinal);
+        HashSet<string> right = second.Where(value => !CandidateMetadataNormalizer.IsEditionMarker(value))
+            .ToHashSet(StringComparer.Ordinal);
+        return JaccardPermille(left, right);
+    }
+
+    private static int JaccardPermille(HashSet<string> left, HashSet<string> right)
+    {
+        if (left.Count == 0 || right.Count == 0) return 0;
         int intersection = left.Count(right.Contains);
         int union = left.Count + right.Count - intersection;
         return union == 0 ? 0 : intersection * 1000 / union;

@@ -183,11 +183,6 @@ public static class UnifiedCandidateMergePolicy
         "MATCH.SERIES_INDEX.CONFLICT",
         "MATCH.CONTENT.DIFFERENT",
     };
-    private static readonly HashSet<string> EditionMarkers = new(StringComparer.Ordinal)
-    {
-        "ABRIDGED", "ANNOTATED", "EXPANDED", "ILLUSTRATED", "REVISED", "UNABRIDGED",
-    };
-
     public static IReadOnlyList<UnifiedCandidateGroup> Merge(
         IEnumerable<ExactMetadataDuplicateGroup> exactMetadataGroups,
         IEnumerable<WorkLanguageCandidateGroup> expandedGroups,
@@ -433,9 +428,11 @@ public static class UnifiedCandidateMergePolicy
 
     private static bool EditionMarkersConflict(string first, string second)
     {
-        string[] left = CandidateMetadataNormalizer.TitleTokens(first).Where(EditionMarkers.Contains)
+        string[] left = CandidateMetadataNormalizer.TitleTokens(first)
+            .Where(CandidateMetadataNormalizer.IsEditionMarker)
             .Order(StringComparer.Ordinal).ToArray();
-        string[] right = CandidateMetadataNormalizer.TitleTokens(second).Where(EditionMarkers.Contains)
+        string[] right = CandidateMetadataNormalizer.TitleTokens(second)
+            .Where(CandidateMetadataNormalizer.IsEditionMarker)
             .Order(StringComparer.Ordinal).ToArray();
         return !left.SequenceEqual(right);
     }

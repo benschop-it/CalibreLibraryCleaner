@@ -40,7 +40,7 @@ public sealed class MatchingCorpusRegressionTests
         report.Overall.OversizedBucketOutcomes.Should().Be(0);
         report.GenerationTemplates.Should().Contain(value => value.Name == "candidate-cap" && value.Count == 10);
         report.Overall.CandidateRouteRecall.Denominator.Should().BeGreaterThanOrEqualTo(100);
-        report.Overall.KeeperCoverage.Should().Be(new MatchingRatio(190, 212, 89.6226m));
+        report.Overall.KeeperCoverage.Should().Be(new MatchingRatio(200, 212, 94.3396m));
         (report.Overall.LanguageAccuracy.Denominator - report.Overall.LanguageAccuracy.Numerator)
             .Should().Be(report.Overall.CrossLanguageMerges);
         report.Overall.FailureCategories.Should().NotContain(value => value.Name == "UNKNOWN_PIPELINE_GAP");
@@ -71,23 +71,26 @@ public sealed class MatchingCorpusRegressionTests
     }
 
     [Fact]
-    public void CurrentExactPolicyEliminatesDecisiveFalsePositivesWithoutRecallLoss()
+    public void CurrentPoliciesKeepPerfectPrecisionAndRecoverEveryLabeledCandidateRoute()
     {
         (MatchingCorpus calibration, MatchingCorpus holdout) = LoadCorpora();
 
         MatchingEvaluationReport report = MatchingCorpusEvaluator.Evaluate(calibration, holdout);
 
         report.FalsePositives.Should().BeEmpty();
-        report.Overall.Precision.Should().Be(new MatchingRatio(210, 210, 100m));
-        report.Overall.Recall.Should().Be(new MatchingRatio(210, 232, 90.5172m));
-        report.Overall.CandidateRouteRecall.Should().Be(new MatchingRatio(222, 232, 95.6897m));
+        report.Policies.Matching.Should().Be("work-language-matching/1.3.0");
+        report.Overall.Precision.Should().Be(new MatchingRatio(220, 220, 100m));
+        report.Overall.Recall.Should().Be(new MatchingRatio(220, 232, 94.8276m));
+        report.Overall.CandidateRouteRecall.Should().Be(new MatchingRatio(232, 232, 100m));
         report.Overall.OvermergedGroups.Should().Be(0);
         report.Overall.CrossLanguageMerges.Should().Be(0);
+        report.FalseNegatives.Should().HaveCount(12);
+        report.FalseNegatives.Should().OnlyContain(value => value.Category == "CONTENT_UNAVAILABLE_OR_WEAK");
         report.FalseNegatives.Should().NotContain(value => value.Category == "UNKNOWN_PIPELINE_GAP");
         report.Splits.Should().OnlyContain(value =>
             value.Precision.Percentage == 100m
-            && value.Recall.Percentage == 90.5172m
-            && value.CandidateRouteRecall.Percentage == 95.6897m);
+            && value.Recall.Percentage == 94.8276m
+            && value.CandidateRouteRecall.Percentage == 100m);
     }
 
     [Fact]

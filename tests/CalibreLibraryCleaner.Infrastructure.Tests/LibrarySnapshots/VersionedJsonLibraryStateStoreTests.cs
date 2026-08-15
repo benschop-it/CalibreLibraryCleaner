@@ -407,6 +407,30 @@ public sealed class VersionedJsonLibraryStateStoreTests
     }
 
     [Fact]
+    public async Task IncompatibleCandidateAnalysisPolicyMigratesConservatively()
+    {
+        using TemporaryDirectory directory = new();
+        InfrastructureExecutionFixture fixture = InfrastructureExecutionTestData.Create(directory.Path);
+        string cache = Path.Combine(directory.Path, "state-cache");
+        VersionedJsonLibraryStateStore store = new(new() { StorageRoot = cache });
+        LibraryState state = LibraryState.FromScan(fixture.Snapshot,
+            new(Guid.Parse("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee")))
+            .AdvanceWorkflow(LibraryWorkflowPhase.ExactReady, fixture.Snapshot.ScannedAt);
+        await store.WriteBaselineAsync(state, CancellationToken.None);
+        string manifestPath = Directory.GetFiles(cache, "*.library-state.json").Single();
+        JsonObject manifest = JsonNode.Parse(await File.ReadAllTextAsync(manifestPath))!.AsObject();
+        manifest["workflowCheckpoint"]!["candidateAnalysisPolicyVersion"] = "candidate-analysis/1.0.0";
+        await File.WriteAllTextAsync(manifestPath, manifest.ToJsonString());
+
+        LibraryState? loaded = await store.ReadAsync(fixture.Snapshot.Identity.LibraryRoot,
+            CancellationToken.None);
+
+        loaded!.WorkflowCheckpoint.Phase.Should().Be(LibraryWorkflowPhase.RequiresExactAnalysis);
+        loaded.WorkflowCheckpoint.PolicyVersions.Should().Be(LibraryWorkflowPolicyVersions.Current);
+        loaded.IsWorkflowCheckpointCurrent.Should().BeTrue();
+    }
+
+    [Fact]
     public async Task BaselineAndDeltasReplayAcrossStoreInstances()
     {
         using TemporaryDirectory directory = new();

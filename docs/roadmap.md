@@ -41,16 +41,16 @@ Completed measurement foundation:
 - full Domain pipeline evaluator with pair/group/candidate/language/keeper metrics;
 - opaque stage-specific false-positive/false-negative reports and cap diagnostics;
 - contradiction-aware Exact Metadata removed all 20 measured false positives;
-- reviewed semantic baseline: 100% precision, 90.5172% recall, 95.0226% F1,
-  95.6897% candidate-route recall, 89.6226% keeper coverage, and 100% keeper
+- edition-neutral title similarity recovered all 10 previously unproposed positives;
+- reviewed semantic baseline: 100% precision, 94.8276% recall, 97.3451% F1,
+  100% candidate-route recall, 94.3396% keeper coverage, and 100% keeper
   accuracy on scored groups.
 
 Next:
 
-1. Improve candidate generation for the 10 positive pairs not proposed.
-2. Improve deterministic evidence for 12 requested pairs with unavailable/weak
+1. Improve deterministic evidence for 12 requested pairs with unavailable/weak
    content outcomes.
-3. Calibrate changes on calibration, then require frozen-holdout improvement without
+2. Calibrate changes on calibration, then require frozen-holdout improvement without
    library-specific aliases.
 
 ## Priority 2: Fast incremental analysis and caches

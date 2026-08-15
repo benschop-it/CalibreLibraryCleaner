@@ -39,7 +39,8 @@ public sealed record MatchingPolicyVersion
     public static MatchingPolicyVersion V1 { get; } = new("work-language-matching/1.0.0");
     public static MatchingPolicyVersion V2 { get; } = new("work-language-matching/1.1.0");
     public static MatchingPolicyVersion V3 { get; } = new("work-language-matching/1.2.0");
-    public static MatchingPolicyVersion Current => V3;
+    public static MatchingPolicyVersion V4 { get; } = new("work-language-matching/1.3.0");
+    public static MatchingPolicyVersion Current => V4;
 
     public MatchingPolicyVersion(string value)
     {
@@ -166,7 +167,8 @@ public sealed record WorkLanguageCandidateGroup
         ContentComparison = contentComparison.Validate();
         PolicyVersion = policyVersion;
         EvidenceStatus = evidenceStatus;
-        CleanupEligibility = policyVersion == MatchingPolicyVersion.V3
+        CleanupEligibility = policyVersion is { } version
+            && (version == MatchingPolicyVersion.V3 || version == MatchingPolicyVersion.V4)
             && ContentComparison.ComparedPairCount > 0
             && ContentComparison.EquivalentPairCount + ContentComparison.HighSimilarityPairCount
                 == ContentComparison.ComparedPairCount
