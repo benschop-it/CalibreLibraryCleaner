@@ -188,7 +188,9 @@ Ollama or downloads a model. Configuration requires runtime version, model name,
 immutable model digest. Only bounded title, author, and language text is embedded.
 Vectors remain in memory; pair caches contain only input hashes, complete versions,
 status, and cosine similarity permille. Observations do not affect grouping until a
-separate threshold decision is calibrated and accepted.
+separate threshold decision is calibrated and accepted. Expanded calibration found
+positive and same-author negative overlap at 850 permille, so metadata embeddings
+remain observational and no activation threshold is planned for this model/input.
 
 ## Logging and privacy
 

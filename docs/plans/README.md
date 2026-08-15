@@ -2,8 +2,9 @@
 
 This directory contains only active execution plans.
 
-There is no active execution plan. The next matching plan should expand local-model
-calibration coverage before deciding whether embeddings may affect grouping.
+Current plan:
+
+- [SHA-256 File-Identity Reuse](sha256-file-identity-reuse.md)
 
 Keep active plans current during implementation, then move them to
 `../archive/plans/` after completion and documentation reconciliation.

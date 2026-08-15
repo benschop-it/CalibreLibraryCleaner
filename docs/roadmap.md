@@ -48,12 +48,10 @@ Completed measurement foundation:
    100% candidate-route recall, 95.2830% keeper coverage, and 100% keeper
   accuracy on scored groups.
 
-Next:
-
-1. Improve local content/model evidence for 10 synthetic requested pairs with
-   unavailable/weak content outcomes.
-2. Calibrate changes on calibration, then require frozen-holdout improvement without
-   library-specific aliases.
+Matching calibration is now frozen. The remaining ten synthetic ambiguous-content
+cases are retained as known limitations rather than targets for more metadata
+heuristics. New matching evidence may be evaluated later only as a genuine product
+capability with independently expanded data.
 
 ## Priority 2: Fast incremental analysis and caches
 
@@ -84,16 +82,16 @@ Completed:
 - enabled-by-default Open Library search with field disclosure, bounded requests,
   rate limiting, reduced cache, and local fallback.
 - fixed-loopback Ollama metadata-embedding observations with complete runtime/model
-   provenance and reduced comparison cache; initial `embeddinggemma` positives scored
-   850-864 permille versus 696-801 for four hard negatives.
+   provenance and reduced comparison cache; final `embeddinggemma` calibration found
+   positives at 850-932 and hard negatives at 647-850, so no threshold was activated.
 
-Next:
+Closed for now:
 
-1. Expand local-model calibration positives and hard negatives before choosing any
-   threshold.
-2. Evaluate privacy-safe derived content embeddings if metadata embeddings add too
-   little beyond deterministic evidence.
-3. Calibrate evidence fusion; model output remains observational until accepted.
+- metadata-only embedding calibration cannot preserve both perfect corpus precision
+  and recall with one threshold;
+- model output remains observational;
+- future privacy-safe content models require a separate product plan and new data,
+  not continued tuning of this corpus.
 
 ## Priority 5: Review experience
 

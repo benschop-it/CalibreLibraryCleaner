@@ -92,11 +92,12 @@ contradictions still reject the pair.
 
 When explicitly configured, unresolved pairs may also be measured with local Ollama
 metadata embeddings. Inputs contain bounded title, author, and normalized language
-only and remain on loopback. The current `embeddinggemma` evaluation observed four
-positive variants at 850-864 cosine permille and four same-author/different-work
-controls at 696-801. This small separation is promising but insufficient to set a
-safe threshold, so model observations do not change decisions or the reviewed
-matching baseline.
+only and remain on loopback. Expanded `embeddinggemma` evaluation measured ten
+positive variants at 850-932 cosine permille and twenty same-author/different-work
+controls at 647-850. Because the bands overlap at 850, no single threshold preserves
+both 100% precision and 100% recall. Metadata embedding observations therefore do not
+change decisions or the reviewed matching baseline, and this calibration track is
+closed.
 
 ## Component and group construction
 

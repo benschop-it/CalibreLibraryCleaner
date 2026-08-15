@@ -259,3 +259,10 @@ The observed gap is promising but only eight cases were measured, with the highe
 hard negative at 801 and lowest positive at 850. No production threshold or model
 Candidate evidence was accepted. The next plan must expand independently reviewed
 positive/hard-negative coverage before considering a threshold between those bands.
+
+Final closure evaluation expanded to ten positives and twenty same-author hard
+negatives. Positives ranged 850-932; negatives ranged 647-850, with *The Adventures
+of Tom Sawyer* versus *Adventures of Huckleberry Finn* scoring 850. The bands overlap,
+so no single threshold can preserve both 100% precision and 100% recall. Metadata
+embedding activation was rejected, matching calibration was frozen, and work moved
+to Priority 2 performance/caching.

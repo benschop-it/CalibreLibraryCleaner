@@ -65,6 +65,11 @@ timeout/malformed fallback, no persisted vectors/raw inputs, and unchanged match
 decisions. Real Ollama evaluation is opt-in and emits only opaque case IDs, versions,
 expected labels, and integer similarities.
 
+The frozen matching baseline is the regression gate, not an optimization target.
+Do not add metadata heuristics or adjust labels solely to eliminate its ten remaining
+synthetic false negatives. Matching calibration resumes only for a distinct evidence
+capability with independently justified data.
+
 ## Cache and performance tests
 
 Every cache test covers:
