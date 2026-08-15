@@ -43,6 +43,13 @@ equality gates. External corpora are opt-in through `CALIBRE_MATCHING_CORPUS_PAT
 and `CALIBRE_RUN_EXTERNAL_MATCHING_EVALUATION=1`; they report only aggregates and
 opaque IDs.
 
+The accepted `exact-metadata/1.1.0` gate requires zero corpus false positives,
+overmerged groups, cross-language merges, and unknown pipeline gaps while preserving
+90.5172% pair recall and 95.6897% candidate-route recall overall and in each frozen
+split. Exact policy tests additionally cover language aliases, missing values,
+validated identifier overlap, unique consensus/outliers, tied conflicts,
+determinism, and stale workflow-policy invalidation.
+
 ## Cache and performance tests
 
 Every cache test covers:

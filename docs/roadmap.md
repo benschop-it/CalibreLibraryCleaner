@@ -40,15 +40,16 @@ Completed measurement foundation:
   translations, damaged metadata, format diversity, and minimal CC0 sourced works;
 - full Domain pipeline evaluator with pair/group/candidate/language/keeper metrics;
 - opaque stage-specific false-positive/false-negative reports and cap diagnostics;
-- reviewed semantic baseline: 91.3043% precision, 90.5172% recall, 90.9091% F1,
-   95.6897% candidate-route recall, 89.6226% keeper coverage, and 100% keeper
-   accuracy on scored groups.
+- contradiction-aware Exact Metadata removed all 20 measured false positives;
+- reviewed semantic baseline: 100% precision, 90.5172% recall, 95.0226% F1,
+  95.6897% candidate-route recall, 89.6226% keeper coverage, and 100% keeper
+  accuracy on scored groups.
 
 Next:
 
-1. Improve normalization and deterministic evidence for current false negatives.
-2. Prevent Exact Metadata overmerge across decisive language/identifier/content
-   contradictions before Unified publication.
+1. Improve candidate generation for the 10 positive pairs not proposed.
+2. Improve deterministic evidence for 12 requested pairs with unavailable/weak
+   content outcomes.
 3. Calibrate changes on calibration, then require frozen-holdout improvement without
    library-specific aliases.
 

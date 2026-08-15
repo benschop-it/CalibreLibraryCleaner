@@ -21,6 +21,7 @@ public sealed class LibraryWorkflowCheckpointTests
         state.WorkflowCheckpoint.GenerationId.Should().Be(Generation);
         state.WorkflowCheckpoint.Revision.Should().Be(state.Revision);
         state.WorkflowCheckpoint.PolicyVersions.Should().Be(LibraryWorkflowPolicyVersions.Current);
+        state.WorkflowCheckpoint.PolicyVersions.ExactAnalysis.Should().Be("exact-analysis/1.1.0");
         state.IsWorkflowCheckpointCurrent.Should().BeTrue();
     }
 

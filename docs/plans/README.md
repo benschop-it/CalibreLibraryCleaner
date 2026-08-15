@@ -2,8 +2,8 @@
 
 This directory contains only active execution plans.
 
-There is no active execution plan. The next plan should improve deterministic
-matching against the committed calibration and frozen-holdout baseline.
+There is no active execution plan. The next plan should address the measured
+false-negative categories against the committed calibration and frozen holdout.
 
 Keep active plans current during implementation, then move them to
 `../archive/plans/` after completion and documentation reconciliation.

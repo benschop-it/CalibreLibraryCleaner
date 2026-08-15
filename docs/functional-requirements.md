@@ -28,7 +28,9 @@ An explicit Scan:
   managed paths;
 - resolves each declared format path and records missing/invalid associations;
 - streams SHA-256 over every resolvable format with bounded concurrency;
-- builds byte-identical format groups; and
+- builds byte-identical format groups;
+- excludes ambiguous exact title/author buckets with decisive known language or
+  validated strong-identifier conflicts; and
 - publishes an authoritative `ExactReady` generation.
 
 Exact analysis does not run EPUB/PDF assessment or Candidate matching.

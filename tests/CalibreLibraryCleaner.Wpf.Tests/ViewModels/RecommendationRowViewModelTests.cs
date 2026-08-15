@@ -86,7 +86,7 @@ public sealed class RecommendationRowViewModelTests
             Book(1, [], new(languages: ["eng"])),
             Book(2, [], new(languages: ["deu"])),
         ];
-        ExactMetadataDuplicateGroup group = ExactMetadataDuplicateDetector.Detect(books).Single();
+        ExactMetadataDuplicateGroup group = RawMetadataGroup(books);
         ConsolidationRecommendation generated = new ConsolidationRecommendationPolicy().Generate(
             new("87f7ed1f-59a8-45a6-975a-7e06fd84780d", 27, "library"), group, books, [], [], [], CancellationToken.None);
 
@@ -152,6 +152,14 @@ public sealed class RecommendationRowViewModelTests
         formats,
         $"Book ({id})",
         metadata);
+
+    private static ExactMetadataDuplicateGroup RawMetadataGroup(params CalibreBook[] books)
+    {
+        MetadataTextNormalizer.TryNormalizeTitle(books[0].Title, out NormalizedTitle? title);
+        MetadataTextNormalizer.TryCreateAuthorSet(
+            books[0].Authors.Select(value => value.Name), out NormalizedAuthorSet? authors);
+        return new(new(title!, authors!), books.Select(value => value.Id));
+    }
 
     private static BookFormat Present(string format, string path, FormatFileFingerprint fingerprint) => new(
         format,

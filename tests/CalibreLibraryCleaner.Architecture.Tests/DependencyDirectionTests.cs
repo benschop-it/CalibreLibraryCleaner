@@ -229,7 +229,7 @@ public sealed class DependencyDirectionTests
     }
 
     [Fact]
-    public void DomainMetadataMatchingAvoidsIntegrationAndFutureScopeAlgorithms()
+    public void DomainMetadataMatchingAvoidsIntegrationAndFuzzyAlgorithms()
     {
         string duplicatesPath = Path.Combine(
             RepositoryRoot,
@@ -252,7 +252,6 @@ public sealed class DependencyDirectionTests
         source.Should().NotContain("AuthorSort");
         source.Should().NotContain("SortName");
         string upperSource = source.ToUpperInvariant();
-        upperSource.Should().NotContain("ISBN");
         upperSource.Should().NotContain("LEVENSHTEIN");
         upperSource.Should().NotContain("JARO");
         upperSource.Should().NotContain("SIMILARITY");

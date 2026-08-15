@@ -10,7 +10,6 @@ namespace CalibreLibraryCleaner.Domain.Tests.Matching.Evaluation;
 public static class MatchingCorpusEvaluator
 {
     public const string EvaluationSchemaVersion = "matching-evaluation/1.0";
-    public const string ExactMetadataPolicyIdentity = "exact-metadata/1.0.0";
     public const string KeeperPolicyIdentity = "expanded-candidate-keeper/1.0.0";
 
     public static MatchingEvaluationReport Evaluate(MatchingCorpus calibration, MatchingCorpus holdout)
@@ -46,7 +45,7 @@ public static class MatchingCorpusEvaluator
             MatchingCorpusLoader.CanonicalDigest(calibration),
             MatchingCorpusLoader.CanonicalDigest(holdout),
             new(
-                ExactMetadataPolicyIdentity,
+                ExactMetadataDuplicateDetector.PolicyVersion.Value,
                 MatchingPolicyVersion.Current.Value,
                 UnifiedCandidatePolicyVersion.Current.Value,
                 KeeperPolicyIdentity),

@@ -383,7 +383,7 @@ public sealed class VersionedJsonLibraryStateStoreTests
     }
 
     [Fact]
-    public async Task IncompatibleWorkflowPolicyMigratesConservatively()
+    public async Task IncompatibleExactAnalysisPolicyMigratesConservatively()
     {
         using TemporaryDirectory directory = new();
         InfrastructureExecutionFixture fixture = InfrastructureExecutionTestData.Create(directory.Path);
@@ -395,7 +395,7 @@ public sealed class VersionedJsonLibraryStateStoreTests
         await store.WriteBaselineAsync(state, CancellationToken.None);
         string manifestPath = Directory.GetFiles(cache, "*.library-state.json").Single();
         JsonObject manifest = JsonNode.Parse(await File.ReadAllTextAsync(manifestPath))!.AsObject();
-        manifest["workflowCheckpoint"]!["workflowPolicyVersion"] = "staged-cleanup/0.0.0";
+        manifest["workflowCheckpoint"]!["exactAnalysisPolicyVersion"] = "exact-analysis/1.0.0";
         await File.WriteAllTextAsync(manifestPath, manifest.ToJsonString());
 
         LibraryState? loaded = await store.ReadAsync(fixture.Snapshot.Identity.LibraryRoot,

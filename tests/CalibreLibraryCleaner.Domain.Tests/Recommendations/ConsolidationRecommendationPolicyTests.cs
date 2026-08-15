@@ -84,7 +84,7 @@ public sealed class ConsolidationRecommendationPolicyTests
         CalibreBook first = Book(1, [Format("EPUB", 10, "01")], new(languages: ["eng"]));
         CalibreBook second = Book(2, [Format("EPUB", 20, "02")], new(languages: ["deu"]));
 
-        ConsolidationRecommendation recommendation = Generate([first, second]);
+        ConsolidationRecommendation recommendation = GenerateDefensively([first, second]);
 
         recommendation.RetainedSeparateRecords.Should().HaveCount(2);
         recommendation.MetadataSource.Should().BeNull();
@@ -120,7 +120,7 @@ public sealed class ConsolidationRecommendationPolicyTests
         CalibreBook first = BookWithIdentifiers(1, [new("isbn", "9780306406157")]);
         CalibreBook second = BookWithIdentifiers(2, [new("isbn", "9783161484100")]);
 
-        ConsolidationRecommendation recommendation = Generate([first, second]);
+        ConsolidationRecommendation recommendation = GenerateDefensively([first, second]);
 
         recommendation.Warnings.Should().Contain(value => value.Code == "IDENTIFIER.STRONG_CONFLICT");
         recommendation.RetainedSeparateRecords.Should().HaveCount(2);
@@ -487,6 +487,23 @@ public sealed class ConsolidationRecommendationPolicyTests
             books,
             ExactBinaryDuplicateDetector.Detect(books),
             assessments ?? [],
+            [],
+            CancellationToken.None);
+    }
+
+    private static ConsolidationRecommendation GenerateDefensively(CalibreBook[] books)
+    {
+        MetadataTextNormalizer.TryNormalizeTitle(books[0].Title, out NormalizedTitle? title);
+        MetadataTextNormalizer.TryCreateAuthorSet(
+            books[0].Authors.Select(value => value.Name), out NormalizedAuthorSet? authors);
+        ExactMetadataDuplicateGroup group = new(
+            new(title!, authors!), books.Select(value => value.Id));
+        return new ConsolidationRecommendationPolicy().Generate(
+            Identity,
+            group,
+            books,
+            ExactBinaryDuplicateDetector.Detect(books),
+            [],
             [],
             CancellationToken.None);
     }

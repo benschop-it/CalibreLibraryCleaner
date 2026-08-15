@@ -64,7 +64,7 @@ public sealed class UnifiedCandidateMergePolicyTests
         [
             Book(1, "eng"), Book(2, "eng"), Book(3, "nld"), Book(4, "nld"),
         ];
-        ExactMetadataDuplicateGroup metadata = ExactMetadataDuplicateDetector.Detect(books).Single();
+        ExactMetadataDuplicateGroup metadata = RawMetadataGroup(books);
         WorkLanguageCandidateGroup english = Expanded("en", books[0].Id, books[1].Id);
         WorkLanguageCandidateGroup dutch = Expanded("nl", books[2].Id, books[3].Id);
 
@@ -86,7 +86,7 @@ public sealed class UnifiedCandidateMergePolicyTests
             Book(1, identifier: "9780306406157"), Book(2, identifier: "9780306406157"),
             Book(3, identifier: "9780140328721"), Book(4, identifier: "9780140328721"),
         ];
-        ExactMetadataDuplicateGroup metadata = ExactMetadataDuplicateDetector.Detect(books).Single();
+        ExactMetadataDuplicateGroup metadata = RawMetadataGroup(books);
 
         IReadOnlyList<UnifiedCandidateGroup> groups = UnifiedCandidateMergePolicy.Merge(
             [metadata], [Expanded("en", books[0].Id, books[1].Id), Expanded("en", books[2].Id, books[3].Id)], books);
@@ -101,7 +101,7 @@ public sealed class UnifiedCandidateMergePolicyTests
         CalibreBook english = Book(1, identifier: "9780306406157");
         CalibreBook expandedPeer = Book(2, identifier: "9780306406157");
         CalibreBook contradicted = Book(3, identifier: "9780140328721");
-        ExactMetadataDuplicateGroup metadata = ExactMetadataDuplicateDetector.Detect([english, contradicted]).Single();
+        ExactMetadataDuplicateGroup metadata = RawMetadataGroup(english, contradicted);
         WorkLanguageCandidateGroup expanded = Expanded("en", english.Id, expandedPeer.Id);
 
         CandidateMetadataNormalizer.NormalizeStrongIdentifier("isbn", "9780306406157")
@@ -218,6 +218,14 @@ public sealed class UnifiedCandidateMergePolicyTests
             WorkLanguageCandidateConfidence.Strong,
             [new("MATCH.CONTENT.EQUIVALENT", CandidateEvidenceStrength.Anchor)],
             contentComparison: new(1, 1, 0, 0, 0, 0));
+
+    private static ExactMetadataDuplicateGroup RawMetadataGroup(params CalibreBook[] books)
+    {
+        MetadataTextNormalizer.TryNormalizeTitle(books[0].Title, out NormalizedTitle? title);
+        MetadataTextNormalizer.TryCreateAuthorSet(
+            books[0].Authors.Select(value => value.Name), out NormalizedAuthorSet? authors);
+        return new(new(title!, authors!), books.Select(value => value.Id));
+    }
 
     private static CalibreBook Book(
         int id,

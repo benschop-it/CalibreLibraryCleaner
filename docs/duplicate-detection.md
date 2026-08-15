@@ -25,6 +25,14 @@ Normalization uses Unicode NFC and invariant casing, removes format controls,
 normalizes whitespace around retained punctuation, and excludes incomplete/empty
 author identities. It does not silently discard subtitles or infer aliases.
 
+Before publishing an executable Exact Metadata group, policy
+`exact-metadata/1.1.0` checks catalog languages and validated ISBN/DOI/ASIN/OCLC
+values. Missing/invalid values remain neutral. Disjoint known values exclude an
+outlier only when one repeated consensus exists; an ambiguous or tied conflict
+suppresses the identity bucket. This preserves one deterministic identity-based
+group ID and prevents known translations or identifier conflicts from reaching
+Exact-first cleanup.
+
 ### Expanded local evidence
 
 Implemented profiles combine:
@@ -116,19 +124,20 @@ ebook prose or personal-library data.
 
 The reviewed `matching-evaluation/1.0` baseline for current policies records:
 
-- pair precision: 210/230, 91.3043%;
+- pair precision: 210/210, 100%;
 - pair recall: 210/232, 90.5172%;
-- F1: 420/462, 90.9091%;
+- F1: 420/442, 95.0226%;
 - candidate-route recall: 222/232, 95.6897%;
-- exact final components: 190/212, 89.6226%; and
+- exact final components: 190/212, 89.6226%;
 - keeper coverage: 190/212 expected groups, 89.6226%; and
 - keeper accuracy among those complete predicted groups: 190/190, 100%.
 
-The 20 false positives are Exact Metadata overmerges in explicit identifier/content
-or language-conflict scenarios. The 22 false negatives are 10 candidates not
-proposed and 12 requested-but-unavailable/weak content outcomes. These are corpus
-measurements, not universal library accuracy claims. Later policy changes must report
-calibration and frozen-holdout deltas against the committed semantic baseline.
+Contradiction-aware Exact Metadata removed all 20 prior false positives in both
+calibration and holdout without changing recall or candidate-route recall. The 22
+remaining false negatives are 10 candidates not proposed and 12
+requested-but-unavailable/weak content outcomes. These are corpus measurements, not
+universal library accuracy claims. Later policy changes must report calibration and
+frozen-holdout deltas against the committed semantic baseline.
 
 ## Target matching program
 

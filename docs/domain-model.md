@@ -120,6 +120,9 @@ aggregates are not current product concepts.
 
 - Exact groups have at least two distinct file references/records as appropriate.
 - Exact Metadata never degrades to title-only matching.
+- Exact Metadata groups contain no disjoint known normalized-language or validated
+  same-type strong-identifier pair; ambiguous tied conflict buckets are not
+  executable.
 - Matching/group IDs are canonical and deterministic for their policy version.
 - Weak evidence alone cannot bridge components; decisive contradictions block union.
 - Final Unified groups are disjoint and contain current record IDs only.

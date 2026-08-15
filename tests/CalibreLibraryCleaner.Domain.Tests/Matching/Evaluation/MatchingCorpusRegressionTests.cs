@@ -71,6 +71,26 @@ public sealed class MatchingCorpusRegressionTests
     }
 
     [Fact]
+    public void CurrentExactPolicyEliminatesDecisiveFalsePositivesWithoutRecallLoss()
+    {
+        (MatchingCorpus calibration, MatchingCorpus holdout) = LoadCorpora();
+
+        MatchingEvaluationReport report = MatchingCorpusEvaluator.Evaluate(calibration, holdout);
+
+        report.FalsePositives.Should().BeEmpty();
+        report.Overall.Precision.Should().Be(new MatchingRatio(210, 210, 100m));
+        report.Overall.Recall.Should().Be(new MatchingRatio(210, 232, 90.5172m));
+        report.Overall.CandidateRouteRecall.Should().Be(new MatchingRatio(222, 232, 95.6897m));
+        report.Overall.OvermergedGroups.Should().Be(0);
+        report.Overall.CrossLanguageMerges.Should().Be(0);
+        report.FalseNegatives.Should().NotContain(value => value.Category == "UNKNOWN_PIPELINE_GAP");
+        report.Splits.Should().OnlyContain(value =>
+            value.Precision.Percentage == 100m
+            && value.Recall.Percentage == 90.5172m
+            && value.CandidateRouteRecall.Percentage == 95.6897m);
+    }
+
+    [Fact]
     public void DomainEvaluationProjectDoesNotReferenceApplicationOrInfrastructure()
     {
         string[] references = typeof(MatchingCorpusEvaluator).Assembly.GetReferencedAssemblies()

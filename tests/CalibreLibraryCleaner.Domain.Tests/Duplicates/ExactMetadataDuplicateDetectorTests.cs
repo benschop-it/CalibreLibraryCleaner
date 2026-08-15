@@ -39,7 +39,7 @@ public sealed class ExactMetadataDuplicateDetectorTests
     }
 
     [Fact]
-    public void AuthorSortIdentifiersAndFingerprintsDoNotAffectMetadataIdentity()
+    public void AuthorSortInvalidIdentifiersAndFingerprintsDoNotAffectMetadataIdentity()
     {
         CalibreBook first = CreateBook(
             1,
@@ -57,6 +57,104 @@ public sealed class ExactMetadataDuplicateDetectorTests
             digestCharacter: 'b');
 
         ExactMetadataDuplicateDetector.Detect([first, second]).Should().ContainSingle();
+    }
+
+    [Fact]
+    public void DisjointKnownLanguagesSuppressAmbiguousExactGroup()
+    {
+        CalibreBook first = CreateBook(1, "Book", ["Jane Doe"], languages: ["eng"]);
+        CalibreBook second = CreateBook(2, "Book", ["Jane Doe"], languages: ["nld"]);
+
+        ExactMetadataDuplicateDetector.Detect([first, second]).Should().BeEmpty();
+    }
+
+    [Fact]
+    public void LanguageAliasesAndUnknownLanguageRemainCompatible()
+    {
+        CalibreBook english = CreateBook(1, "Book", ["Jane Doe"], languages: ["eng"]);
+        CalibreBook alias = CreateBook(2, "Book", ["Jane Doe"], languages: ["en"]);
+        CalibreBook unknown = CreateBook(3, "Book", ["Jane Doe"]);
+
+        ExactMetadataDuplicateGroup group = ExactMetadataDuplicateDetector.Detect(
+            [unknown, alias, english]).Single();
+
+        group.Members.Select(value => value.Value).Should().Equal(1, 2, 3);
+    }
+
+    [Fact]
+    public void ConflictingValidatedStrongIdentifiersSuppressAmbiguousExactGroup()
+    {
+        CalibreBook first = CreateBook(
+            1, "Book", ["Jane Doe"], identifiers: [new("isbn", "9780306406157")]);
+        CalibreBook second = CreateBook(
+            2, "Book", ["Jane Doe"], identifiers: [new("isbn", "9780140328721")]);
+
+        ExactMetadataDuplicateDetector.Detect([first, second]).Should().BeEmpty();
+    }
+
+    [Fact]
+    public void OverlappingStrongIdentifierSetsRemainCompatible()
+    {
+        CalibreBook first = CreateBook(
+            1,
+            "Book",
+            ["Jane Doe"],
+            identifiers: [new("isbn", "9780306406157"), new("isbn", "9780140328721")]);
+        CalibreBook second = CreateBook(
+            2,
+            "Book",
+            ["Jane Doe"],
+            identifiers: [new("isbn", "9780140328721"), new("isbn", "9780131103627")]);
+
+        ExactMetadataDuplicateDetector.Detect([first, second]).Should().ContainSingle();
+    }
+
+    [Fact]
+    public void UniqueRepeatedConsensusExcludesDisjointOutlier()
+    {
+        CalibreBook[] books =
+        [
+            CreateBook(3, "Book", ["Jane Doe"], languages: ["fr"]),
+            CreateBook(1, "Book", ["Jane Doe"], languages: ["en"]),
+            CreateBook(2, "Book", ["Jane Doe"], languages: ["eng"]),
+        ];
+
+        ExactMetadataDuplicateGroup group = ExactMetadataDuplicateDetector.Detect(books).Single();
+
+        group.Members.Select(value => value.Value).Should().Equal(1, 2);
+    }
+
+    [Fact]
+    public void TiedRepeatedConflictingSignalsSuppressIdentityBucket()
+    {
+        CalibreBook[] books =
+        [
+            CreateBook(1, "Book", ["Jane Doe"], languages: ["en"]),
+            CreateBook(2, "Book", ["Jane Doe"], languages: ["eng"]),
+            CreateBook(3, "Book", ["Jane Doe"], languages: ["fr"]),
+            CreateBook(4, "Book", ["Jane Doe"], languages: ["fra"]),
+        ];
+
+        ExactMetadataDuplicateDetector.Detect(books).Should().BeEmpty();
+    }
+
+    [Fact]
+    public void LanguageAndIdentifierOutliersAreUnionedDeterministically()
+    {
+        BookIdentifier isbnA = new("isbn", "9780306406157");
+        BookIdentifier isbnB = new("isbn", "9780140328721");
+        CalibreBook[] books =
+        [
+            CreateBook(4, "Book", ["Jane Doe"], languages: ["en"], identifiers: [isbnB]),
+            CreateBook(3, "Book", ["Jane Doe"], languages: ["fr"], identifiers: [isbnA]),
+            CreateBook(2, "Book", ["Jane Doe"], languages: ["eng"], identifiers: [isbnA]),
+            CreateBook(1, "Book", ["Jane Doe"], languages: ["en"], identifiers: [isbnA]),
+        ];
+
+        ExactMetadataDuplicateGroup group = ExactMetadataDuplicateDetector.Detect(books).Single();
+
+        group.Members.Select(value => value.Value).Should().Equal(1, 2);
+        ExactMetadataDuplicateDetector.Detect(books.Reverse()).Single().Members.Should().Equal(group.Members);
     }
 
     [Fact]
@@ -153,7 +251,9 @@ public sealed class ExactMetadataDuplicateDetectorTests
         IReadOnlyList<string> authors,
         string authorSort = "Stored sort",
         string identifier = "identifier",
-        char digestCharacter = 'a') => new(
+        char digestCharacter = 'a',
+        IReadOnlyList<string>? languages = null,
+        IReadOnlyList<BookIdentifier>? identifiers = null) => new(
         new CalibreBookId(id),
         title,
         authorSort,
@@ -161,7 +261,7 @@ public sealed class ExactMetadataDuplicateDetectorTests
             new CalibreAuthorId((id * 10L) + index + 1),
             author,
             $"Sort {index}")),
-        [new BookIdentifier("test", identifier)],
+        identifiers ?? [new BookIdentifier("test", identifier)],
         [new BookFormat(
             "EPUB",
             $"Book {id}",
@@ -169,5 +269,6 @@ public sealed class ExactMetadataDuplicateDetectorTests
             FormatFileStatus.Present,
             new FormatFileFingerprint(id, new Sha256Digest(new string(digestCharacter, 64))),
             new FormatFileObservation(id, DateTimeOffset.UnixEpoch, DateTimeOffset.UnixEpoch, 0))],
-        $"Book {id}");
+        $"Book {id}",
+        new(languages: languages));
 }
