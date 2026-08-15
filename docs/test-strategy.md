@@ -81,9 +81,11 @@ Every cache test covers:
 - no prose/path leakage where prohibited; and
 - loss/corruption degrading to recomputation rather than false evidence.
 
-Hash-cache tests additionally cover unchanged identity reuse, selective byte
-revalidation, timestamp/size/attribute changes, replacement at the same path, and
-forced full verification.
+Hash-cache tests additionally cover unchanged identity reuse without a stream open,
+timestamp/size/attribute changes, replacement at the same path, forced full
+verification, path-private persistence, bounded pruning, and cold/warm repeated Exact
+Scan behavior. Selective/periodic byte revalidation tests accompany that future
+policy slice.
 
 Performance baselines use deterministic synthetic libraries and explicitly supplied
 disposable copies. Record cold/warm durations, cache hit rates, bytes read, parser

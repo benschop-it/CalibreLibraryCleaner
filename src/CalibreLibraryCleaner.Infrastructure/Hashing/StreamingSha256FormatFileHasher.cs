@@ -9,6 +9,9 @@ using Microsoft.Extensions.Logging;
 namespace CalibreLibraryCleaner.Infrastructure.Hashing;
 
 internal sealed class StreamingSha256FormatFileHasher(
+    IFormatHashCache cache,
+    IFormatHashCacheKeyFactory cacheKeyFactory,
+    IClock clock,
     ILogger<StreamingSha256FormatFileHasher> logger) : IFormatFileHasher
 {
     private const int BufferSize = 128 * 1024;
@@ -95,17 +98,20 @@ internal sealed class StreamingSha256FormatFileHasher(
         await Parallel.ForEachAsync(prepared, parallelOptions, async (item, token) =>
         {
             coordinator.StartFile();
+            FormatHashResult? result = null;
             try
             {
-                results[item.Request.Sequence] = await HashOneAsync(item, coordinator, token).ConfigureAwait(false);
+                result = await HashOneAsync(item, coordinator, token).ConfigureAwait(false);
+                results[item.Request.Sequence] = result;
             }
             finally
             {
-                coordinator.CompleteFile();
+                coordinator.CompleteFile(result);
             }
         }).ConfigureAwait(false);
 
         cancellationToken.ThrowIfCancellationRequested();
+        await TryPruneCacheAsync(cancellationToken).ConfigureAwait(false);
         coordinator.ReportCompleted();
         return results.Select(result => result ?? throw new InvalidOperationException("A format hash result is missing.")).ToArray();
     }
@@ -186,6 +192,29 @@ internal sealed class StreamingSha256FormatFileHasher(
                 return Changed(prepared.Request.Sequence, "ChangedBeforeOpen");
             }
 
+            FormatFileObservation observation = ToObservation(prepared.State);
+            FormatHashCacheKey cacheKey = cacheKeyFactory.Create(prepared.Request.Path);
+            if (!prepared.Request.ForceVerification)
+            {
+                FormatHashCacheEntry? cached = await TryReadCacheAsync(cacheKey, cancellationToken).ConfigureAwait(false);
+                if (cached?.Matches(cacheKey, observation) == true)
+                {
+                    if (!TryEnsureSafeManagedPath(prepared.Request.Path)
+                        || !TryCaptureState(prepared.Request.Path.FullPath, out FileState? beforeReuse)
+                        || beforeReuse != prepared.State)
+                    {
+                        return Changed(prepared.Request.Sequence, "ChangedBeforeReuse");
+                    }
+
+                    progress.AddReusedBytes(prepared.State.Length);
+                    return FormatHashResult.Success(
+                        prepared.Request.Sequence,
+                        cached.Fingerprint,
+                        observation,
+                        wasReused: true);
+                }
+            }
+
             FileStreamOptions options = new()
             {
                 Mode = FileMode.Open,
@@ -227,10 +256,19 @@ internal sealed class StreamingSha256FormatFileHasher(
             }
 
             string digest = Convert.ToHexString(hash.GetHashAndReset()).ToLowerInvariant();
-            return FormatHashResult.Success(
+            FormatHashResult result = FormatHashResult.Success(
                 prepared.Request.Sequence,
                 new FormatFileFingerprint(prepared.State.Length, new Sha256Digest(digest)),
-                ToObservation(prepared.State));
+                observation);
+            await TryWriteCacheAsync(
+                new(
+                    cacheKey,
+                    FormatHashCacheKey.PolicyVersion,
+                    result.Fingerprint!,
+                    observation,
+                    clock.GetUtcNow()),
+                cancellationToken).ConfigureAwait(false);
+            return result;
         }
         catch (OperationCanceledException)
         {
@@ -334,6 +372,51 @@ internal sealed class StreamingSha256FormatFileHasher(
     private void LogFailure(string reasonCode, Exception exception) =>
         FileHashFailed(logger, reasonCode, exception.GetType().FullName ?? exception.GetType().Name, null);
 
+    private async Task<FormatHashCacheEntry?> TryReadCacheAsync(
+        FormatHashCacheKey key,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            return await cache.TryReadAsync(key, cancellationToken).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) { throw; }
+        catch (Exception exception) when (IsCacheFailure(exception))
+        {
+            return null;
+        }
+    }
+
+    private async Task TryWriteCacheAsync(FormatHashCacheEntry entry, CancellationToken cancellationToken)
+    {
+        try
+        {
+            await cache.WriteAsync(entry, cancellationToken).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) { throw; }
+        catch (Exception exception) when (IsCacheFailure(exception))
+        { }
+    }
+
+    private async Task TryPruneCacheAsync(CancellationToken cancellationToken)
+    {
+        try
+        {
+            await cache.PruneAsync(cancellationToken).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) { throw; }
+        catch (Exception exception) when (IsCacheFailure(exception))
+        { }
+    }
+
+    private static bool IsCacheFailure(Exception exception) =>
+        exception is IOException
+            or UnauthorizedAccessException
+            or SecurityException
+            or InvalidDataException
+            or ArgumentException
+            or OverflowException;
+
     private static bool TryCaptureState(string path, out FileState? state)
     {
         try
@@ -382,8 +465,12 @@ internal sealed class StreamingSha256FormatFileHasher(
         private readonly long _totalBytes;
         private readonly int _totalFiles;
         private long _completedBytes;
+        private long _freshBytes;
+        private long _reusedBytes;
         private long _lastReportedBytes;
         private int _completedFiles;
+        private int _freshFiles;
+        private int _reusedFiles;
         private int _activeFiles;
 
         public ProgressCoordinator(
@@ -413,16 +500,32 @@ internal sealed class StreamingSha256FormatFileHasher(
             lock (_gate)
             {
                 _completedBytes += count;
+                _freshBytes += count;
                 ReportLocked(force: _completedBytes - _lastReportedBytes >= ProgressInterval);
             }
         }
 
-        public void CompleteFile()
+        public void AddReusedBytes(long count)
+        {
+            lock (_gate)
+            {
+                _completedBytes += count;
+                _reusedBytes += count;
+                ReportLocked(force: _completedBytes - _lastReportedBytes >= ProgressInterval);
+            }
+        }
+
+        public void CompleteFile(FormatHashResult? result)
         {
             lock (_gate)
             {
                 _activeFiles--;
                 _completedFiles++;
+                if (result?.Status == FormatHashResultStatus.Success)
+                {
+                    if (result.WasReused) _reusedFiles++;
+                    else _freshFiles++;
+                }
                 ReportLocked(force: _completedFiles == _totalFiles || _completedFiles % CompletedFileProgressInterval == 0);
             }
         }
@@ -458,7 +561,11 @@ internal sealed class StreamingSha256FormatFileHasher(
                 _completedFiles,
                 _totalFiles,
                 _activeFiles,
-                $"Hashing ebook files: {_completedFiles} of {_totalFiles} complete"));
+                $"Hashing ebook files: {_completedFiles} of {_totalFiles} complete; {_freshFiles} fresh, {_reusedFiles} reused",
+                _freshBytes,
+                _reusedBytes,
+                _freshFiles,
+                _reusedFiles));
         }
     }
 

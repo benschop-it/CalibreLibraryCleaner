@@ -78,7 +78,8 @@ public sealed class ScanLibraryUseCaseTests
             "C:/Library",
             new InlineProgress(progress.Add),
             CancellationToken.None,
-            mode: LibraryAnalysisMode.ExactOnly);
+            mode: LibraryAnalysisMode.ExactOnly,
+            forceHashVerification: true);
 
         outcome.IsSuccess.Should().BeTrue();
         outcome.Snapshot!.Books.SelectMany(book => book.Formats).Should().HaveCount(4);
@@ -96,7 +97,8 @@ public sealed class ScanLibraryUseCaseTests
             || value.Phase == LibraryScanPhase.BuildingMatchingProfiles
             || value.Phase == LibraryScanPhase.GeneratingConsolidationRecommendations);
         A.CallTo(() => context.Hasher.HashAsync(
-                A<IReadOnlyList<FormatHashRequest>>.That.Matches(requests => requests.Count == 4),
+                A<IReadOnlyList<FormatHashRequest>>.That.Matches(requests =>
+                    requests.Count == 4 && requests.All(request => request.ForceVerification)),
                 A<int>._,
                 A<IProgress<FormatHashProgress>?>._,
                 A<CancellationToken>._))

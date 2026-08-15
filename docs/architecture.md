@@ -29,7 +29,7 @@ reference Infrastructure only in `App.xaml.cs`.
 ```text
 Explicit Exact Scan
   -> catalog/path resolution
-  -> full SHA-256 hashing
+  -> safe SHA-256 identity reuse or full hashing
   -> Exact groups
   -> Exact review and worker cleanup
   -> read-only residual reconciliation
@@ -92,21 +92,23 @@ must be calibrated on labeled data. Online failure cannot block local matching.
 - Compatible EPUB/PDF assessments are reusable by fingerprint and all analyzer,
   scoring, classification, and resource versions.
 - EPUB signatures are cached by fingerprint and signature/inspection versions.
+- SHA-256 fingerprints are cached by a one-way identity over canonical library root,
+  expected relative path, and hash policy. Reuse occurs only after current
+  containment/reparse preflight and exact size/creation/last-write/attribute match.
+  A forced-verification request bypasses reads and refreshes successful entries.
 - Open Library resolutions are cached by query hash and all provider/query/resolution
   policy versions; entries contain reduced work identity evidence, not raw payloads.
 - Cache entries contain technical facts/hashes, not prose or absolute library paths.
 - Atomic writes and bounded pruning make cache loss a performance event, not a
   correctness event.
 
-There is currently no SHA-256 cache: Exact Scan rereads every resolvable file.
-
 ### Target
 
-Introduce a common versioned cache identity for hashes, assessments, signatures,
-enrichment, embeddings, and derived matching artifacts. Reuse SHA-256 for unchanged
-stable file identity; selectively/periodically revalidate bytes and support a forced
-verification scan. Track dependency edges so changed records invalidate only affected
-profiles, pairs, evidence, and groups where practical.
+Introduce a common versioned cache identity across assessments, signatures,
+enrichment, embeddings, and derived matching artifacts. Selectively/periodically
+revalidate cached SHA-256 bytes, expose forced verification in the UI, and track
+dependency edges so changed records invalidate only affected profiles, pairs,
+evidence, and groups where practical.
 
 ## Analysis and progress
 
@@ -201,7 +203,8 @@ payloads, or embeddings by default.
 
 ## Current architectural debt
 
-- Exact Scan still hashes every resolvable file instead of using a hash cache.
+- Cached SHA-256 identities have forced verification but not periodic/selective byte
+  revalidation or a dedicated UI command.
 - Current mutation state is more detailed than the accepted minimal target.
 - Full compatibility scan code remains for compatibility although staged mode is the
   configured product workflow.

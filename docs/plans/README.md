@@ -2,9 +2,8 @@
 
 This directory contains only active execution plans.
 
-Current plan:
-
-- [SHA-256 File-Identity Reuse](sha256-file-identity-reuse.md)
+There is no active execution plan. The next Priority 2 slice is periodic/selective
+byte validation plus a user-facing forced-verification command.
 
 Keep active plans current during implementation, then move them to
 `../archive/plans/` after completion and documentation reconciliation.

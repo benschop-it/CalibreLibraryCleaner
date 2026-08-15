@@ -55,13 +55,19 @@ capability with independently expanded data.
 
 ## Priority 2: Fast incremental analysis and caches
 
-1. Add versioned SHA-256 reuse for unchanged stable file identity.
-2. Add selective/periodic byte validation and a forced verification scan.
-3. Unify cache identity/provenance across hashes, assessments, signatures,
+Completed first slice: versioned SHA-256 reuse now requires current safe-path/reparse
+preflight and exact stable file observation, uses bounded path-private atomic cache
+entries, supports forced verification at the Application boundary, and reports
+fresh/reused files and bytes.
+
+Next:
+
+1. Add selective/periodic byte validation and expose forced verification in the UI.
+2. Unify cache identity/provenance across hashes, assessments, signatures,
    enrichment, embeddings, and derived evidence.
-4. Invalidate/recompute affected records and candidate neighborhoods instead of the
+3. Invalidate/recompute affected records and candidate neighborhoods instead of the
    whole residual library where practical.
-5. Track cold/warm duration, bytes read, cache hits, memory, parser work, and log
+4. Track cold/warm duration, bytes read, cache hits, memory, parser work, and log
    volume as regression baselines.
 
 ## Priority 3: Richer local matching evidence

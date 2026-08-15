@@ -4,10 +4,13 @@ using CalibreLibraryCleaner.Application.Abstractions;
 using CalibreLibraryCleaner.Application.Libraries;
 using CalibreLibraryCleaner.Domain.Libraries;
 using CalibreLibraryCleaner.Infrastructure.DependencyInjection;
+using CalibreLibraryCleaner.Infrastructure.Hashing;
 using CalibreLibraryCleaner.Infrastructure.Tests.Fixtures;
+using FakeItEasy;
 using FluentAssertions;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using Xunit;
 
 namespace CalibreLibraryCleaner.Infrastructure.Tests.Hashing;
@@ -54,6 +57,112 @@ public sealed class StreamingSha256FormatFileHasherTests
         FormatFileFingerprint fingerprint = results[0].Fingerprint!;
         fingerprint.SizeInBytes.Should().Be(content.Length);
         fingerprint.Sha256.Value.Should().Be(Convert.ToHexString(SHA256.HashData(content)).ToLowerInvariant());
+    }
+
+    [Fact]
+    public async Task UnchangedSecondHashReusesFingerprintWithoutOpeningFile()
+    {
+        using TemporaryDirectory directory = new();
+        string libraryRoot = Path.Combine(directory.Path, "library");
+        string cacheRoot = Path.Combine(directory.Path, "cache");
+        Directory.CreateDirectory(libraryRoot);
+        string path = Path.Combine(libraryRoot, "book.epub");
+        await File.WriteAllBytesAsync(path, [1, 2, 3]);
+        using ServiceProvider provider = TestServices.CreateProvider(cacheRoot);
+        IFormatFileHasher hasher = provider.GetRequiredService<IFormatFileHasher>();
+        FormatHashResult first = (await hasher.HashAsync(
+            [Request(0, path)], 1, null, CancellationToken.None)).Single();
+        List<FormatHashProgress> updates = [];
+        await using FileStream exclusive = new(path, FileMode.Open, FileAccess.Read, FileShare.None);
+
+        FormatHashResult second = (await hasher.HashAsync(
+            [Request(0, path)],
+            1,
+            new InlineProgress(updates.Add),
+            CancellationToken.None)).Single();
+
+        first.WasReused.Should().BeFalse();
+        second.Should().BeEquivalentTo(first, options => options.Excluding(result => result.WasReused));
+        second.WasReused.Should().BeTrue();
+        updates[^1].ReusedFiles.Should().Be(1);
+        updates[^1].ReusedBytes.Should().Be(3);
+        updates[^1].FreshFiles.Should().Be(0);
+        updates[^1].FreshBytes.Should().Be(0);
+    }
+
+    [Fact]
+    public async Task ForcedVerificationBypassesValidCacheEntry()
+    {
+        using TemporaryDirectory directory = new();
+        string libraryRoot = Path.Combine(directory.Path, "library");
+        Directory.CreateDirectory(libraryRoot);
+        string path = Path.Combine(libraryRoot, "book.epub");
+        await File.WriteAllBytesAsync(path, [1, 2, 3]);
+        using ServiceProvider provider = TestServices.CreateProvider(Path.Combine(directory.Path, "cache"));
+        IFormatFileHasher hasher = provider.GetRequiredService<IFormatFileHasher>();
+        await hasher.HashAsync([Request(0, path)], 1, null, CancellationToken.None);
+        FormatHashRequest forced = Request(0, path) with { ForceVerification = true };
+        List<FormatHashProgress> updates = [];
+
+        FormatHashResult result = (await hasher.HashAsync(
+            [forced], 1, new InlineProgress(updates.Add), CancellationToken.None)).Single();
+
+        result.Status.Should().Be(FormatHashResultStatus.Success);
+        result.WasReused.Should().BeFalse();
+        updates[^1].FreshFiles.Should().Be(1);
+        updates[^1].FreshBytes.Should().Be(3);
+        updates[^1].ReusedFiles.Should().Be(0);
+    }
+
+    [Fact]
+    public async Task ChangedObservationCausesFreshHash()
+    {
+        using TemporaryDirectory directory = new();
+        string libraryRoot = Path.Combine(directory.Path, "library");
+        Directory.CreateDirectory(libraryRoot);
+        string path = Path.Combine(libraryRoot, "book.epub");
+        await File.WriteAllBytesAsync(path, [1, 2, 3]);
+        using ServiceProvider provider = TestServices.CreateProvider(Path.Combine(directory.Path, "cache"));
+        IFormatFileHasher hasher = provider.GetRequiredService<IFormatFileHasher>();
+        FormatHashResult first = (await hasher.HashAsync(
+            [Request(0, path)], 1, null, CancellationToken.None)).Single();
+        await File.WriteAllBytesAsync(path, [4, 5, 6, 7]);
+
+        FormatHashResult changed = (await hasher.HashAsync(
+            [Request(0, path)], 1, null, CancellationToken.None)).Single();
+
+        changed.Status.Should().Be(FormatHashResultStatus.Success);
+        changed.WasReused.Should().BeFalse();
+        changed.Fingerprint.Should().NotBe(first.Fingerprint);
+    }
+
+    [Fact]
+    public async Task CacheFailuresFallBackToFreshHashing()
+    {
+        using TemporaryDirectory directory = new();
+        string path = Path.Combine(directory.Path, "book.epub");
+        await File.WriteAllBytesAsync(path, [1, 2, 3]);
+        IFormatHashCache cache = A.Fake<IFormatHashCache>();
+        IClock clock = A.Fake<IClock>();
+        A.CallTo(() => cache.TryReadAsync(A<FormatHashCacheKey>._, A<CancellationToken>._))
+            .ThrowsAsync(new IOException("cache read failed"));
+        A.CallTo(() => cache.WriteAsync(A<FormatHashCacheEntry>._, A<CancellationToken>._))
+            .ThrowsAsync(new IOException("cache write failed"));
+        A.CallTo(() => cache.PruneAsync(A<CancellationToken>._))
+            .ThrowsAsync(new IOException("cache prune failed"));
+        StreamingSha256FormatFileHasher hasher = new(
+            cache,
+            new Sha256FormatHashCacheKeyFactory(),
+            clock,
+            NullLogger<StreamingSha256FormatFileHasher>.Instance);
+
+        FormatHashResult result = (await hasher.HashAsync(
+            [Request(0, path)], 1, null, CancellationToken.None)).Single();
+
+        result.Status.Should().Be(FormatHashResultStatus.Success);
+        result.WasReused.Should().BeFalse();
+        result.Fingerprint!.Sha256.Value.Should()
+            .Be(Convert.ToHexString(SHA256.HashData([1, 2, 3])).ToLowerInvariant());
     }
 
     [Fact]

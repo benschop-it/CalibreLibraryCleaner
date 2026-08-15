@@ -2,6 +2,7 @@ using CalibreLibraryCleaner.Application.Abstractions;
 using CalibreLibraryCleaner.Application.Executions;
 using CalibreLibraryCleaner.Application.Matching;
 using CalibreLibraryCleaner.Infrastructure.Bibliographic;
+using CalibreLibraryCleaner.Infrastructure.Caches;
 using CalibreLibraryCleaner.Infrastructure.Calibre;
 using CalibreLibraryCleaner.Infrastructure.Epub;
 using CalibreLibraryCleaner.Infrastructure.Execution;
@@ -31,6 +32,9 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<IClock, SystemClock>();
         services.AddSingleton<ILibraryPathResolver, LibraryPathResolver>();
         services.AddSingleton<ICalibreMetadataReader, SqliteCalibreMetadataReader>();
+        services.AddSingleton(new FormatHashCacheOptions());
+        services.AddSingleton<IFormatHashCacheKeyFactory, Sha256FormatHashCacheKeyFactory>();
+        services.AddSingleton<IFormatHashCache, FileFormatHashCache>();
         services.AddSingleton<IFormatFileHasher, StreamingSha256FormatFileHasher>();
         services.AddSingleton<IFormatFileProbe, PhysicalFormatFileProbe>();
         services.AddSingleton(new LibrarySnapshotStorageOptions());

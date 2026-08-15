@@ -27,7 +27,8 @@ An explicit Scan:
 - loads records, authors, identifiers, publication metadata, languages, formats, and
   managed paths;
 - resolves each declared format path and records missing/invalid associations;
-- streams SHA-256 over every resolvable format with bounded concurrency;
+- safely reuses SHA-256 for an unchanged stable file observation or streams a fresh
+  digest with bounded concurrency;
 - builds byte-identical format groups;
 - excludes ambiguous exact title/author buckets with decisive known language or
   validated strong-identifier conflicts; and
@@ -136,6 +137,13 @@ runtime/model/preprocessing/comparison versions. Raw queries, model inputs, vect
 and provider payloads are not stored. Cache loss affects performance, not matching
 semantics.
 
+SHA-256 cache entries use a one-way identity over canonical library root, expected
+relative path, and hash policy; store only fingerprint, exact file observation, and
+verification time; and are reused only after current path/reparse safety checks and
+exact observation equality. Corruption or cache failure causes fresh hashing. Scan
+requests can force full verification, and progress/logging separates reused from
+fresh files and bytes.
+
 ## Progress and responsiveness
 
 Long operations must keep WPF responsive and visibly active. Candidate preparation
@@ -167,10 +175,8 @@ be arbitrarily cancelled after it starts.
 
 ### Faster repeated analysis
 
-- Persist and reuse SHA-256 when canonical path, size, timestamps, attributes/file
-  identity, and cache provenance are unchanged.
 - Selectively or periodically rehash cached files to detect drift.
-- Offer a verification scan that forces full byte hashing.
+- Expose the implemented forced full-byte verification control in the UI.
 - Version/invalidate every hash, assessment, signature, enrichment, embedding, and
   grouping cache by all relevant inputs and policies.
 - Measure and expose cold/warm cache hit rates, durations, memory, and work counts.

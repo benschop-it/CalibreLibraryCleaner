@@ -79,6 +79,45 @@ public sealed class ReadOnlyLibraryScanSafetyTests
     }
 
     [Fact]
+    public async Task RepeatedExactScanReusesHashesAndForcedVerificationReadsFreshBytes()
+    {
+        using SyntheticCalibreLibrary library = new();
+        using TemporaryDirectory cacheDirectory = new();
+        library.AddSimpleBook(1, [1, 2, 3, 4, 5]);
+        using ServiceProvider provider = TestServices.CreateProvider(cacheDirectory.Path);
+        ScanLibraryUseCase useCase = TestServices.CreateScanUseCase(provider);
+        List<LibraryScanProgress> coldProgress = [];
+        List<LibraryScanProgress> warmProgress = [];
+        List<LibraryScanProgress> forcedProgress = [];
+
+        LibraryScanOutcome cold = await useCase.ExecuteAsync(
+            library.RootPath,
+            new InlineProgress(coldProgress.Add),
+            CancellationToken.None,
+            mode: LibraryAnalysisMode.ExactOnly);
+        LibraryScanOutcome warm = await useCase.ExecuteAsync(
+            library.RootPath,
+            new InlineProgress(warmProgress.Add),
+            CancellationToken.None,
+            mode: LibraryAnalysisMode.ExactOnly);
+        LibraryScanOutcome forced = await useCase.ExecuteAsync(
+            library.RootPath,
+            new InlineProgress(forcedProgress.Add),
+            CancellationToken.None,
+            mode: LibraryAnalysisMode.ExactOnly,
+            forceHashVerification: true);
+
+        cold.IsSuccess.Should().BeTrue();
+        warm.IsSuccess.Should().BeTrue();
+        forced.IsSuccess.Should().BeTrue();
+        warm.Snapshot!.Books.Should().BeEquivalentTo(cold.Snapshot!.Books);
+        forced.Snapshot!.Books.Should().BeEquivalentTo(cold.Snapshot.Books);
+        coldProgress.Should().Contain(value => value.Message.Contains("1 fresh, 0 reused", StringComparison.Ordinal));
+        warmProgress.Should().Contain(value => value.Message.Contains("0 fresh, 1 reused", StringComparison.Ordinal));
+        forcedProgress.Should().Contain(value => value.Message.Contains("1 fresh, 0 reused", StringComparison.Ordinal));
+    }
+
+    [Fact]
     public async Task ExactMetadataDuplicateAnalysisDoesNotChangeSyntheticLibrary()
     {
         using SyntheticCalibreLibrary library = new();

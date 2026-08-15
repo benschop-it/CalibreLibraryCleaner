@@ -36,7 +36,8 @@ public sealed partial class ScanLibraryUseCase(
         IProgress<LibraryScanProgress>? progress,
         CancellationToken cancellationToken,
         bool includePdfAssessments = true,
-        LibraryAnalysisMode mode = LibraryAnalysisMode.FullCompatibility)
+        LibraryAnalysisMode mode = LibraryAnalysisMode.FullCompatibility,
+        bool forceHashVerification = false)
     {
         if (!Enum.IsDefined(mode)) throw new ArgumentOutOfRangeException(nameof(mode));
         if (mode == LibraryAnalysisMode.CandidateResidual)
@@ -118,7 +119,12 @@ public sealed partial class ScanLibraryUseCase(
                 else
                 {
                     int sequence = requests.Count;
-                    requests.Add(new(sequence, bookId, canonicalFormat, resolved.Path!));
+                    requests.Add(new(
+                        sequence,
+                        bookId,
+                        canonicalFormat,
+                        resolved.Path!,
+                        forceHashVerification));
                     formats.Add(new(
                         canonicalFormat,
                         formatRecord.StoredName,
@@ -167,6 +173,14 @@ public sealed partial class ScanLibraryUseCase(
                 "Retry the scan. If the problem continues, inspect the application log."));
         }
         long hashingCompleted = Stopwatch.GetTimestamp();
+        int reusedHashFiles = hashResults.Count(result => result.Status == FormatHashResultStatus.Success && result.WasReused);
+        int freshHashFiles = hashResults.Count(result => result.Status == FormatHashResultStatus.Success && !result.WasReused);
+        long reusedHashBytes = hashResults
+            .Where(result => result.WasReused)
+            .Sum(result => result.Fingerprint?.SizeInBytes ?? 0L);
+        long freshHashBytes = hashResults
+            .Where(result => result.Status == FormatHashResultStatus.Success && !result.WasReused)
+            .Sum(result => result.Fingerprint?.SizeInBytes ?? 0L);
 
         Dictionary<int, FormatHashResult> resultsBySequence = hashResults.ToDictionary(result => result.Sequence);
         List<CalibreBook> books = preparedBooks
@@ -200,12 +214,14 @@ public sealed partial class ScanLibraryUseCase(
                 exactFindings,
                 exactGroups);
             long exactCompleted = Stopwatch.GetTimestamp();
-            long hashedBytes = hashResults.Sum(result => result.Fingerprint?.SizeInBytes ?? 0L);
             LogExactAnalysisCompleted(
                 _logger,
                 catalog.Books.Count,
                 requests.Count,
-                hashedBytes,
+                freshHashFiles,
+                freshHashBytes,
+                reusedHashFiles,
+                reusedHashBytes,
                 exactGroups.Count,
                 ElapsedMilliseconds(scanStarted, catalogReadCompleted),
                 ElapsedMilliseconds(catalogReadCompleted, resolutionCompleted),
@@ -459,6 +475,10 @@ public sealed partial class ScanLibraryUseCase(
             epubReuse.Reused.Count,
             pdfTargetCount,
             reusedPdfCount,
+            freshHashFiles,
+            freshHashBytes,
+            reusedHashFiles,
+            reusedHashBytes,
             ElapsedMilliseconds(scanStarted, catalogReadCompleted),
             ElapsedMilliseconds(catalogReadCompleted, resolutionCompleted),
             ElapsedMilliseconds(resolutionCompleted, hashingCompleted),
@@ -815,7 +835,7 @@ public sealed partial class ScanLibraryUseCase(
         (long)Stopwatch.GetElapsedTime(started, completed).TotalMilliseconds;
 
     [LoggerMessage(400, LogLevel.Information,
-        "Library scan completed. Books={BookCount}, Formats={FormatCount}, EpubTargets={EpubTargets}, ReusedEpubAssessments={ReusedEpubAssessments}, PdfTargets={PdfTargets}, ReusedPdfAssessments={ReusedPdfAssessments}, CatalogMilliseconds={CatalogMilliseconds}, ResolutionMilliseconds={ResolutionMilliseconds}, HashingMilliseconds={HashingMilliseconds}, EpubMilliseconds={EpubMilliseconds}, PdfMilliseconds={PdfMilliseconds}, MatchingMilliseconds={MatchingMilliseconds}, RecommendationAndPublicationMilliseconds={RecommendationAndPublicationMilliseconds}, TotalMilliseconds={TotalMilliseconds}.")]
+        "Library scan completed. Books={BookCount}, Formats={FormatCount}, EpubTargets={EpubTargets}, ReusedEpubAssessments={ReusedEpubAssessments}, PdfTargets={PdfTargets}, ReusedPdfAssessments={ReusedPdfAssessments}, FreshHashFiles={FreshHashFiles}, FreshHashBytes={FreshHashBytes}, ReusedHashFiles={ReusedHashFiles}, ReusedHashBytes={ReusedHashBytes}, CatalogMilliseconds={CatalogMilliseconds}, ResolutionMilliseconds={ResolutionMilliseconds}, HashingMilliseconds={HashingMilliseconds}, EpubMilliseconds={EpubMilliseconds}, PdfMilliseconds={PdfMilliseconds}, MatchingMilliseconds={MatchingMilliseconds}, RecommendationAndPublicationMilliseconds={RecommendationAndPublicationMilliseconds}, TotalMilliseconds={TotalMilliseconds}.")]
     private static partial void LogScanCompleted(
         ILogger logger,
         int bookCount,
@@ -824,6 +844,10 @@ public sealed partial class ScanLibraryUseCase(
         int reusedEpubAssessments,
         int pdfTargets,
         int reusedPdfAssessments,
+        int freshHashFiles,
+        long freshHashBytes,
+        int reusedHashFiles,
+        long reusedHashBytes,
         long catalogMilliseconds,
         long resolutionMilliseconds,
         long hashingMilliseconds,
@@ -834,12 +858,15 @@ public sealed partial class ScanLibraryUseCase(
         long totalMilliseconds);
 
     [LoggerMessage(401, LogLevel.Information,
-        "Exact-only analysis completed. Books={BookCount}, Formats={FormatCount}, HashedBytes={HashedBytes}, ExactGroups={ExactGroupCount}, CatalogMilliseconds={CatalogMilliseconds}, ResolutionMilliseconds={ResolutionMilliseconds}, HashingMilliseconds={HashingMilliseconds}, GroupingAndPublicationMilliseconds={GroupingAndPublicationMilliseconds}, TotalMilliseconds={TotalMilliseconds}.")]
+        "Exact-only analysis completed. Books={BookCount}, Formats={FormatCount}, FreshHashFiles={FreshHashFiles}, FreshHashBytes={FreshHashBytes}, ReusedHashFiles={ReusedHashFiles}, ReusedHashBytes={ReusedHashBytes}, ExactGroups={ExactGroupCount}, CatalogMilliseconds={CatalogMilliseconds}, ResolutionMilliseconds={ResolutionMilliseconds}, HashingMilliseconds={HashingMilliseconds}, GroupingAndPublicationMilliseconds={GroupingAndPublicationMilliseconds}, TotalMilliseconds={TotalMilliseconds}.")]
     private static partial void LogExactAnalysisCompleted(
         ILogger logger,
         int bookCount,
         int formatCount,
-        long hashedBytes,
+        int freshHashFiles,
+        long freshHashBytes,
+        int reusedHashFiles,
+        long reusedHashBytes,
         int exactGroupCount,
         long catalogMilliseconds,
         long resolutionMilliseconds,

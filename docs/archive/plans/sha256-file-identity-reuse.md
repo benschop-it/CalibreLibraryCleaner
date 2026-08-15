@@ -214,12 +214,30 @@ dotnet list package --vulnerable --include-transitive
 
 - [x] Current staged hash flow and persistence/cache patterns inspected.
 - [x] Dedicated cache ownership and forced-verification boundary selected.
-- [ ] Cache contracts and key tests implemented.
-- [ ] File cache implemented and verified.
-- [ ] Streaming hasher reuse integrated.
-- [ ] Scan/progress integration measured.
-- [ ] Documentation and standard verification completed.
+- [x] Cache contracts and key tests implemented.
+- [x] File cache implemented and verified.
+- [x] Streaming hasher reuse integrated.
+- [x] Scan/progress integration measured.
+- [x] Documentation and standard verification completed.
 
 ## Final outcome
 
-Pending implementation.
+Implemented `format-sha256/1.0.0` identity reuse through Application cache/key
+ports and Infrastructure-owned canonical key hashing plus bounded atomic JSON
+persistence. The warm path retains containment/reparse checks and two exact stable
+file observations but does not open the managed file stream. Forced verification
+bypasses reads and refreshes successful entries; cache failures rehash.
+
+Progress and aggregate logs separate fresh/reused files and bytes. A deterministic
+Exact Scan integration test proved five fresh bytes cold, zero fresh/five reused
+bytes warm, and five fresh bytes when forced. This is a work-reduction assertion,
+not a wall-clock promise.
+
+The full solution built and all 701 tests passed. Formatting, whitespace checks, IDE
+diagnostics, and the transitive vulnerability audit were clean. Key hashing moved
+behind an Infrastructure factory and mutable cache files moved outside the managed
+file hashing namespace to preserve architecture/safety boundaries discovered by the
+full suite.
+
+Periodic/selective byte validation and a user-facing Verify command remain the next
+slice. Matching policies, corpus, baseline, and mutation behavior did not change.
