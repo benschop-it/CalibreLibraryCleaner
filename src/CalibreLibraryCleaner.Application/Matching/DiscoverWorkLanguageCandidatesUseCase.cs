@@ -11,6 +11,7 @@ public enum WorkLanguageDiscoveryPhase
     GeneratingCandidates,
     InspectingContent,
     ResolvingBibliographicEvidence,
+    ObservingLocalModel,
     Clustering,
 }
 
@@ -38,7 +39,8 @@ public interface IWorkLanguageCandidateDiscoverer
 
 public sealed class DiscoverWorkLanguageCandidatesUseCase(
     ResolveCandidateContentSignaturesUseCase resolveContentSignatures,
-    ResolveBibliographicEvidenceUseCase? resolveBibliographicEvidence = null) : IWorkLanguageCandidateDiscoverer
+    ResolveBibliographicEvidenceUseCase? resolveBibliographicEvidence = null,
+    ObserveLocalEmbeddingEvidenceUseCase? observeLocalEmbeddings = null) : IWorkLanguageCandidateDiscoverer
 {
     public async Task<WorkLanguageDiscoveryResult> ExecuteAsync(
         IReadOnlyList<CalibreBook> books,
@@ -118,6 +120,15 @@ public sealed class DiscoverWorkLanguageCandidatesUseCase(
                 progress is null ? null : new BibliographicProgressAdapter(progress),
                 cancellationToken).ConfigureAwait(false);
 
+        LocalEmbeddingObservationResult embeddings = observeLocalEmbeddings is null
+            ? new(new Dictionary<BookCandidatePairId, LocalEmbeddingComparison>(), 0, 0, 0, 0, 0, false, false)
+            : await observeLocalEmbeddings.ExecuteAsync(
+                books,
+                profiles,
+                bibliography.Pairs,
+                progress is null ? null : new LocalEmbeddingProgressAdapter(progress),
+                cancellationToken).ConfigureAwait(false);
+
         progress?.Report(new(WorkLanguageDiscoveryPhase.Clustering, 0, bibliography.Pairs.Count));
         IReadOnlyList<BookCandidateDecision> decisions = BookCandidateDecisionPolicy.Decide(
             bibliography.Pairs, comparisons, cancellationToken);
@@ -143,7 +154,14 @@ public sealed class DiscoverWorkLanguageCandidatesUseCase(
             bibliography.MatchedRecords,
             bibliography.Failures,
             bibliography.RequestLimitReached,
-            bibliography.Enabled);
+            bibliography.Enabled,
+            embeddings.PairCount,
+            embeddings.CacheHits,
+            embeddings.ModelBatches,
+            embeddings.Comparisons.Count,
+            embeddings.Failures,
+            embeddings.InputLimitReached,
+            embeddings.Enabled);
         return new(groups, summary, false);
     }
 
@@ -164,6 +182,16 @@ public sealed class DiscoverWorkLanguageCandidatesUseCase(
             WorkLanguageDiscoveryPhase.ResolvingBibliographicEvidence,
             value.CompletedQueries,
             value.TotalQueries,
+            value.Detail));
+    }
+
+    private sealed class LocalEmbeddingProgressAdapter(IProgress<WorkLanguageDiscoveryProgress> progress) :
+        IProgress<LocalEmbeddingObservationProgress>
+    {
+        public void Report(LocalEmbeddingObservationProgress value) => progress.Report(new(
+            WorkLanguageDiscoveryPhase.ObservingLocalModel,
+            value.CompletedPairs,
+            value.TotalPairs,
             value.Detail));
     }
 }

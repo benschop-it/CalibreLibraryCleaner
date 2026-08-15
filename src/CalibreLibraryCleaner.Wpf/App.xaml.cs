@@ -49,6 +49,23 @@ public partial class App : System.Windows.Application
         builder.Services.AddSingleton<GenerateConsolidationRecommendationsUseCase>();
         builder.Services.AddSingleton<ResolveCandidateContentSignaturesUseCase>();
         builder.Services.AddSingleton<ResolveBibliographicEvidenceUseCase>();
+        builder.Services.AddSingleton<ObserveLocalEmbeddingEvidenceUseCase>(serviceProvider =>
+        {
+            Infrastructure.LocalModels.OllamaEmbeddingOptions options = serviceProvider
+                .GetRequiredService<Infrastructure.LocalModels.OllamaEmbeddingOptions>();
+            Domain.Matching.LocalEmbeddingModelIdentity? model = options.Enabled
+                ? new(
+                    "ollama",
+                    options.RuntimeVersion!,
+                    options.ModelId!,
+                    options.ModelVersion!,
+                    options.Dimensions)
+                : null;
+            return new(
+                serviceProvider.GetRequiredService<ILocalEmbeddingProvider>(),
+                serviceProvider.GetRequiredService<ILocalEmbeddingComparisonCache>(),
+                model);
+        });
         builder.Services.AddSingleton<PrepareResidualAnalysisFactsUseCase>();
         builder.Services.AddSingleton<IResidualAnalysisFactsPreparer>(serviceProvider =>
             serviceProvider.GetRequiredService<PrepareResidualAnalysisFactsUseCase>());

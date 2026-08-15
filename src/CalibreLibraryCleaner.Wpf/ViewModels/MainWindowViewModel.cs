@@ -1168,6 +1168,9 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
         string bibliographicSummary = snapshot.MatchingRunSummary.BibliographicEnabled
             ? $"Open Library used {snapshot.MatchingRunSummary.BibliographicCacheHits:N0} cached and {snapshot.MatchingRunSummary.BibliographicProviderRequests:N0} online result(s), transmitting identifier or title, author, and language fields for unresolved records."
             : "Open Library bibliographic evidence was disabled.";
+        string localModelSummary = snapshot.MatchingRunSummary.LocalEmbeddingEnabled
+            ? $"Local Ollama embeddings observed {snapshot.MatchingRunSummary.LocalEmbeddingComparisons:N0} pair(s), with {snapshot.MatchingRunSummary.LocalEmbeddingCacheHits:N0} cached comparison(s); observations do not affect grouping."
+            : "Local embedding observations were disabled.";
         ExpandedCandidateSummary = snapshot.MatchingRunSummary.Status switch
         {
             MatchingEvidenceStatus.Unavailable =>
@@ -1175,9 +1178,9 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
             MatchingEvidenceStatus.Stale =>
                 "Expanded matching evidence is stale after library changes. Run a fresh scan to regenerate it.",
             _ when presentation.ExpandedGroups.Count == 0 =>
-                $"No expanded work-language candidate groups were found from {snapshot.MatchingRunSummary.RetainedPairCount:N0} retained pairs. {bibliographicSummary}",
+                $"No expanded work-language candidate groups were found from {snapshot.MatchingRunSummary.RetainedPairCount:N0} retained pairs. {bibliographicSummary} {localModelSummary}",
             _ =>
-                $"{presentation.ExpandedGroups.Count:N0} expanded groups from {snapshot.MatchingRunSummary.RetainedPairCount:N0} retained pairs; {snapshot.MatchingRunSummary.ContentSignaturesRequested:N0} content signatures requested. {bibliographicSummary}",
+                $"{presentation.ExpandedGroups.Count:N0} expanded groups from {snapshot.MatchingRunSummary.RetainedPairCount:N0} retained pairs; {snapshot.MatchingRunSummary.ContentSignaturesRequested:N0} content signatures requested. {bibliographicSummary} {localModelSummary}",
         };
         _epubAssessments.ReplaceAll(presentation.EpubAssessments);
         SelectedEpubAssessment = _epubAssessments.FirstOrDefault();

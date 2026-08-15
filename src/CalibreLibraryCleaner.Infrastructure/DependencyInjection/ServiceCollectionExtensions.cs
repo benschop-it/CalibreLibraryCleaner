@@ -7,6 +7,7 @@ using CalibreLibraryCleaner.Infrastructure.Epub;
 using CalibreLibraryCleaner.Infrastructure.Execution;
 using CalibreLibraryCleaner.Infrastructure.Hashing;
 using CalibreLibraryCleaner.Infrastructure.LibrarySnapshots;
+using CalibreLibraryCleaner.Infrastructure.LocalModels;
 using CalibreLibraryCleaner.Infrastructure.Paths;
 using CalibreLibraryCleaner.Infrastructure.Pdf;
 using CalibreLibraryCleaner.Infrastructure.Recommendations;
@@ -62,6 +63,23 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<OpenLibraryBibliographicProvider>();
         services.AddSingleton<IBibliographicProvider>(provider =>
             provider.GetRequiredService<OpenLibraryBibliographicProvider>());
+        string? embeddingModel = Environment.GetEnvironmentVariable("CALIBRE_OLLAMA_EMBEDDING_MODEL");
+        string? embeddingVersion = Environment.GetEnvironmentVariable("CALIBRE_OLLAMA_EMBEDDING_MODEL_VERSION");
+        string? ollamaRuntimeVersion = Environment.GetEnvironmentVariable("CALIBRE_OLLAMA_RUNTIME_VERSION");
+        OllamaEmbeddingOptions embeddingOptions = new(
+            embeddingModel, embeddingVersion, ollamaRuntimeVersion);
+        services.AddSingleton(embeddingOptions);
+        services.AddSingleton(new LocalEmbeddingComparisonCacheOptions());
+        services.AddSingleton<ILocalEmbeddingComparisonCache, FileLocalEmbeddingComparisonCache>();
+        services.AddSingleton<ILocalEmbeddingProvider>(_ =>
+        {
+            HttpClient client = new(new SocketsHttpHandler { AllowAutoRedirect = false })
+            {
+                BaseAddress = new("http://127.0.0.1:11434/", UriKind.Absolute),
+                Timeout = TimeSpan.FromSeconds(125),
+            };
+            return new OllamaLocalEmbeddingProvider(client, embeddingOptions);
+        });
         services.AddSingleton(new PdfWorkerOptions());
         services.AddSingleton<IPdfInspector, IsolatedPdfInspector>();
         services.AddSingleton<IRecommendationExporter, VersionedJsonRecommendationExporter>();

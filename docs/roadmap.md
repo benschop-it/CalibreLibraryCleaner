@@ -83,13 +83,17 @@ Completed:
 - provider-neutral work resolution, evidence provenance, and Domain fusion;
 - enabled-by-default Open Library search with field disclosure, bounded requests,
   rate limiting, reduced cache, and local fallback.
+- fixed-loopback Ollama metadata-embedding observations with complete runtime/model
+   provenance and reduced comparison cache; initial `embeddinggemma` positives scored
+   850-864 permille versus 696-801 for four hard negatives.
 
 Next:
 
-1. Evaluate local embeddings/models for title, author, language, metadata, and
-   bounded content similarity.
-2. Version model inputs/outputs and benchmark value against deterministic evidence.
-3. Calibrate evidence fusion; provider/model output remains advisory.
+1. Expand local-model calibration positives and hard negatives before choosing any
+   threshold.
+2. Evaluate privacy-safe derived content embeddings if metadata embeddings add too
+   little beyond deterministic evidence.
+3. Calibrate evidence fusion; model output remains observational until accepted.
 
 ## Priority 5: Review experience
 

@@ -389,6 +389,7 @@ public sealed class MainWindowViewModelTests
         viewModel.ExpandedCandidateGroups[0].Skip.Should().BeFalse();
         viewModel.ExpandedCandidateSummary.Should().Contain("1 expanded groups");
         viewModel.ExpandedCandidateSummary.Should().Contain("Open Library bibliographic evidence was disabled");
+        viewModel.ExpandedCandidateSummary.Should().Contain("Local embedding observations were disabled");
         viewModel.SelectedExpandedCandidateMembers.Should().HaveCount(2);
         viewModel.SelectedExpandedCandidateGroup!.KeeperRecordId.Should().Be(2);
         viewModel.SelectedExpandedCandidateMember!.BookId.Should().Be(2);

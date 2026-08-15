@@ -788,6 +788,8 @@ public sealed partial class ScanLibraryUseCase(
                     (LibraryScanPhase.InspectingCandidateContent, "Confirming candidate books with EPUB content evidence"),
                 WorkLanguageDiscoveryPhase.ResolvingBibliographicEvidence =>
                     (LibraryScanPhase.InspectingCandidateContent, "Resolving unresolved records with Open Library bibliographic evidence"),
+                WorkLanguageDiscoveryPhase.ObservingLocalModel =>
+                    (LibraryScanPhase.InspectingCandidateContent, "Observing unresolved records with local Ollama metadata embeddings"),
                 WorkLanguageDiscoveryPhase.Clustering =>
                     (LibraryScanPhase.GroupingWorkLanguageCandidates, "Publishing confirmed work-language groups"),
                 _ => throw new ArgumentOutOfRangeException(nameof(value)),

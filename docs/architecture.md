@@ -175,12 +175,20 @@ Network/provider/cache failures degrade to local matching. Set
 `CALIBRE_OPEN_LIBRARY_ENABLED=0` to disable the provider; optional
 `CALIBRE_OPEN_LIBRARY_CONTACT` identifies regular requests without being logged.
 
-## Local ML target
+## Local ML
 
 Infrastructure owns model files/runtime and bounded inference. Application owns
 batching, cache keys, progress, and model-selection ports. Domain receives only
 versioned vectors/similarity/classification evidence, never runtime tensors or model
 objects. A model upgrade invalidates dependent evidence and groups.
+
+Configured Ollama metadata embeddings are implemented as observational evidence.
+The endpoint is fixed to `http://127.0.0.1:11434`; the application never starts
+Ollama or downloads a model. Configuration requires runtime version, model name, and
+immutable model digest. Only bounded title, author, and language text is embedded.
+Vectors remain in memory; pair caches contain only input hashes, complete versions,
+status, and cosine similarity permille. Observations do not affect grouping until a
+separate threshold decision is calibrated and accepted.
 
 ## Logging and privacy
 

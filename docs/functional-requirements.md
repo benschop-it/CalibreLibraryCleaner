@@ -94,10 +94,13 @@ advisory; a group is processed unless the user selects Skip. Candidate cleanup:
 - title-token, series/index, language, edition-marker, and binary evidence;
 - explicit author/language/series/identifier/content contradictions;
 - candidate-only EPUB signatures containing 12 bounded token landmarks and a
-  bounded shingle sketch; and
+  bounded shingle sketch;
 - enabled-by-default, cache-first Open Library work identity for locally unresolved
   pairs, with deterministic title/author/language compatibility and field-category
-  disclosure; and
+  disclosure;
+- optional configured fixed-loopback Ollama metadata-embedding observations with
+  immutable runtime/model identity, memory-only vectors, and reduced comparison
+  cache; and
 - deterministic component construction without blind weak-edge transitive closure.
 
 Candidate generation uses indexes, per-record caps, and a global pair ceiling rather
@@ -128,8 +131,10 @@ lists small manifests; explicit Load restores saved state without scanning.
 Implemented caches reuse compatible EPUB/PDF assessments and EPUB content signatures
 by fingerprint and analyzer/model/resource versions. Reduced Open Library work
 resolutions are cached by a one-way query identity plus provider/query/resolution
-versions; raw queries and provider payloads are not stored. Cache loss affects
-performance, not matching semantics.
+versions. Reduced local embedding comparisons are cached by input hashes plus
+runtime/model/preprocessing/comparison versions. Raw queries, model inputs, vectors,
+and provider payloads are not stored. Cache loss affects performance, not matching
+semantics.
 
 ## Progress and responsiveness
 
@@ -154,8 +159,8 @@ be arbitrarily cancelled after it starts.
 - Add additional configured online bibliographic providers only where they improve
   labeled quality beyond the implemented Open Library source. Preserve provider,
   request-field, response-identity, retrieval-time, cache, and policy provenance.
-- Add versioned local ML/embeddings for title, author, language, metadata, and bounded
-  content similarity where benchmarks show value.
+- Expand calibration for implemented local metadata embeddings and evaluate bounded
+  content embeddings where benchmarks and privacy constraints justify it.
 - Calibrate evidence fusion, contradictions, thresholds, and confidence on labeled
   train/holdout corpora. Do not hard-code library-specific aliases.
 - Recompute only affected candidate neighborhoods where practical.

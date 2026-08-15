@@ -85,6 +85,13 @@ evidence may carry bounded source/version/result provenance. Same-provider/same-
 resolutions add positive evidence; absence, ambiguity, or provider disagreement is
 neutral.
 
+`LocalEmbeddingModelIdentity`, `LocalEmbeddingInput`, transient bounded vectors,
+and `LocalEmbeddingComparison` represent configured loopback-only local inference.
+Input and comparison identities include preprocessing, runtime, model digest,
+dimensions, and policy versions. Vectors are memory-only; persisted comparisons
+contain input hashes and integer cosine similarity. They are observational and are
+not Candidate evidence.
+
 `UnifiedCandidateGroup` merges Exact Metadata and Expanded evidence into one
 disjoint executable group. It contains canonical members, evidence provenance,
 review findings, advisory classification, generated keeper, retention facts, and

@@ -58,6 +58,13 @@ unique/dominant resolution, provenance, decisive-contradiction precedence, cold/
 cache behavior, stale/corrupt cache misses, thrown-adapter fallback, and absence of
 raw query metadata in cache files. Ordinary tests never require live network access.
 
+Local embedding tests use fake vectors and fake loopback HTTP in the ordinary suite.
+They cover finite dimensions, symmetric integer cosine similarity, complete
+runtime/model/preprocessing cache identity, batching/caps, cold/warm reuse,
+timeout/malformed fallback, no persisted vectors/raw inputs, and unchanged matching
+decisions. Real Ollama evaluation is opt-in and emits only opaque case IDs, versions,
+expected labels, and integer similarities.
+
 ## Cache and performance tests
 
 Every cache test covers:

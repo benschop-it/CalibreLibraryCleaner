@@ -93,7 +93,13 @@ public sealed class LibrarySnapshotJsonSerializerTests
             bibliographicProviderRequests: 1,
             bibliographicMatchedRecords: 2,
             bibliographicFailures: 0,
-            bibliographicEnabled: true);
+            bibliographicEnabled: true,
+            localEmbeddingPairs: 1,
+            localEmbeddingCacheHits: 1,
+            localEmbeddingModelBatches: 0,
+            localEmbeddingComparisons: 1,
+            localEmbeddingFailures: 0,
+            localEmbeddingEnabled: true);
         LibrarySnapshot value = new(
             fixture.Snapshot.Identity,
             fixture.Snapshot.ScannedAt,

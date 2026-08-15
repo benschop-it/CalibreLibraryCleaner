@@ -280,7 +280,14 @@ public sealed record BookMatchingRunSummary
         int bibliographicMatchedRecords = 0,
         int bibliographicFailures = 0,
         bool bibliographicRequestLimitReached = false,
-        bool bibliographicEnabled = false)
+        bool bibliographicEnabled = false,
+        int localEmbeddingPairs = 0,
+        int localEmbeddingCacheHits = 0,
+        int localEmbeddingModelBatches = 0,
+        int localEmbeddingComparisons = 0,
+        int localEmbeddingFailures = 0,
+        bool localEmbeddingInputLimitReached = false,
+        bool localEmbeddingEnabled = false)
     {
         ArgumentNullException.ThrowIfNull(policyVersion);
         int[] counts =
@@ -299,6 +306,11 @@ public sealed record BookMatchingRunSummary
             bibliographicProviderRequests,
             bibliographicMatchedRecords,
             bibliographicFailures,
+            localEmbeddingPairs,
+            localEmbeddingCacheHits,
+            localEmbeddingModelBatches,
+            localEmbeddingComparisons,
+            localEmbeddingFailures,
         ];
         if (!Enum.IsDefined(status) || counts.Any(value => value < 0)
             || retainedPairCount > proposedPairCount
@@ -307,7 +319,10 @@ public sealed record BookMatchingRunSummary
             || bibliographicCacheHits > bibliographicQueries
             || bibliographicProviderRequests > bibliographicQueries
             || bibliographicMatchedRecords > recordCount
-            || bibliographicFailures > bibliographicProviderRequests)
+            || bibliographicFailures > bibliographicProviderRequests
+            || localEmbeddingCacheHits > localEmbeddingPairs
+            || localEmbeddingComparisons > localEmbeddingPairs
+            || localEmbeddingFailures > recordCount)
             throw new ArgumentException("The matching run summary is invalid.");
         PolicyVersion = policyVersion;
         Status = status;
@@ -327,6 +342,13 @@ public sealed record BookMatchingRunSummary
         BibliographicFailures = bibliographicFailures;
         BibliographicRequestLimitReached = bibliographicRequestLimitReached;
         BibliographicEnabled = bibliographicEnabled;
+        LocalEmbeddingPairs = localEmbeddingPairs;
+        LocalEmbeddingCacheHits = localEmbeddingCacheHits;
+        LocalEmbeddingModelBatches = localEmbeddingModelBatches;
+        LocalEmbeddingComparisons = localEmbeddingComparisons;
+        LocalEmbeddingFailures = localEmbeddingFailures;
+        LocalEmbeddingInputLimitReached = localEmbeddingInputLimitReached;
+        LocalEmbeddingEnabled = localEmbeddingEnabled;
     }
 
     public MatchingPolicyVersion PolicyVersion { get; }
@@ -347,6 +369,13 @@ public sealed record BookMatchingRunSummary
     public int BibliographicFailures { get; }
     public bool BibliographicRequestLimitReached { get; }
     public bool BibliographicEnabled { get; }
+    public int LocalEmbeddingPairs { get; }
+    public int LocalEmbeddingCacheHits { get; }
+    public int LocalEmbeddingModelBatches { get; }
+    public int LocalEmbeddingComparisons { get; }
+    public int LocalEmbeddingFailures { get; }
+    public bool LocalEmbeddingInputLimitReached { get; }
+    public bool LocalEmbeddingEnabled { get; }
 
     public static BookMatchingRunSummary Unavailable(int recordCount) => new(
         MatchingPolicyVersion.Current,
