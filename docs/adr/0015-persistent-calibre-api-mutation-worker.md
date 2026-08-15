@@ -1,8 +1,12 @@
 # ADR 0015: Use a Persistent Calibre API Mutation Worker
 
-- Status: Accepted
+- Status: Accepted, mutation scope amended by ADR 0020
 - Date: 2026-08-03
 - Amends: ADR 0003, ADR 0007, ADR 0013, ADR 0014
+
+> Current interpretation: the fixed typed worker and operation set remain current.
+> ADR 0020 reuses the same worker for Unified Candidate cleanup as well as Exact
+> cleanup; it does not grant any additional mutation engine or arbitrary operation.
 
 ## Context
 

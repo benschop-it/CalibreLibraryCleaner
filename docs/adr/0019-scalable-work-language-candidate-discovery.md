@@ -1,8 +1,12 @@
 # ADR 0019: Use Bounded Work-Language Candidate Discovery
 
-- Status: Amended
+- Status: Accepted matching baseline, amended by ADRs 0020 and 0021
 - Date: 2026-08-08
 - Amends: ADR 0012, ADR 0016, ADR 0018
+
+> Current interpretation: bounded local discovery and content evidence remain
+> implemented. ADR 0020 merges Expanded evidence into disjoint Unified executable
+> groups; ADR 0021 permits future online bibliographic and local-model evidence.
 
 ## Context
 

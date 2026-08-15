@@ -1,6 +1,6 @@
 # ADR 0012: Use Persistent Delta-Driven Library State
 
-- Status: Accepted
+- Status: Superseded as target architecture by ADR 0021; retained implementation baseline
 - Date: 2026-08-02
 - Amends: ADR 0007, ADR 0011
 

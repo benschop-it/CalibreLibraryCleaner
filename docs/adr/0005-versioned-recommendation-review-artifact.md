@@ -1,7 +1,11 @@
 # ADR 0005: Version Deterministic Recommendation Review Artifacts
 
-- Status: Accepted
+- Status: Accepted for analysis-only recommendation review/export
 - Date: 2026-07-18
+
+> Current interpretation: the deterministic review export remains implemented and
+> has no mutation authority. General cleanup plans were removed by ADR 0017, and
+> executable keeper/Skip decisions now belong to ADR 0020's Unified Candidate flow.
 
 ## Context
 

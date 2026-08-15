@@ -1,162 +1,186 @@
 # Architecture
 
-## Projects
+This document names both the implemented architecture and accepted target changes.
+Target sections are not claims about current production code.
 
-```text
-src/
-  CalibreLibraryCleaner.Domain/
-  CalibreLibraryCleaner.Application/
-  CalibreLibraryCleaner.Infrastructure/
-  CalibreLibraryCleaner.PdfWorker/
-  CalibreLibraryCleaner.Wpf/
-
-tests/
-  CalibreLibraryCleaner.Domain.Tests/
-  CalibreLibraryCleaner.Application.Tests/
-  CalibreLibraryCleaner.Infrastructure.Tests/
-  CalibreLibraryCleaner.Architecture.Tests/
-  CalibreLibraryCleaner.Wpf.Tests/
-```
-
-## Dependency direction
+## Projects and dependency direction
 
 ```text
 Domain <- Application <- Infrastructure
                     <- Wpf
+
+PdfWorker (standalone executable, provider-specific parsing)
 ```
 
-`Wpf` may reference `Infrastructure` only in the composition root.
+- **Domain:** immutable library, assessment, matching, evidence, group, keeper, and
+  state values plus deterministic policies.
+- **Application:** use cases, orchestration, progress contracts, and integration
+  ports.
+- **Infrastructure:** read-only SQLite, filesystem/path identity, hashing, ebook
+  inspection, caches/state persistence, Calibre discovery/worker process, and JSON.
+- **WPF:** selection, progress, evidence review, keeper/Skip choices, and composition.
+- **PdfWorker:** one isolated bounded PDF parse per process.
 
-## Responsibilities
+Domain has no integration dependencies. Application depends only on Domain. WPF may
+reference Infrastructure only in `App.xaml.cs`.
 
-- Domain: books, formats, identities, duplicate groups, findings, scores, recommendations, plans, invariants.
-- Application: use cases and integration interfaces.
-- Infrastructure: read-only SQLite, paths, hashing, ebook inspection, Calibre CLI, backups, JSON storage, analysis cache.
-- WPF: selection, progress, comparison, review, approval, history, and settings.
-- WPF tests: focused ViewModel and presentation-state behavior on the Windows target.
+## Implemented staged pipeline
 
-## Long-running operations
+```text
+Explicit Exact Scan
+  -> catalog/path resolution
+  -> full SHA-256 hashing
+  -> Exact groups
+  -> Exact review and worker cleanup
+  -> read-only residual reconciliation
+  -> assessment/signature reuse and misses
+  -> exact-metadata + Expanded discovery
+  -> disjoint Unified Candidate groups
+  -> Candidate review and worker cleanup
+```
 
-Must be asynchronous, cancellable, progress-reporting, bounded in parallelism, and non-blocking to the UI.
+Exact and Candidate mutation are separate runs with separate external-backup
+confirmation. Candidate preparation is a read-only activation; Candidate execution
+is a later activation.
 
-An explicit Scan always hashes every current format for exact-duplicate and mutation safety. After hashing, unchanged EPUB/PDF assessments may be rebound from prior authoritative state only when SHA-256/size and analyzer/scoring/resource versions match. Missing, uncertain, changed, or version-incompatible facts are inspected fresh. Explicit Scan may load the application-owned prior baseline to enable this reuse after restart; startup listing remains manifest-only. EPUB assessment concurrency is CPU-aware and bounded from two through four workers. A structured scan-completion event reports phase durations and reuse counts without paths or book metadata.
+## Matching architecture
 
-Staged mode introduces explicit `ExactOnly` and `CandidateResidual` analysis modes;
-the existing full scan remains a temporary compatibility mode. `ExactOnly` stops
-after catalog/path/hash processing and Exact grouping. `CandidateResidual` begins
-only after trusted post-exact reconciliation and owns assessment reuse, exact
-metadata evidence, Expanded discovery, and unified candidate construction.
+### Implemented
 
-The runtime assumes no unrelated process mutates the selected library while the cleaner is active. Calibre mutations are initiated only by the cleaner's fixed worker. This permits future removal of duplicate race checks, but does not permit timestamp-only identity, skipped hashing, skipped path containment, or weaker parser limits.
+Domain builds bounded `BookMatchingProfile` values and candidate pairs from author
+identities and independent work evidence. Inverted indexes avoid all-pairs search.
+Ordinary candidates are capped per record and globally. Decisions retain positive
+evidence and contradictions.
 
-## Persistent library-state boundary
+Ambiguous pairs with two usable EPUBs request hash-only content signatures.
+Application deduplicates fingerprint demand, applies bounded concurrency, and uses a
+versioned Infrastructure cache. Domain compares signatures symmetrically and forms
+components only through compatible anchor/strong relations. Complete-component
+language, author, series, identifier, edition-marker, and content contradictions
+block unsafe unions. Final groups are partitioned by normalized language.
 
-Application owns the authoritative library-state session and persistence ports. Infrastructure owns the versioned baseline/checkpoint representation, append-only hash-chained delta journal, atomic state manifest, replay, compaction, and current-generation pruning under the user's local application-data directory. State artifacts are never written inside a Calibre library. Startup listing reads only small manifests; it never materializes a baseline, checkpoint, or journal.
+Exact normalized metadata evidence is mandatory input to unified grouping and is not
+suppressed by ordinary candidate caps. The unified merge policy produces disjoint
+executable groups; each record occurs in at most one group.
 
-One cleanup-run marker records the generation, starting revision, run identity, and total operation count before the first worker chunk. A complete successful chunk appends every typed logical delta in one write-through journal write and advances the manifest once. A failed or ambiguous chunk is not partially projected and leaves state uncertain. The marker clears only with the final successful chunk. Exact-cleanup batches defer state publication for the worker lifetime and compact one final checkpoint after successful completion.
+### Target
 
-One explicit successful scan creates a new authoritative generation. Successful typed cleanup chunks durably append and apply deterministic deltas; they never trigger catalog reads, hashing, ebook inspection, or targeted state scans. Replayed authoritative state remains mutation-eligible across restart until the developer explicitly rescans. Existing development `.library-snapshot.json` files migrate on explicit Load and are removed only after state publication succeeds.
+Add independent provider-neutral evidence boundaries for:
 
-The application intentionally does not detect external library changes between explicit scans. Failed, ambiguous, interrupted, unpersistable, or unprojectable mutations mark the generation uncertain and block all mutation until explicit rescan.
+- PDF whole-document/sampled fingerprints;
+- cover and visual similarity;
+- content-language classification;
+- online bibliographic work/edition identity; and
+- local embedding/model outputs.
 
-Application also owns a versioned workflow checkpoint bound to canonical library
-root, state generation, state revision, and relevant policy versions. Infrastructure
-persists that checkpoint atomically with or immediately after the durable state
-transition it describes. Missing or incompatible workflow data migrates
-conservatively to `RequiresExactAnalysis`; uncertain library state overrides any
-later checkpoint phase. Restart replay must never enable a stage that the durable
-state and mutation marker do not support.
+Every evidence result carries input identity, provider/model/policy versions,
+coverage, confidence, problems, and provenance. Evidence fusion remains in Domain and
+must be calibrated on labeled data. Online failure cannot block local matching.
 
-Candidate preparation is a dedicated read-only catalog reconciliation boundary.
-It compares a fresh catalog with authoritative projected state and completed typed
-Exact deltas, reuses fingerprints only for explained associations, target-hashes
-when transfer evidence is insufficient, and rejects unexplained differences. A
-successful preparation publishes a new authoritative generation whose executable
-associations are physical. Unchanged pre-existing invalid-path associations may be
-preserved as non-executable findings; changed or newly resolvable associations fail
-closed. Failure or cancellation leaves the prior generation and phase authoritative.
+## Cache architecture
 
-Application owns one presentation-neutral Candidate-preparation progress envelope
-with stable phases and phase-local units. Existing hashing, EPUB, PDF, signature,
-grouping, publication, and presentation counters are adapted into that envelope;
-WPF renders determinate progress only when the active phase has a known total and
-adds an elapsed heartbeat without advancing work counters. Progress remains
-observational and cannot alter state transitions, concurrency, or mutation authority.
+### Implemented
 
-Application owns one presentation-neutral Candidate-preparation progress envelope
-with stable phases and phase-local units. Existing hashing, EPUB, PDF, signature,
-grouping, publication, and presentation counters are adapted into that envelope;
-WPF renders determinate progress only when the active phase has a known total and
-adds an elapsed heartbeat without advancing work counters. Progress remains
-observational and cannot alter state transitions, concurrency, or mutation authority.
+- Authoritative library state and workflow manifests live outside the library.
+- Compatible EPUB/PDF assessments are reusable by fingerprint and all analyzer,
+  scoring, classification, and resource versions.
+- EPUB signatures are cached by fingerprint and signature/inspection versions.
+- Cache entries contain technical facts/hashes, not prose or absolute library paths.
+- Atomic writes and bounded pruning make cache loss a performance event, not a
+  correctness event.
 
-## EPUB inspection boundary
+There is currently no SHA-256 cache: Exact Scan rereads every resolvable file.
 
-Application owns the provider-neutral `IEpubInspector` contract, inspection limits/results, deterministic scoring engine, and bounded orchestration. Infrastructure alone owns ZIP, XML, HTML, image-header, filesystem, and VersOne/Html Agility Pack types. EPUB files are preflighted and opened read-only, content is never extracted or fetched, expected untrusted-input failures become structured inspection problems, and the final snapshot is published only after all assessments complete.
+### Target
 
-Ordinary EPUB assessment rejects decoded HTML above 2,000,000 characters and documents above 50,000 HTML elements before/around DOM traversal. This protects the in-process non-cooperative HTML parser from monolithic dictionary/reference chapters that can otherwise monopolize a scan worker for minutes. Such files remain in the snapshot with incomplete coverage and a controlled `LimitExceeded` warning; they do not fail the scan. Progress reports content/fallback chapter units, and structured diagnostics report record ID, file bytes, stage units, technical counts, total time, and warnings for assessments taking at least five seconds without logging paths or content. The resource-profile change is versioned as `epub-inspector/1.0.5`.
+Introduce a common versioned cache identity for hashes, assessments, signatures,
+enrichment, embeddings, and derived matching artifacts. Reuse SHA-256 for unchanged
+stable file identity; selectively/periodically revalidate bytes and support a forced
+verification scan. Track dependency edges so changed records invalidate only affected
+profiles, pairs, evidence, and groups where practical.
 
-## Expanded matching boundary
+## Analysis and progress
 
-Domain owns bounded metadata profiles, canonical candidate pairs, fixed-point evidence/contradictions, hash-only EPUB signatures, symmetric comparison, constrained clustering, policy-versioned work-language groups with an advisory evidence classification, and matching run summaries. Application owns candidate-only demand planning, fingerprint/version cache ports, bounded concurrency, progress, and explicit-scan orchestration. Infrastructure reuses the safe EPUB boundary to produce transient visible-text tokens but returns only hashes/counts; its atomic disposable cache is outside the library and contains no paths or prose.
+Analysis opens `metadata.db` read-only and managed files read-only. EPUB/PDF inputs
+remain untrusted and are processed with bounded sizes, counts, concurrency, and
+parser/process limits.
 
-Author identity is the first ordinary-candidate boundary. Canonical aliases use normalized family name plus positional given-name initials and non-conflicting full expansions; comma-order and punctuation differences do not create separate authors. Work candidates are searched only inside compatible author identities and require independent title, identifier, series/index, or binary evidence. Author similarity alone never proposes a work.
+Long operations are asynchronous and non-blocking to WPF. Progress is mandatory and
+uses truthful phase-local units plus elapsed heartbeat. Cancellation is optional and
+best effort; an incomplete analysis is discarded and never published.
 
-Only non-binary work candidates with two usable EPUB targets request content, and equivalent/high-similarity content is required before final grouping. Known languages partition final work groups; complete-component author, language, series, and content contradictions block union. Weak/unavailable evidence never merges. Projected mutations never rerun matching; they discard inferred evidence and require explicit Rescan. Inferred groups never enter cleanup requests.
+## Assessment boundaries
 
-The signature cache validates its complete storage-root ancestor chain because any ancestor reparse point can redirect an apparently safe path. Once that controlled root is validated, immediate cache children use leaf-only checks. Cache writes are atomic but intentionally non-durable because cache loss affects only performance. Pruning runs once after a resolver batch, not after each entry.
+Application owns provider-neutral EPUB/PDF inspection requests, limits, results,
+scoring, sampling, and orchestration. Infrastructure owns ZIP/XML/HTML/filesystem and
+PdfPig/process details.
 
-Matching diagnostics use structured logs without paths or book metadata.
-Information events report pair/fingerprint demand, periodic completion, aggregate
-cache/inspection/write/prune time, and cache size/pruning. Debug details report
-bounded fingerprint and EPUB preflight/counting/sampling timing only when
-`CALIBRE_DIAGNOSTIC_LOGGING=1`; production defaults to Information and coalesces
-repeated EPUB stage callbacks. The WPF host writes these events through Serilog to
-bounded rolling files under `%LOCALAPPDATA%\CalibreLibraryCleaner\logs`. The UI
-reports fingerprint ordinal and current preflight/counting/sampling progress.
+PDF parsing uses one fresh worker with a cleared environment, managed-heap limit,
+Windows Job Object where available, CPU/working-set/wall-time watchdogs, and a
+versioned bounded stdio protocol. The worker cannot render, OCR, execute actions,
+follow links, use the network, or retain full text.
 
-## PDF inspection boundary
+Infrastructure launches the fixed sibling PdfWorker executable for one file, sends a
+versioned request and Application-selected page sample over bounded JSON stdio, reads
+provider-neutral progress/results, and terminates/disposes the process. Per-file
+process isolation contains parser/decoder crashes and resource pressure without
+giving the worker mutation authority over Calibre.
 
-Application owns the provider-neutral `IPdfInspector` contract, deterministic page sampling, classification, scoring, progress, cancellation, and bounded library orchestration. Infrastructure alone owns PdfPig 0.1.15, PDF tokens/filters, read-only file handles, SHA-256 revalidation, the versioned JSON protocol, and worker-process containment. WPF deploys a fixed sibling worker executable; paths are protocol data, never process arguments. Each file gets a fresh worker with a cleared environment, managed-heap limit, Windows Job Object where available, and parent wall-time, CPU, and working-set watchdogs.
+## Mutation boundary
 
-The worker opens one seekable read-only stream, reports the page header, accepts the Application-selected bounded sample, and returns provider-neutral aggregates. It does not render, OCR, execute actions, follow links, access network resources, or extract attachments. Encoded streams are checked before decode; decoded and aggregate outputs are checked immediately afterward, while process containment covers decoder allocations made before control returns. Parser failures become closed problem codes without paths, text, binary content, or raw exceptions.
+### Implemented
 
-`FormatAssessment` is the shared result/identity core. `EpubAssessment` and `PdfAssessment` add format-specific feature semantics. PDF classification is separately versioned and never feeds the score. PDF assessments are a separate `LibrarySnapshot` collection and are not inputs to recommendations, cleanup plans, execution, or recovery.
+Application builds deterministic transfer, format-removal, and empty-record-removal
+operations. Infrastructure opens one trusted persistent `calibre-debug` worker using
+a fixed script and strict typed JSON-lines protocol. Chunks contain at most 100
+operations. Transfers precede dependent removals; record removals are last.
 
-## Recommendation boundary
+Current persistence uses authoritative generations/revisions, workflow checkpoints,
+a mutation marker, hash-chained typed delta journal, complete-chunk projection, and
+uncertainty blocking. It is the implemented baseline, not the long-term complexity
+target.
 
-Domain owns immutable recommendation selections, reasons, warnings, decision strength, qualitative confidence, and invariants. Application indexes completed Milestone 2–4 evidence and orchestrates deterministic generation. Recommendation review is analysis-only; executable Candidate retention and transfer selection use unified candidate evidence and current physical facts.
+No direct SQLite write, shell, direct managed-file mutation, arbitrary script,
+`calibredb` fallback, or second mutation engine is allowed.
 
-## Duplicate-cleanup boundary
+### Target
 
-WPF owns generated keeper presentation for Exact and unified Candidate groups, advisory `Cleanup eligible`/`To be reviewed` text, explicit keeper overrides and Skip choices, per-run external-backup confirmation, progress, and terminal status. Both advisory Candidate types are included unless explicitly skipped. Metadata and Expanded tabs remain read-only evidence views. Application builds one deterministic operation sequence, acquires the library mutation lease, and orchestrates one persistent worker. Infrastructure owns trusted Calibre discovery, the fixed embedded worker script, strict bounded JSON-lines protocol, process lifecycle, and lease storage.
+Retain only enough durable workflow/run status to prevent accidental continuation.
+After failed or ambiguous mutation, stop and require explicit Rescan. Do not add
+rollback/recovery models, backup bundles, execution history, or reconciliation-heavy
+state.
 
-The staged target exposes two top-level mutation stages. `Exact cleanup` gates and
-invokes `ExecuteBulkExactDuplicateCleanupUseCase` without changing its grouping,
-retention, planning, worker, projection, checkpoint, or failure behavior. `Candidate
-cleanup` is unavailable until Exact cleanup completes or returns nothing to do for
-the bound generation. Its first activation prepares residual candidates without
-mutation; a later activation executes reviewed keeper/Skip selections.
+## Online bibliographic evidence target
 
-The legacy `Cleanup all` composite boundary and standalone Metadata/Expanded
-mutation commands were retired after shadow parity. Exact and staged Candidate
-cleanup are the only mutation owners.
+Configured providers are enabled by default. Infrastructure owns HTTP, credentials,
+rate limits, retries, response parsing, and provider caches behind Application ports.
+Application requests only bounded bibliographic metadata needed for matching. Domain
+owns provider-neutral evidence and fusion.
 
-The worker uses Calibre's documented database `Cache` API through one `calibre-debug` process. Exact cleanup transfers fingerprint-verified complementary formats only to unambiguous non-conflicting targets. Unified Candidate cleanup transfers one quality-ranked complementary source for each format absent from the selected keeper, removes every non-keeper format, and removes only records proven empty. The keeper's same-format file wins. Requests contain at most 100 operations. No shell, direct SQLite write, direct managed-library filesystem mutation, arbitrary script, direct `calibredb` mutation gateway, or second mutation engine is permitted.
+The UI/settings disclose enabled providers and transmitted field categories. Logs do
+not contain book metadata or provider payloads. Provider results are advisory,
+versioned, cached, and reproducible from stored safe identifiers/evidence where
+possible. Network/provider failures degrade to local matching.
 
-Every run requires explicit confirmation that a complete external library backup exists. The application does not create, inspect, or verify that backup. A startup/preflight failure logs and stops before mutation. A failed, ambiguous, interrupted, unpersistable, or unprojectable mutation logs structured technical context, marks projected state uncertain, stops without retry or continuation, and blocks later mutation until explicit Rescan.
+## Local ML target
 
-General cleanup plans, application-created backup bundles, execution journals/history, and automated recovery are not part of the architecture.
+Infrastructure owns model files/runtime and bounded inference. Application owns
+batching, cache keys, progress, and model-selection ports. Domain receives only
+versioned vectors/similarity/classification evidence, never runtime tensors or model
+objects. A model upgrade invalidates dependent evidence and groups.
 
-## External ebook viewer boundary
+## Logging and privacy
 
-WPF routes an explicit member-row double-click to an Application launcher port. Infrastructure resolves only the trusted `ebook-viewer.exe` sibling of the configured Calibre executable, validates the requested format as a physical regular file contained in the selected library, and starts the viewer with `UseShellExecute=false` and one argument-list item. The cleaner does not wait for, control, or infer state from the viewer process.
+Production defaults to aggregate Information events plus Warning/Error. Detailed
+matching/inspection diagnostics require explicit developer diagnostics and remain
+bounded. Never log book content, titles, authors, identifiers, paths, provider
+payloads, or embeddings by default.
 
-Exact duplicate rows open their represented format. Metadata and expanded-candidate rows choose the first present format in deterministic reading preference order: EPUB, AZW3, MOBI, PDF, then remaining formats alphabetically. Missing formats, unsafe paths, and missing/failed viewer launches return controlled errors and never affect cleanup selection or projected state.
-## Errors
+## Current architectural debt
 
-Distinguish validation failures, read failures, missing-file findings, malformed-format findings, operation conflicts, process failures, verification failures, and unexpected faults.
-
-## Security
-
-Validate paths, safely escape process arguments, avoid arbitrary commands, keep content out of logs by default, and require explicit consent before sending content to external AI services.
+- Exact Scan still hashes every resolvable file instead of using a hash cache.
+- Current mutation state is more detailed than the accepted minimal target.
+- Full compatibility scan code remains for compatibility although staged mode is the
+  configured product workflow.
+- PDF matching, online providers, local ML, incremental candidate recomputation, and
+  calibrated evidence fusion are not implemented.

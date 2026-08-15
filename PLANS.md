@@ -2,10 +2,10 @@
 
 Create an execution plan for work that spans projects, changes architecture, introduces an external dependency, affects cleanup safety, or requires multiple implementation steps.
 
-Store plans under `docs/plans/` using descriptive names such as:
+Store active plans under `docs/plans/` using descriptive names such as:
 
 ```text
-docs/plans/milestone-1-read-only-library-snapshot.md
+docs/plans/improve-pdf-matching.md
 ```
 
 ## Required plan structure
@@ -31,3 +31,7 @@ docs/plans/milestone-1-read-only-library-snapshot.md
 ```
 
 Keep the plan current during implementation. Record deviations and failed approaches. Prefer small vertical slices over broad speculative scaffolding.
+
+After implementation, verification, and documentation reconciliation are complete,
+move the plan to `docs/archive/plans/`. Archived plans are historical and no longer
+define current requirements.

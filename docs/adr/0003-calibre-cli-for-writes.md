@@ -1,7 +1,12 @@
 # ADR 0003: Use Supported Calibre Tooling for Mutations
 
-- Status: Accepted
+- Status: Accepted principle; execution mechanics superseded by ADRs 0015 and 0017
 - Date: 2026-07-11
+
+> Current interpretation: mutations still use supported Calibre tooling, but not the
+> CLI plan/audit workflow below. ADR 0015 defines the fixed persistent
+> `calibre-debug` worker and ADR 0017 removes application-created backup, general
+> execution history, recovery, and mutation fallback.
 
 ## Context
 

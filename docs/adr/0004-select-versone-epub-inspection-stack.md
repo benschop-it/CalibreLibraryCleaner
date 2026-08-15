@@ -1,6 +1,6 @@
 # ADR 0004: Select a Bounded EPUB Inspection Stack
 
-- Status: Accepted
+- Status: Accepted; cancellation priority amended by ADR 0021
 - Date: 2026-07-16
 
 ## Context

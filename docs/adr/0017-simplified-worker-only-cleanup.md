@@ -1,9 +1,13 @@
 # ADR 0017: Simplify to Worker-Only Exact Cleanup
 
-- Status: Accepted
+- Status: Accepted worker/no-recovery foundation; executable scope superseded by ADR 0020; amended by ADR 0021
 - Date: 2026-08-05
 - Supersedes: ADR 0006, ADR 0007, ADR 0008, ADR 0010 for executable cleanup, application-created backup, and automated recovery behavior
 - Amends: ADR 0012, ADR 0013, ADR 0015
+
+> Current interpretation: worker-only mutation, external-backup confirmation, and
+> no recovery/fallback remain current. ADR 0020 adds Unified Candidate cleanup as a
+> second executable workflow, so Exact cleanup is no longer the only mutation path.
 
 ## Context
 

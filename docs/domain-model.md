@@ -1,143 +1,134 @@
 # Domain Model
 
-## Principal types
+Domain contains immutable provider-neutral values and deterministic policies. It
+contains no SQLite, filesystem, process, JSON, WPF, EPUB-library, PdfPig, HTTP, or
+model-runtime types.
 
-```csharp
-public sealed record LibrarySnapshot(
-    LibraryIdentity Identity,
-    DateTimeOffset ScannedAt,
-    IReadOnlyList<CalibreBook> Books,
-    IReadOnlyList<LibraryFinding> Findings);
+## Library and formats
 
-public sealed record CalibreBook(
-    CalibreBookId Id,
-    string Title,
-    string AuthorSort,
-    IReadOnlyList<AuthorName> Authors,
-    IReadOnlyDictionary<IdentifierType, string> Identifiers,
-    string? Series,
-    decimal? SeriesIndex,
-    IReadOnlyList<string> Languages,
-    IReadOnlyList<BookFormat> Formats,
-    string RelativeDirectory);
+`LibrarySnapshot` is one immutable analysis view containing:
 
-public sealed record AssessmentFinding(
-    string RuleId,
-    FindingSeverity Severity,
-    decimal ScoreAdjustment,
-    string Description,
-    IReadOnlyDictionary<string, string> Evidence);
-```
+- `LibraryIdentity` and scan time;
+- ordered `CalibreBook` records and `LibraryFinding` values;
+- Exact binary and Exact Metadata groups;
+- EPUB and PDF assessments;
+- Expanded work-language evidence and matching summary; and
+- disjoint `UnifiedCandidateGroup` values.
 
-Additional types: `BookFormat`, `DuplicateGroup`, `NormalizedBookIdentity`, `FormatAssessment`, `BookAssessment`, `ConsolidationRecommendation`, `CleanupPlan`, and expected pre-operation file states.
+`CalibreBook` contains Calibre ID, title, author-sort, ordered authors, identifiers,
+relative directory, publication metadata, and formats. `BookFormat` contains
+canonical format, stored name/relative path, physical status, fingerprint, and file
+observation where available.
 
-ADR 0012 adds `LibraryState`, generation and revision values, authoritative/uncertain status, and a closed state-delta hierarchy. One explicit scan creates revision zero. Successful typed commands advance the revision through removal, add/replace, record-creation, or metadata deltas without rereading the library. Uncertain state blocks all mutation until explicit Rescan creates a new generation.
+`FormatFileFingerprint` is byte length plus SHA-256. `FormatFileObservation` records
+technical file identity used for change/cache checks. Non-physical statuses never
+carry invented fingerprint/observation facts.
 
-ADR 0020 adds a versioned workflow phase and checkpoint bound to one canonical
-library identity, authoritative generation, revision, and policy-version set.
-Phases are `RequiresExactAnalysis`, `ExactReady`,
-`CandidatePreparationReady`, `CandidateAnalysisReady`, and `Completed`;
-in-progress mutation remains represented by the durable mutation intent, while
-`Uncertain` is derived from library-state status. A checkpoint cannot claim a
-phase later than its bound state and mutation marker support.
+## Workflow state
 
-`BookFormat` distinguishes scan-observed `Present` state from `ProjectedPresent`. A projected format carries the command's verified fingerprint but no fabricated managed path, stored filename, or observation. `BookAuthor.Id` may be absent only for projected authors. Projected physical facts are ineligible for new plans requiring observed paths and file state.
+Current implementation uses `LibraryState` with generation, revision,
+authoritative/uncertain status, immutable snapshot, workflow checkpoint, mutation
+intent, and typed deltas. Workflow phases are:
 
-Milestone 4 adds immutable assessment values. Milestone 9 generalizes `FormatAssessment` into a shared identity/result core with explicit score components while preserving a typed `EpubAssessment` wrapper and its established recommendation semantics. Each assessment is associated with a Calibre book ID, canonical format, presentation-safe expected relative path, and observed file fingerprint. Completed assessments have a 0-through-100 score derived only from ordered findings and may declare an explicit score ceiling; `UncappedScore` remains findings-derived while `Score` is the lesser of that value and the ceiling. Unassessed results have no score or ceiling, no disqualifying finding, and only zero-point evidence because comparable facts were unavailable. Disqualified assessments have no numeric score or ceiling and at least one disqualifying finding. EPUB policy reserves disqualification for definitive file open/read failures; other formats retain their documented policies. `EpubFeatureSummary` records `Full`, `FallbackReadable`, or `Incomplete` coverage, available assessment facets, and bounded fallback candidate/renderability evidence. Snapshots keep EPUB and PDF assessments in separate deterministic collections and reject duplicate associations.
+- `RequiresExactAnalysis`;
+- `ExactReady`;
+- `CandidatePreparationReady`;
+- `CandidateAnalysisReady`; and
+- `Completed`.
 
-`PdfAssessment` adds `PdfFeatureSummary`, classification/confidence, open/encryption status, bounded metadata values, text/image/page summaries, outline facts, inert active-content marker counts, checksum-valid bounded identifier evidence, conservative repeated-page clusters, sampling disclosure, a technical/embedded-metadata score breakdown, and classification/resource policy versions. Classifications are `DigitalText`, `ScannedWithoutOcr`, `ScannedWithOcr`, `Mixed`, `EmptyOrNearEmpty`, `Encrypted`, `Unreadable`, and `Unknown`. Classification is evidence rather than score; scanned, illustrated, image-heavy, or text-unavailable presentation is not itself penalized.
+This detailed projected model is implemented baseline. ADR 0021 targets simpler
+durable workflow/run status while preserving stop-and-Rescan after failed or
+ambiguous mutation.
 
-No Domain value contains filesystem, process, JSON, SQLite, WPF, or PdfPig types. PDF page text and image bytes are not Domain values. A sampled classification discloses selected/total page counts and cannot imply whole-document certainty.
+## Exact evidence
 
-Milestone 2 adds `Sha256Digest`, `FormatFileFingerprint`, and `ExactBinaryDuplicateGroup`. A fingerprint contains the observed file length and SHA-256 digest. An exact binary group contains at least two distinct Calibre-managed format-file references with matching length and digest, and reports how many distinct book records those files span.
+`ExactBinaryDuplicateGroup` groups distinct managed file references with identical
+length and SHA-256. Its ID derives from that fingerprint.
 
-Milestone 3 adds `NormalizedTitle`, `NormalizedAuthorName`, `NormalizedAuthorSet`, `NormalizedBookIdentity`, and `ExactMetadataDuplicateGroup`. The author set is non-empty, duplicate-free, ordinally sorted, and structurally equal by normalized author values. An exact metadata group contains at least two distinct Calibre book record IDs whose normalized title and complete normalized author set are exactly equal. Its deterministic ID is derived from the normalized identity, and it records reason code `EXACT_NORMALIZED_TITLE_AUTHOR_SET`.
+`ExactMetadataDuplicateGroup` groups distinct records with the same safely normalized
+title and complete order-independent normalized author set. It is Candidate evidence,
+not byte/content/edition proof.
 
-ADR 0019 adds transient bounded `BookMatchingProfile` values, canonical `BookCandidatePair` and decision values, hash-only `EpubContentSignature` landmarks/shingle sketches, and persisted `WorkLanguageCandidateGroup` plus `BookMatchingRunSummary`. Profiles and signatures are not snapshot collections. Final groups contain member/anchor IDs, normalized language or `und`, confidence, reason/contradiction codes, aggregate content counts, policy version, and an immutable evidence classification. Current V3 groups classify as `ExplicitKeeperCleanup` only when every compared pair is equivalent or high-similarity; all other groups classify as `ReviewOnly`. These persisted names are interpreted in the UI as advisory `Cleanup eligible` and `To be reviewed`; both classifications may enter cleanup unless the user selects Skip.
+The two Exact group collections are independent.
 
-Milestone 5 adds stored `BookPublicationMetadata` (publisher, publication date, series/index, ordered languages, and Calibre's cover flag) and immutable `ConsolidationRecommendation` aggregates. A recommendation records independent metadata and per-format sources, all format candidates, exact-binary exclusions, unresolved conflicts, retained-separate/potentially-redundant records, linked reasons/warnings, decision strength, qualitative confidence, model version, and canonical input version. `UserRecommendationOverride` remains separate from the generated aggregate; `ReviewedConsolidationRecommendation` records current/effective/stale state and review status without modifying the generated value.
+## Assessment values
 
-Milestone 6 adds `FormatFileObservation` to present `BookFormat` values and immutable cleanup-plan values under `Domain.Plans`. A cleanup plan has a frozen semantic definition containing expected state, one target/metadata source, final-format retentions, reviewed format removals, non-target record removals, complete declarative backup requirements, and recommendation/review/override provenance. Its canonical SHA-256 covers only that deterministic semantic definition. Lifecycle revisions (`Draft`, `Valid`, `Blocked`, `Approved`, `Stale`, `Revoked`) reuse the same body and digest; operational-content changes require a new plan ID.
+`EpubAssessment` and `PdfAssessment` share `FormatAssessment` identity/status/score
+semantics and retain provider-neutral feature summaries, ordered findings, verified
+fingerprint/observation, and all analyzer/scoring/resource versions.
 
-`ExactBinaryCleanupPlan` is a separate aggregate. Its body binds one automatically retained exact-group member, every duplicate-format removal, only records derived to become empty, complete exact-group evidence, the shared length/SHA-256 fingerprint, complete expected state for all involved records, full backup requirements, and review time. Metadata does not participate in exact identity, but deterministic record completeness selects where an identical copy remains. Unrelated formats, non-empty records, and unrelated records are preservation expectations.
+Status is Completed, Unassessed, or Disqualified. Completed scores are reproducible
+from findings and may have an explicit ceiling. Unknown facts are not treated as
+success or absence.
 
-Milestone 7 adds a separate immutable execution model under `Domain.Executions`.
-It records a plan/digest-bound confirmation, a deterministic dependency-ordered
-operation graph, verified backup-manifest identity, lifecycle transitions,
-operation status, verification findings, failure classification, mutation
-boundary, and recovery disposition. Cleanup execution never changes the
-Milestone 6 plan body or lifecycle.
+Assessment quality helps keeper/source ranking. It does not establish a match.
 
-Milestone 8 adds immutable recovery values under `Domain.Recoveries`. A
-`CurrentStateReconciliation` binds verified pre-execution state, durable source
-journal progress, and the authoritative projected snapshot. A `RecoveryPlan` binds that
-reconciliation, the source plan/execution/journal/manifest hashes, current
-library identity, capability profile, preservation expectations, dependency
-graph, expected semantic final state, issues, and canonical immutable-body
-digest. Its lifecycle is `Draft -> Valid|Blocked`, `Valid -> Approved|Stale|
-Revoked`, and `Approved -> Stale|Revoked|Completed`; semantic input changes
-require a new recovery-plan ID.
+## Matching values
 
-`RecoveryExecution` records the verified current-state manifest, mutation and
-destructive boundaries, per-operation durable status, final semantic
-verification, failure classification, and `RecoveryRecordIdMapping` values.
-Logical recovery identity remains stable when Calibre assigns a new numeric
-record ID. A created record first records its command-returned numeric
-mapping. After complete final verification, the same mapping is finalized with
-the exact restored formats and verified identifiers. A recovered terminal
-journal is invalid unless every created-record mapping has this matching
-finalized event.
+### Implemented
 
-## Invariants
+`BookMatchingProfile` is transient bounded metadata/assessment evidence for one
+record. `BookCandidatePair` has canonical record ordering, cheap score, evidence,
+contradictions, and content-demand flag.
 
-- Record-duplicate groups contain at least two distinct records. Exact binary file groups contain at least two distinct managed files and may occur within one record or across records.
-- Exact metadata groups never fall back to title-only matching. Records with no usable normalized title, no authors, any unusable normalized author, or a missing/invalid catalog author reference are ineligible.
-- Exact binary file groups and exact metadata record groups are independent evidence collections. Neither implies the other or authorizes a merge or deletion.
-- Expanded work-language groups are separate, disjoint review collections. Weak edges cannot merge, decisive component contradictions block union, IDs are canonical, and no inferred group can authorize mutation.
-- Content signatures and caches contain hashes, counts, versions, language codes, and coverage only; they contain no source tokens, sentences, paths, or book prose.
-- An exact-binary cleanup plan requires exactly one retained same-format association and at least one matching-fingerprint format removal; its record-deletion set must equal exactly the involved records whose complete format sets are removed.
-- Scores are derivable from findings.
-- A completed capped score equals `min(uncapped findings-derived score, score ceiling)`; unassessed and disqualified assessments cannot have a ceiling.
-- Fallback-readable EPUB coverage requires an available content facet and positive bounded local renderability evidence. Unknown facets are not interpreted as either success or absence.
-- Assessment evidence is bounded and contains no retained book prose, absolute external paths, raw exceptions, parser objects, or mutable collections.
-- Analyzer and scoring-model versions are recorded independently; fact/limit changes bump the analyzer version and weight/formula/disqualification changes bump the scoring-model version.
-- A recommendation selects at most one source per final format.
-- A cleanup plan cannot remove its target record.
-- Destructive plans require backups and expected pre-operation states.
-- Approved plans are immutable.
-- Only `Draft -> Valid|Blocked`, `Valid -> Approved|Stale|Blocked`, and `Approved -> Stale|Revoked` transitions are legal. Blocked, stale, and revoked plan definitions are terminal.
-- Approval binds to the canonical immutable-body digest. Staleness prevents further approval and preserves any prior approval only as audit information.
-- Every involved record requires a metadata backup; every affected format requires file and managed-state backups; reported covers require later resolution/backup; and plan/audit artifacts remain mandatory.
-- An execution cannot cross the mutation boundary without an approved current
-  plan, a held lease, an exact supported tool, an authoritative projected revision, and a
-  complete verified backup manifest.
-- Constructive operations precede destructive record removals. Each mutation is
-  serial and must be semantically verified before dependent operations start.
-- Any incomplete or unverifiable execution after the mutation boundary requires
-  recovery and cannot be reported as completed.
-- A recovery mutation cannot start until the immutable source backup and a new
-  complete current-state backup both verify.
-- A destructive recovery operation requires verified constructive and
-  preservation dependencies plus a separate exact destructive-graph
-  confirmation.
-- `Recovered` is unreachable until every recovery expectation is satisfied and
-  final semantic verification passes. Destructive uncertainty requires manual
-  intervention.
-- Unexpected current content is an explicit preservation expectation; it is
-  never discarded by filename, timestamp, size, or numeric record ID.
-- A changed Calibre record ID is valid only when the logical record is uniquely
-  rediscovered, mapped, semantically verified, and finalized in the durable
-  journal without changing its actual numeric identities.
-- AI confidence is distinct from deterministic duplicate confidence.
-- Candidate preparation is unreachable before successful Exact cleanup or a
-  successful exact nothing-to-do result for the same generation.
-- Missing or incompatible workflow persistence never enables mutation and maps to
-  `RequiresExactAnalysis`.
-- Uncertain library state disables both staged mutation commands regardless of the
-  persisted workflow phase.
-- The Exact cleanup algorithm and operation ordering are unchanged by staged
-  orchestration.
-- Recommendation confidence is distinct from exact-metadata match evidence, exact-binary equality, EPUB assessment status, EPUB quality score, and per-decision strength.
-- A non-identical unassessed same-format conflict has no generated source or exclusion. A proposed redundant record has at least one available format and exact-binary coverage for every available format, and contributes no selection or unresolved/unavailable/separate evidence.
-- A non-identical EPUB comparison involving any capped assessment has no generated source or exclusion and requires manual review; sole-copy retention and exact-binary selection remain allowed.
-- Staleness is equality over canonical relevant input/model identity, not scan time. A stale override has no effective final selection until reset or reapplied.
+`EpubContentSignature` contains fingerprint, token/coverage counts, 12 hash
+landmarks, and a bounded hash sketch. It contains no prose.
+
+`WorkLanguageCandidateGroup` stores members/anchors, normalized language, evidence,
+contradictions, confidence, content comparison summary, policy version, and advisory
+eligibility.
+
+`UnifiedCandidateGroup` merges Exact Metadata and Expanded evidence into one
+disjoint executable group. It contains canonical members, evidence provenance,
+review findings, advisory classification, generated keeper, retention facts, and
+policy version. Every current record belongs to at most one Unified group.
+
+A Unified group means same work and language. It may span editions/revisions or
+formatting differences. Both advisory classifications are executable unless skipped.
+
+### Target evidence
+
+Future provider-neutral Domain values should represent:
+
+- PDF content signatures/comparisons with coverage semantics;
+- cover/visual and structural comparisons;
+- content-language classification;
+- bibliographic provider work/edition evidence with provenance; and
+- local model/embedding evidence with model/input versions.
+
+These values are evidence inputs. They cannot reference HTTP/model runtimes or call
+mutation.
+
+## Keeper and cleanup values
+
+`UnifiedCandidateRetentionPolicy` ranks a generated keeper from completed compatible
+assessments, format coverage, metadata completeness, valid identifiers, cover, and
+record-ID tie-breaking.
+
+User choices are session-scoped keeper override and Skip. Cleanup selections bind
+expected generation/revision/group members and selected keeper.
+
+Application planner output consists of deterministic complementary transfers,
+non-keeper format removals, empty-record removals, and skipped-group count. Domain
+simulation must prove transfers survive, keeper formats remain, and removed records
+are empty.
+
+General cleanup-plan, execution-history, backup-bundle, rollback, and recovery
+aggregates are not current product concepts.
+
+## Core invariants
+
+- Exact groups have at least two distinct file references/records as appropriate.
+- Exact Metadata never degrades to title-only matching.
+- Matching/group IDs are canonical and deterministic for their policy version.
+- Weak evidence alone cannot bridge components; decisive contradictions block union.
+- Final Unified groups are disjoint and contain current record IDs only.
+- Matching signatures/evidence contain bounded hashes/counts/provenance, not prose.
+- Assessment scores derive from findings and never prove duplicate identity.
+- Keeper ranking is deterministic and independent from group identity.
+- Executable formats are physical, present, verified, and safely contained.
+- Transfers precede removals; a record removal is valid only when final inventory is
+  empty.
+- AI/provider/model confidence remains distinct from deterministic evidence and
+  never authorizes mutation directly.
+- Uncertain or failed mutation state cannot enable another mutation before Rescan.

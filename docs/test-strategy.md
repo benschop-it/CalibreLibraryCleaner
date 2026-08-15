@@ -1,42 +1,151 @@
 # Test Strategy
 
-Use xUnit, FakeItEasy, and FluentAssertions.
+Use xUnit, FakeItEasy, and FluentAssertions. Automated tests are deterministic,
+offline by default, and never use a personal Calibre library.
+
+## Priority order
+
+1. matching quality and deterministic evidence fusion;
+2. cache correctness, invalidation, and cold/warm performance;
+3. cleanup planning/worker ordering and backup confirmation;
+4. parser/path/process safety;
+5. progress visibility and architecture boundaries;
+6. optional best-effort cancellation behavior where retained.
+
+## Matching evaluation
+
+Unit tests remain necessary but are not sufficient. Maintain labeled corpora with
+positive same-work/language pairs, hard negatives, editions/revisions, translations,
+author variants, identifier conflicts, metadata damage, format-only records, and
+content/cover/PDF variants.
+
+For each policy/model version, record:
+
+- pair and group precision/recall on train/calibration/holdout splits;
+- false-positive/false-negative categories;
+- candidate-generation recall before expensive evidence;
+- cap/global-limit effects;
+- evidence/contradiction contribution and calibration;
+- group disjointness and deterministic IDs; and
+- keeper outcomes and skipped physical-state conflicts.
+
+Do not tune against the developer's library alone or add library-specific aliases.
+Online/provider and local-model tests use recorded/generated fixtures, not live
+network/model downloads in the ordinary suite.
+
+## Cache and performance tests
+
+Every cache test covers:
+
+- canonical input identity;
+- complete algorithm/model/provider/resource version keys;
+- hit, miss, corruption, incompatible version, and atomic replacement;
+- dependency invalidation after changed files/metadata/policies;
+- no prose/path leakage where prohibited; and
+- loss/corruption degrading to recomputation rather than false evidence.
+
+Hash-cache tests additionally cover unchanged identity reuse, selective byte
+revalidation, timestamp/size/attribute changes, replacement at the same path, and
+forced full verification.
+
+Performance baselines use deterministic synthetic libraries and explicitly supplied
+disposable copies. Record cold/warm durations, cache hit rates, bytes read, parser
+work, candidate counts, memory, log volume, and mutation throughput. Treat observed
+numbers as regression baselines, not universal time promises.
 
 ## Test levels
 
-- Domain unit tests: invariants, normalization, scores, confidence, recommendations, and plans.
-- Application tests: validation, cancellation, missing files, grouping, recommendation, stale plans, backup ordering, and verification failures.
-- Infrastructure integration tests: read-only SQLite, paths, hashes, malformed EPUBs/PDFs, isolated process wrappers, JSON storage, and backups.
-- Architecture tests: dependency direction and prohibited references.
-- Focused UI tests: library choice, scan cancellation, group navigation, overrides, warnings, and approval.
+### Domain
+
+Normalization, candidate scoring, evidence/contradictions, clustering, language
+partition, confidence, quality scoring, keeper ranking, operation simulation, IDs,
+and invariants. Domain tests contain no integration types.
+
+### Application
+
+Mode orchestration, demand planning, cache partitioning, progress mapping, bounded
+concurrency, fallback behavior, state transitions, planning/execution ordering, and
+provider/model error handling.
+
+### Infrastructure
+
+Read-only SQLite, path containment/reparse behavior, streaming hashing, state/cache
+serialization, EPUB/PDF inspection, worker protocols/process containment, Calibre
+worker integration, online-provider clients, and local-model adapters.
+
+### WPF
+
+Workflow gating, progress/heartbeat, evidence display, filtering/sorting, keeper
+changes, Skip, backup confirmation, viewer launch, terminal outcomes, and large-group
+presentation.
+
+### Architecture
+
+Dependency direction, no direct mutation path, parser/process types confined to
+Infrastructure, WPF composition-root exception only, and no removed recovery/general
+cleanup-plan systems returning.
 
 ## Fixtures
 
-Generate synthetic temporary Calibre-style libraries for empty, valid, binary duplicate, conflicting EPUB, missing file, malformed EPUB/PDF, missing cover/TOC/outline, conflicting ISBN, non-conflicting formats, and stale-plan scenarios. PDF fixtures are programmatically generated with PdfPig's writer or small explicit object graphs; no copyrighted or personal library content is used.
+Use generated Calibre-style libraries and ebooks for:
 
-PDF coverage includes digital text, image-only scan evidence, existing text layers, mixed/illustrated content, metadata/outline variants, valid/invalid ISBN evidence, encryption/password-required, zero/truncated/non-PDF/malformed/zero-page inputs, resource families, deterministic sampling/classification/scoring/finding order, penalty caps, disqualification, worker timeout/cancellation/no-orphan behavior, bounded concurrency, prohibited network/action/attachment/OCR/image-decode APIs, no full-text retention or content logging, read-only library manifests, and parser-type architecture boundaries.
+- exact files and same-work metadata variants;
+- different languages and translations;
+- different editions/revisions/illustrations;
+- missing, invalid, inaccessible, malformed, encrypted, and resource-heavy formats;
+- EPUB package/navigation/content variants;
+- digital, scan-like, mixed, encrypted, malformed, and resource-heavy PDFs;
+- identifiers, series/index, author expansion, edition markers, covers, and provider
+  responses; and
+- cache warm/cold/invalidation scenarios.
 
-EPUB coverage includes monolithic dictionary/reference chapters, decoded-HTML and DOM-node ceilings before expensive traversal, controlled incomplete `LimitExceeded` results, chapter/candidate progress units, per-file timing diagnostics, slow-file warnings, cancellation between parser stages, and no paths/content in logs.
+Public-domain data may support labeled matching calibration when licensing and
+provenance are recorded. No copyrighted corpus is committed without permission.
 
-## Safety assertions
+## Mutation assertions
 
-Analysis must not modify database bytes, file timestamps, names, or contents and must not create files inside the library.
+Tests prove:
 
-Duplicate-cleanup tests prove deterministic keeper overrides, metadata Skip behavior, external-backup acknowledgement, one worker process, chunks of at most 100 operations, complementary transfers before source removals, record removals last, complete-chunk projection, typed delta durability, lease exclusion, checkpointing, and no direct-command fallback. Metadata tests prove generated metadata-source keepers, keeper-authoritative non-identical same-format removal, and preflight skipping for unresolved complementary sources. Worker startup failures stop before mutation. Failed or ambiguous chunks emit structured logs, do not project successful prefixes, mark state uncertain, and block later mutation until explicit Scan.
+- explicit external-backup acknowledgement;
+- one fixed worker and no fallback;
+- chunks of at most 100 operations;
+- transfers before source removals and record removals last;
+- keeper same-format content wins;
+- records are removed only when empty;
+- stale/non-physical groups skip before mutation;
+- failed/ambiguous mutation stops and requires Rescan; and
+- no direct SQLite or managed-file mutation exists.
 
-Persistence tests prove metadata-only legacy listing, manifest-only state listing, strict full snapshot loading, baseline/delta replay, hash-chain tamper detection, uncertainty persistence, bounded run markers, checkpoint compaction, authoritative restart loading, current-generation pruning, and legacy migration after atomic publication. A deterministic 10,000-record/6,000-delta test verifies projection without a wall-clock threshold.
+Detailed projected-delta/journal tests remain while that implementation exists. Do
+not expand them as a product feature; replace them with minimal run-state tests when
+the simplification is implemented.
 
-Infrastructure worker tests use only temporary caller-created disposable libraries and controlled executables. They validate trusted executable/script identity, fixed protocol messages, bounded I/O, writer-process rejection, handshake capabilities, cancellation/timeouts, and no direct SQLite or managed-file mutation. Ordinary automated tests never discover or use a default or personal Calibre library.
+## Progress and cancellation
 
-WPF tests cover persisted development loading, exact keeper overrides, backup confirmation, progress/results, state uncertainty wording, XAML activation, and close protection during exact cleanup. Architecture tests prohibit recovery, cleanup-plan, app-backup/history, and direct mutation gateway boundaries from returning.
+Test that long operations publish truthful phase/unit/elapsed feedback and do not
+look hung. Progress callbacks must be bounded and must not leak book metadata.
 
-Viewer tests use a controlled sibling executable and temporary synthetic library files. They prove exact one-argument launch, no-shell process configuration, trusted sibling discovery, containment/reparse validation, missing viewer/file outcomes, exact-row paths, metadata format preference, WPF command routing, and no cleanup-state mutation.
+Cancellation tests are required only where cancellation remains implemented or is
+needed to release processes/resources safely. Do not add new cancellation points for
+new features by default. There is no blanket requirement for arbitrary cancellation,
+restart, or partial-analysis resume.
 
-Staged-workflow tests prove conservative checkpoint migration, generation/revision
-and policy binding, restart replay, uncertain-state precedence, exact-only service
-exclusion, full exact hashing, unchanged Exact planning/execution, completion and
-nothing-to-do phase advancement, and Candidate-button gating. Later refresh tests
-must prove explained fingerprint reuse, targeted hashing, fail-closed catalog
-differences, and atomic publication without using a personal library.
+## Online and model evidence
 
-Expanded-matching tests cover generic Unicode/identifier/language normalization, deterministic mutual top-20 retention, decisive-edge preservation, broad-bucket suppression, global fail-closed limits, cancellation, 20,000-record scale, candidate-only demand, fingerprint deduplication, cache reuse/corruption/cancellation, no-prose cache JSON, 12 by 64-token landmarks, script/style/navigation exclusion, diacritic-relaxed hashes, shifted front matter, symmetric comparison, language/series/content contradictions, weak-chain blocking, stable-anchor attachment, review-only snapshot persistence, progress, WPF presentation, and viewer routing.
+Provider tests cover bounded requests, field disclosure, provenance, rate limits,
+cache identity, malformed responses, network failure fallback, and secret/payload
+redaction. Model tests cover deterministic preprocessing, model/version identity,
+bounded batches/resources, cache invalidation, and reproducible fixture outputs.
+
+Neither provider nor model evidence can call a mutation boundary.
+
+## Standard verification
+
+```powershell
+dotnet restore
+dotnet build --no-restore
+dotnet test --no-build --maxcpucount:1
+dotnet format --verify-no-changes
+git diff --check
+dotnet list package --vulnerable --include-transitive
+```

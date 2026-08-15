@@ -1,6 +1,6 @@
 # ADR 0013: Use One-Click Exact Duplicate Cleanup
 
-- Status: Accepted
+- Status: Accepted, amended by ADR 0020
 - Date: 2026-08-02
 - Amends: ADR 0011, ADR 0012
 

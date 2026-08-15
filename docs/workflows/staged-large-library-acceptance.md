@@ -273,7 +273,7 @@ persistent `vstest.console` processes were traced to Visual Studio `DevHub` and
 
 Acceptance decision: **Safety, function, and Candidate-preparation UX accepted.**
 
-The follow-up [Candidate preparation progress and observability plan](../plans/candidate-preparation-progress-and-observability.md)
+The follow-up [Candidate preparation progress and observability plan](../archive/plans/candidate-preparation-progress-and-observability.md)
 passed same-scale qualification on 2026-08-11 without Candidate mutation. Progress
 remained visible across phases, all 17,369 EPUB/PDF assessments were reused, 77
 unified groups were published, default logs totaled 9,948 bytes in one segment,

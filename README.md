@@ -1,74 +1,85 @@
 # Calibre Library Cleaner
 
-Calibre Library Cleaner is a Windows/.NET 10 WPF application for safe,
-explainable analysis and consolidation of Calibre libraries. Development uses
-Visual Studio Code and GitHub Copilot Business.
+Calibre Library Cleaner is a Windows/.NET 10 WPF application for finding and
+consolidating records that contain the same work and language in large Calibre
+libraries.
 
-## Current status
+The product assumes the user maintains a complete external library backup. Its main
+priorities are matching quality, fast repeated analysis through versioned caches,
+explainable keeper/Skip review, and high-throughput cleanup through supported Calibre
+tooling.
 
-The application can build immutable read-only analysis snapshots, hash formats,
-detect exact binary and exact normalized metadata candidates, assess EPUB and
-PDF quality, generate bounded local work-language candidates with candidate-only
-EPUB hash evidence, and execute staged Exact and unified Candidate cleanup through
-a constrained persistent Calibre worker.
+## Current workflow
 
-Persisted analysis loading remains available during development because a full
-large-library scan can take approximately twenty minutes. Startup lists small
-state manifests; explicit Load restores the saved analysis without rescanning.
-Explicit Scan still SHA-256 hashes every file, but unchanged EPUB/PDF assessments
-are reused from authoritative state when fingerprints and analyzer versions match.
-Repeat scans should therefore avoid most archive parsing and PDF worker startup.
+The production WPF composition uses the staged workflow described below. A
+compatibility analysis mode remains in code for tests/migration but is not the
+configured product flow.
 
-Exact cleanup runs first from an exact-only analysis. Candidate preparation then
-performs trusted post-Exact reconciliation, reuses compatible facts, and builds
-disjoint unified Metadata/Expanded groups. Candidate cleanup uses reviewed keeper
-and Skip choices, transfers complementary formats, and removes non-keepers. Each
-mutation stage separately requires confirmation of a complete external backup.
+1. **Scan** reads the catalog, resolves files, hashes formats, and shows Exact binary
+   groups.
+2. **Exact cleanup** keeps one byte-identical copy, transfers safe complementary
+   formats, removes duplicates, and deletes empty records.
+3. The first **Candidate cleanup** activation is read-only: it reconciles the
+   residual library, reuses compatible assessments/signatures, runs matching, and
+   shows Unified Candidate groups.
+4. The second Candidate activation executes reviewed keeper/Skip choices.
 
-Metadata and Expanded tabs remain read-only evidence views. The Unified candidates
-tab presents executable disjoint groups, keeper details, evidence, advisory
-classification, keeper override, and Skip. Double-click opens a present format in
-Calibre ebook viewer. Legacy standalone Metadata/Expanded mutation commands and
-`Cleanup all` were retired after documented shadow parity.
+Every mutation run requires confirmation of a complete external backup. Mutation
+uses one fixed persistent `calibre-debug` worker. The application does not provide
+rollback or recovery.
 
-Candidate-only EPUB fingerprints and local expanded discovery are implemented.
-PDF cross-document fingerprints, calibrated content-language detection, and
-optional online/model enrichment remain later roadmap work.
+## Matching today
 
-## Diagnostics
+Current matching combines exact normalized metadata, canonical author variants,
+identifiers, title/series/language/binary evidence, explicit contradictions, and
+candidate-only EPUB content signatures. Candidate generation is indexed and bounded,
+and final Unified groups are disjoint.
 
-Application and scan diagnostics are written through Serilog to
-`%LOCALAPPDATA%\CalibreLibraryCleaner\logs\calibre-library-cleaner-*.log`.
-Logs roll daily and at 25 MB, retain the most recent 20 files, and flush buffered
-events to disk every second so completed and failed scans can be investigated
-after the application closes.
+A Candidate group means **same work and language**, not necessarily the same edition,
+revision, illustrations, or formatting. All groups start included; the user can
+change the generated keeper or Skip a group.
+
+## Current limitations and next work
+
+- Exact Scan still rehashes every resolvable file.
+- PDF cross-document matching is not implemented.
+- Content-language detection is not calibrated.
+- Online bibliographic evidence and local embeddings/models are not implemented.
+- Candidate evidence is recomputed as a complete residual run rather than
+  incrementally.
+- Current mutation state is more detailed than the accepted minimal target.
+
+See [the current roadmap](docs/roadmap.md) for priorities.
+
+## Safety model
+
+- Analysis opens `metadata.db` and managed files read-only.
+- Never write directly to `metadata.db` or Calibre-managed files.
+- Keep Calibre and other writers closed during cleanup.
+- Confirm an external backup before every mutation run.
+- Stop on failed/ambiguous mutation and Rescan before continuing.
+- No direct-command fallback, rollback, or automated recovery.
+
+## Documentation
+
+Start with [docs/README.md](docs/README.md). It separates current authoritative
+documentation from archived milestone plans and handoffs.
 
 ## Development
-
-1. Open the repository root in Visual Studio Code.
-2. Read `AGENTS.md`, nested instruction files, and the relevant documentation.
-3. Review or create an execution plan under `docs/plans/` for substantial work.
-4. Implement only the approved milestone or vertical slice.
-5. Run the standard verification commands before reporting completion.
-
-## Important files
-
-- `AGENTS.md` — repository-wide Codex instructions.
-- `PLANS.md` — execution-plan requirements.
-- `docs/roadmap.md` — milestone order and scope.
-- `docs/architecture.md` — project boundaries.
-- `docs/safety-and-rollback.md` — non-negotiable safety model.
-- `docs/adr/` — accepted architectural decisions.
-- nested `AGENTS.md` files — project-specific instructions.
-
-## Standard verification
 
 ```powershell
 dotnet restore
 dotnet build --no-restore
-dotnet test --no-build
+dotnet test --no-build --maxcpucount:1
 dotnet format --verify-no-changes
 ```
 
-Never use a personal Calibre library in automated tests. Use synthetic fixtures
-and temporary directories. Never write directly to `metadata.db`.
+Automated tests use synthetic or explicitly supplied disposable libraries, never a
+personal Calibre library.
+
+## Diagnostics
+
+Logs are written to
+`%LOCALAPPDATA%\CalibreLibraryCleaner\logs\calibre-library-cleaner-*.log`.
+Production defaults to aggregate Information events. Set
+`CALIBRE_DIAGNOSTIC_LOGGING=1` for bounded detailed matching/inspection diagnostics.

@@ -1,75 +1,132 @@
-# Duplicate Detection
+# Duplicate Detection and Matching
 
-## Confidence levels
+## Matching objective
 
-- **Exact binary:** same SHA-256 for compared files.
-- **Strong identifier:** matching normalized ISBN or another strong identifier.
-- **Exact normalized metadata:** title and author set match after safe deterministic normalization.
-- **Equivalent normalized text:** extracted text fingerprints are equal or extremely similar.
-- **Fuzzy metadata:** similar title/author/series/year; manual review only initially.
+Find records that contain the same work and language. Different editions, revisions,
+illustrations, or formatting may belong to one executable Candidate group.
 
-## MVP
+Matching confidence is not a promise of file interchangeability. Evidence,
+contradictions, advisory classification, generated keeper, keeper override, and Skip
+make the tradeoff visible. Published groups are processed unless skipped.
 
-Group records when normalized title and normalized author set are equal. Record that reason and do not auto-merge.
+## Evidence layers
 
-## Safe normalization
+### Exact binary
 
-- Normalize to Unicode NFC, apply whole-string `ToUpperInvariant()`, then normalize to NFC again.
-- Remove Unicode `Format` scalars, including zero-width and directional formatting controls.
-- Convert Unicode whitespace runs to one ASCII space and trim leading/trailing space.
-- Remove that canonical space immediately before or after Unicode punctuation while preserving every punctuation scalar and all subtitle/edition text.
-- Normalize titles from the stored title and authors from stored author names only. Never use author-sort values for identity.
-- Deduplicate normalized author names and sort them with ordinal comparison to create an order-independent author set.
-- Require a usable title and a non-empty author set. If any stored author normalizes to empty, exclude the record rather than silently weakening its identity.
-- Exclude records carrying an `AUTHOR_REFERENCE_MISSING` catalog finding because their complete stored author set is unknown.
+Equal byte length and SHA-256 for at least two managed file references. This proves
+byte equality for those files only.
 
-Do not initially remove subtitles, infer pen names, reverse comma-separated names, discard initials, translate titles, or infer editions.
+### Exact normalized metadata
 
-Author sets must be exactly equal. A record listing only a main author does not match a record listing that author plus additional authors. Literal non-empty values such as `Unknown` are treated as stored text; the detector does not infer localized placeholder semantics.
+Equal safely normalized title and complete order-independent author set for at least
+two records. It is strong Candidate evidence, not content/edition proof.
 
-## Exact normalized metadata groups
+Normalization uses Unicode NFC and invariant casing, removes format controls,
+normalizes whitespace around retained punctuation, and excludes incomplete/empty
+author identities. It does not silently discard subtitles or infer aliases.
 
-A group key is exactly `(NormalizedTitle, NormalizedAuthorSet)`. Identifiers, author IDs/order, author-sort values, formats, hashes, paths, series, and edition inference do not affect it. A group requires at least two distinct Calibre record IDs.
+### Expanded local evidence
 
-Member IDs are ordered ascending. Groups are ordered by normalized title ordinal, then lexicographically by the ordinally sorted normalized author-name sequence, then by canonical group ID. Group IDs use the versioned, UTF-8-byte-length-prefixed normalized identity and never depend on record order or runtime dictionary hashes.
+Implemented profiles combine:
 
-Every group records reason code `EXACT_NORMALIZED_TITLE_AUTHOR_SET`, category `Exact normalized metadata candidate`, and the explanation that normalized title and order-independent normalized author set are exactly equal. These are candidate duplicate records, not proof of identical files, content, or editions.
+- canonical author aliases (family name, positional initials, comma order, compatible
+  full given names);
+- title keys/tokens;
+- validated catalog and embedded identifiers;
+- series/index, year, language, and edition markers;
+- exact binary relations;
+- format/assessment metadata; and
+- candidate-only EPUB content comparison.
 
-Exact metadata groups remain separate from exact binary file groups. A pair can appear in either collection, both collections, or neither; grouping itself does not combine the signals or imply a recommendation.
+Author similarity alone cannot propose a work. Known author expansion, language,
+series/index, identifier, edition-marker, and different-content contradictions can
+reject a pair or component.
 
-Milestone 5 consumes these existing collections without changing either group definition. Recommendations may use exact-binary membership to choose among byte-identical same-format alternatives and exact-metadata groups as their review scope. Exact equality remains file-level evidence only; it cannot hide a unique/unavailable/unresolved format or establish content/edition equivalence for a non-identical file.
+## Bounded candidate generation
 
-## Expanded work-language candidates
+The current matcher indexes compatible author identities instead of comparing all
+records. It suppresses broad ordinary buckets, ranks cheap evidence, retains at most
+20 mutual ordinary candidates per record, preserves decisive anchor relations, and
+fails closed when the global pair ceiling is exceeded.
 
-An explicit scan first builds conservative canonical author identities from catalog and OPF creator variants. Punctuation, spacing, comma order, initials, and compatible full given-name expansions are normalized: for example `J. K. Rowling`, `J.K.Rowling`, `Joanne K. Rowling`, `Joanne Kathleen Rowling`, and `Rowling, J.K.` share `ROWLING|JK`. Expanded given names must not conflict, so `Joanne Kathleen Rowling` and `John Kevin Rowling` remain distinct even though both abbreviate to `J.K. Rowling`.
+Exact Metadata candidates bypass ordinary caps and always reach unified merging.
 
-Work candidates are searched only inside compatible author identities. Author similarity alone is insufficient; a pair also requires title overlap, a validated/embedded identifier, compatible series/index, or exact binary evidence. Inverted indexes suppress broad author buckets, retain at most 20 mutual ordinary candidates per record, and stop inferred discovery if unique pairs exceed `min(200,000, 10 * record count)`. Exact detectors and IDs are unchanged.
+## EPUB content evidence
 
-Only retained ambiguous pairs request EPUB content evidence. The inspector reuses the existing read-only archive/path/observation boundary, removes script/style/navigation content, and creates 12 distributed windows of at most 64 normalized tokens plus a 64-value bottom-k shingle sketch. Cache entries are keyed by file fingerprint and all algorithm/resource versions, contain hashes/counts only, and live outside the library. Added front matter can match through the sketch without retaining prose.
+Only retained ambiguous pairs with two usable EPUBs request signatures. Each
+signature is keyed by file fingerprint and all policy/resource versions and stores:
 
-Pair decisions retain explicit evidence and contradiction codes. Known language, author-expansion, series-index, and different-content contradictions reject edges. Every non-binary inferred relation requires equivalent/high-similarity EPUB content evidence; unavailable or ambiguous content never forms a final group. Anchor edges seed components, complete-component author/language contradictions are checked before union, and final `WorkLanguageCandidateGroup` values are partitioned by known catalog/OPF language (otherwise `und`). They are always `ReviewOnly`.
+- token/coverage counts;
+- 12 distributed landmarks of at most 64 normalized tokens;
+- a bounded bottom-k shingle sketch; and
+- safe problem codes.
 
-The Expanded candidates tab exposes confidence, language, anchors, reason codes, content counts, and viewer opening. It has no cleanup command and inferred group IDs are not accepted by mutation contracts.
+No prose is retained. Comparison is symmetric. Equivalent/high-similarity content
+can support union; unavailable/weak/different content does not.
 
-## Content fingerprints (Milestone 10)
+## Component and group construction
 
-EPUB candidate content uses the bounded hash-only signatures above. Content-language detection and PDF cross-document fingerprints remain future work.
+Anchor/strong compatible edges seed components. Before each union, the matcher checks
+complete-component contradictions rather than applying blind connected components.
+Groups are partitioned by normalized known language, otherwise `und`.
 
-PDF fingerprints must disclose whether all pages or a deterministic bounded
-sample contributed. Sampled evidence cannot establish whole-document equality.
-Cross-format comparisons must use explicitly compatible, versioned
-normalization semantics and retain no book prose. Content comparison is
-evidence only until a separately reviewed recommendation policy defines safe
-use.
+The unified merge policy combines Exact Metadata and Expanded evidence, resolves
+safe overlaps, blocks contradictory bridges, and emits disjoint Candidate groups.
 
-## Automation policy
+Advisory classifications:
 
-Only same-format files contributing provably byte-identical content are eligible for this cleanup path without metadata equality. One retained copy is generated automatically from record format count, metadata completeness, validated identifiers, cover presence, and a final record-ID tie-breaker. Other copies are removed as formats; records with remaining formats are preserved. All non-identical matches require separate review.
+- `Cleanup eligible`: strongest uncontradicted evidence;
+- `To be reviewed`: weaker, incomplete, older-policy, or ambiguous evidence.
 
-## Exact binary file groups
+Both start included and are executable unless skipped.
 
-Milestone 2 hashes every safely readable declared format with streaming SHA-256. File size is a comparison pre-filter, not a reason to skip hashing. A group requires both equal byte length and equal SHA-256 and at least two distinct managed file references.
+## Keeper policy
 
-Group identity is derived from the length and digest. Groups are ordered by size descending and digest; members are ordered by record ID, format, and managed relative path. These are file-level groups: even when identical files span records, the result does not assert that the book records are metadata duplicates, equivalent editions, or safe to merge or delete.
+Group identity and keeper selection are separate. The generated keeper ranks:
 
-An exact-binary cleanup decision removes duplicate copies through typed `calibredb remove_format`. It removes a Calibre record through non-permanent `calibredb remove` only after the authoritative projected state contains no formats. Successful commands apply typed deltas; no cleanup scan occurs. Additional formats and metadata remain on their records.
+1. completed compatible assessment evidence;
+2. assessment score total;
+3. present format coverage;
+4. metadata completeness;
+5. validated strong identifiers;
+6. cover evidence; and
+7. lowest Calibre record ID.
+
+For complementary formats absent from the keeper, the planner selects the best
+quality-ranked physical source. The keeper's existing same-format file wins.
+
+## Current limitations
+
+- No PDF cross-document matching.
+- No cover/visual comparison.
+- Content language relies on catalog/OPF evidence rather than calibrated detection.
+- No online bibliographic enrichment.
+- No local embeddings/models.
+- Candidate neighborhoods are recomputed as a complete residual run rather than
+  incrementally.
+- Exact Scan currently rereads every resolvable file for SHA-256.
+
+## Target matching program
+
+1. Build a labeled corpus with same-work/language positives and hard negatives.
+2. Measure current candidate-generation recall and final group precision/recall.
+3. Add PDF fingerprints with all-page versus sampled coverage.
+4. Add calibrated language, cover/visual, and structural evidence.
+5. Add configured online provider evidence with provenance and local fallback.
+6. Evaluate local embeddings/models against deterministic baselines.
+7. Calibrate evidence fusion and confidence on held-out data.
+8. Add incremental candidate/evidence invalidation and cold/warm performance budgets.
+
+A new evidence source is accepted only when it improves measured quality or
+performance without unbounded resource use or hidden library-specific rules.
+
+## Cache requirements
+
+All signatures, provider results, model outputs, and derived evidence are keyed by
+stable input identity and all relevant versions. Corruption or incompatibility is a
+miss. Cache entries retain no recoverable book prose unless a future explicit privacy
+decision allows it.
+
+Future hash reuse additionally validates canonical path, size, timestamps,
+attributes/file identity, and provenance, with selective/periodic byte checks and a
+forced verification mode.

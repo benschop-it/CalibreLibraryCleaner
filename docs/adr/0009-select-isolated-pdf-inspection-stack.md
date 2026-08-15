@@ -1,6 +1,6 @@
 # ADR 0009: Select an Isolated Bounded PDF Inspection Stack
 
-- Status: Accepted
+- Status: Accepted; cancellation priority amended by ADR 0021
 - Date: 2026-07-31
 
 ## Context
@@ -46,7 +46,7 @@ The frozen profiles are:
 The hard and soft limits, deterministic 200-page sampling policy,
 classification thresholds, 85/15 score components, rule weights, caps, and
 disqualifiers are those frozen in
-`docs/plans/milestone-9-pdf-assessment.md`. A limit or fact-semantics change
+`docs/archive/plans/milestone-9-pdf-assessment.md`. A limit or fact-semantics change
 requires analyzer/profile review and versioning; a weight, cap, component,
 formula, or disqualifier change requires scoring-model versioning.
 

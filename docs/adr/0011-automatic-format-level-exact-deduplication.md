@@ -1,10 +1,15 @@
 # ADR 0011: Use Automatic Format-Level Exact Deduplication
 
-- Status: Accepted
+- Status: Accepted core Exact retention policy; execution mechanics superseded
 - Date: 2026-08-02
 - Supersedes: ADR 0010
 - Amends: ADR 0007
 - Amended by: ADR 0012
+
+> Current interpretation: deterministic format-level retention and empty-record
+> safety remain current. Cleanup-plan, direct `calibredb`, application backup, and
+> fresh-scan-after-command mechanics below were replaced by ADRs 0012, 0013, 0015,
+> 0017, and 0020.
 
 ## Context
 

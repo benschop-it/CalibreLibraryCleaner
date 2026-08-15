@@ -1,85 +1,122 @@
-# Safety and Failure Handling
+# Safety and Operating Assumptions
 
-## Analysis mode
+The filename is retained for compatibility. The product does not provide rollback or
+recovery.
 
-Analysis may read the Calibre database and managed files, hash and parse formats, and create application-owned reports or development cache artifacts outside the library.
+## Backup assumption
 
-The supported operating model is single-writer for the selected library while CalibreLibraryCleaner is running: no unrelated process modifies the library, and Calibre changes occur only when initiated through the cleaner's controlled worker. The application may optimize redundant race-defense checks around this assumption. It still performs initial containment/reparse validation, current full-file SHA-256, bounded untrusted-format parsing, and projected-state validation because those establish identity and safety rather than merely detect unrelated writers.
+Every Exact or Candidate mutation run requires explicit confirmation that the user
+has a complete external backup of the selected Calibre library. The application does
+not create, inspect, verify, restore, or manage that backup.
 
-Analysis must never write directly to `metadata.db`, rename or move Calibre-managed files, modify metadata, add or remove formats, or create files inside the selected library. EPUB and PDF inputs remain untrusted and are processed through the documented bounded read-only inspection paths. Book content is not logged.
+If cleanup produces an unacceptable or uncertain result, the user restores the
+external backup outside the application and performs an explicit Scan.
 
-Staged exact-only analysis still resolves and SHA-256 hashes every current format,
-but does not inspect EPUB/PDF content or generate candidate evidence. Post-exact
-Candidate preparation may reread the catalog and target-hash explained affected
-associations. It may reuse a fingerprint only from authoritative pre-exact identity
-plus a completed typed mutation relation; timestamp, size, path, stored name, or
-record ID alone never proves identity. Any unexplained catalog or file change stops
-preparation and requires a new exact analysis.
-An association already classified `InvalidPath` may remain only when the catalog
-association is unchanged and path resolution still fails; it remains non-executable,
-and any changed or newly resolvable outcome fails closed.
+## Analysis safety
 
-Explicit duplicate-row viewing may launch the trusted Calibre `ebook-viewer.exe`. The requested format must be a physical regular file contained in the selected library. Launch uses no shell and passes the physical path as one argument. Viewer launch does not alter projected state or authorize cleanup.
+Analysis may:
 
-## Persisted development state
+- open `metadata.db` read-only/query-only;
+- read, hash, and inspect Calibre-managed formats;
+- use configured online bibliographic providers;
+- run bounded local models; and
+- write application-owned state, caches, metrics, and logs outside the library.
 
-A successful explicit Scan creates one authoritative projected-state generation outside the library. During development, explicit Load may restore that state or migrate a strictly validated legacy snapshot without rescanning. This deliberately trusts development cache data and does not detect external Calibre changes.
+Analysis must not:
 
-Startup listing reads only small manifests or bounded legacy metadata. A manifest references one active baseline/checkpoint and one active delta journal. New manifest publication is atomic and precedes deletion of unreferenced state files. Shutdown does not compact or write a large snapshot.
+- write directly to `metadata.db`;
+- rename, move, overwrite, or delete Calibre-managed files;
+- create files inside the selected library;
+- execute ebook actions, follow links, run OCR implicitly, or fetch resources
+  referenced from untrusted ebooks; or
+- log book content or ordinary bibliographic metadata by default.
 
-## Duplicate cleanup
+Untrusted EPUB/PDF input remains bounded by documented file, archive, XML/HTML,
+object, stream, page, memory, CPU, and wall-time limits.
 
-Exact and unified Candidate cleanup are the only mutation workflows. Before each run, the user confirms that a complete external backup of the Calibre library exists. The application does not create, inspect, or verify that backup.
+## Single-writer assumption
 
-The workflow:
+Calibre, calibre-server, ebook editors, synchronization tools, and unrelated library
+writers remain closed while the cleaner mutates the selected library. Analysis and
+cache reuse may rely on stable file/catalog identity under this assumption, but path
+containment and input validation remain mandatory.
 
-1. requires authoritative projected state;
-2. deterministically builds keeper, transfer, format-removal, and empty-record-removal operations;
-3. discovers and validates the trusted Calibre installation;
-4. acquires one library mutation lease;
-5. opens one fixed persistent `calibre-debug` worker;
-6. writes one bounded cleanup-run marker;
-7. sends typed chunks of at most 100 operations;
-8. projects and durably journals only complete successful chunks; and
-9. writes one final checkpoint after complete success.
+## Matching and cleanup tradeoff
 
-Transfers precede dependent source removals. Formats are removed before records, and a record is removed only when projected empty. Exact cleanup leaves ambiguous or conflicting records unchanged. Unified Candidate cleanup is keeper-authoritative: same-format alternatives on Remove records are deleted even when not byte-identical. Every executable association must be physical `Present`; stale, projected, missing, unsafe, or unverified groups skip before mutation.
+A Candidate group means same work and language, not necessarily the same edition,
+revision, illustrations, or formatting. Published groups are processed unless the
+user selects Skip. The generated keeper can be changed.
 
-The staged target runs Exact cleanup first through the existing algorithm and fixed
-worker path unchanged. Candidate cleanup remains disabled until Exact cleanup
-completes successfully, including a successful nothing-to-do result. The two stages
-are separate mutation runs and each requires explicit confirmation of a complete
-external library backup. Candidate preparation and Candidate mutation are separate
-user activations so the generated keeper, evidence, and Skip state can be reviewed.
+This policy can intentionally remove distinct editions from the working library.
+The external backup is the recovery mechanism. Matching evidence, contradictions,
+coverage, provider/model provenance, and advisory confidence remain visible so the
+user can intervene efficiently.
 
-## Cleanup ordering
+No matching, online, ML, or AI component directly invokes mutation.
 
-Exact cleanup validates current exact selections against authoritative state.
-Candidate preparation then performs trusted reconciliation and publishes a new
-physical generation before discovery. Candidate cleanup validates current
-generation, revision, unified membership, keeper, Skip, and physical facts before
-mutation. `Cleanup all` and standalone Metadata/Expanded mutation paths are retired.
+## Mutation safety
 
-The worker uses only Calibre's documented database `Cache` API through the fixed embedded script and strict JSON-lines protocol. Direct SQL, shell invocation, direct managed-file mutation, arbitrary Python, GUI automation, direct `calibredb` mutation commands, and mutation-engine fallback are prohibited.
+Only the fixed persistent `calibre-debug` worker may mutate a library. It uses a
+fixed typed protocol and supported Calibre database APIs. Direct SQLite writes,
+direct managed-file mutation, shell commands, arbitrary scripts, GUI automation,
+and mutation-engine fallback are prohibited.
+
+Operations are deterministic and ordered:
+
+1. transfer selected complementary formats;
+2. remove non-keeper/source formats; and
+3. remove records proven empty.
+
+The keeper's existing same-format file wins. Non-physical, missing, unsafe, stale,
+or unverified groups are skipped before mutation.
 
 ## Failure handling
 
-Preflight, discovery, lease, worker startup, or handshake failure logs structured technical context and stops before mutation.
+Preflight or worker-start failure stops before mutation.
 
-A failed, ambiguous, interrupted, unpersistable, or unprojectable mutation:
+After mutation begins, any failed, ambiguous, interrupted, or unverifiable worker
+outcome:
 
-1. logs the run ID, safe operation identifiers, worker failure code, and exception details without book content;
-2. stops immediately;
-3. does not retry, continue, invoke another engine, or infer a successful operation prefix;
-4. marks projected state uncertain/Rescan-required; and
-5. blocks later mutation until an explicit successful Scan creates a new generation.
+1. logs technical run/chunk/operation identifiers and failure codes without book
+   content;
+2. stops without retrying, continuing, inferring a successful prefix, or switching
+   engines; and
+3. blocks further mutation until explicit Rescan.
 
-Cancellation before mutation is ordinary cancellation. After mutation starts, cancellation is observed only between worker chunks and follows the same uncertain-state rule if the outcome cannot be proven complete.
+The current implementation marks detailed projected state uncertain and retains
+markers/deltas/checkpoints. The accepted target may simplify this to minimal durable
+run/workflow status, but stop-and-Rescan behavior remains.
 
-## Restoration
+## Progress and cancellation
 
-Automated rollback and recovery are not provided. If manual restoration is needed, the user restores from the externally maintained full-library backup using Calibre-supported procedures outside this application, then performs an explicit Scan before further cleanup.
+The UI must remain responsive and show active phase, truthful units, and elapsed time
+throughout long work. Cancellation is not required. If retained, it is best effort
+at safe boundaries. Partial analysis is discarded; partial mutation follows the
+failure rule above.
 
-## Testing
+## Caches
 
-Automated destructive tests use only synthetic or caller-marked disposable libraries. They never discover or mutate a default or personal Calibre library. Tests cover deterministic operation order, backup acknowledgement, lease exclusion, worker-only execution, bounded chunks, complete-chunk projection, structured failure logs, state uncertainty, restart replay, checkpointing, and explicit-Scan recovery of application state.
+A cache may improve performance but cannot silently bypass identity/version checks.
+Hash reuse requires unchanged stable file identity and provenance. Selective or
+periodic byte validation detects drift; a verification scan can force full hashing.
+Cache corruption or loss becomes a miss, not invented evidence.
+
+## Online providers and local models
+
+Configured online providers are enabled by default. Settings disclose providers and
+transmitted field categories. Requests are bounded and cached with provenance.
+Provider/network failure falls back to local matching.
+
+Local model evidence is versioned and bounded. Provider/model output is evidence,
+not authority. Credentials, payloads, embeddings, and book metadata are not written
+to ordinary logs.
+
+## Explicit non-features
+
+- application-created backup bundles;
+- undo;
+- automated rollback;
+- automated recovery/reconciliation;
+- resumable partial analysis as a requirement;
+- automatic retry of mutation; and
+- a direct-command or direct-database fallback.

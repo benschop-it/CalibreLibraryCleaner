@@ -10,8 +10,12 @@ These instructions extend the repository root `AGENTS.md`.
 - Treat malformed EPUB/PDF content as findings, not application crashes.
 - Wrap third-party exceptions at clear boundaries with useful context.
 - Use structured logging.
-- External process execution must capture executable version, arguments, exit code, stdout, stderr, duration, and cancellation.
+- External process execution must capture safe technical identity, exit code,
+	bounded output, duration, and failure outcome without logging book metadata.
 - Escape command-line arguments safely.
-- Never invoke destructive Calibre commands without a validated cleanup plan.
-- Verify backups before mutation and verify the resulting library state afterward.
+- Mutate only through the fixed typed persistent `calibre-debug` worker; never add
+	direct SQLite/filesystem mutation or a fallback engine.
+- Implement versioned hash/assessment/signature/provider/model caches so corruption
+	or incompatibility becomes a miss.
+- Keep HTTP/provider and model-runtime details behind Application-owned ports.
 - Tests must use temporary directories and synthetic fixtures, never a real user library.

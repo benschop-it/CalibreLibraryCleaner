@@ -1,6 +1,6 @@
 # ADR 0016: Unify Persisted Development State
 
-- Status: Accepted
+- Status: Accepted implementation baseline; target simplification defined by ADR 0021
 - Date: 2026-08-05
 - Amends: ADR 0012
 

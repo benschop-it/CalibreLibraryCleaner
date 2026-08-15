@@ -1,9 +1,15 @@
 # ADR 0020: Stage Exact Cleanup Before Unified Candidate Cleanup
 
-- Status: Accepted
+- Status: Accepted, amended by ADR 0021
 - Date: 2026-08-10
 - Amends: ADR 0012, ADR 0017, ADR 0018, ADR 0019
 - Supersedes: the one-scan composite cleanup workflow for future development
+
+> Implementation status: staged mode is the production WPF configuration. Shadow
+> parity and large-library acceptance passed; `Cleanup all` and standalone
+> Metadata/Expanded mutation surfaces are retired. Their read-only evidence views
+> remain. ADR 0021 amends mandatory full rehashing as a future target, not current
+> implementation.
 
 ## Context
 

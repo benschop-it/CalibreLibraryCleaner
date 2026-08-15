@@ -1,8 +1,11 @@
 # ADR 0018: Use Keeper-Based Metadata Candidate Cleanup
 
-- Status: Accepted
+- Status: Superseded by ADR 0020's Unified Candidate cleanup
 - Date: 2026-08-08
 - Amends: ADR 0013, ADR 0017
+
+> Historical scope: the keeper-authoritative semantics informed Unified Candidate
+> cleanup, but the standalone Metadata mutation command and workspace were retired.
 
 ## Context
 

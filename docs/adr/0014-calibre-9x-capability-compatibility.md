@@ -1,8 +1,12 @@
 # ADR 0014: Accept Capability-Compatible Calibre 9.x Releases
 
-- Status: Accepted
+- Status: Accepted version range; capability mechanism amended by ADRs 0015 and 0017
 - Date: 2026-08-02
 - Amends: ADR 0007, ADR 0013
+
+> Current interpretation: the bounded Calibre 9.x version range and executable
+> identity checks remain current. The fixed worker handshake, not the removed
+> CLI/recovery command list below, proves mutation capabilities.
 
 ## Context
 

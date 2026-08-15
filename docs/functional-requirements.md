@@ -1,153 +1,180 @@
 # Functional Requirements
 
-## Library analysis
+This document separates behavior implemented today from accepted target work. Target
+requirements do not describe current production behavior until implemented and
+verified.
 
-- Select and validate a Calibre library directory.
-- Open `metadata.db` read-only.
-- Load book IDs, titles, authors, author-sort values, identifiers, series, languages, formats, and managed paths.
-- Resolve referenced format files and report missing or anomalous paths.
-- Calculate SHA-256 using streaming I/O, cancellation, progress, and bounded concurrency.
-- Persist the latest complete successful scan per canonical library folder outside the Calibre library.
-- List persisted library folders and explicitly load a prior result instead of rescanning, while identifying it as potentially stale.
-- Invalidate the persisted result before an approved library mutation; only a later complete normal scan may repopulate it.
-- When Load is invoked, immediately show an indeterminate loading-saved-analysis phase before deserialization or state replay begins. After scanning or loading completes, show an indeterminate preparing-results phase while large presentation collections are materialized, then publish the collections and finish progress at 100%.
+## Operating model
 
-The staged workflow begins with explicit exact-only analysis. It reads the complete
-catalog, resolves every current format path, hashes every resolvable format with
-streaming SHA-256 and bounded concurrency, and publishes Exact binary groups. It
-does not assess EPUB/PDF files, generate recommendations, detect exact-metadata
-groups, inspect candidate content, or run Expanded discovery.
+- The user selects one Calibre library and keeps Calibre/other writers closed while
+  cleanup is running.
+- Before each mutation run, the user confirms that a complete external backup exists.
+- The application does not create, inspect, restore, or manage that backup.
+- Analysis is read-only. It never writes directly to `metadata.db` or modifies
+  Calibre-managed files.
+- Mutation uses only the fixed persistent `calibre-debug` worker and supported
+  Calibre APIs.
+- A failed or ambiguous mutation stops. No retry or alternate mutation engine runs;
+  explicit Rescan is required before another mutation.
 
-After Exact cleanup succeeds, Candidate preparation performs a dedicated read-only
-catalog refresh. It reconciles current records, metadata, format labels, and
-associations against authoritative projected state and completed Exact deltas.
-Known fingerprints may be reused only for explained associations. Unexplained
-catalog or file changes fail closed and require a new exact analysis. Candidate
-preparation is not a normal full scan and never occurs implicitly during mutation.
-An unchanged catalog association already classified `InvalidPath` by Exact analysis
-may remain as a non-executable finding only while the same association remains
-unresolvable. A newly resolvable or otherwise changed association fails closed.
+## Implemented workflow
 
-Candidate preparation reports its active phase with truthful phase-local units.
-Transfer verification uses bytes/files; EPUB/PDF assessment uses completed/total
-files plus bounded technical substages; content matching uses fingerprints; and
-result materialization uses exact item totals. A one-second elapsed heartbeat keeps
-the current phase visible when semantic counters do not advance. It never invents
-completed work. Cancel remains available and immediately reports that cancellation
-is pending while the current bounded operation stops.
+### 1. Exact analysis
 
-Candidate preparation reports its active phase with truthful phase-local units.
-Transfer verification uses bytes/files; EPUB/PDF assessment uses completed/total
-files plus bounded technical substages; content matching uses fingerprints; and
-result materialization uses exact item totals. A one-second elapsed heartbeat keeps
-the current phase visible when semantic counters do not advance. It never invents
-completed work. Cancel remains available and immediately reports that cancellation
-is pending while the current bounded operation stops.
+An explicit Scan:
 
-## Duplicate detection
+- validates the selected library and opens `metadata.db` read-only;
+- loads records, authors, identifiers, publication metadata, languages, formats, and
+  managed paths;
+- resolves each declared format path and records missing/invalid associations;
+- streams SHA-256 over every resolvable format with bounded concurrency;
+- builds byte-identical format groups; and
+- publishes an authoritative `ExactReady` generation.
 
-Support progressively:
+Exact analysis does not run EPUB/PDF assessment or Candidate matching.
 
-1. byte-identical files;
-2. strong identifier matches;
-3. exact normalized title/author matches;
-4. normalized content fingerprints;
-5. fuzzy metadata matches.
+### 2. Exact cleanup
 
-Every group must expose confidence and reasons. Exact title/author matches are candidates, not proof of identical content.
+The user reviews the generated keeper for each byte-identical same-format group and
+may override it or Skip the group. Exact cleanup:
 
-Residual candidate discovery runs only after successful Exact cleanup and trusted
-post-exact refresh. It retains exact normalized title/author detection as mandatory
-candidate evidence and combines that evidence with Expanded discovery into one
-disjoint candidate model. Exact-metadata candidates remain present when EPUB
-content is absent and bypass ordinary candidate caps. Expanded discovery first
-canonicalizes compatible author variants using family name, positional initials,
-comma order, and non-conflicting full given-name expansions. It searches for
-duplicate works only inside those author identities, requires independent
-title/identifier/series/binary evidence, and partitions candidates by language.
-Every non-binary final inferred relation uses EPUB content evidence from 12 by
-64-token hash landmarks and a bounded shingle sketch when available. Signatures
-are cached by fingerprint/version outside the library and retain no prose. Groups
-whose evidence meets the strongest policy criteria display `Cleanup eligible`;
-groups with weaker, incomplete, ambiguous, older-policy, or contradictory evidence
-display `To be reviewed`. This distinction is advisory: both types start
-unskipped, use the generated keeper, permit keeper changes and Skip, and are
-processed unless the user explicitly skips them.
+- requires external-backup confirmation even for a NothingToDo run;
+- transfers unambiguous complementary formats to one keeper;
+- removes duplicate/transferred source formats;
+- removes records only when they become empty;
+- leaves conflicting or ambiguous records unchanged; and
+- advances to `CandidatePreparationReady` after Completed or NothingToDo.
 
-For each byte-identical same-format file group, automatically retain the copy on the record with the most formats, then the best metadata/validated identifiers/cover evidence, using the lowest Calibre ID only as a tie-breaker. Remove the other format copies, not their records. A record becomes a deletion target only when no formats remain after deduplication. Mixed-format-label groups are anomalous and skipped. The user is responsible for a complete library backup; complementary formats are fingerprint-verified in automatic temporary staging before transfer and source removal.
+### 3. Candidate preparation
 
-The Exact file duplicates UI lets the user override each generated keeper and provides one `Remove duplicates` command for all eligible groups. It transfers complementary formats to one unambiguous keeper record, removes duplicate and transferred source formats, and deletes empty records. Non-identical same-format conflicts and multi-target sources remain unchanged.
+The first Candidate action is read-only. It:
 
-## EPUB analysis
+- rereads and reconciles the residual catalog against the completed Exact outcome;
+- reuses explained fingerprints and target-hashes transfer destinations when needed;
+- preserves unchanged invalid paths as non-executable findings;
+- reuses compatible EPUB/PDF assessments and cached EPUB signatures;
+- detects exact normalized metadata candidates;
+- runs bounded Expanded matching;
+- merges evidence into disjoint same-work/language Candidate groups; and
+- publishes `CandidateAnalysisReady` without starting a mutation worker.
 
-Inspect readability, package metadata, identifiers, language, cover, navigation, spine, resources, internal references, text presence, chapter structure, and encryption indicators. Malformed files become findings rather than application crashes. EPUBs are disqualified only by definitive file open/read failures. Incomplete technical inspection is `Unassessed` unless bounded fallback inspection proves at least one safe, unique, unencrypted local XHTML/HTML/SVG resource is renderable. A fallback-readable EPUB is `Completed`, receives explainable warning penalties, and has an explicit maximum score of 70. Unknown facets earn neither positive points nor absence penalties. Capped EPUBs require manual review when compared with non-identical EPUB alternatives.
+Unexplained catalog/path/file changes reject preparation and require a new Exact
+analysis. Incomplete preparation is not published.
 
-Decoded HTML and DOM structure are bounded before expensive traversal. Monolithic dictionary/reference chapters that exceed the assessment resource profile return controlled incomplete/limit evidence instead of blocking the scan. The UI reports the current EPUB substage and chapter/candidate units, and technical diagnostics identify slow records without logging titles, paths, or book content.
+### 4. Candidate review and cleanup
 
-## PDF analysis
+A Candidate group represents records believed to contain the same work and language.
+Different editions, revisions, illustrations, or formatting may occur in one group.
 
-Milestone 9 implements safe read-only PDF assessment for verified PDF formats in
-the library snapshot. It reports strict readability, encryption/password
-status, page count, bounded metadata, deterministic all-page or sampled-page
-text/image evidence, scan-like/digital/mixed classification with confidence,
-outline and inert active-content facts, conservative repeated/blank-page
-evidence, checksum-valid bounded ISBN evidence, resource-limit outcomes, and a
-PDF-specific explainable quality score.
+The review UI shows evidence, contradictions, formats, assessment facts, generated
+keeper, advisory classification, keeper override, Skip, and safe viewer opening.
+Metadata and Expanded tabs remain read-only evidence views; Unified Candidate groups
+are the executable surface. The evidence tabs may filter, navigate, select, and open
+present formats in Calibre's viewer, but they do not own keeper/Skip choices or a
+mutation command.
 
-PDF parsing runs in one disposable bounded worker per file. It does not render,
-perform OCR, decode images for presentation, extract attachments, execute PDF
-actions, follow links, retain complete text, access the network, or mutate the
-library. Classification is evidence rather than score, and PDF assessments do
-not rank retained PDFs or affect recommendations, cleanup, execution, or
-recovery.
+All published groups start included. `Cleanup eligible` and `To be reviewed` are
+advisory; a group is processed unless the user selects Skip. Candidate cleanup:
 
-Candidate-only EPUB content fingerprints and equality/similarity evidence are available for Expanded discovery and policy-gated cleanup eligibility. PDF cross-document fingerprints and recommendation-policy changes remain future work.
+- requires a second external-backup confirmation;
+- transfers quality-ranked complementary formats absent from the keeper;
+- keeps the keeper's existing same-format file;
+- removes all formats from non-keepers; and
+- removes non-keeper records proven empty.
 
-## Scoring and recommendations
+## Implemented matching evidence
 
-- Score formats and metadata separately.
-- Every rule returns an adjustment and explanation.
-- A recommendation can combine metadata and formats from different records.
-- Conflicting non-identical files of the same format require review.
+- exact file size plus SHA-256;
+- exact normalized title and complete author set;
+- normalized author identities supporting punctuation, comma order, initials, and
+  non-conflicting full-name expansion;
+- validated and embedded strong identifiers;
+- title-token, series/index, language, edition-marker, and binary evidence;
+- explicit author/language/series/identifier/content contradictions;
+- candidate-only EPUB signatures containing 12 bounded token landmarks and a
+  bounded shingle sketch; and
+- deterministic component construction without blind weak-edge transitive closure.
 
-## Review workflow
+Candidate generation uses indexes, per-record caps, and a global pair ceiling rather
+than all-pairs comparison. Signatures contain hashes/counts only and retain no prose.
 
-The user can navigate duplicate groups and compare records. Exact and metadata candidate groups present one generated keeper that can be changed by selecting another member. Metadata groups also expose a session-scoped Skip choice.
+## Assessment and keeper evidence
 
-Double-clicking a member in Exact file duplicates opens that exact format in Calibre ebook viewer. Double-clicking a Metadata candidate opens its preferred present format (EPUB, AZW3, MOBI, PDF, then another available format). Viewer launch is explicit, read-only, and reports unavailable files or viewer installation errors without changing review or cleanup state.
+EPUB assessment reports readability, package/navigation/spine/resource integrity,
+metadata, identifiers, language, cover, text/chapter structure, encryption, bounded
+fallback readability, explainable score/findings, and analyzer/scoring versions.
 
-The Expanded candidates tab shows content-confirmed work-language groups, confidence, reason/contradiction codes, bounded content evidence, member formats, a generated sole keeper, Keep/Remove actions, and a session-scoped Skip choice. Selecting another member changes the keeper. Double-clicking opens its preferred present format.
+PDF assessment runs in a fresh bounded worker per file and reports strict open,
+encryption, page/sampling, metadata, text/image, outline, inert active-content,
+identifier, repeated/blank-page, resource, classification, score, and version facts.
+It does not render, OCR, follow links, access the network, extract attachments, or
+retain page text.
 
-Metadata and Expanded tabs are read-only evidence views. Unified Candidate groups
-combine these evidence sources into disjoint executable groups. Before Candidate
-cleanup the user confirms a complete external backup and acknowledges that matching
-may not prove identical work, edition, revision, illustrations, or formatting.
-`To be reviewed` is advisory rather than a cleanup gate. Complementary formats are
-transferred to the keeper; every non-keeper format and proven-empty record is
-removed through the fixed worker. The keeper's same-format file wins.
+Keeper ranking uses completed compatible assessments, format coverage, metadata
+quality, validated identifiers, cover evidence, and deterministic record-ID ties.
+Scores are evidence for retention, not proof that two records match.
 
-## Retired legacy cleanup
+## Persistence and caches
 
-`Cleanup all` and standalone Metadata/Expanded mutation commands are retired.
-Shadow parity and intentional differences are recorded in
-`docs/workflows/unified-candidate-shadow-parity.md`.
+Implemented persistence stores authoritative workflow state outside the library,
+including generations/checkpoints and current projected mutation state. Startup
+lists small manifests; explicit Load restores saved state without scanning.
 
-## Exact duplicate cleanup
+Implemented caches reuse compatible EPUB/PDF assessments and EPUB content signatures
+by fingerprint and analyzer/model/resource versions. Cache loss affects performance,
+not matching semantics.
 
-The Exact file duplicates workflow presents one generated keeper per group, allows explicit keeper overrides, and removes all eligible exact duplicates in one command. Before each run, the user confirms that a complete external library backup exists; the application does not create or verify backups.
+## Progress and responsiveness
 
-Cleanup uses one trusted persistent `calibre-debug` worker with typed chunks of at most 100 operations. It transfers complementary formats only to one unambiguous non-conflicting target, removes exact duplicate and transferred source formats, and removes records that become empty. Successful complete chunks durably update projected state without rescanning.
+Long operations must keep WPF responsive and visibly active. Candidate preparation
+reports phase-local bytes, files, pages, fingerprints, records/groups, active work,
+and elapsed time. A heartbeat may update elapsed time but never invent completed
+work. Presentation materialization reports exact item totals where available.
 
-Worker startup or preflight failure logs and stops before mutation. Any failed, ambiguous, interrupted, unpersistable, or unprojectable mutation logs structured technical context, marks state uncertain, stops without retry or continuation, and blocks later mutation until explicit Rescan. There is no direct-command fallback or automated recovery.
+Cancellation is not required for new features and new cancellation points should not
+be added by default. Existing Cancel behavior may remain best effort and stop only at
+safe boundaries. Partial analysis is discarded rather than resumed; mutation cannot
+be arbitrarily cancelled after it starts.
 
-Persisted analysis loading remains available during development. Startup lists only small state manifests; explicit Load restores the saved analysis without scanning. Legacy snapshot files migrate into state on explicit Load. New scans and checkpoints retain only the active state generation.
+## Target requirements
 
-In staged mode, Exact cleanup is enabled only for a compatible authoritative
-`ExactReady` checkpoint and eligible unskipped Exact selections. It invokes the
-existing Exact cleanup algorithm unchanged. Completed and nothing-to-do outcomes
-advance the durable phase to `CandidatePreparationReady`; failed or ambiguous
-mutation leaves state uncertain and Candidate cleanup disabled.
+### Smarter matching
 
-## AI
+- Add PDF cross-document fingerprints with explicit all-page/sampled coverage.
+- Add cover/visual and richer structural evidence where it improves labeled-corpus
+  precision or recall.
+- Add calibrated content-language detection.
+- Add configured online bibliographic providers, enabled by default. Record provider,
+  request fields, response identity, retrieval time, cache identity, and policy
+  version. Network/provider failure falls back to local evidence.
+- Add versioned local ML/embeddings for title, author, language, metadata, and bounded
+  content similarity where benchmarks show value.
+- Calibrate evidence fusion, contradictions, thresholds, and confidence on labeled
+  train/holdout corpora. Do not hard-code library-specific aliases.
+- Recompute only affected candidate neighborhoods where practical.
 
-Optional AI may assist with ambiguous metadata or edition comparison. It must include provenance and may not directly authorize destructive operations.
+### Faster repeated analysis
+
+- Persist and reuse SHA-256 when canonical path, size, timestamps, attributes/file
+  identity, and cache provenance are unchanged.
+- Selectively or periodically rehash cached files to detect drift.
+- Offer a verification scan that forces full byte hashing.
+- Version/invalidate every hash, assessment, signature, enrichment, embedding, and
+  grouping cache by all relevant inputs and policies.
+- Measure and expose cold/warm cache hit rates, durations, memory, and work counts.
+
+### Simpler mutation state
+
+- Replace detailed projected-delta/journal machinery with minimal durable workflow
+  and run status where this can be done without allowing accidental continuation.
+- Keep stop-on-ambiguity and explicit-Rescan-before-next-mutation behavior.
+- Do not add rollback, recovery, backup bundles, execution history, or alternate
+  mutation engines.
+
+## Explicit non-goals
+
+- Preserving every edition as a separate executable group.
+- Application-managed backup, undo, rollback, or recovery.
+- Guaranteed arbitrary cancellation or restart of partial analysis.
+- Direct SQLite writes or direct Calibre-managed filesystem mutation.
+- Cloud AI as matching or mutation authority.
