@@ -43,7 +43,8 @@ public sealed record CalibreCommandResult(
 public sealed record OpenCalibreMutationWorkerRequest(
     CalibreToolDescriptor Tool,
     string LibraryRoot,
-    string ExpectedLibraryUuid);
+    string ExpectedLibraryUuid,
+    string? MetadataCoverStagingRoot = null);
 
 public sealed record CalibreMutationWorkerOpenResult(
     ICalibreMutationWorkerSession? Session,
@@ -54,9 +55,81 @@ public sealed record CalibreMutationWorkerOpenResult(
 
 public enum CalibreMutationOperationKind
 {
+    SetMetadata,
     TransferFormat,
     RemoveFormat,
     RemoveRecord,
+}
+
+public sealed record CalibreMetadataSourceIdentity
+{
+    public CalibreMetadataSourceIdentity(
+        string providerId,
+        string providerVersion,
+        string editionId,
+        string proposalPolicyVersion)
+    {
+        ProviderId = Bound(providerId, 64, nameof(providerId));
+        ProviderVersion = Bound(providerVersion, 128, nameof(providerVersion));
+        EditionId = Bound(editionId, 160, nameof(editionId));
+        ProposalPolicyVersion = Bound(proposalPolicyVersion, 128, nameof(proposalPolicyVersion));
+    }
+
+    public string ProviderId { get; }
+    public string ProviderVersion { get; }
+    public string EditionId { get; }
+    public string ProposalPolicyVersion { get; }
+
+    private static string Bound(string value, int maximumLength, string parameterName)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(value, parameterName);
+        string normalized = value.Trim();
+        return normalized.Length <= maximumLength && normalized.All(character => !char.IsControl(character))
+            ? normalized
+            : throw new ArgumentOutOfRangeException(parameterName);
+    }
+}
+
+public sealed record CalibreMetadataMutation
+{
+    public CalibreMetadataMutation(
+        LibraryMetadataField field,
+        IEnumerable<string> values,
+        CalibreMetadataSourceIdentity source,
+        string? stagedCoverFileName = null,
+        FormatFileFingerprint? stagedCoverFingerprint = null)
+    {
+        ArgumentNullException.ThrowIfNull(values);
+        ArgumentNullException.ThrowIfNull(source);
+        if (!Enum.IsDefined(field)) throw new ArgumentOutOfRangeException(nameof(field));
+        string[] boundedValues = values.Select(value => value ?? throw new ArgumentException(
+                "Metadata values cannot contain null.", nameof(values)))
+            .ToArray();
+        if (boundedValues.Length > 32 || boundedValues.Any(value => value.Length > 2_048)
+            || boundedValues.Sum(value => value.Length) > 16_384)
+            throw new ArgumentException("Metadata values exceed their bounds.", nameof(values));
+        bool cover = field == LibraryMetadataField.Cover;
+        if (cover != (stagedCoverFingerprint is not null)
+            || cover != !string.IsNullOrWhiteSpace(stagedCoverFileName)
+            || cover && boundedValues.Length != 0
+            || !cover && boundedValues.Length == 0)
+            throw new ArgumentException("The metadata cover payload is invalid.", nameof(stagedCoverFileName));
+        if (stagedCoverFileName is not null
+            && (stagedCoverFileName.Length > 128
+                || stagedCoverFileName != Path.GetFileName(stagedCoverFileName)))
+            throw new ArgumentException("The staged cover filename is invalid.", nameof(stagedCoverFileName));
+        Field = field;
+        Values = Array.AsReadOnly(boundedValues);
+        Source = source;
+        StagedCoverFileName = stagedCoverFileName;
+        StagedCoverFingerprint = stagedCoverFingerprint;
+    }
+
+    public LibraryMetadataField Field { get; }
+    public IReadOnlyList<string> Values { get; }
+    public CalibreMetadataSourceIdentity Source { get; }
+    public string? StagedCoverFileName { get; }
+    public FormatFileFingerprint? StagedCoverFingerprint { get; }
 }
 
 public sealed record CalibreMutationOperation
@@ -67,12 +140,13 @@ public sealed record CalibreMutationOperation
         CalibreBookId recordId,
         string? canonicalFormat,
         CalibreBookId? targetRecordId,
-        FormatFileFingerprint? expectedFingerprint)
+        FormatFileFingerprint? expectedFingerprint,
+        CalibreMetadataMutation? metadata)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(operationId);
         if (operationId.Length > 160) throw new ArgumentOutOfRangeException(nameof(operationId));
         if (recordId.Value <= 0) throw new ArgumentOutOfRangeException(nameof(recordId));
-        if (kind != CalibreMutationOperationKind.RemoveRecord)
+        if (kind is CalibreMutationOperationKind.TransferFormat or CalibreMutationOperationKind.RemoveFormat)
         {
             ArgumentException.ThrowIfNullOrWhiteSpace(canonicalFormat);
             if (canonicalFormat.Length > 16 || !canonicalFormat.All(char.IsAsciiLetterOrDigit))
@@ -82,6 +156,10 @@ public sealed record CalibreMutationOperation
             && (targetRecordId is null || targetRecordId.Value.Value <= 0
                 || targetRecordId == recordId || expectedFingerprint is null))
             throw new ArgumentException("The transfer operation is incomplete.", nameof(targetRecordId));
+        if ((kind == CalibreMutationOperationKind.SetMetadata) != (metadata is not null)
+            || kind == CalibreMutationOperationKind.SetMetadata
+                && (canonicalFormat is not null || targetRecordId is not null || expectedFingerprint is not null))
+            throw new ArgumentException("The metadata operation is invalid.", nameof(metadata));
 
         OperationId = operationId;
         Kind = kind;
@@ -89,6 +167,7 @@ public sealed record CalibreMutationOperation
         CanonicalFormat = canonicalFormat?.ToUpperInvariant();
         TargetRecordId = targetRecordId;
         ExpectedFingerprint = expectedFingerprint;
+        Metadata = metadata;
     }
 
     public string OperationId { get; }
@@ -97,6 +176,14 @@ public sealed record CalibreMutationOperation
     public string? CanonicalFormat { get; }
     public CalibreBookId? TargetRecordId { get; }
     public FormatFileFingerprint? ExpectedFingerprint { get; }
+    public CalibreMetadataMutation? Metadata { get; }
+
+    public static CalibreMutationOperation SetMetadata(
+        string operationId,
+        CalibreBookId recordId,
+        CalibreMetadataMutation metadata) => new(operationId,
+        CalibreMutationOperationKind.SetMetadata, recordId, null, null, null,
+        metadata ?? throw new ArgumentNullException(nameof(metadata)));
 
     public static CalibreMutationOperation TransferFormat(
         string operationId,
@@ -105,18 +192,18 @@ public sealed record CalibreMutationOperation
         string canonicalFormat,
         FormatFileFingerprint expectedFingerprint) => new(operationId,
         CalibreMutationOperationKind.TransferFormat, sourceRecordId, canonicalFormat,
-        targetRecordId, expectedFingerprint ?? throw new ArgumentNullException(nameof(expectedFingerprint)));
+        targetRecordId, expectedFingerprint ?? throw new ArgumentNullException(nameof(expectedFingerprint)), null);
 
     public static CalibreMutationOperation RemoveFormat(
         string operationId,
         CalibreBookId recordId,
         string canonicalFormat) => new(operationId, CalibreMutationOperationKind.RemoveFormat,
-        recordId, canonicalFormat, null, null);
+        recordId, canonicalFormat, null, null, null);
 
     public static CalibreMutationOperation RemoveRecord(
         string operationId,
         CalibreBookId recordId) => new(operationId, CalibreMutationOperationKind.RemoveRecord,
-        recordId, null, null, null);
+        recordId, null, null, null, null);
 }
 
 public sealed record CalibreMutationChunkRequest
@@ -145,7 +232,10 @@ public sealed record CalibreMutationOperationResult(
     string OperationId,
     CalibreMutationOperationKind Kind,
     bool IsSuccess,
-    string? FailureCode = null);
+    string? FailureCode = null,
+    IReadOnlyList<string>? VerifiedMetadataValues = null,
+    string? VerifiedManagedPath = null,
+    string? VerifiedAuthorSort = null);
 
 public sealed record CalibreMutationChunkResult(
     string ChunkId,

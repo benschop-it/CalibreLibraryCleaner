@@ -37,13 +37,14 @@ public enum LibraryWorkflowPhase
     ExactReady,
     CandidatePreparationReady,
     CandidateAnalysisReady,
+    CandidateCleanupCompleted,
     Completed,
 }
 
 public sealed record LibraryWorkflowPolicyVersions
 {
     public static LibraryWorkflowPolicyVersions Current { get; } = new(
-        "staged-cleanup/1.0.0",
+        "staged-cleanup/1.1.0",
         "exact-analysis/1.1.0",
         "exact-cleanup/1.0.0",
         "candidate-analysis/1.3.0");
@@ -91,7 +92,9 @@ public sealed record LibraryWorkflowCheckpoint
         Revision = revision;
         PolicyVersions = policyVersions ?? throw new ArgumentNullException(nameof(policyVersions));
         PublishedAtUtc = publishedAtUtc.ToUniversalTime();
-        if (phase is LibraryWorkflowPhase.CandidateAnalysisReady or LibraryWorkflowPhase.Completed
+        if (phase is LibraryWorkflowPhase.CandidateAnalysisReady
+            or LibraryWorkflowPhase.CandidateCleanupCompleted
+            or LibraryWorkflowPhase.Completed
             && source is null)
             throw new ArgumentException("Candidate workflow phases require exact-stage provenance.", nameof(source));
         Source = source;
@@ -256,7 +259,8 @@ public sealed record LibraryState
             LibraryWorkflowPhase.RequiresExactAnalysis => next == LibraryWorkflowPhase.ExactReady,
             LibraryWorkflowPhase.ExactReady => next == LibraryWorkflowPhase.CandidatePreparationReady,
             LibraryWorkflowPhase.CandidatePreparationReady => next == LibraryWorkflowPhase.CandidateAnalysisReady,
-            LibraryWorkflowPhase.CandidateAnalysisReady => next == LibraryWorkflowPhase.Completed,
+            LibraryWorkflowPhase.CandidateAnalysisReady => next == LibraryWorkflowPhase.CandidateCleanupCompleted,
+            LibraryWorkflowPhase.CandidateCleanupCompleted => next == LibraryWorkflowPhase.Completed,
             _ => false,
         };
 }

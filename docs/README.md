@@ -17,22 +17,27 @@ Read these first:
 ## Decisions
 
 The [ADR index](adr/README.md) classifies current, amended, implementation-baseline,
-and superseded decisions. ADRs under [adr/](adr/) preserve decision history. The current product direction is
-[ADR 0021: matching-first, performance-oriented product](adr/0021-matching-first-performance-oriented-product.md).
-Earlier ADRs remain useful implementation/history records but are superseded or
-amended where ADR 0021 says so.
+and superseded decisions. ADRs under [adr/](adr/) preserve decision history.
+[ADR 0021](adr/0021-matching-first-performance-oriented-product.md) records the
+matching and performance baseline, but its broad future priorities are amended by
+the current one-time cleanup product decision and active finish plan. Earlier ADRs
+remain useful implementation/history records where they do not conflict with that
+decision.
 
 ## Current work
 
-Active execution plans live under [plans/](plans/). A plan is not authoritative
-product behavior until its outcome is implemented, verified, and reflected in the
-core documents above.
+Active execution plans live under [plans/](plans/). The current plan records the
+explicit one-time cleanup scope for remaining work. Its unimplemented outcomes are
+targets rather than current production behavior.
 
 ## Workflows and evidence
 
 Reusable procedures and measured acceptance evidence live under
 [workflows/](workflows/). They support, but do not override, the current core docs
 and accepted ADRs.
+
+The current deterministic package evidence and pending destructive acceptance gate
+are recorded in [Windows release acceptance](workflows/windows-release-acceptance.md).
 
 ## Historical material
 

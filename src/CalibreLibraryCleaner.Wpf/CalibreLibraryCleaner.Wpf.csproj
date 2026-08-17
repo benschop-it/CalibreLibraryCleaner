@@ -17,10 +17,10 @@
     <PackageReference Include="Serilog.Sinks.File" />
   </ItemGroup>
 
-  <Target Name="CopyPdfInspectionWorker" AfterTargets="Build">
+  <Target Name="CopyPdfInspectionWorkerForDevelopmentBuild" AfterTargets="Build">
     <ItemGroup>
       <_PdfInspectionWorkerFile Include="$(MSBuildThisFileDirectory)..\CalibreLibraryCleaner.PdfWorker\bin\$(Configuration)\net10.0\CalibreLibraryCleaner.PdfWorker*" />
     </ItemGroup>
-    <Copy SourceFiles="@(_PdfInspectionWorkerFile)" DestinationFolder="$(OutDir)" SkipUnchangedFiles="true" />
+    <Copy SourceFiles="@(_PdfInspectionWorkerFile)" DestinationFolder="$(OutDir)pdf-worker\" SkipUnchangedFiles="true" />
   </Target>
 </Project>

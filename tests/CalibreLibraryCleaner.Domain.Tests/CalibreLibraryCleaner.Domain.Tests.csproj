@@ -10,6 +10,7 @@
 
   <ItemGroup>
     <EmbeddedResource Include="Matching\Corpus\*.json" />
+    <EmbeddedResource Include="Metadata\Fixtures\*.json" />
   </ItemGroup>
 
   <ItemGroup>

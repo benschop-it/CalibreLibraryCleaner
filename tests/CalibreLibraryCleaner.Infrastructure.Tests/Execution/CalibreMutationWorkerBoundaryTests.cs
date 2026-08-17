@@ -45,6 +45,40 @@ public sealed class CalibreMutationWorkerBoundaryTests
     }
 
     [Fact]
+    public async Task MetadataOperationReturnsVerifiedValuesPathAndAuthorSort()
+    {
+        using ControlledCalibreExecutable executable = new();
+        using TemporaryDirectory temporary = new();
+        using ServiceProvider provider = Provider(executable);
+        string library = Path.Combine(temporary.Path, "library");
+        Directory.CreateDirectory(library);
+        File.WriteAllBytes(Path.Combine(library, "metadata.db"), [0x00]);
+        CalibreToolDescriptor tool = (await provider.GetRequiredService<ICalibreToolDiscovery>()
+            .DiscoverAndProbeAsync(library, CancellationToken.None)).Tool!;
+        ICalibreMutationWorkerFactory factory = provider.GetRequiredService<ICalibreMutationWorkerFactory>();
+        CalibreMetadataSourceIdentity source = new(
+            "qualified-provider", "1.0", "qualified-edition", "qualified-policy/1.0");
+
+        CalibreMutationWorkerOpenResult opened = await factory.TryOpenAsync(new(
+            tool, library, "87f7ed1f-59a8-45a6-975a-7e06fd84780d"), CancellationToken.None);
+        await using ICalibreMutationWorkerSession session = opened.Session!;
+        CalibreMutationChunkResult result = await session.ExecuteChunkAsync(new(
+            "metadata-chunk",
+            [CalibreMutationOperation.SetMetadata(
+                "metadata:1:title",
+                new(1),
+                new(LibraryMetadataField.Title, ["Qualified Title"], source))]),
+            CancellationToken.None);
+
+        opened.IsSuccess.Should().BeTrue(opened.FailureCode);
+        result.IsSuccess.Should().BeTrue(result.FailureCode);
+        CalibreMutationOperationResult operation = result.OperationResults.Should().ContainSingle().Subject;
+        operation.VerifiedMetadataValues.Should().Equal("Qualified Title");
+        operation.VerifiedManagedPath.Should().Be("Verified/Managed/Path");
+        operation.VerifiedAuthorSort.Should().Be("Verified Author Sort");
+    }
+
+    [Fact]
     public async Task MissingTrustedSiblingFailsBeforeMutation()
     {
         using ControlledCalibreExecutable executable = new();

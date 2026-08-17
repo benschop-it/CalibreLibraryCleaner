@@ -31,7 +31,13 @@ public sealed class ExactBinaryCleanupPlanWorkspaceViewModelTests
         A.CallTo(() => clock.GetUtcNow()).Returns(now);
         IExactDuplicateCleanupConfirmationService confirmation =
             A.Fake<IExactDuplicateCleanupConfirmationService>();
-        A.CallTo(() => confirmation.ConfirmExternalBackup(0)).Returns(true);
+        LibraryOperationCoordinator operationCoordinator = new();
+        A.CallTo(() => confirmation.ConfirmExternalBackup(0)).ReturnsLazily(() =>
+        {
+            operationCoordinator.IsOperationActive.Should().BeTrue();
+            operationCoordinator.TryBegin().Should().BeNull();
+            return true;
+        });
         ICleanupExecutionIdGenerator executionIds = A.Fake<ICleanupExecutionIdGenerator>();
         A.CallTo(() => executionIds.Create()).Returns(new CleanupExecutionId(
             Guid.Parse("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee")));
@@ -45,7 +51,8 @@ public sealed class ExactBinaryCleanupPlanWorkspaceViewModelTests
                 clock),
             confirmation,
             stateSession,
-            clock);
+            clock,
+            operationCoordinator);
         viewModel.UpdateContext(snapshot, []);
 
         await viewModel.RemoveDuplicatesCommand.ExecuteAsync(null);
@@ -54,6 +61,7 @@ public sealed class ExactBinaryCleanupPlanWorkspaceViewModelTests
             .Be(LibraryWorkflowPhase.CandidatePreparationReady);
         viewModel.Status.Should().Contain("no library changes were required");
         viewModel.RemoveDuplicatesCommand.CanExecute(null).Should().BeFalse();
+        operationCoordinator.IsOperationActive.Should().BeFalse();
         A.CallTo(() => tools.DiscoverAndProbeAsync(A<string>._, A<CancellationToken>._))
             .MustNotHaveHappened();
         A.CallTo(() => workers.TryOpenAsync(

@@ -10,7 +10,7 @@ if (values is ["-e", _, "--", _, string libraryUuid])
 {
     IReadOnlyList<string> capabilities = new List<string>
     {
-        "transferFormat", "removeFormat", "removeRecord",
+        "setMetadata", "transferFormat", "removeFormat", "removeRecord",
     };
     if (!string.IsNullOrWhiteSpace(control.LogPath))
         File.AppendAllText(control.LogPath, JsonSerializer.Serialize(values) + Environment.NewLine);
@@ -21,6 +21,7 @@ if (values is ["-e", _, "--", _, string libraryUuid])
         libraryUuid,
         capabilities,
     });
+    string[] verifiedCoverValues = ["true"];
     string? line;
     while ((line = await Console.In.ReadLineAsync()) is not null)
     {
@@ -49,6 +50,18 @@ if (values is ["-e", _, "--", _, string libraryUuid])
                 operationId = operation.GetProperty("operationId").GetString(),
                 kind = operation.GetProperty("kind").GetString(),
                 isSuccess = true,
+                verifiedMetadataValues = operation.GetProperty("kind").GetString() == "setMetadata"
+                    ? operation.GetProperty("metadataField").GetString() == "cover"
+                        ? verifiedCoverValues
+                        : operation.GetProperty("metadataValues").EnumerateArray()
+                            .Select(value => value.GetString()).ToArray()
+                    : null,
+                verifiedManagedPath = operation.GetProperty("kind").GetString() == "setMetadata"
+                    ? "Verified/Managed/Path"
+                    : null,
+                verifiedAuthorSort = operation.GetProperty("kind").GetString() == "setMetadata"
+                    ? "Verified Author Sort"
+                    : null,
             }).ToArray(),
         });
     }

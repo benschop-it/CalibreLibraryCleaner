@@ -147,6 +147,64 @@ public sealed class DependencyDirectionTests
     }
 
     [Fact]
+    public void EditionMetadataProposalsHaveNoMutationAuthority()
+    {
+        string[] mutationRoots =
+        [
+            Path.Combine(RepositoryRoot, "src", ApplicationProject, "Executions"),
+            Path.Combine(RepositoryRoot, "src", InfrastructureProject, "Calibre"),
+        ];
+        string source = string.Join(
+            Environment.NewLine,
+            mutationRoots.SelectMany(root => Directory.EnumerateFiles(
+                root, "*.cs", SearchOption.AllDirectories)).Select(File.ReadAllText));
+
+        source.Should().NotContain("EditionMetadataProposal");
+        source.Should().NotContain("IEditionMetadataProvider");
+    }
+
+    [Fact]
+    public void GoogleBooksCredentialDoesNotFlowToCachesSnapshotsOrExports()
+    {
+        string[] protectedFiles =
+        [
+            Path.Combine(RepositoryRoot, "src", InfrastructureProject, "Bibliographic", "FileEditionMetadataProposalCache.cs"),
+            Path.Combine(RepositoryRoot, "src", InfrastructureProject, "Metadata", "FileMetadataReviewDecisionStore.cs"),
+            .. Directory.EnumerateFiles(
+                Path.Combine(RepositoryRoot, "src", InfrastructureProject, "LibrarySnapshots"),
+                "*.cs",
+                SearchOption.AllDirectories),
+            .. Directory.EnumerateFiles(
+                Path.Combine(RepositoryRoot, "src", InfrastructureProject, "Recommendations"),
+                "*.cs",
+                SearchOption.AllDirectories),
+        ];
+        string source = string.Join(Environment.NewLine, protectedFiles.Select(File.ReadAllText));
+
+        source.Should().NotContain("IGoogleBooksApiKeyStore");
+        source.Should().NotContain("GoogleBooksApiKey");
+        source.Should().NotContain("ProviderPayload");
+    }
+
+    [Fact]
+    public void MetadataReviewUsesVirtualizedMasterAndResizableSelectedDetail()
+    {
+        string source = File.ReadAllText(Path.Combine(
+            RepositoryRoot, "src", WpfProject, "MainWindow.xaml"));
+
+        source.Should().Contain("ItemsSource=\"{Binding MetadataReviewSubjects}\"");
+        source.Should().Contain("EnableRowVirtualization=\"True\"");
+        source.Should().Contain("EnableColumnVirtualization=\"True\"");
+        source.Should().Contain("VirtualizingPanel.VirtualizationMode=\"Recycling\"");
+        source.Should().Contain("SelectedItem=\"{Binding SelectedMetadataReviewSubject, Mode=TwoWay}\"");
+        source.Should().Contain("AutomationProperties.Name=\"Resize metadata review details\"");
+        source.Should().NotContain("RowDetailsVisibilityMode=\"Visible\"");
+        source.Should().Contain("Text=\"{Binding Reasons, Mode=OneWay}\"");
+        source.Should().Contain("Text=\"{Binding Provenance, Mode=OneWay}\"");
+        source.Should().Contain("IsChecked=\"{Binding Apply, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}\"");
+    }
+
+    [Fact]
     public void CoreAndWpfSourceDoNotImplementFileHashing()
     {
         string[] projectNames = [DomainProject, ApplicationProject, WpfProject];

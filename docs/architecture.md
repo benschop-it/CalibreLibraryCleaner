@@ -177,6 +177,63 @@ Network/provider/cache failures degrade to local matching. Set
 `CALIBRE_OPEN_LIBRARY_ENABLED=0` to disable the provider; optional
 `CALIBRE_OPEN_LIBRARY_CONTACT` identifies regular requests without being logged.
 
+A separate edition-metadata boundary is invoked only by an explicit action after
+Candidate cleanup. Domain owns bounded provider-neutral edition queries, coherent
+edition candidates, and deterministic one-provider proposal selection. Application
+runs each configured provider independently through
+cache-first orchestration, so one failure does not block another. The rate-limited
+Open Library adapter requests one nested relevance-ranked edition per work. Google
+Books uses the bounded public volumes endpoint only when a current-user DPAPI-
+protected API key is configured; it requests title/subtitle, authors, publisher,
+published date, industry identifiers, and language, but no cover fields in this
+slice. A separate reduced cache stores normalized proposal fields and provenance
+under opaque provider-specific query hashes and never receives the key. The settings
+dialog displays only configured status and masked Save/Replace/Clear input.
+
+Domain fusion now chooses one deterministic primary edition using validated ISBN,
+title/author/language compatibility, provider support, publisher/date/series
+compatibility, provider match score, and completeness. Cross-provider missing fields
+are filled only for a shared validated ISBN; same-provider completion additionally
+accepts the identical edition ID. Conflicting provider facts lower confidence. Every
+fused result retains provider identities/versions, retrieval times, proposals, field
+sources, reasons, and `edition-metadata-fusion/1.0.0` policy identity.
+
+After Candidate cleanup, projected Unified groups are cleared and Application creates
+one metadata-review subject for every retained record. Candidate preparation,
+Candidate review, persisted load, and projected-state updates never invoke edition
+providers. The user explicitly starts post-cleanup provider resolution; compatible
+Apply overrides restore only for matching subject, policy, provider/version/edition,
+generation, and revision identities.
+
+Infrastructure persists only bounded Apply overrides in an atomic path-private file;
+no proposal fields, local metadata, provider payloads, API keys, or library paths are
+stored. WPF presents one recycling/virtualized subject grid with compact current
+metadata and a distinct proposed row, confidence/reasons/provenance, Apply, four
+filters, and current/proposed cover availability/reference text.
+
+Candidate cleanup first transfers/removes reviewed duplicate records and advances to
+a post-cleanup checkpoint. A separate confirmed metadata-only worker run accepts the
+current compatible checked review subjects. Infrastructure stages trusted Open Library
+covers through bounded HTTPS into an execution-scoped directory outside the library.
+The fixed persistent worker merges identifiers from the live Cache, verifies stored
+local fields and exact read-back, and returns the live managed path and author sort for
+state projection. Provider/model evidence still has no direct mutation authority.
+
+## Windows release assembly
+
+Release packaging publishes the WPF application and PDF worker independently for
+`win-x64`, framework-dependent on the .NET 10 Desktop Runtime. The complete PDF worker
+publish remains under `pdf-worker/`, matching its default process path and preventing
+same-named dependency collisions with the WPF publish. Release correctness does not
+depend on the WPF project's development-only post-build copy target.
+
+The deterministic package workflow merges only those two explicit publish outputs,
+rejects symbols/tests/caches/logs/state/credentials/temporary files and source-machine
+paths, emits a sorted SHA-256 manifest, and creates a ZIP with sorted entries and fixed
+timestamps. The packaged WPF executable provides a no-UI `--release-smoke` path that
+validates required files and the fixed embedded Calibre mutation worker without
+initializing logging, state, providers, or child workers.
+
 ## Local ML
 
 Infrastructure owns model files/runtime and bounded inference. Application owns

@@ -5,11 +5,12 @@ offline by default, and never use a personal Calibre library.
 
 ## Priority order
 
-1. matching quality and deterministic evidence fusion;
-2. cache correctness, invalidation, and cold/warm performance;
-3. cleanup planning/worker ordering and backup confirmation;
-4. parser/path/process safety;
-5. progress visibility and architecture boundaries;
+1. preserve the frozen matching baseline and deterministic grouping;
+2. rich-edition parsing, coherent proposal selection, provenance, and confidence;
+3. approved metadata mutation, local-field preservation, worker ordering, and backup
+  confirmation;
+4. provider/key/cache, parser/path/process, and privacy safety;
+5. scalable review, operation exclusion, progress, packaging, and architecture;
 6. optional best-effort cancellation behavior where retained.
 
 ## Matching evaluation
@@ -58,6 +59,26 @@ unique/dominant resolution, provenance, decisive-contradiction precedence, cold/
 cache behavior, stale/corrupt cache misses, thrown-adapter fallback, and absence of
 raw query metadata in cache files. Ordinary tests never require live network access.
 
+Open Library edition-metadata tests use fake nested-edition Search API responses and
+small labeled fixtures. They cover coherent edition selection, validated ISBNs,
+title/author/language compatibility, bounded rich field parsing, query deduplication,
+provider failure, opaque cache keys, stale/corrupt misses, and separation from
+mutation authority. Final cross-provider confidence remains outside this boundary.
+
+Google Books tests use fake volumes responses and cover ISBN or title/author/language
+queries, exact partial-response fields, result/response/time bounds, validated
+identifiers, missing-key and provider failure isolation, and deliberate omission of
+cover fields. Credential tests run on Windows and cover DPAPI current-user
+Save/Replace/Clear, corrupt ciphertext, input bounds, no plaintext on disk or in the
+view model, and no credential dependency from caches, snapshots, exports, or mutation.
+
+Fusion fixtures cover shared-ISBN agreement, conflicting editions, shared-ISBN
+missing-field completion, same-provider identical edition IDs, single-provider exact
+matches, unavailable results, deterministic ordering, every retained-record subject,
+and provider failure. Tests assert categorical
+High/Medium/Low/Unavailable defaults, field provenance, provider versions/retrieval
+facts, reason codes, and fusion policy version.
+
 Local embedding tests use fake vectors and fake loopback HTTP in the ordinary suite.
 They cover finite dimensions, symmetric integer cosine similarity, complete
 runtime/model/preprocessing cache identity, batching/caps, cold/warm reuse,
@@ -84,8 +105,7 @@ Every cache test covers:
 Hash-cache tests additionally cover unchanged identity reuse without a stream open,
 timestamp/size/attribute changes, replacement at the same path, forced full
 verification, path-private persistence, bounded pruning, and cold/warm repeated Exact
-Scan behavior. Selective/periodic byte revalidation tests accompany that future
-policy slice.
+Scan behavior.
 
 Performance baselines use deterministic synthetic libraries and explicitly supplied
 disposable copies. Record cold/warm durations, cache hit rates, bytes read, parser
@@ -177,6 +197,31 @@ redaction. Model tests cover deterministic preprocessing, model/version identity
 bounded batches/resources, cache invalidation, and reproducible fixture outputs.
 
 Neither provider nor model evidence can call a mutation boundary.
+
+Edition-enrichment orchestration tests cover immediate cache writes, warm reuse,
+short-lived unavailable-result cooldown, interruption-safe partial reuse, bounded
+request caps, true processed/total progress, and deferred-query reporting.
+
+Metadata-review tests cover exact compatible restart restore, generation/revision/
+policy/provider-version/edition staleness reset, stale pruning, reset-to-default,
+bounded/private atomic decision persistence, zero provider calls during Candidate
+preparation/load, explicit post-cleanup preparation, current/proposed fields,
+cover availability/reference text,
+four filters, one recycling virtualized surface, and deterministic materialization of
+20,000 rows. Metadata and Expanded evidence choices do not imply mutation authority.
+All analysis and cleanup commands share one operation gate.
+
+Metadata-mutation tests cover exact protocol validation, supported-field replacement,
+local tags/ratings/comments/custom columns/unrelated identifier preservation, cover
+bounds, metadata-only post-cleanup ordering, Calibre read-back, and stop-on-failure with
+Rescan required. Release verification proves the published package contains the WPF
+application, complete isolated PDF worker, runtime assets, embedded mutation worker,
+and a matching size/SHA-256 manifest; rejects forbidden content; and launches the
+packaged executable's no-UI smoke mode directly. Rebuilding identical inputs must
+produce the same ZIP hash. Final disposable-library acceptance is explicit and opt-in.
+
+Do not add tests for periodic maintenance, generalized recovery, synchronization,
+plugins, cross-platform behavior, or Ollama activation.
 
 ## Standard verification
 

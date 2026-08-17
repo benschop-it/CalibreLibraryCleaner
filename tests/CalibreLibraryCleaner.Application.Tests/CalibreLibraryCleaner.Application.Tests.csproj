@@ -10,6 +10,11 @@
   </ItemGroup>
 
   <ItemGroup>
+    <EmbeddedResource Include="..\CalibreLibraryCleaner.Domain.Tests\Metadata\Fixtures\edition-metadata-fusion.v1.json"
+                      Link="Metadata\Fixtures\edition-metadata-fusion.v1.json" />
+  </ItemGroup>
+
+  <ItemGroup>
     <PackageReference Include="FakeItEasy" />
     <PackageReference Include="FluentAssertions" />
     <PackageReference Include="Microsoft.NET.Test.Sdk" />

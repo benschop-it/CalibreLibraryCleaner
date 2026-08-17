@@ -2,14 +2,13 @@
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="Calibre Library Cleaner"
-        Width="1100"
+        Width="1240"
         Height="700"
         MinWidth="760"
         MinHeight="480">
   <Window.InputBindings>
     <KeyBinding Key="N" Modifiers="Control" Command="{Binding NextMetadataDuplicateGroupCommand}" />
     <KeyBinding Key="P" Modifiers="Control" Command="{Binding PreviousMetadataDuplicateGroupCommand}" />
-    <KeyBinding Key="D" Modifiers="Control" Command="{Binding ToggleMetadataDuplicateDeferredCommand}" />
   </Window.InputBindings>
   <Grid Margin="16">
     <Grid.RowDefinitions>
@@ -24,6 +23,7 @@
       <Grid.ColumnDefinitions>
         <ColumnDefinition Width="Auto" />
         <ColumnDefinition Width="*" />
+        <ColumnDefinition Width="Auto" />
         <ColumnDefinition Width="Auto" />
         <ColumnDefinition Width="Auto" />
         <ColumnDefinition Width="Auto" />
@@ -80,11 +80,19 @@
               ToolTip="Run the unchanged Exact cleanup workflow for the current exact-only analysis" />
             <Button Grid.Column="7"
               MinWidth="120"
+              Margin="0,0,8,0"
               Padding="8,4"
-              Content="Candidate _cleanup"
+              Content="{Binding CandidateCleanupAutomationName}"
               Command="{Binding CandidateCleanupCommand}"
               AutomationProperties.Name="{Binding CandidateCleanupAutomationName}"
               ToolTip="{Binding CandidateCleanupToolTip}" />
+      <Button Grid.Column="8"
+              MinWidth="130"
+              Padding="8,4"
+              Content="Online _metadata..."
+              Command="{Binding OnlineMetadataSettingsCommand}"
+              AutomationProperties.Name="Online metadata settings"
+              ToolTip="Configure online metadata providers and the protected Google Books API key" />
     </Grid>
 
     <StackPanel Grid.Row="1" Margin="0,12,0,0">
@@ -172,7 +180,9 @@
         <Grid Margin="8">
           <Grid.RowDefinitions>
             <RowDefinition Height="Auto" />
-            <RowDefinition Height="*" />
+            <RowDefinition Height="3*" MinHeight="180" />
+            <RowDefinition Height="5" />
+            <RowDefinition Height="2*" MinHeight="180" />
             <RowDefinition Height="*" />
           </Grid.RowDefinitions>
           <StackPanel Grid.Row="0" Margin="0,0,0,8">
@@ -238,10 +248,10 @@
             <RowDefinition Height="*" />
           </Grid.RowDefinitions>
           <StackPanel Grid.Row="0" Margin="0,0,0,8">
-            <TextBlock Text="These records have equal normalized titles and author sets. Review the generated keeper, skip groups that should remain unchanged, then process all remaining groups together."
+            <TextBlock Text="Read-only evidence for records with equal normalized titles and author sets. Cleanup choices are made only in Unified candidates."
                        TextWrapping="Wrap" />
             <TextBlock Margin="0,4,0,0"
-                       Text="Selecting a member changes the keeper. Every other record is removed after complementary formats are transferred; when the keeper already has the same format, the keeper's file wins."
+                       Text="Select or double-click a member to inspect it. The shown keeper and actions are generated evidence and cannot be changed here."
                        TextWrapping="Wrap" />
             <TextBlock Margin="0,4,0,0" Text="{Binding MetadataDuplicateSummary}" TextWrapping="Wrap" />
           </StackPanel>
@@ -249,6 +259,7 @@
             <DataGrid ItemsSource="{Binding MetadataDuplicateGroups}"
                       SelectedItem="{Binding SelectedMetadataDuplicateGroup}"
                       AutoGenerateColumns="False"
+                      IsReadOnly="True"
                       SelectionMode="Single"
                       CanUserAddRows="False"
                       EnableRowVirtualization="True"
@@ -256,7 +267,6 @@
                       VirtualizingPanel.VirtualizationMode="Recycling"
                       AutomationProperties.Name="Normalized metadata candidate groups">
               <DataGrid.Columns>
-                <DataGridCheckBoxColumn Width="70" Header="Skip" Binding="{Binding Skip, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
                 <DataGridTextColumn IsReadOnly="True" Width="2*" Header="Normalized title" Binding="{Binding NormalizedTitle}" />
                 <DataGridTextColumn IsReadOnly="True" Width="2*" Header="Normalized author set" Binding="{Binding NormalizedAuthors}" />
                 <DataGridTextColumn IsReadOnly="True" Width="80" Header="Records" Binding="{Binding RecordCount}" />
@@ -268,7 +278,7 @@
               </DataGrid.Columns>
             </DataGrid>
           </GroupBox>
-          <GroupBox Grid.Row="2" Margin="0,8,0,0" Header="Select the record to keep; double-click a row to open its book">
+          <GroupBox Grid.Row="2" Margin="0,8,0,0" Header="Generated keeper evidence; double-click a row to open its book">
             <DataGrid ItemsSource="{Binding SelectedMetadataDuplicateMembers}"
                       SelectedItem="{Binding SelectedMetadataDuplicateMember}"
                       MouseDoubleClick="MetadataCandidateMembersGrid_MouseDoubleClick"
@@ -369,6 +379,133 @@
           </GroupBox>
         </Grid>
       </TabItem>
+      <TabItem Header="Metadata _review" AutomationProperties.Name="Online metadata proposal review">
+        <Grid Margin="8">
+          <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+          </Grid.RowDefinitions>
+          <DockPanel Grid.Row="0" Margin="0,0,0,8">
+            <TextBlock DockPanel.Dock="Left"
+                       VerticalAlignment="Center"
+                       FontWeight="Bold"
+                       Text="{Binding MetadataReviewSummary}"
+                       TextWrapping="Wrap" />
+            <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" Margin="16,0,0,0">
+              <Label Target="{Binding ElementName=MetadataReviewFilterBox}"
+                     Content="_Show:" />
+              <ComboBox x:Name="MetadataReviewFilterBox"
+                        MinWidth="160"
+                        ItemsSource="{Binding MetadataReviewFilterModes}"
+                        SelectedItem="{Binding MetadataReviewFilterMode, Mode=TwoWay}" />
+            </StackPanel>
+          </DockPanel>
+          <DataGrid Grid.Row="1"
+                    ItemsSource="{Binding MetadataReviewSubjects}"
+                    SelectedItem="{Binding SelectedMetadataReviewSubject, Mode=TwoWay}"
+                    AutoGenerateColumns="False"
+                    IsReadOnly="True"
+                    SelectionMode="Single"
+                    SelectionUnit="FullRow"
+                    CanUserAddRows="False"
+                    EnableRowVirtualization="True"
+                    EnableColumnVirtualization="True"
+                    VirtualizingPanel.IsVirtualizing="True"
+                    VirtualizingPanel.VirtualizationMode="Recycling"
+                    ScrollViewer.CanContentScroll="True"
+                    AutomationProperties.Name="Metadata review subjects">
+            <DataGrid.Columns>
+              <DataGridTemplateColumn Width="70" Header="Apply">
+                <DataGridTemplateColumn.CellTemplate>
+                  <DataTemplate>
+                    <CheckBox HorizontalAlignment="Center"
+                              VerticalAlignment="Center"
+                              IsEnabled="{Binding CanApply}"
+                              IsChecked="{Binding Apply, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                              Command="{Binding PersistApplyCommand}" />
+                  </DataTemplate>
+                </DataGridTemplateColumn.CellTemplate>
+              </DataGridTemplateColumn>
+              <DataGridTextColumn Width="95" Header="Confidence" Binding="{Binding Confidence}" />
+              <DataGridTextColumn Width="80" Header="Target ID" Binding="{Binding TargetBookId}" />
+              <DataGridTextColumn Width="2*" MinWidth="180" Header="Current title" Binding="{Binding CurrentTitle}" />
+              <DataGridTextColumn Width="2*" MinWidth="160" Header="Current authors" Binding="{Binding CurrentAuthors}" />
+              <DataGridTextColumn Width="2*" MinWidth="180" Header="Proposed title" Binding="{Binding ProposedTitle}" />
+              <DataGridTextColumn Width="2*" MinWidth="160" Header="Proposed authors" Binding="{Binding ProposedAuthors}" />
+              <DataGridTextColumn Width="110" Header="Cover" Binding="{Binding ProposedCover}" />
+            </DataGrid.Columns>
+          </DataGrid>
+          <GridSplitter Grid.Row="2"
+                        Height="5"
+                        HorizontalAlignment="Stretch"
+                        ResizeDirection="Rows"
+                        ResizeBehavior="PreviousAndNext"
+                        Background="#B8C1C8"
+                        AutomationProperties.Name="Resize metadata review details" />
+          <Border Grid.Row="3"
+                  Margin="0,8,0,0"
+                  Padding="10"
+                  BorderBrush="#4B728A"
+                  BorderThickness="2,0,0,0"
+                  Background="#EAF4F7"
+                  DataContext="{Binding SelectedMetadataReviewSubject}">
+            <ScrollViewer VerticalScrollBarVisibility="Auto"
+                          HorizontalScrollBarVisibility="Disabled">
+              <StackPanel>
+                <TextBlock FontSize="15"
+                           FontWeight="Bold"
+                           Text="Selected proposal details" />
+                <Grid Margin="0,8,0,0">
+                  <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="16" />
+                    <ColumnDefinition Width="*" />
+                  </Grid.ColumnDefinitions>
+                  <StackPanel Grid.Column="0">
+                    <TextBlock FontWeight="Bold" Text="Current metadata" />
+                    <TextBlock Margin="0,4,0,0" Text="{Binding CurrentTitle, StringFormat=Title: {0}}" TextWrapping="Wrap" />
+                    <TextBlock Margin="0,3,0,0" Text="{Binding CurrentAuthors, StringFormat=Authors: {0}}" TextWrapping="Wrap" />
+                    <TextBlock Margin="0,3,0,0" Text="{Binding CurrentIdentifiers, StringFormat=Identifiers: {0}}" TextWrapping="Wrap" />
+                    <TextBlock Margin="0,3,0,0" Text="{Binding CurrentPublisher, StringFormat=Publisher: {0}}" TextWrapping="Wrap" />
+                    <TextBlock Margin="0,3,0,0" Text="{Binding CurrentPublicationDate, StringFormat=Date: {0}}" />
+                    <TextBlock Margin="0,3,0,0" Text="{Binding CurrentLanguages, StringFormat=Languages: {0}}" TextWrapping="Wrap" />
+                    <TextBlock Margin="0,3,0,0" Text="{Binding CurrentSeries, StringFormat=Series: {0}}" TextWrapping="Wrap" />
+                    <TextBlock Margin="0,3,0,0" Text="{Binding CurrentCover, StringFormat=Cover: {0}}" />
+                  </StackPanel>
+                  <StackPanel Grid.Column="2">
+                    <TextBlock FontWeight="Bold" Text="Proposed metadata" />
+                    <TextBlock Margin="0,4,0,0" Text="{Binding ProposedTitle, StringFormat=Title: {0}}" TextWrapping="Wrap" />
+                    <TextBlock Margin="0,3,0,0" Text="{Binding ProposedAuthors, StringFormat=Authors: {0}}" TextWrapping="Wrap" />
+                    <TextBlock Margin="0,3,0,0" Text="{Binding ProposedIdentifiers, StringFormat=Identifiers: {0}}" TextWrapping="Wrap" />
+                    <TextBlock Margin="0,3,0,0" Text="{Binding ProposedPublisher, StringFormat=Publisher: {0}}" TextWrapping="Wrap" />
+                    <TextBlock Margin="0,3,0,0" Text="{Binding ProposedPublicationDate, StringFormat=Date: {0}}" />
+                    <TextBlock Margin="0,3,0,0" Text="{Binding ProposedLanguages, StringFormat=Languages: {0}}" TextWrapping="Wrap" />
+                    <TextBlock Margin="0,3,0,0" Text="{Binding ProposedSeries, StringFormat=Series: {0}}" TextWrapping="Wrap" />
+                    <TextBlock Margin="0,3,0,0" Text="{Binding ProposedCover, StringFormat=Cover: {0}}" />
+                  </StackPanel>
+                </Grid>
+                <TextBlock Margin="0,10,0,0" FontWeight="Bold" Text="Reasons" />
+                <TextBox Margin="0,3,0,0"
+                         Padding="6"
+                         IsReadOnly="True"
+                         BorderThickness="1"
+                         Text="{Binding Reasons, Mode=OneWay}"
+                         TextWrapping="Wrap"
+                         VerticalScrollBarVisibility="Auto" />
+                <TextBlock Margin="0,10,0,0" FontWeight="Bold" Text="Provenance" />
+                <TextBox Margin="0,3,0,0"
+                         Padding="6"
+                         MinHeight="54"
+                         IsReadOnly="True"
+                         BorderThickness="1"
+                         Text="{Binding Provenance, Mode=OneWay}"
+                         TextWrapping="Wrap"
+                         VerticalScrollBarVisibility="Auto" />
+              </StackPanel>
+            </ScrollViewer>
+          </Border>
+        </Grid>
+      </TabItem>
       <TabItem Header="E_xpanded candidates" AutomationProperties.Name="Expanded content-confirmed candidates">
         <Grid Margin="8">
           <Grid.RowDefinitions>
@@ -381,13 +518,14 @@
                        Text="{Binding ExpandedCandidateSummary}"
                        TextWrapping="Wrap" />
             <TextBlock Margin="0,4,0,0"
-                       Text="Select the sole keeper in each content-confirmed group. Other records are removed after complementary formats are transferred; metadata is not rewritten."
+                       Text="Read-only matching and keeper evidence. Select or double-click a member to inspect it; cleanup choices are made only in Unified candidates."
                        TextWrapping="Wrap" />
           </StackPanel>
           <GroupBox Grid.Row="1" Header="Work-language groups">
             <DataGrid ItemsSource="{Binding ExpandedCandidateGroups}"
                       SelectedItem="{Binding SelectedExpandedCandidateGroup}"
                       AutoGenerateColumns="False"
+                      IsReadOnly="True"
                       SelectionMode="Single"
                       CanUserAddRows="False"
                       EnableRowVirtualization="True"
@@ -395,15 +533,6 @@
                       VirtualizingPanel.VirtualizationMode="Recycling"
                       AutomationProperties.Name="Expanded work-language candidate groups">
               <DataGrid.Columns>
-                <DataGridTemplateColumn Width="70" Header="Skip">
-                  <DataGridTemplateColumn.CellTemplate>
-                    <DataTemplate>
-                      <CheckBox HorizontalAlignment="Center"
-                                VerticalAlignment="Center"
-                                IsChecked="{Binding Skip, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
-                    </DataTemplate>
-                  </DataGridTemplateColumn.CellTemplate>
-                </DataGridTemplateColumn>
                 <DataGridTextColumn IsReadOnly="True" Width="95" Header="Eligibility" Binding="{Binding Eligibility}" />
                 <DataGridTextColumn IsReadOnly="True" Width="90" Header="Language" Binding="{Binding Language}" />
                 <DataGridTextColumn IsReadOnly="True" Width="100" Header="Confidence" Binding="{Binding Confidence}" />
@@ -415,7 +544,7 @@
               </DataGrid.Columns>
             </DataGrid>
           </GroupBox>
-          <GroupBox Grid.Row="2" Margin="0,8,0,0" Header="Select the record to keep; double-click a row to open its book">
+          <GroupBox Grid.Row="2" Margin="0,8,0,0" Header="Generated keeper evidence; double-click a row to open its book">
             <DataGrid ItemsSource="{Binding SelectedExpandedCandidateMembers}"
                       SelectedItem="{Binding SelectedExpandedCandidateMember}"
                       MouseDoubleClick="ExpandedCandidateMembersGrid_MouseDoubleClick"

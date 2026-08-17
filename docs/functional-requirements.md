@@ -98,10 +98,12 @@ advisory; a group is processed unless the user selects Skip. Candidate cleanup:
   bounded shingle sketch;
 - enabled-by-default, cache-first Open Library work identity for locally unresolved
   pairs, with deterministic title/author/language compatibility and field-category
-  disclosure;
+  disclosure; it confirms same-work identity and does not fetch or apply corrected
+  edition metadata;
 - optional configured fixed-loopback Ollama metadata-embedding observations with
   immutable runtime/model identity, memory-only vectors, and reduced comparison
-  cache; and
+  cache; calibration produced no acceptable threshold, so these observations do not
+  affect grouping or cleanup; and
 - deterministic component construction without blind weak-edge transitive closure.
 
 Candidate generation uses indexes, per-record caps, and a global pair ceiling rather
@@ -156,38 +158,100 @@ be added by default. Existing Cancel behavior may remain best effort and stop on
 safe boundaries. Partial analysis is discarded rather than resumed; mutation cannot
 be arbitrarily cancelled after it starts.
 
-## Target requirements
+## Implemented rich-edition boundary
 
-### Smarter matching
+Provider-neutral edition queries, candidates, provider-specific proposals, and
+selection reasons are implemented separately from same-work matching evidence. A
+cache-first read-only use case can resolve every queryable retained record from each
+provider independently. The Open Library adapter requests one nested relevance-ranked
+edition per work and extracts bounded title, authors, validated ISBNs, publisher,
+publication date, language, series, and cover reference. Google Books uses a bounded
+partial-response volumes query and extracts title/subtitle, authors, validated ISBNs,
+publisher, publication date, and language; cover fields are not requested in this
+step. One provider failure does not block the other. A separate opaque-key cache
+stores only normalized proposal fields and provenance, never raw responses, local
+queries, or the Google key.
 
-- Add PDF cross-document fingerprints with explicit all-page/sampled coverage.
-- Add cover/visual and richer structural evidence where it improves labeled-corpus
-  precision or recall.
-- Add calibrated content-language detection.
-- Add additional configured online bibliographic providers only where they improve
-  labeled quality beyond the implemented Open Library source. Preserve provider,
-  request-field, response-identity, retrieval-time, cache, and policy provenance.
-- Expand calibration for implemented local metadata embeddings and evaluate bounded
-  content embeddings where benchmarks and privacy constraints justify it.
-- Calibrate evidence fusion, contradictions, thresholds, and confidence on labeled
-  train/holdout corpora. Do not hard-code library-specific aliases.
-- Recompute only affected candidate neighborhoods where practical.
+The WPF Online metadata settings dialog discloses that providers receive ISBN only,
+or title, author names, and optional language. It accepts masked Save/Replace/Clear
+input and stores only DPAPI ciphertext for the current Windows user outside the
+repository and library. Plaintext is never reloaded for display.
 
-### Faster repeated analysis
+Deterministic provider fusion produces High confidence only for cross-provider shared
+ISBN agreement without conflicts; Medium for one exact ISBN or exact title+author
+without conflicts; Low for weaker or conflicting evidence; and Unavailable when no
+provider proposes an edition. High/Medium default selected and Low/Unavailable default
+unselected. Cross-provider missing fields require a shared validated ISBN; identical
+same-provider edition IDs may also complete a missing field. Provenance is retained
+per provider and per resulting field.
 
-- Selectively or periodically rehash cached files to detect drift.
-- Expose the implemented forced full-byte verification control in the UI.
-- Version/invalidate every hash, assessment, signature, enrichment, embedding, and
-  grouping cache by all relevant inputs and policies.
-- Measure and expose cold/warm cache hit rates, durations, memory, and work counts.
+After Candidate cleanup, subject construction creates one proposal target for every
+retained record. Candidate preparation, Unified review, persisted load, and projected
+state updates do not invoke edition providers. An explicit post-cleanup action runs
+provider resolution/fusion and prepares review subjects. The WPF review
+surface shows compact current metadata and a visually distinct proposed row with
+Apply, confidence, reasons, provenance, all supported fields, and cover availability.
+Filters are All, Applied automatically, Needs review, and Unavailable.
 
-### Simpler mutation state
+Only user Apply overrides are persisted. Each bounded decision is keyed by subject
+ID, fusion policy version, primary provider/version/edition identity, generation, and
+revision. Exact matches restore after restart; stale/incompatible decisions reset to
+confidence defaults and are pruned. Keeper changes preserve compatible decisions.
+The decision file contains no proposal metadata, provider payloads, API keys, or raw
+library path. Candidate cleanup completes before online enrichment begins. A separate
+confirmed metadata-only run sends current checked subjects through the fixed worker.
+The worker merges live identifier maps, preserves and
+verifies tags/ratings/comments/stored custom columns, verifies every field/cover
+read-back, and projects Calibre's live managed path and author sort. Cover staging is
+bounded, HTTPS-only, outside the library, and removed after the run.
 
-- Replace detailed projected-delta/journal machinery with minimal durable workflow
-  and run status where this can be done without allowing accidental continuation.
-- Keep stop-on-ambiguity and explicit-Rescan-before-next-mutation behavior.
-- Do not add rollback, recovery, backup bundles, execution history, or alternate
-  mutation engines.
+## Accepted finish requirements
+
+### Rich metadata proposals
+
+- Create one metadata-review subject for every expected retained record: one subject
+  per Unified group targeting its selected keeper, plus every residual singleton.
+- Resolve rich edition candidates from Open Library and optional keyed Google Books
+  independently, with bounded requests, complete provenance, versioned cache
+  identity, and failure isolation.
+- Persist each successful, NotFound, or transiently unavailable provider result as it
+  completes. Reuse normal results for the configured cache lifetime and unavailable
+  results for a short cooldown so interrupted review resumes without repeating failed
+  requests immediately.
+- When a provider request limit is reached, stop at the actual processed query count,
+  report the uncached deferred count, and never count unrequested queries as completed.
+- Choose one coherent best edition using validated ISBN, title/author/language,
+  edition compatibility, provider agreement, completeness, and cover availability.
+- Fill a missing field from another provider only when edition identity is proven.
+- Propose supported title, authors, ISBN/identifiers, publisher, publication date,
+  language, series/index, and cover without replacing local-only fields.
+- Default High/Medium confidence proposals checked and Low proposals unchecked.
+
+### Review and coordination
+
+- Show current retained metadata and one visually distinct proposed row with Apply,
+  confidence/reasons, provenance, supported fields, and cover indication/preview.
+- Filter proposals by All, Applied automatically, Needs review, and Unavailable.
+- Keep Metadata and Expanded tabs read-only; Unified review remains the only
+  duplicate-cleanup selection surface.
+- Prevent Scan, Load, Exact cleanup, Candidate preparation, Candidate cleanup, and
+  final normalization from overlapping.
+
+### Approved mutation and release
+
+- Send only checked supported metadata fields through a narrow typed operation on the
+  fixed persistent worker, apply them through supported Calibre APIs before deleting
+  source records, and verify read-back.
+- Stop on failed or ambiguous metadata mutation and require explicit Rescan.
+- Store an optional Google Books key per Windows user with Windows protection; never
+  log, export, cache, or redisplay its plaintext.
+- Publish one deterministic versioned Windows x64 ZIP containing the WPF application,
+  complete isolated PDF-worker publish, runtime dependencies, embedded Calibre worker,
+  and a file size/SHA-256 manifest. Exclude symbols, tests, caches, credentials, logs,
+  state, staging data, and source-machine paths. Package acceptance uses the executable
+  directly and remains destructive only on an explicitly backed-up disposable library.
+- After separate explicit approval, offer final Calibre-managed name normalization
+  through supported Calibre behavior only.
 
 ## Explicit non-goals
 
@@ -196,3 +260,6 @@ be arbitrarily cancelled after it starts.
 - Guaranteed arbitrary cancellation or restart of partial analysis.
 - Direct SQLite writes or direct Calibre-managed filesystem mutation.
 - Cloud AI as matching or mutation authority.
+- Further duplicate-matching calibration, new matching providers, periodic
+  maintenance, generalized cache work, synchronization, plugins, or multi-library
+  comparison.

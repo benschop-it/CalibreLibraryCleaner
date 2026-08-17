@@ -61,14 +61,26 @@ fixed typed protocol and supported Calibre database APIs. Direct SQLite writes,
 direct managed-file mutation, shell commands, arbitrary scripts, GUI automation,
 and mutation-engine fallback are prohibited.
 
-Operations are deterministic and ordered:
+Candidate cleanup and metadata enrichment are separate deterministic mutation runs:
 
-1. transfer selected complementary formats;
-2. remove non-keeper/source formats; and
-3. remove records proven empty.
+1. Candidate cleanup transfers selected complementary formats;
+2. removes non-keeper/source formats; and
+3. removes records proven empty.
+
+Only after Candidate cleanup, an explicit online review resolves retained records.
+A later confirmed metadata-only run applies checked fields/covers and verifies live
+Cache read-back. No metadata operation is mixed with transfer/removal operations.
 
 The keeper's existing same-format file wins. Non-physical, missing, unsafe, stale,
 or unverified groups are skipped before mutation.
+
+Metadata enrichment uses only checked, typed metadata-update operations through the
+same worker. It validates current review/target identity, merges identifiers from the
+live Cache, preserves local-only fields, uses supported Calibre APIs, and verifies
+read-back after Candidate source records are already deleted. Title/author updates may move managed
+paths; verified live paths are projected without direct filesystem mutation. Final
+managed-name normalization remains a separate, explicit action and may use supported
+Calibre behavior only.
 
 ## Failure handling
 
@@ -97,19 +109,31 @@ failure rule above.
 ## Caches
 
 A cache may improve performance but cannot silently bypass identity/version checks.
-Hash reuse requires unchanged stable file identity and provenance. Selective or
-periodic byte validation detects drift; a verification scan can force full hashing.
-Cache corruption or loss becomes a miss, not invented evidence.
+Hash reuse requires unchanged stable file identity and provenance; forced
+verification at the Application boundary performs full hashing. Cache corruption or
+loss becomes a miss, not invented evidence.
 
 ## Online providers and local models
 
-Configured online providers are enabled by default. Settings disclose providers and
-transmitted field categories. Requests are bounded and cached with provenance.
-Provider/network failure falls back to local matching.
+Open Library same-work evidence is enabled by default. Read-only metadata providers
+for Open Library and Google Books are implemented independently; Google Books runs
+only when the user stores an optional current-user DPAPI-protected key. Settings
+disclose that ISBN only, or title, author names, and optional language are transmitted.
+Requests and responses are bounded and proposals are cached with provenance, without
+the key. Provider/network failure leaves metadata unchanged and does not block the
+other provider or duplicate cleanup.
 
-Local model evidence is versioned and bounded. Provider/model output is evidence,
-not authority. Credentials, payloads, embeddings, and book metadata are not written
-to ordinary logs.
+Metadata review persists only bounded Apply overrides under an opaque library key.
+Compatibility requires exact subject, fusion policy, provider/version/edition,
+generation, and revision identity; stale decisions reset to safe confidence defaults.
+The review decision store contains no API keys, raw provider payloads, bibliographic
+metadata, covers, or library paths. Cover review currently shows availability and
+bounded references only; it downloads nothing.
+
+Configured local Ollama observations are versioned and bounded but do not affect
+grouping or cleanup. Provider/model output is evidence or a review proposal, never
+authority. Credentials, payloads, embeddings, and book metadata are not written to
+ordinary logs.
 
 ## Explicit non-features
 

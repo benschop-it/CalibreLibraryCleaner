@@ -1,5 +1,9 @@
 # Staged Workflow Large-Library Acceptance
 
+This record accepts the implemented Exact and Unified Candidate duplicate-cleanup
+baseline. It is not acceptance of the remaining online metadata, packaged-release,
+or final managed-name workflow in the active finish plan.
+
 ## Status
 
 - Checklist prepared: 2026-08-10.

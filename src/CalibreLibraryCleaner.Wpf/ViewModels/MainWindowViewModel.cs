@@ -4,10 +4,12 @@ using System.ComponentModel;
 using CalibreLibraryCleaner.Application.Abstractions;
 using CalibreLibraryCleaner.Application.Executions;
 using CalibreLibraryCleaner.Application.Libraries;
+using CalibreLibraryCleaner.Application.Metadata;
 using CalibreLibraryCleaner.Application.Recommendations;
 using CalibreLibraryCleaner.Domain.Duplicates;
 using CalibreLibraryCleaner.Domain.Libraries;
 using CalibreLibraryCleaner.Domain.Matching;
+using CalibreLibraryCleaner.Domain.Metadata;
 using CalibreLibraryCleaner.Domain.Recommendations;
 using CalibreLibraryCleaner.Wpf.Services;
 using CommunityToolkit.Mvvm.ComponentModel;
@@ -30,6 +32,10 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
     private readonly ICandidatePreparationWorkflow? _candidatePreparation;
     private readonly IUnifiedCandidateCleanupExecutor? _executeUnifiedCandidateCleanup;
     private readonly IUnifiedCandidateCleanupConfirmationService? _unifiedCandidateConfirmation;
+    private readonly IMetadataMutationConfirmationService? _metadataMutationConfirmation;
+    private readonly IOnlineMetadataSettingsDialogService? _onlineMetadataSettingsDialog;
+    private readonly PrepareMetadataReviewUseCase? _prepareMetadataReview;
+    private readonly LibraryOperationCoordinator _operationCoordinator;
     private readonly SynchronizationContext? _uiContext;
     private readonly BulkObservableCollection<BookRowViewModel> _books = [];
     private readonly BulkObservableCollection<string> _persistedLibraryPaths = [];
@@ -37,13 +43,16 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
     private readonly BulkObservableCollection<MetadataDuplicateGroupRowViewModel> _metadataDuplicateGroups = [];
     private readonly BulkObservableCollection<ExpandedCandidateGroupRowViewModel> _expandedCandidateGroups = [];
     private readonly BulkObservableCollection<UnifiedCandidateGroupRowViewModel> _unifiedCandidateGroups = [];
+    private readonly BulkObservableCollection<MetadataReviewSubjectRowViewModel> _metadataReviewSubjects = [];
     private readonly BulkObservableCollection<EpubAssessmentRowViewModel> _epubAssessments = [];
     private readonly BulkObservableCollection<EpubAssessmentFindingRowViewModel> _epubFindings = [];
     private readonly BulkObservableCollection<PdfAssessmentRowViewModel> _pdfAssessments = [];
     private readonly BulkObservableCollection<PdfAssessmentFindingRowViewModel> _pdfFindings = [];
     private readonly Dictionary<RecommendationReviewKey, ReviewedConsolidationRecommendation> _recommendationReviews = [];
     private readonly object _candidateProgressGate = new();
+    private readonly SemaphoreSlim _metadataReviewDecisionGate = new(1, 1);
     private IReadOnlyList<MetadataDuplicateGroupRowViewModel> _allMetadataDuplicateGroups = [];
+    private MetadataReviewSubjectRowViewModel[] _allMetadataReviewSubjects = [];
     private CancellationTokenSource? _scanCancellation;
     private string _selectedLibraryPath = string.Empty;
     private string? _selectedPersistedLibraryPath;
@@ -54,9 +63,12 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
     private string _metadataDuplicateSummary = "No exact metadata candidate groups have been found.";
     private string _expandedCandidateSummary = "Run a fresh scan to discover expanded candidates.";
     private string _unifiedCandidateSummary = "Run Candidate analysis to prepare unified candidates.";
+    private string _metadataReviewSummary =
+        "Complete Candidate cleanup, then prepare online metadata proposals for retained records.";
     private string _candidateCleanupResultSummary = string.Empty;
     private string _metadataDuplicateFilterText = string.Empty;
     private MetadataDuplicateFilterMode _metadataDuplicateFilterMode;
+    private MetadataReviewFilterMode _metadataReviewFilterMode = MetadataReviewFilterMode.NeedsReview;
     private bool _isBusy;
     private double _progressPercentage;
     private bool _isProgressIndeterminate;
@@ -69,6 +81,7 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
     private ExpandedCandidateMemberRowViewModel? _selectedExpandedCandidateMember;
     private UnifiedCandidateGroupRowViewModel? _selectedUnifiedCandidateGroup;
     private UnifiedCandidateMemberRowViewModel? _selectedUnifiedCandidateMember;
+    private MetadataReviewSubjectRowViewModel? _selectedMetadataReviewSubject;
     private EpubAssessmentRowViewModel? _selectedEpubAssessment;
     private EpubFindingFilterMode _epubFindingFilterMode;
     private PdfAssessmentRowViewModel? _selectedPdfAssessment;
@@ -87,6 +100,7 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
     private string _lastCandidateProgressDetail = string.Empty;
     private bool _isCandidatePreparationActive;
     private bool _candidateCancellationRequested;
+    private MetadataReviewWorkspace? _metadataReviewWorkspace;
 
     public MainWindowViewModel(
         ValidateLibraryUseCase validateLibrary,
@@ -102,7 +116,11 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
         LibraryWorkflowOptions? workflowOptions = null,
         ICandidatePreparationWorkflow? candidatePreparation = null,
         IUnifiedCandidateCleanupExecutor? executeUnifiedCandidateCleanup = null,
-        IUnifiedCandidateCleanupConfirmationService? unifiedCandidateConfirmation = null)
+        IUnifiedCandidateCleanupConfirmationService? unifiedCandidateConfirmation = null,
+        LibraryOperationCoordinator? operationCoordinator = null,
+        IOnlineMetadataSettingsDialogService? onlineMetadataSettingsDialog = null,
+        PrepareMetadataReviewUseCase? prepareMetadataReview = null,
+        IMetadataMutationConfirmationService? metadataMutationConfirmation = null)
     {
         _validateLibrary = validateLibrary;
         _scanLibrary = scanLibrary;
@@ -117,9 +135,14 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
         _candidatePreparation = candidatePreparation;
         _executeUnifiedCandidateCleanup = executeUnifiedCandidateCleanup;
         _unifiedCandidateConfirmation = unifiedCandidateConfirmation;
+        _metadataMutationConfirmation = metadataMutationConfirmation;
+        _onlineMetadataSettingsDialog = onlineMetadataSettingsDialog;
+        _prepareMetadataReview = prepareMetadataReview;
+        _operationCoordinator = operationCoordinator ?? new();
         _uiContext = SynchronizationContext.Current;
         if (_libraryStateSession is not null)
             _libraryStateSession.StateChanged += OnLibraryStateChanged;
+        _operationCoordinator.StateChanged += OnOperationStateChanged;
         ExactBinaryCleanupPlans = exactBinaryCleanupPlans;
         Books = new ReadOnlyObservableCollection<BookRowViewModel>(_books);
         PersistedLibraryPaths = new ReadOnlyObservableCollection<string>(_persistedLibraryPaths);
@@ -130,12 +153,19 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
             _expandedCandidateGroups);
         UnifiedCandidateGroups = new ReadOnlyObservableCollection<UnifiedCandidateGroupRowViewModel>(
             _unifiedCandidateGroups);
+        MetadataReviewSubjects = new ReadOnlyObservableCollection<MetadataReviewSubjectRowViewModel>(
+            _metadataReviewSubjects);
         EpubAssessments = new ReadOnlyObservableCollection<EpubAssessmentRowViewModel>(_epubAssessments);
         EpubFindings = new ReadOnlyObservableCollection<EpubAssessmentFindingRowViewModel>(_epubFindings);
         PdfAssessments = new ReadOnlyObservableCollection<PdfAssessmentRowViewModel>(_pdfAssessments);
         PdfFindings = new ReadOnlyObservableCollection<PdfAssessmentFindingRowViewModel>(_pdfFindings);
-        SelectLibraryCommand = new AsyncRelayCommand(SelectLibraryAsync, () => !IsBusy);
-        ScanCommand = new AsyncRelayCommand(ScanAsync, () => !IsBusy && !string.IsNullOrWhiteSpace(SelectedLibraryPath));
+        SelectLibraryCommand = new AsyncRelayCommand(
+            SelectLibraryAsync,
+            () => !IsBusy && !_operationCoordinator.IsOperationActive);
+        ScanCommand = new AsyncRelayCommand(
+            ScanAsync,
+            () => !IsBusy && !_operationCoordinator.IsOperationActive
+                && !string.IsNullOrWhiteSpace(SelectedLibraryPath));
         LoadPersistedSnapshotCommand = new AsyncRelayCommand(LoadPersistedSnapshotAsync, CanLoadPersistedSnapshot);
         CancelCommand = new RelayCommand(
             CancelScan,
@@ -167,6 +197,10 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
         MarkNotDuplicatesCommand = new RelayCommand(() => ApplySelectedReview(RecommendationReviewStatus.NotDuplicates), CanReviewSelected);
         ResetRecommendationCommand = new RelayCommand(ResetSelectedReview, CanReviewSelected);
         ExportRecommendationsCommand = new AsyncRelayCommand(ExportRecommendationsAsync, () => !IsBusy && _currentSnapshot is not null && _exportRecommendations is not null && _exportFilePicker is not null);
+        OnlineMetadataSettingsCommand = new RelayCommand(
+            ShowOnlineMetadataSettings,
+            () => !IsBusy && !_operationCoordinator.IsOperationActive
+                && _onlineMetadataSettingsDialog is not null);
         CandidateCleanupCommand = new AsyncRelayCommand(CandidateCleanupAsync, CanRunCandidateCleanup);
     }
 
@@ -219,6 +253,8 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
         private set => SetProperty(ref _errorAction, value);
     }
 
+    public bool IsOperationActive => _operationCoordinator.IsOperationActive;
+
     public bool IsBusy
     {
         get => _isBusy;
@@ -238,6 +274,7 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
                 PreviousMetadataDuplicateGroupCommand.NotifyCanExecuteChanged();
                 ToggleMetadataDuplicateDeferredCommand.NotifyCanExecuteChanged();
                 NotifyRecommendationCommands();
+                OnlineMetadataSettingsCommand.NotifyCanExecuteChanged();
                 CandidateCleanupCommand.NotifyCanExecuteChanged();
             }
         }
@@ -267,6 +304,8 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
 
     public ReadOnlyObservableCollection<UnifiedCandidateGroupRowViewModel> UnifiedCandidateGroups { get; }
 
+    public ReadOnlyObservableCollection<MetadataReviewSubjectRowViewModel> MetadataReviewSubjects { get; }
+
     public ReadOnlyObservableCollection<EpubAssessmentRowViewModel> EpubAssessments { get; }
 
     public ReadOnlyObservableCollection<EpubAssessmentFindingRowViewModel> EpubFindings { get; }
@@ -283,6 +322,9 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
 
     public IReadOnlyList<MetadataDuplicateFilterMode> MetadataDuplicateFilterModes { get; } =
         Enum.GetValues<MetadataDuplicateFilterMode>();
+
+    public IReadOnlyList<MetadataReviewFilterMode> MetadataReviewFilterModes { get; } =
+        Enum.GetValues<MetadataReviewFilterMode>();
 
     public string ExactDuplicateSummary
     {
@@ -308,6 +350,12 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
         private set => SetProperty(ref _unifiedCandidateSummary, value);
     }
 
+    public string MetadataReviewSummary
+    {
+        get => _metadataReviewSummary;
+        private set => SetProperty(ref _metadataReviewSummary, value);
+    }
+
     public string CandidateCleanupResultSummary
     {
         get => _candidateCleanupResultSummary;
@@ -318,6 +366,9 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
     {
         LibraryWorkflowPhase.CandidatePreparationReady => "Prepare Candidate review",
         LibraryWorkflowPhase.CandidateAnalysisReady => "Run Candidate cleanup",
+        LibraryWorkflowPhase.CandidateCleanupCompleted when _metadataReviewWorkspace is null =>
+            "Prepare online metadata review",
+        LibraryWorkflowPhase.CandidateCleanupCompleted => "Apply checked metadata",
         LibraryWorkflowPhase.Completed => "Candidate cleanup completed",
         _ => "Candidate cleanup unavailable",
     };
@@ -328,6 +379,10 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
             "Refresh the post-Exact library and prepare unified candidates without mutation",
         LibraryWorkflowPhase.CandidateAnalysisReady =>
             "Execute reviewed unified keeper and Skip selections after backup confirmation",
+        LibraryWorkflowPhase.CandidateCleanupCompleted when _metadataReviewWorkspace is null =>
+            "Resolve online metadata only for records retained after Candidate cleanup",
+        LibraryWorkflowPhase.CandidateCleanupCompleted =>
+            "Apply checked online metadata proposals after backup confirmation",
         LibraryWorkflowPhase.Completed => "Candidate cleanup is complete for this workflow generation",
         _ => "Available after Exact cleanup completes for the current workflow generation",
     };
@@ -354,6 +409,24 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
                 ApplyMetadataDuplicateFilter();
             }
         }
+    }
+
+    public MetadataReviewFilterMode MetadataReviewFilterMode
+    {
+        get => _metadataReviewFilterMode;
+        set
+        {
+            if (SetProperty(ref _metadataReviewFilterMode, value))
+            {
+                ApplyMetadataReviewFilter();
+            }
+        }
+    }
+
+    public MetadataReviewSubjectRowViewModel? SelectedMetadataReviewSubject
+    {
+        get => _selectedMetadataReviewSubject;
+        set => SetProperty(ref _selectedMetadataReviewSubject, value);
     }
 
     public BookRowViewModel? SelectedBook
@@ -436,8 +509,6 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
         {
             if (!SetProperty(ref _selectedMetadataDuplicateMember, value)) return;
             OpenSelectedMetadataCandidateCommand.NotifyCanExecuteChanged();
-            if (value is null || SelectedMetadataDuplicateGroup is null) return;
-            SelectedMetadataDuplicateGroup.KeeperMember = value;
         }
     }
 
@@ -464,8 +535,6 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
         {
             if (!SetProperty(ref _selectedExpandedCandidateMember, value)) return;
             OpenSelectedExpandedCandidateCommand.NotifyCanExecuteChanged();
-            if (value is null || SelectedExpandedCandidateGroup is null) return;
-            SelectedExpandedCandidateGroup.KeeperMember = value;
         }
     }
 
@@ -494,6 +563,7 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
             OpenSelectedUnifiedCandidateCommand.NotifyCanExecuteChanged();
             if (value is null || SelectedUnifiedCandidateGroup is null) return;
             SelectedUnifiedCandidateGroup.KeeperMember = value;
+            RetargetMetadataReview(SelectedUnifiedCandidateGroup.CandidateGroupId, new(value.BookId));
         }
     }
 
@@ -625,6 +695,8 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
 
     public IAsyncRelayCommand ExportRecommendationsCommand { get; }
 
+    public IRelayCommand OnlineMetadataSettingsCommand { get; }
+
     public IAsyncRelayCommand CandidateCleanupCommand { get; }
 
     public async Task InitializeAsync(CancellationToken cancellationToken = default)
@@ -640,6 +712,26 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
         _candidateHeartbeatCancellation?.Cancel();
         if (_libraryStateSession is not null)
             _libraryStateSession.StateChanged -= OnLibraryStateChanged;
+        _operationCoordinator.StateChanged -= OnOperationStateChanged;
+        _metadataReviewDecisionGate.Dispose();
+    }
+
+    private void OnOperationStateChanged(object? sender, EventArgs eventArgs)
+    {
+        OnPropertyChanged(nameof(IsOperationActive));
+        SelectLibraryCommand.NotifyCanExecuteChanged();
+        ScanCommand.NotifyCanExecuteChanged();
+        LoadPersistedSnapshotCommand.NotifyCanExecuteChanged();
+        OnlineMetadataSettingsCommand.NotifyCanExecuteChanged();
+        CandidateCleanupCommand.NotifyCanExecuteChanged();
+    }
+
+    private void ShowOnlineMetadataSettings()
+    {
+        if (_onlineMetadataSettingsDialog is null) return;
+        using IDisposable? operation = _operationCoordinator.TryBegin();
+        if (operation is null) return;
+        _onlineMetadataSettingsDialog.Show();
     }
 
     private void OnLibraryStateChanged(object? sender, LibraryStateChangedEventArgs eventArgs)
@@ -665,13 +757,16 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
             || latest.WorkflowCheckpoint != state.WorkflowCheckpoint) return;
         ApplySnapshot(state.Snapshot, presentation, state.IsAuthoritative);
         NotifyCandidateCleanupStateChanged();
-        StatusMessage = state.IsAuthoritative
-            ? $"Projected library state updated to revision {state.Revision.Value}. External Calibre changes require Rescan."
-            : $"Library state is uncertain after revision {state.Revision.Value}. Rescan is required before cleanup or recovery.";
+        if (!IsBusy && !_operationCoordinator.IsOperationActive)
+            StatusMessage = state.IsAuthoritative
+                ? $"Projected library state updated to revision {state.Revision.Value}. External Calibre changes require Rescan."
+                : $"Library state is uncertain after revision {state.Revision.Value}. Rescan is required before cleanup or recovery.";
     }
 
     private async Task SelectLibraryAsync()
     {
+        using IDisposable? operation = _operationCoordinator.TryBegin();
+        if (operation is null) return;
         string? selected = _folderPicker.PickFolder(SelectedLibraryPath);
         if (selected is null)
         {
@@ -697,6 +792,9 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
 
     private async Task ScanAsync()
     {
+        using IDisposable? operation = _operationCoordinator.TryBegin();
+        if (operation is null) return;
+        ClearMetadataReview();
         _scanCancellation?.Dispose();
         _scanCancellation = new CancellationTokenSource();
         IsBusy = true;
@@ -770,6 +868,8 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
             return;
         }
 
+        using IDisposable? operation = _operationCoordinator.TryBegin();
+        if (operation is null) return;
         IsBusy = true;
         ClearError();
         ProgressPercentage = 0;
@@ -1206,7 +1306,8 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
 
     private bool CanRunCandidateCleanup()
     {
-        if (IsBusy || !_workflowOptions.IsStaged || _libraryStateSession is null
+        if (IsBusy || _operationCoordinator.IsOperationActive
+            || !_workflowOptions.IsStaged || _libraryStateSession is null
             || string.IsNullOrWhiteSpace(SelectedLibraryPath))
             return false;
         LibraryState? state = _libraryStateSession.GetCurrent(SelectedLibraryPath);
@@ -1217,6 +1318,9 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
                 _candidatePreparation is not null,
             LibraryWorkflowPhase.CandidateAnalysisReady =>
                 _executeUnifiedCandidateCleanup is not null && _unifiedCandidateConfirmation is not null,
+            LibraryWorkflowPhase.CandidateCleanupCompleted => _metadataReviewWorkspace is null
+                ? _prepareMetadataReview is not null
+                : _executeUnifiedCandidateCleanup is not null && _metadataMutationConfirmation is not null,
             _ => false,
         };
     }
@@ -1224,6 +1328,8 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
     private async Task CandidateCleanupAsync()
     {
         if (_libraryStateSession is null || string.IsNullOrWhiteSpace(SelectedLibraryPath)) return;
+        using IDisposable? operation = _operationCoordinator.TryBegin();
+        if (operation is null) return;
         LibraryState? startingState = _libraryStateSession.GetCurrent(SelectedLibraryPath);
         if (startingState is null) return;
         LibraryWorkflowPhase startingPhase = startingState.WorkflowCheckpoint.Phase;
@@ -1275,7 +1381,52 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
                     _scanCancellation.Token,
                     candidatePreparation: true).ConfigureAwait(true);
                 ApplySnapshot(analysis.State.Snapshot, presentation, analysis.State.IsAuthoritative);
-                StatusMessage = $"Candidate review ready: {analysis.UnifiedGroupCount:N0} unified group(s). Review keeper and Skip choices, then activate Candidate cleanup again.";
+                ClearMetadataReview();
+                StatusMessage = $"Candidate review ready: {analysis.UnifiedGroupCount:N0} unified group(s). Review choices, then activate Candidate cleanup again.";
+                return;
+            }
+
+            if (startingPhase == LibraryWorkflowPhase.CandidateCleanupCompleted)
+            {
+                if (_metadataReviewWorkspace is null)
+                {
+                    await PrepareMetadataReviewIfReadyAsync(
+                        startingState, _scanCancellation.Token).ConfigureAwait(true);
+                    string deferred = _metadataReviewWorkspace?.DeferredQueryCount > 0
+                        ? $" {_metadataReviewWorkspace.DeferredQueryCount:N0} uncached queries were deferred by the online request limit; rerun later to continue from cache."
+                        : string.Empty;
+                    StatusMessage = $"Online metadata review ready for {_allMetadataReviewSubjects.Length:N0} retained record(s).{deferred} Review Apply choices, then activate Apply checked metadata.";
+                    return;
+                }
+                int selectedProposalCount = _metadataReviewWorkspace.Subjects.Count(value => value.Apply);
+                if (_metadataMutationConfirmation is null
+                    || !_metadataMutationConfirmation.ConfirmExternalBackup(selectedProposalCount))
+                {
+                    StatusMessage = "Metadata update canceled. Confirm a complete external backup before retrying.";
+                    return;
+                }
+                IsProgressIndeterminate = false;
+                Progress<UnifiedCandidateCleanupProgress> metadataProgress = new(value =>
+                    UpdateOperationProgress(value.Message, value.CompletedOperations, value.TotalOperations));
+                UnifiedCandidateCleanupResult metadataResult = await _executeUnifiedCandidateCleanup!.ExecuteAsync(new(
+                    SelectedLibraryPath,
+                    startingState.GenerationId,
+                    startingState.Revision,
+                    [],
+                    ExternalBackupConfirmed: true,
+                    _metadataReviewWorkspace), metadataProgress, _scanCancellation.Token).ConfigureAwait(true);
+                CandidateCleanupResultSummary = $"Updated {metadataResult.UpdatedMetadataFieldCount:N0} metadata field(s).";
+                LibraryState? metadataFinal = _libraryStateSession.GetCurrent(SelectedLibraryPath);
+                if (metadataFinal is not null)
+                {
+                    SnapshotPresentation metadataPresentation = await PreparePresentationAsync(
+                        metadataFinal.Snapshot, CancellationToken.None).ConfigureAwait(true);
+                    ApplySnapshot(metadataFinal.Snapshot, metadataPresentation, metadataFinal.IsAuthoritative);
+                    ClearMetadataReview();
+                }
+                StatusMessage = metadataResult.IsCompleted
+                    ? "Checked metadata update completed."
+                    : string.Join(" ", metadataResult.Issues.Select(value => $"{value.Code}: {value.Explanation}"));
                 return;
             }
 
@@ -1304,8 +1455,12 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
                 startingState.GenerationId,
                 startingState.Revision,
                 selections,
-                ExternalBackupConfirmed: true), cleanupProgress, _scanCancellation.Token).ConfigureAwait(true);
+                ExternalBackupConfirmed: true,
+                MetadataReview: null), cleanupProgress, _scanCancellation.Token).ConfigureAwait(true);
             CandidateCleanupResultSummary = $"Transferred {result.TransferredFormatCount:N0} format(s), removed {result.RemovedFormatCount:N0} format(s), and removed {result.RemovedRecordCount:N0} record(s)."
+                + (result.UpdatedMetadataFieldCount > 0
+                    ? $" Updated {result.UpdatedMetadataFieldCount:N0} metadata field(s)."
+                    : string.Empty)
                 + (result.SkippedGroupCount > 0 ? $" Skipped {result.SkippedGroupCount:N0} group(s)." : string.Empty);
             LibraryState? final = _libraryStateSession.GetCurrent(SelectedLibraryPath);
             if (final is not null)
@@ -1315,7 +1470,7 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
                 ApplySnapshot(final.Snapshot, presentation, final.IsAuthoritative);
             }
             StatusMessage = result.IsCompleted
-                ? "Candidate cleanup completed."
+                ? "Candidate cleanup completed. Prepare online metadata review for retained records."
                 : string.Join(" ", result.Issues.Select(value => $"{value.Code}: {value.Explanation}"));
         }
         catch (OperationCanceledException)
@@ -1364,8 +1519,9 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
         string detail = string.IsNullOrWhiteSpace(progress.Detail) ? string.Empty : $" {progress.Detail}.";
         string active = progress.ActiveItems > 0 ? $" {progress.ActiveItems:N0} active." : string.Empty;
         StatusMessage = $"{progress.Message}.{detail}{active} Elapsed {FormatElapsed(elapsed)}";
-        IsProgressIndeterminate = progress.Total <= 0;
-        ProgressPercentage = progress.Total <= 0 ? 0 : 100d * progress.Completed / progress.Total;
+        bool determinate = progress.Total > 0 && (progress.Completed > 0 || progress.Total == 1);
+        IsProgressIndeterminate = !determinate;
+        ProgressPercentage = determinate ? 100d * progress.Completed / progress.Total : 0;
     }
 
     private void UpdateOperationProgress(string message, int completed, int total)
@@ -1504,6 +1660,7 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
     }
 
     private bool CanLoadPersistedSnapshot() => !IsBusy
+        && !_operationCoordinator.IsOperationActive
         && _persistedSnapshots is not null
         && !string.IsNullOrWhiteSpace(SelectedLibraryPath)
         && _persistedLibraryPaths.Any(path => PathsEqual(path, SelectedLibraryPath));
@@ -1580,6 +1737,144 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
         NextMetadataDuplicateGroupCommand.NotifyCanExecuteChanged();
         PreviousMetadataDuplicateGroupCommand.NotifyCanExecuteChanged();
         ToggleMetadataDuplicateDeferredCommand.NotifyCanExecuteChanged();
+    }
+
+    private async Task PrepareMetadataReviewIfReadyAsync(
+        LibraryState state,
+        CancellationToken cancellationToken)
+    {
+        if (_prepareMetadataReview is null
+            || !state.IsAuthoritative
+            || !state.IsWorkflowCheckpointCurrent
+            || state.WorkflowCheckpoint.Phase != LibraryWorkflowPhase.CandidateCleanupCompleted)
+        {
+            ClearMetadataReview();
+            return;
+        }
+        if (_metadataReviewWorkspace is not null
+            && _metadataReviewWorkspace.GenerationId == state.GenerationId
+            && _metadataReviewWorkspace.Revision == state.Revision
+            && PathsEqual(_metadataReviewWorkspace.LibraryRoot, state.Snapshot.Identity.LibraryRoot))
+            return;
+        MetadataReviewKeeperSelection[] keeperSelections = _unifiedCandidateGroups
+            .Select(value => new MetadataReviewKeeperSelection(value.CandidateGroupId, value.KeeperBookId))
+            .ToArray();
+        IProgress<EditionMetadataEnrichmentProgress> progress = new SynchronizedProgress<EditionMetadataEnrichmentProgress>(
+            _uiContext, UpdateMetadataReviewProgress);
+        MetadataReviewWorkspace workspace = await _prepareMetadataReview.ExecuteAsync(
+            state, keeperSelections, progress, cancellationToken).ConfigureAwait(true);
+        ApplyMetadataReviewWorkspace(workspace, state.Snapshot);
+    }
+
+    private void UpdateMetadataReviewProgress(EditionMetadataEnrichmentProgress value)
+    {
+        IsProgressIndeterminate = value.TotalQueries == 0;
+        ProgressPercentage = value.TotalQueries == 0
+            ? 0
+            : Math.Clamp(100d * value.CompletedQueries / value.TotalQueries, 0, 100);
+        StatusMessage = $"Preparing metadata review ({value.Provider.Id}): {value.Detail} "
+            + $"{value.CompletedQueries:N0} of {value.TotalQueries:N0}; "
+            + $"{value.CacheHits:N0} cached, {value.ProviderRequests:N0} online.";
+    }
+
+    private void ApplyMetadataReviewWorkspace(
+        MetadataReviewWorkspace workspace,
+        LibrarySnapshot snapshot)
+    {
+        Dictionary<CalibreBookId, CalibreBook> books = snapshot.Books.ToDictionary(value => value.Id);
+        _metadataReviewWorkspace = workspace;
+        _allMetadataReviewSubjects = workspace.Subjects.Select(value => new MetadataReviewSubjectRowViewModel(
+                value,
+                books[value.Subject.TargetBookId],
+                PersistMetadataApplyAsync))
+            .ToArray();
+        ApplyMetadataReviewFilter();
+        NotifyCandidateCleanupStateChanged();
+    }
+
+    private async Task PersistMetadataApplyAsync(MetadataReviewSubjectId subjectId, bool apply)
+    {
+        await _metadataReviewDecisionGate.WaitAsync().ConfigureAwait(true);
+        try
+        {
+            if (_metadataReviewWorkspace is null || _prepareMetadataReview is null) return;
+            using IDisposable? operation = _operationCoordinator.TryBegin();
+            if (operation is null)
+            {
+                RefreshMetadataReviewRow(subjectId);
+                return;
+            }
+            _metadataReviewWorkspace = await _prepareMetadataReview.SetApplyAsync(
+                _metadataReviewWorkspace, subjectId, apply, CancellationToken.None).ConfigureAwait(true);
+            RefreshMetadataReviewRow(subjectId);
+            ApplyMetadataReviewFilter();
+            if (!_metadataReviewWorkspace.PersistenceAvailable)
+                MetadataReviewSummary = "Metadata review is available, but Apply overrides are session-only because protected review decisions could not be saved.";
+        }
+        finally
+        {
+            _metadataReviewDecisionGate.Release();
+        }
+    }
+
+    private void RetargetMetadataReview(UnifiedCandidateGroupId groupId, CalibreBookId targetBookId)
+    {
+        if (_metadataReviewWorkspace is null || _currentSnapshot is null) return;
+        _metadataReviewWorkspace = PrepareMetadataReviewUseCase.Retarget(
+            _metadataReviewWorkspace, groupId, targetBookId);
+        MetadataReviewSubjectId subjectId = _metadataReviewWorkspace.Subjects.Single(value =>
+            value.Subject.UnifiedGroupId == groupId).Subject.Id;
+        RefreshMetadataReviewRow(subjectId);
+        ApplyMetadataReviewFilter();
+    }
+
+    private void RefreshMetadataReviewRow(MetadataReviewSubjectId subjectId)
+    {
+        if (_metadataReviewWorkspace is null || _currentSnapshot is null) return;
+        ReviewedMetadataSubject reviewed = _metadataReviewWorkspace.Subjects.Single(value =>
+            value.Subject.Id == subjectId);
+        MetadataReviewSubjectRowViewModel? row = _allMetadataReviewSubjects.FirstOrDefault(value =>
+            value.SubjectId == subjectId);
+        if (row is null) return;
+        CalibreBook current = _currentSnapshot.Books.Single(value => value.Id == reviewed.Subject.TargetBookId);
+        row.Update(reviewed, current);
+    }
+
+    private void ApplyMetadataReviewFilter()
+    {
+        MetadataReviewSubjectId? selectedId = SelectedMetadataReviewSubject?.SubjectId;
+        MetadataReviewSubjectRowViewModel[] visible = _allMetadataReviewSubjects
+            .Where(value => value.MatchesFilter(MetadataReviewFilterMode)).ToArray();
+        _metadataReviewSubjects.ReplaceAll(visible);
+        SelectedMetadataReviewSubject = selectedId is null
+            ? visible.FirstOrDefault()
+            : visible.FirstOrDefault(value => value.SubjectId == selectedId.Value)
+                ?? visible.FirstOrDefault();
+        int high = _allMetadataReviewSubjects.Count(value => value.Confidence == "High");
+        int medium = _allMetadataReviewSubjects.Count(value => value.Confidence == "Medium");
+        int low = _allMetadataReviewSubjects.Count(value => value.Confidence == "Low");
+        int unavailable = _allMetadataReviewSubjects.Count(value => value.IsUnavailable);
+        string persistence = _metadataReviewWorkspace?.PersistenceAvailable == false
+            ? " Apply overrides are session-only because durable review storage is unavailable."
+            : string.Empty;
+        string deferred = _metadataReviewWorkspace?.DeferredQueryCount > 0
+            ? $" {_metadataReviewWorkspace.DeferredQueryCount:N0} uncached queries deferred; rerun preparation later to continue from cache."
+            : string.Empty;
+        MetadataReviewSummary = _allMetadataReviewSubjects.Length == 0
+            ? "No metadata review subjects are available."
+            : $"{visible.Length:N0} of {_allMetadataReviewSubjects.Length:N0} subjects visible; "
+                + $"High {high:N0}, Medium {medium:N0}, Low {low:N0}, Unavailable {unavailable:N0}.{persistence}";
+        if (deferred.Length > 0) MetadataReviewSummary += deferred;
+    }
+
+    private void ClearMetadataReview()
+    {
+        _metadataReviewWorkspace = null;
+        _allMetadataReviewSubjects = [];
+        _metadataReviewSubjects.ReplaceAll([]);
+        SelectedMetadataReviewSubject = null;
+        MetadataReviewSummary = "Complete Candidate cleanup, then prepare online metadata proposals for retained records.";
+        NotifyCandidateCleanupStateChanged();
     }
 
     private void MoveMetadataSelection(int offset)

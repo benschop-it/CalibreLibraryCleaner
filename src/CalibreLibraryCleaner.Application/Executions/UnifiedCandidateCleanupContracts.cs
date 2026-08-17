@@ -1,3 +1,4 @@
+using CalibreLibraryCleaner.Application.Metadata;
 using CalibreLibraryCleaner.Domain.Executions;
 using CalibreLibraryCleaner.Domain.Libraries;
 using CalibreLibraryCleaner.Domain.Matching;
@@ -24,7 +25,8 @@ public sealed record ExecuteUnifiedCandidateCleanupRequest(
     LibraryStateGenerationId ExpectedGeneration,
     LibraryStateRevision ExpectedRevision,
     IReadOnlyList<UnifiedCandidateCleanupSelection> GroupSelections,
-    bool ExternalBackupConfirmed);
+    bool ExternalBackupConfirmed,
+    MetadataReviewWorkspace? MetadataReview = null);
 
 public enum UnifiedCandidateCleanupState
 {
@@ -47,7 +49,8 @@ public sealed record UnifiedCandidateCleanupResult(
     int RemovedFormatCount,
     int RemovedRecordCount,
     int SkippedGroupCount,
-    IReadOnlyList<ExecutionIssue> Issues)
+    IReadOnlyList<ExecutionIssue> Issues,
+    int UpdatedMetadataFieldCount = 0)
 {
     public bool IsCompleted => State is UnifiedCandidateCleanupState.Completed
         or UnifiedCandidateCleanupState.NothingToDo;

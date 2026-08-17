@@ -1,8 +1,12 @@
 using System.Diagnostics;
+using System.Globalization;
 using CalibreLibraryCleaner.Application.Abstractions;
 using CalibreLibraryCleaner.Application.Libraries;
+using CalibreLibraryCleaner.Application.Metadata;
 using CalibreLibraryCleaner.Domain.Executions;
 using CalibreLibraryCleaner.Domain.Libraries;
+using CalibreLibraryCleaner.Domain.Matching;
+using CalibreLibraryCleaner.Domain.Metadata;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 
@@ -14,6 +18,7 @@ public sealed partial class ExecuteUnifiedCandidateCleanupUseCase(
     ICalibreMutationWorkerFactory workerFactory,
     ILibraryMutationLease mutationLease,
     ICleanupExecutionIdGenerator executionIds,
+    IEditionCoverStager coverStager,
     IClock clock,
     ILogger<ExecuteUnifiedCandidateCleanupUseCase>? logger = null) : IUnifiedCandidateCleanupExecutor
 {
@@ -29,6 +34,7 @@ public sealed partial class ExecuteUnifiedCandidateCleanupUseCase(
         long started = Stopwatch.GetTimestamp();
         CleanupExecutionId executionId = executionIds.Create();
         List<ExecutionIssue> issues = [];
+        int updatedMetadataFields = 0;
         if (!request.ExternalBackupConfirmed)
         {
             issues.Add(Block(
@@ -44,15 +50,37 @@ public sealed partial class ExecuteUnifiedCandidateCleanupUseCase(
             return Result(UnifiedCandidateCleanupState.PreflightFailed, 0, 0, 0, 0);
         }
 
+        bool candidateCleanup = initial.WorkflowCheckpoint.Phase == LibraryWorkflowPhase.CandidateAnalysisReady;
+        bool metadataMutation = initial.WorkflowCheckpoint.Phase == LibraryWorkflowPhase.CandidateCleanupCompleted;
+        if (!candidateCleanup && !metadataMutation)
+        {
+            issues.Add(Block("CANDIDATE.PHASE_INVALID", "The cleanup request is not valid for the current workflow phase."));
+            return Result(UnifiedCandidateCleanupState.PreflightFailed, 0, 0, 0, 0);
+        }
+
         UnifiedCandidateCleanupPlan plan;
+        MetadataOperationTemplate[] metadataTemplates;
         try
         {
-            plan = UnifiedCandidateCleanupPlanner.Build(
-                initial,
-                request.ExpectedGeneration,
-                request.ExpectedRevision,
-                request.GroupSelections,
-                issues);
+            if (candidateCleanup)
+            {
+                if (request.MetadataReview is not null)
+                    throw new InvalidOperationException("Candidate cleanup cannot apply online metadata.");
+                plan = UnifiedCandidateCleanupPlanner.Build(
+                    initial,
+                    request.ExpectedGeneration,
+                    request.ExpectedRevision,
+                    request.GroupSelections,
+                    issues);
+                metadataTemplates = [];
+            }
+            else
+            {
+                if (request.GroupSelections.Count != 0 || request.MetadataReview is null)
+                    throw new InvalidOperationException("Metadata mutation requires only a current metadata review workspace.");
+                plan = new([], [], [], 0);
+                metadataTemplates = BuildMetadataOperations(initial, request);
+            }
         }
         catch (Exception exception) when (exception is ArgumentException or InvalidOperationException)
         {
@@ -60,10 +88,13 @@ public sealed partial class ExecuteUnifiedCandidateCleanupUseCase(
             return Result(UnifiedCandidateCleanupState.PreflightFailed, 0, 0, 0, 0);
         }
 
-        if (plan.TotalOperations == 0)
+        int totalOperations = checked(plan.TotalOperations + metadataTemplates.Length);
+        if (totalOperations == 0)
         {
-            LibraryStateSessionOutcome completed = await AdvanceCompletedAsync(request.LibraryRoot)
-                .ConfigureAwait(false);
+            LibraryStateSessionOutcome completed = await AdvancePhaseAsync(
+                request.LibraryRoot,
+                candidateCleanup ? LibraryWorkflowPhase.CandidateCleanupCompleted : LibraryWorkflowPhase.Completed)
+            .ConfigureAwait(false);
             if (!completed.IsSuccess)
             {
                 issues.Add(Block(
@@ -76,7 +107,29 @@ public sealed partial class ExecuteUnifiedCandidateCleanupUseCase(
             return Result(UnifiedCandidateCleanupState.NothingToDo, 0, 0, 0, plan.SkippedGroupCount);
         }
 
-        LogCleanupStarted(_logger, executionId.ToString(), plan.TotalOperations);
+        IEditionCoverStagingSession? stagedCovers = null;
+        EditionCoverStagingRequest[] coverRequests = metadataTemplates
+            .Where(value => value.Cover is not null)
+            .Select(value => new EditionCoverStagingRequest(value.StagingKey, value.Cover!))
+            .ToArray();
+        if (coverRequests.Length > 0)
+        {
+            progress?.Report(new("Downloading approved metadata covers.", 0, coverRequests.Length));
+            Progress<EditionCoverStagingProgress> coverProgress = new(value => progress?.Report(new(
+                "Downloading approved metadata covers.", value.Completed, value.Total)));
+            EditionCoverStagingResult staging = await coverStager.StageAsync(
+                coverRequests, coverProgress, cancellationToken).ConfigureAwait(false);
+            if (!staging.IsSuccess)
+            {
+                issues.Add(Block("CANDIDATE.METADATA_COVER_STAGING_FAILED",
+                    $"Approved metadata covers could not be staged ({staging.FailureCode ?? "METADATA_COVER.STAGING_FAILED"})."));
+                return Result(UnifiedCandidateCleanupState.PreflightFailed, 0, 0, 0, plan.SkippedGroupCount);
+            }
+            stagedCovers = staging.Session;
+        }
+        await using IEditionCoverStagingSession? coverSession = stagedCovers;
+
+        LogCleanupStarted(_logger, executionId.ToString(), totalOperations);
         CalibreToolDiscoveryResult discovery = await toolDiscovery.DiscoverAndProbeAsync(
             request.LibraryRoot, cancellationToken).ConfigureAwait(false);
         issues.AddRange(discovery.Issues);
@@ -102,7 +155,8 @@ public sealed partial class ExecuteUnifiedCandidateCleanupUseCase(
         try
         {
             CalibreMutationWorkerOpenResult worker = await workerFactory.TryOpenAsync(new(
-                discovery.Tool!, request.LibraryRoot, initial.Snapshot.Identity.CalibreLibraryUuid),
+                discovery.Tool!, request.LibraryRoot, initial.Snapshot.Identity.CalibreLibraryUuid,
+                coverSession?.StagingRoot),
                 cancellationToken).ConfigureAwait(false);
             if (!worker.IsSuccess)
             {
@@ -114,7 +168,7 @@ public sealed partial class ExecuteUnifiedCandidateCleanupUseCase(
 
             await using ICalibreMutationWorkerSession session = worker.Session!;
             using IDisposable statePublication = libraryState.DeferStateChanged(request.LibraryRoot);
-            WorkerPlannedOperation[] operations = BuildWorkerOperations(plan);
+            WorkerPlannedOperation[] operations = BuildWorkerOperations(plan, metadataTemplates, coverSession);
             string mutationRunId = executionId.ToString();
             LibraryState markerState = Current();
             LibraryStateSessionOutcome marker = await libraryState.BeginMutationBatchAsync(
@@ -167,9 +221,14 @@ public sealed partial class ExecuteUnifiedCandidateCleanupUseCase(
                 LibraryStateRevision revision = current.Revision;
                 DateTimeOffset appliedAt = AppliedAt(current);
                 List<LibraryStateDelta> deltas = new(chunk.Length);
-                foreach (WorkerPlannedOperation operation in chunk)
+                for (int index = 0; index < chunk.Length; index++)
                 {
-                    deltas.Add(CreateDelta(current.GenerationId, revision, appliedAt, operation));
+                    deltas.Add(CreateDelta(
+                        current.GenerationId,
+                        revision,
+                        appliedAt,
+                        chunk[index],
+                        workerResult.OperationResults[index]));
                     revision = revision.Next();
                 }
                 LibraryStateSessionOutcome applied = await libraryState.ApplyMutationBatchAsync(
@@ -189,6 +248,8 @@ public sealed partial class ExecuteUnifiedCandidateCleanupUseCase(
                 transferred += chunk.Count(value => value.Operation.Kind == CalibreMutationOperationKind.TransferFormat);
                 removedFormats += chunk.Count(value => value.Operation.Kind == CalibreMutationOperationKind.RemoveFormat);
                 removedRecords += chunk.Count(value => value.Operation.Kind == CalibreMutationOperationKind.RemoveRecord);
+                updatedMetadataFields += chunk.Count(value =>
+                    value.Operation.Kind == CalibreMutationOperationKind.SetMetadata);
                 completedOperations += chunk.Length;
             }
 
@@ -205,8 +266,10 @@ public sealed partial class ExecuteUnifiedCandidateCleanupUseCase(
                 return Result(UnifiedCandidateCleanupState.PartiallyCompleted,
                     transferred, removedFormats, removedRecords, plan.SkippedGroupCount);
             }
-            LibraryStateSessionOutcome completed = await AdvanceCompletedAsync(request.LibraryRoot)
-                .ConfigureAwait(false);
+            LibraryStateSessionOutcome completed = await AdvancePhaseAsync(
+                request.LibraryRoot,
+                candidateCleanup ? LibraryWorkflowPhase.CandidateCleanupCompleted : LibraryWorkflowPhase.Completed)
+            .ConfigureAwait(false);
             if (!completed.IsSuccess)
             {
                 await MarkUncertainAsync(
@@ -266,14 +329,16 @@ public sealed partial class ExecuteUnifiedCandidateCleanupUseCase(
                 new(code, explanation, clock.GetUtcNow()),
                 CancellationToken.None);
 
-        async Task<LibraryStateSessionOutcome> AdvanceCompletedAsync(string root)
+        async Task<LibraryStateSessionOutcome> AdvancePhaseAsync(
+            string root,
+            LibraryWorkflowPhase phase)
         {
             LibraryState state = libraryState.GetCurrent(root)
                 ?? throw new InvalidOperationException("Authoritative Candidate state disappeared.");
             DateTimeOffset publishedAt = clock.GetUtcNow().ToUniversalTime();
             if (publishedAt < state.ProjectedAtUtc) publishedAt = state.ProjectedAtUtc;
             return await libraryState.AdvanceWorkflowAsync(
-                root, LibraryWorkflowPhase.Completed, publishedAt, CancellationToken.None)
+                root, phase, publishedAt, CancellationToken.None)
                 .ConfigureAwait(false);
         }
 
@@ -289,11 +354,115 @@ public sealed partial class ExecuteUnifiedCandidateCleanupUseCase(
             formatCount,
             recordCount,
             skippedCount,
-            issues.ToArray());
+            issues.ToArray(),
+            updatedMetadataFields);
     }
 
-    private static WorkerPlannedOperation[] BuildWorkerOperations(UnifiedCandidateCleanupPlan plan) =>
+    private static MetadataOperationTemplate[] BuildMetadataOperations(
+        LibraryState state,
+        ExecuteUnifiedCandidateCleanupRequest request)
+    {
+        MetadataReviewWorkspace? workspace = request.MetadataReview;
+        if (workspace is null) return [];
+        if (workspace.GenerationId != request.ExpectedGeneration
+            || workspace.Revision != request.ExpectedRevision
+            || !PathsEqual(workspace.LibraryRoot, request.LibraryRoot))
+            throw new InvalidOperationException("The metadata review workspace is stale.");
+
+        Dictionary<UnifiedCandidateGroupId, UnifiedCandidateCleanupSelection> selections =
+            request.GroupSelections.ToDictionary(value => value.GroupId);
+        Dictionary<UnifiedCandidateGroupId, UnifiedCandidateGroup> groups =
+            state.Snapshot.UnifiedCandidateGroups.ToDictionary(value => value.Id);
+        HashSet<CalibreBookId> groupedBooks = groups.Values.SelectMany(value => value.Members).ToHashSet();
+        HashSet<CalibreBookId> targets = [];
+        List<MetadataOperationTemplate> operations = [];
+        foreach (ReviewedMetadataSubject reviewed in workspace.Subjects.Where(value => value.Apply))
+        {
+            MetadataReviewSubject subject = reviewed.Subject;
+            EditionMetadataCandidate candidate = subject.Proposal.Candidate
+                ?? throw new InvalidOperationException("Checked metadata has no edition candidate.");
+            EditionMetadataProviderIdentity provider = subject.Proposal.PrimaryProvider
+                ?? throw new InvalidOperationException("Checked metadata has no primary provider.");
+            MetadataReviewDecisionKey key = MetadataReviewDecisionPolicy.CreateKey(
+                subject, workspace.GenerationId, workspace.Revision);
+            if (reviewed.IsOverride && reviewed.DecisionKey != key)
+                throw new InvalidOperationException("A metadata review override is stale.");
+            if (subject.UnifiedGroupId is { } groupId)
+            {
+                if (!groups.TryGetValue(groupId, out UnifiedCandidateGroup? group)
+                    || !selections.TryGetValue(groupId, out UnifiedCandidateCleanupSelection? selection))
+                    throw new InvalidOperationException("A metadata review group is stale.");
+                if (selection.Skip) continue;
+                if (selection.KeeperBookId != subject.TargetBookId
+                    || !group.Members.ToHashSet().SetEquals(subject.Members))
+                    throw new InvalidOperationException("A metadata review keeper is stale.");
+            }
+            else if (subject.Members.Count != 1 || groupedBooks.Contains(subject.TargetBookId))
+            {
+                throw new InvalidOperationException("A singleton metadata review subject is stale.");
+            }
+            if (!state.Snapshot.Books.Any(value => value.Id == subject.TargetBookId)
+                || !targets.Add(subject.TargetBookId))
+                throw new InvalidOperationException("A metadata target is missing or duplicated.");
+            CalibreMetadataSourceIdentity source = new(
+                provider.Id, provider.Version, candidate.EditionId, subject.Proposal.PolicyVersion);
+            Add(LibraryMetadataField.Title, [candidate.Title]);
+            Add(LibraryMetadataField.Authors, candidate.Authors);
+            if (candidate.Identifiers.Count > 0)
+                Add(LibraryMetadataField.Identifiers,
+                    candidate.Identifiers
+                        .GroupBy(value => value.Type, StringComparer.Ordinal)
+                        .Select(group => group
+                            .OrderByDescending(value => value.Type == "isbn" && value.Value.Length == 13)
+                            .ThenBy(value => value.Value, StringComparer.Ordinal)
+                            .First())
+                        .OrderBy(value => value.Type, StringComparer.Ordinal)
+                        .Select(value => $"{value.Type}:{value.Value}")
+                        .ToArray());
+            if (candidate.Publisher is not null) Add(LibraryMetadataField.Publisher, [candidate.Publisher]);
+            if (candidate.PublicationDate is not null)
+            {
+                EditionPublicationDate date = candidate.PublicationDate;
+                DateTimeOffset value = new(
+                    date.Year, date.Month ?? 1, date.Day ?? 1, 0, 0, 0, TimeSpan.Zero);
+                Add(LibraryMetadataField.PublicationDate, [value.ToString("O", CultureInfo.InvariantCulture)]);
+            }
+            if (candidate.Languages.Count > 0) Add(LibraryMetadataField.Languages, candidate.Languages);
+            if (candidate.Series is not null) Add(LibraryMetadataField.Series, [candidate.Series]);
+            if (candidate.SeriesIndex is not null)
+                Add(LibraryMetadataField.SeriesIndex,
+                    [candidate.SeriesIndex.Value.ToString(CultureInfo.InvariantCulture)]);
+            if (candidate.Cover is not null)
+                operations.Add(new(
+                    subject.Id.Value,
+                    subject.TargetBookId,
+                    LibraryMetadataField.Cover,
+                    [],
+                    source,
+                    candidate.Cover));
+
+            void Add(LibraryMetadataField field, IEnumerable<string> values) => operations.Add(new(
+                subject.Id.Value, subject.TargetBookId, field, values.ToArray(), source, null));
+        }
+        return operations.ToArray();
+    }
+
+    private static WorkerPlannedOperation[] BuildWorkerOperations(
+        UnifiedCandidateCleanupPlan plan,
+        IReadOnlyList<MetadataOperationTemplate> metadata,
+        IEditionCoverStagingSession? covers) =>
     [
+        .. metadata.Select(value => new WorkerPlannedOperation(
+            CalibreMutationOperation.SetMetadata(
+                $"candidate-metadata:{value.RecordId.Value}:{value.Field.ToString().ToLowerInvariant()}",
+                value.RecordId,
+                new(
+                    value.Field,
+                    value.Values,
+                    value.Source,
+                    value.Cover is null ? null : covers?.Covers[value.StagingKey].FileName,
+                    value.Cover is null ? null : covers?.Covers[value.StagingKey].Fingerprint)),
+            null)),
         .. plan.Transfers.Select(value => new WorkerPlannedOperation(
             CalibreMutationOperation.TransferFormat(
                 $"candidate-add:{value.TargetRecordId.Value}:{value.SourceFormat.Format}",
@@ -317,8 +486,19 @@ public sealed partial class ExecuteUnifiedCandidateCleanupUseCase(
         LibraryStateGenerationId generation,
         LibraryStateRevision revision,
         DateTimeOffset appliedAt,
-        WorkerPlannedOperation planned) => planned.Operation.Kind switch
+        WorkerPlannedOperation planned,
+        CalibreMutationOperationResult result) => planned.Operation.Kind switch
         {
+            CalibreMutationOperationKind.SetMetadata => new SetMetadataLibraryStateDelta(
+                generation,
+                revision,
+                planned.Operation.OperationId,
+                appliedAt,
+                planned.Operation.RecordId,
+                planned.Operation.Metadata!.Field,
+                result.VerifiedMetadataValues!,
+                result.VerifiedManagedPath,
+                result.VerifiedAuthorSort),
             CalibreMutationOperationKind.TransferFormat => new AddOrReplaceFormatLibraryStateDelta(
                 generation,
                 revision,
@@ -344,6 +524,11 @@ public sealed partial class ExecuteUnifiedCandidateCleanupUseCase(
                 planned.Operation.RecordId),
             _ => throw new InvalidOperationException("The worker returned an unsupported Candidate operation."),
         };
+
+    private static bool PathsEqual(string left, string right) => string.Equals(
+        Path.TrimEndingDirectorySeparator(Path.GetFullPath(left)),
+        Path.TrimEndingDirectorySeparator(Path.GetFullPath(right)),
+        OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal);
 
     private static ExecutionIssue Block(string code, string explanation) =>
         new(code, ExecutionIssueSeverity.BlockingError, explanation);
@@ -379,4 +564,12 @@ public sealed partial class ExecuteUnifiedCandidateCleanupUseCase(
     private sealed record WorkerPlannedOperation(
         CalibreMutationOperation Operation,
         UnifiedCandidateFormatRemoval? Removal);
+
+    private sealed record MetadataOperationTemplate(
+        string StagingKey,
+        CalibreBookId RecordId,
+        LibraryMetadataField Field,
+        IReadOnlyList<string> Values,
+        CalibreMetadataSourceIdentity Source,
+        EditionCoverReference? Cover);
 }

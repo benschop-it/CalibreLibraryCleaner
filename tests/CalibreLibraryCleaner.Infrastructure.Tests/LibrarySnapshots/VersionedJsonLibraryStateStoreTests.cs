@@ -16,6 +16,63 @@ namespace CalibreLibraryCleaner.Infrastructure.Tests.LibrarySnapshots;
 public sealed class VersionedJsonLibraryStateStoreTests
 {
     [Fact]
+    public async Task VerifiedMetadataPathAuthorSortAndCoverRoundTrip()
+    {
+        using TemporaryDirectory directory = new();
+        InfrastructureExecutionFixture fixture = InfrastructureExecutionTestData.Create(directory.Path);
+        string cache = Path.Combine(directory.Path, "state-cache");
+        VersionedJsonLibraryStateStore store = new(new() { StorageRoot = cache });
+        LibraryState baseline = LibraryState.FromScan(fixture.Snapshot,
+            new(Guid.Parse("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee")));
+        CalibreBook target = baseline.Snapshot.Books[0];
+        LibraryStateMutationIntent intent = new(
+            "metadata-intent", baseline.GenerationId, baseline.Revision, 2, baseline.ProjectedAtUtc.AddSeconds(1));
+        await store.WriteBaselineAsync(baseline, CancellationToken.None);
+        await store.WriteMutationIntentAsync(
+            baseline.Snapshot.Identity.LibraryRoot, intent, CancellationToken.None);
+        SetMetadataLibraryStateDelta title = new(
+            baseline.GenerationId,
+            baseline.Revision,
+            "metadata-title",
+            baseline.ProjectedAtUtc.AddSeconds(1),
+            target.Id,
+            LibraryMetadataField.Title,
+            ["Verified Title"],
+            "Verified Author/Verified Title (1)",
+            "Verified, Author");
+        LibraryState afterTitle = LibraryStateDeltaPolicy.Apply(baseline, title);
+        SetMetadataLibraryStateDelta cover = new(
+            baseline.GenerationId,
+            afterTitle.Revision,
+            "metadata-cover",
+            afterTitle.ProjectedAtUtc.AddSeconds(1),
+            target.Id,
+            LibraryMetadataField.Cover,
+            ["true"],
+            "Verified Author/Verified Title (1)",
+            "Verified, Author");
+        LibraryState projected = LibraryStateDeltaPolicy.Apply(afterTitle, cover);
+
+        await store.AppendDeltaBatchAsync(
+            baseline.Snapshot.Identity.LibraryRoot,
+            [title, cover],
+            projected,
+            compactIfThresholdReached: false,
+            intent.IntentId,
+            completeMutationIntent: true,
+            CancellationToken.None);
+        LibraryState? loaded = await new VersionedJsonLibraryStateStore(new() { StorageRoot = cache })
+            .ReadAsync(baseline.Snapshot.Identity.LibraryRoot, CancellationToken.None);
+
+        CalibreBook reloaded = loaded!.Snapshot.Books.Single(value => value.Id == target.Id);
+        reloaded.Title.Should().Be("Verified Title");
+        reloaded.AuthorSort.Should().Be("Verified, Author");
+        reloaded.RelativeDirectory.Should().Be("Verified Author/Verified Title (1)");
+        reloaded.PublicationMetadata.HasCover.Should().BeTrue();
+        loaded.Status.Should().Be(LibraryStateStatus.Authoritative);
+    }
+
+    [Fact]
     public async Task ListReadsManifestWithoutOpeningTheLargeBaseline()
     {
         using TemporaryDirectory directory = new();

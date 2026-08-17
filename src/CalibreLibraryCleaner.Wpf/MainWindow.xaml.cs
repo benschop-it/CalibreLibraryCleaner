@@ -50,6 +50,7 @@ public partial class MainWindow : System.Windows.Window
     {
         if (DataContext is MainWindowViewModel viewModel
             && (viewModel.IsBusy
+                || viewModel.IsOperationActive
                 || viewModel.ExactBinaryCleanupPlans?.IsBusy == true))
         {
             e.Cancel = true;

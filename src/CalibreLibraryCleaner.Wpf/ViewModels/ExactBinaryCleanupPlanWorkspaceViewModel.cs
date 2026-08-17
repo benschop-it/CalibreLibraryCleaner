@@ -9,12 +9,13 @@ using CommunityToolkit.Mvvm.Input;
 
 namespace CalibreLibraryCleaner.Wpf.ViewModels;
 
-public sealed class ExactBinaryCleanupPlanWorkspaceViewModel : ObservableObject
+public sealed class ExactBinaryCleanupPlanWorkspaceViewModel : ObservableObject, IDisposable
 {
     private readonly ExecuteBulkExactDuplicateCleanupUseCase _execute;
     private readonly IExactDuplicateCleanupConfirmationService _confirmation;
     private readonly ILibraryStateSession _libraryState;
     private readonly IClock _clock;
+    private readonly LibraryOperationCoordinator _operationCoordinator;
     private LibrarySnapshot? _snapshot;
     private LibraryState? _state;
     private IReadOnlyList<ExactDuplicateGroupRowViewModel> _groups = [];
@@ -28,12 +29,15 @@ public sealed class ExactBinaryCleanupPlanWorkspaceViewModel : ObservableObject
         ExecuteBulkExactDuplicateCleanupUseCase execute,
         IExactDuplicateCleanupConfirmationService confirmation,
         ILibraryStateSession libraryState,
-        IClock clock)
+        IClock clock,
+        LibraryOperationCoordinator? operationCoordinator = null)
     {
         _execute = execute;
         _confirmation = confirmation;
         _libraryState = libraryState;
         _clock = clock;
+        _operationCoordinator = operationCoordinator ?? new();
+        _operationCoordinator.StateChanged += OnOperationStateChanged;
         RemoveDuplicatesCommand = new AsyncRelayCommand(RemoveDuplicatesAsync, CanRemoveDuplicates);
     }
 
@@ -88,13 +92,18 @@ public sealed class ExactBinaryCleanupPlanWorkspaceViewModel : ObservableObject
         RemoveDuplicatesCommand.NotifyCanExecuteChanged();
     }
 
-    private bool CanRemoveDuplicates() => !IsBusy && _snapshot is not null
+    public void Dispose() => _operationCoordinator.StateChanged -= OnOperationStateChanged;
+
+    private bool CanRemoveDuplicates() => !IsBusy && !_operationCoordinator.IsOperationActive
+        && _snapshot is not null
         && _state is { IsWorkflowCheckpointCurrent: true }
         && _state.WorkflowCheckpoint.Phase == LibraryWorkflowPhase.ExactReady;
 
     private async Task RemoveDuplicatesAsync()
     {
         if (_snapshot is null) return;
+        using IDisposable? operation = _operationCoordinator.TryBegin();
+        if (operation is null) return;
         ExactDuplicateKeeperSelection[] selections = _groups
             .Where(value => !value.Skip && value.IsCleanupEligible && value.RetainedMember is not null)
             .Select(value => new ExactDuplicateKeeperSelection(value.GroupId, value.RetainedMember!.Member))
@@ -137,8 +146,8 @@ public sealed class ExactBinaryCleanupPlanWorkspaceViewModel : ObservableObject
                     CancellationToken.None).ConfigureAwait(true);
                 Status = advanced.IsSuccess
                     ? result.State == BulkExactDuplicateCleanupState.NothingToDo
-                        ? "Exact cleanup completed; no library changes were required. Candidate cleanup is available."
-                        : "Exact cleanup completed. Candidate cleanup is available."
+                        ? "Exact cleanup completed; no library changes were required. Candidate preparation is available."
+                        : "Exact cleanup completed. Candidate preparation is available."
                     : advanced.Explanation
                         ?? "Exact cleanup completed, but its workflow checkpoint could not be persisted.";
             }
@@ -181,4 +190,7 @@ public sealed class ExactBinaryCleanupPlanWorkspaceViewModel : ObservableObject
             or nameof(ExactDuplicateGroupRowViewModel.RetainedMember))
             UpdateContext(_snapshot, _groups);
     }
+
+    private void OnOperationStateChanged(object? sender, EventArgs eventArgs) =>
+        RemoveDuplicatesCommand.NotifyCanExecuteChanged();
 }

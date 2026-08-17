@@ -1,6 +1,7 @@
 using CalibreLibraryCleaner.Application.Abstractions;
 using CalibreLibraryCleaner.Application.Executions;
 using CalibreLibraryCleaner.Application.Matching;
+using CalibreLibraryCleaner.Application.Metadata;
 using CalibreLibraryCleaner.Infrastructure.Bibliographic;
 using CalibreLibraryCleaner.Infrastructure.Caches;
 using CalibreLibraryCleaner.Infrastructure.Calibre;
@@ -9,6 +10,7 @@ using CalibreLibraryCleaner.Infrastructure.Execution;
 using CalibreLibraryCleaner.Infrastructure.Hashing;
 using CalibreLibraryCleaner.Infrastructure.LibrarySnapshots;
 using CalibreLibraryCleaner.Infrastructure.LocalModels;
+using CalibreLibraryCleaner.Infrastructure.Metadata;
 using CalibreLibraryCleaner.Infrastructure.Paths;
 using CalibreLibraryCleaner.Infrastructure.Pdf;
 using CalibreLibraryCleaner.Infrastructure.Recommendations;
@@ -54,6 +56,21 @@ public static class ServiceCollectionExtensions
         services.AddSingleton(new BibliographicEnrichmentOptions(enabled: openLibraryEnabled));
         services.AddSingleton(new BibliographicResolutionCacheOptions());
         services.AddSingleton<IBibliographicResolutionCache, FileBibliographicResolutionCache>();
+        services.AddSingleton(new EditionMetadataEnrichmentOptions());
+        services.AddSingleton(new EditionMetadataProposalCacheOptions());
+        services.AddSingleton<IEditionMetadataProposalCache, FileEditionMetadataProposalCache>();
+        services.AddSingleton(new MetadataReviewDecisionStoreOptions());
+        services.AddSingleton<IMetadataReviewDecisionStore, FileMetadataReviewDecisionStore>();
+        services.AddSingleton(new EditionCoverStagingOptions());
+        services.AddSingleton<IEditionCoverStager>(provider => new BoundedEditionCoverStager(
+            new HttpClient(new SocketsHttpHandler { AllowAutoRedirect = false })
+            {
+                Timeout = Timeout.InfiniteTimeSpan,
+            },
+            provider.GetRequiredService<EditionCoverStagingOptions>()));
+        services.AddSingleton(new GoogleBooksApiKeyStoreOptions());
+        services.AddSingleton<IGoogleBooksApiKeyStore, WindowsProtectedGoogleBooksApiKeyStore>();
+        services.AddSingleton(new GoogleBooksOptions());
         services.AddSingleton(_ => new HttpClient(new SocketsHttpHandler
         {
             AllowAutoRedirect = false,
@@ -67,6 +84,23 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<OpenLibraryBibliographicProvider>();
         services.AddSingleton<IBibliographicProvider>(provider =>
             provider.GetRequiredService<OpenLibraryBibliographicProvider>());
+        services.AddSingleton<IEditionMetadataProvider>(provider =>
+            provider.GetRequiredService<OpenLibraryBibliographicProvider>());
+        services.AddSingleton<GoogleBooksEditionMetadataProvider>(provider => new(
+            new HttpClient(new SocketsHttpHandler
+            {
+                AllowAutoRedirect = false,
+                AutomaticDecompression = System.Net.DecompressionMethods.GZip
+                    | System.Net.DecompressionMethods.Deflate,
+            })
+            {
+                BaseAddress = new("https://www.googleapis.com/books/v1/", UriKind.Absolute),
+                Timeout = TimeSpan.FromSeconds(65),
+            },
+            provider.GetRequiredService<IGoogleBooksApiKeyStore>(),
+            provider.GetRequiredService<GoogleBooksOptions>()));
+        services.AddSingleton<IEditionMetadataProvider>(provider =>
+            provider.GetRequiredService<GoogleBooksEditionMetadataProvider>());
         string? embeddingModel = Environment.GetEnvironmentVariable("CALIBRE_OLLAMA_EMBEDDING_MODEL");
         string? embeddingVersion = Environment.GetEnvironmentVariable("CALIBRE_OLLAMA_EMBEDDING_MODEL_VERSION");
         string? ollamaRuntimeVersion = Environment.GetEnvironmentVariable("CALIBRE_OLLAMA_RUNTIME_VERSION");

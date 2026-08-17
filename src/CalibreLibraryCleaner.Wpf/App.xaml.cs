@@ -4,6 +4,7 @@ using CalibreLibraryCleaner.Application.Assessments.Pdf;
 using CalibreLibraryCleaner.Application.Executions;
 using CalibreLibraryCleaner.Application.Libraries;
 using CalibreLibraryCleaner.Application.Matching;
+using CalibreLibraryCleaner.Application.Metadata;
 using CalibreLibraryCleaner.Application.Recommendations;
 using CalibreLibraryCleaner.Domain.Recommendations;
 using CalibreLibraryCleaner.Infrastructure.DependencyInjection;
@@ -18,10 +19,16 @@ namespace CalibreLibraryCleaner.Wpf;
 
 public partial class App : System.Windows.Application
 {
-    private readonly IHost _host;
+    private readonly IHost? _host;
+    private readonly bool _releaseSmoke;
 
     public App()
     {
+        _releaseSmoke = Environment.GetCommandLineArgs()
+            .Skip(1)
+            .Any(value => string.Equals(value, "--release-smoke", StringComparison.Ordinal));
+        if (_releaseSmoke) return;
+
         // Enable legacy single-byte code pages (e.g. windows-1252) so documents that
         // declare a non-Unicode encoding decode accurately. Registration is process
         // global and idempotent; the infrastructure layer registers it too.
@@ -49,6 +56,8 @@ public partial class App : System.Windows.Application
         builder.Services.AddSingleton<GenerateConsolidationRecommendationsUseCase>();
         builder.Services.AddSingleton<ResolveCandidateContentSignaturesUseCase>();
         builder.Services.AddSingleton<ResolveBibliographicEvidenceUseCase>();
+        builder.Services.AddSingleton<ResolveEditionMetadataProposalsUseCase>();
+        builder.Services.AddSingleton<PrepareMetadataReviewUseCase>();
         builder.Services.AddSingleton<ObserveLocalEmbeddingEvidenceUseCase>(serviceProvider =>
         {
             Infrastructure.LocalModels.OllamaEmbeddingOptions options = serviceProvider
@@ -93,6 +102,14 @@ public partial class App : System.Windows.Application
             MessageBoxExactDuplicateCleanupConfirmationService>();
         builder.Services.AddSingleton<IUnifiedCandidateCleanupConfirmationService,
             MessageBoxUnifiedCandidateCleanupConfirmationService>();
+        builder.Services.AddSingleton<IMetadataMutationConfirmationService,
+            MessageBoxMetadataMutationConfirmationService>();
+        builder.Services.AddSingleton<LibraryOperationCoordinator>();
+        builder.Services.AddTransient<OnlineMetadataSettingsViewModel>();
+        builder.Services.AddTransient<OnlineMetadataSettingsWindow>();
+        builder.Services.AddSingleton<IOnlineMetadataSettingsDialogService>(serviceProvider =>
+            new OnlineMetadataSettingsDialogService(
+                serviceProvider.GetRequiredService<OnlineMetadataSettingsWindow>));
         builder.Services.AddSingleton<ExactBinaryCleanupPlanWorkspaceViewModel>();
         builder.Services.AddSingleton<MainWindowViewModel>();
         builder.Services.AddSingleton<MainWindow>();
@@ -101,10 +118,16 @@ public partial class App : System.Windows.Application
 
     protected override async void OnStartup(System.Windows.StartupEventArgs e)
     {
+        if (_releaseSmoke)
+        {
+            base.OnStartup(e);
+            Shutdown(ReleasePackageSmokeCheck.Validate(AppContext.BaseDirectory) ? 0 : 1);
+            return;
+        }
         try
         {
             base.OnStartup(e);
-            await _host.StartAsync().ConfigureAwait(true);
+            await _host!.StartAsync().ConfigureAwait(true);
             await _host.Services.GetRequiredService<MainWindowViewModel>()
                 .InitializeAsync(CancellationToken.None)
                 .ConfigureAwait(true);
@@ -121,6 +144,11 @@ public partial class App : System.Windows.Application
 
     protected override async void OnExit(System.Windows.ExitEventArgs e)
     {
+        if (_host is null)
+        {
+            base.OnExit(e);
+            return;
+        }
         try
         {
             Log.Information("Application shutdown started.");

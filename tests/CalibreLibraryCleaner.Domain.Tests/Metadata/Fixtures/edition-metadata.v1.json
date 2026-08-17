@@ -1,0 +1,35 @@
+{
+  "schemaVersion": "edition-metadata-fixture/1.0",
+  "scenarios": [
+    {
+      "id": "isbn-selects-coherent-edition",
+      "query": { "identifier": "ISBN:9780141439518" },
+      "candidates": [
+        { "workId": "/works/OL66554W", "editionId": "/books/OL7353617M", "title": "Pride and Prejudice", "authors": ["Jane Austen"], "isbns": ["9780141439518"], "publisher": "Penguin Classics", "year": 2003, "language": "eng" },
+        { "workId": "/works/OL66554W", "editionId": "/books/OL1111111M", "title": "Pride and Prejudice", "authors": ["Jane Austen"], "isbns": ["9780307386861"], "publisher": "Vintage", "year": 2007, "language": "eng" }
+      ],
+      "expectedStatus": "Proposed",
+      "expectedEditionId": "/books/OL7353617M"
+    },
+    {
+      "id": "title-author-selects-edition-variant",
+      "query": { "title": "Alice in Wonderland Illustrated", "authors": ["L. Carroll"], "language": "en" },
+      "candidates": [
+        { "workId": "/works/OL138052W", "editionId": "/books/OL24335270M", "title": "Alice's Adventures in Wonderland (Illustrated)", "authors": ["Lewis Carroll"], "isbns": ["9780141192468"], "publisher": "Penguin", "year": 2010, "language": "eng" },
+        { "workId": "/works/OL999999W", "editionId": "/books/OL999999M", "title": "Alice Through the Looking Glass", "authors": ["Another Author"], "isbns": [], "publisher": "Other", "year": 2012, "language": "eng" }
+      ],
+      "expectedStatus": "Proposed",
+      "expectedEditionId": "/books/OL24335270M"
+    },
+    {
+      "id": "equal-compatible-editions-remain-ambiguous",
+      "query": { "title": "Shared Title", "authors": ["Alex Writer"], "language": "en" },
+      "candidates": [
+        { "workId": "/works/OL100000W", "editionId": "/books/OL100000M", "title": "Shared Title", "authors": ["Alex Writer"], "isbns": [], "publisher": "First", "year": 2020, "language": "eng" },
+        { "workId": "/works/OL200000W", "editionId": "/books/OL200000M", "title": "Shared Title", "authors": ["Alex Writer"], "isbns": [], "publisher": "Second", "year": 2021, "language": "eng" }
+      ],
+      "expectedStatus": "Ambiguous",
+      "expectedEditionId": null
+    }
+  ]
+}

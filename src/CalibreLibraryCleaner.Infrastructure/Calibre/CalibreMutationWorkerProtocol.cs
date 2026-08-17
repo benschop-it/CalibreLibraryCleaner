@@ -2,6 +2,7 @@ using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using CalibreLibraryCleaner.Application.Executions;
+using CalibreLibraryCleaner.Domain.Libraries;
 
 namespace CalibreLibraryCleaner.Infrastructure.Calibre;
 
@@ -116,7 +117,13 @@ internal sealed record CalibreMutationWorkerOperationMessage(
     string? CanonicalFormat,
     long? TargetRecordId,
     long? ExpectedSizeInBytes,
-    string? ExpectedSha256);
+    string? ExpectedSha256,
+    LibraryMetadataField? MetadataField,
+    IReadOnlyList<string>? MetadataValues,
+    CalibreMetadataSourceIdentity? MetadataSource,
+    string? StagedCoverFileName,
+    long? StagedCoverSizeInBytes,
+    string? StagedCoverSha256);
 
 internal sealed record CalibreMutationWorkerResultMessage(
     string ProtocolVersion,
@@ -130,4 +137,7 @@ internal sealed record CalibreMutationWorkerOperationResultMessage(
     string OperationId,
     CalibreMutationOperationKind Kind,
     bool IsSuccess,
-    string? FailureCode = null);
+    string? FailureCode = null,
+    IReadOnlyList<string>? VerifiedMetadataValues = null,
+    string? VerifiedManagedPath = null,
+    string? VerifiedAuthorSort = null);

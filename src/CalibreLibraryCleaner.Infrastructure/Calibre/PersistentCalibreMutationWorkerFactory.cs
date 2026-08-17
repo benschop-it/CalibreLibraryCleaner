@@ -13,7 +13,8 @@ internal sealed class PersistentCalibreMutationWorkerFactory(CalibreExecutionOpt
 {
     private const string WorkerResourceName =
         "CalibreLibraryCleaner.Infrastructure.Calibre.calibre_mutation_worker.py";
-    private static readonly string[] RequiredCapabilities = ["transferFormat", "removeFormat", "removeRecord"];
+    private static readonly string[] RequiredCapabilities =
+        ["setMetadata", "transferFormat", "removeFormat", "removeRecord"];
 
     public async Task<CalibreMutationWorkerOpenResult> TryOpenAsync(
         OpenCalibreMutationWorkerRequest request,
@@ -36,6 +37,12 @@ internal sealed class PersistentCalibreMutationWorkerFactory(CalibreExecutionOpt
                 || !string.Equals(request.Tool.Identity.CapabilityProfile, options.CapabilityProfile, StringComparison.Ordinal)
                 || !Directory.Exists(libraryRoot) || !File.Exists(Path.Combine(libraryRoot, "metadata.db")))
                 return Failed("CALIBRE_WORKER_BOUNDARY_INVALID");
+            string? coverStagingRoot = null;
+            if (request.MetadataCoverStagingRoot is not null
+                && (!ExecutionPathGuard.TryValidateExternalDirectory(
+                        libraryRoot, request.MetadataCoverStagingRoot, true, out coverStagingRoot, out _)
+                    || !ExecutionPathGuard.TryRejectReparsePoints(coverStagingRoot!, true, out _)))
+                return Failed("CALIBRE_WORKER_COVER_STAGING_UNSAFE");
 
             trustedToolLock = new FileStream(trustedCalibredb, FileMode.Open, FileAccess.Read, FileShare.Read,
                 128 * 1024, FileOptions.Asynchronous | FileOptions.SequentialScan);
@@ -68,7 +75,7 @@ internal sealed class PersistentCalibreMutationWorkerFactory(CalibreExecutionOpt
                 128 * 1024, FileOptions.Asynchronous | FileOptions.SequentialScan);
 
             ProcessStartInfo startInfo = CreateStartInfo(executable, canonicalWorkerDirectory!, scriptPath,
-                libraryRoot, request.ExpectedLibraryUuid);
+                libraryRoot, request.ExpectedLibraryUuid, coverStagingRoot);
             process = new Process { StartInfo = startInfo };
             if (!process.Start()) return await FailAndDisposeAsync("CALIBRE_WORKER_NOT_STARTED").ConfigureAwait(false);
             Task<string> stderr = DrainBoundedAsync(process.StandardError);
@@ -135,7 +142,8 @@ internal sealed class PersistentCalibreMutationWorkerFactory(CalibreExecutionOpt
         string workingDirectory,
         string scriptPath,
         string libraryRoot,
-        string expectedLibraryUuid)
+        string expectedLibraryUuid,
+        string? coverStagingRoot)
     {
         ProcessStartInfo startInfo = new()
         {
@@ -155,6 +163,7 @@ internal sealed class PersistentCalibreMutationWorkerFactory(CalibreExecutionOpt
             startInfo.Environment[name] = value!;
         startInfo.Environment["CALIBRE_CONFIG_DIRECTORY"] = options.ControlledConfigDirectory;
         startInfo.Environment["CLC_WORKER_TEMP_DIRECTORY"] = workingDirectory;
+        startInfo.Environment["CLC_WORKER_COVER_DIRECTORY"] = coverStagingRoot ?? string.Empty;
         foreach (string argument in new[] { "-e", scriptPath, "--", libraryRoot, expectedLibraryUuid })
             startInfo.ArgumentList.Add(argument);
         return startInfo;
@@ -255,7 +264,10 @@ internal sealed class PersistentCalibreMutationWorkerSession(
             CalibreMutationWorkerOperationMessage[] operations = request.Operations.Select(value => new CalibreMutationWorkerOperationMessage(
                 value.OperationId, value.Kind, value.RecordId.Value, value.CanonicalFormat,
                 value.TargetRecordId?.Value, value.ExpectedFingerprint?.SizeInBytes,
-                value.ExpectedFingerprint?.Sha256.Value)).ToArray();
+                value.ExpectedFingerprint?.Sha256.Value, value.Metadata?.Field,
+                value.Metadata?.Values, value.Metadata?.Source, value.Metadata?.StagedCoverFileName,
+                value.Metadata?.StagedCoverFingerprint?.SizeInBytes,
+                value.Metadata?.StagedCoverFingerprint?.Sha256.Value)).ToArray();
             try
             {
                 await CalibreMutationWorkerProtocol.WriteAsync(process.StandardInput,
@@ -270,7 +282,9 @@ internal sealed class PersistentCalibreMutationWorkerSession(
                     return Failed(request.ChunkId, true, "CALIBRE_WORKER_PROTOCOL_INVALID");
                 return new(response.ChunkId!, response.MutationStarted,
                     response.OperationResults!.Select(value => new CalibreMutationOperationResult(
-                        value.OperationId, value.Kind, value.IsSuccess, value.FailureCode)).ToArray(),
+                        value.OperationId, value.Kind, value.IsSuccess, value.FailureCode,
+                        value.VerifiedMetadataValues, value.VerifiedManagedPath,
+                        value.VerifiedAuthorSort)).ToArray(),
                     response.FailureCode);
             }
             catch (Exception exception) when (exception is IOException or InvalidDataException
@@ -348,6 +362,18 @@ internal sealed class PersistentCalibreMutationWorkerSession(
             if (!result.IsSuccess) failureSeen = true;
             else if (failureSeen) return false;
             if (result.IsSuccess == (result.FailureCode is not null)) return false;
+        }
+        foreach ((CalibreMutationWorkerOperationResultMessage result, CalibreMutationOperation operation) in
+                 response.OperationResults.Zip(request.Operations))
+        {
+            bool metadataSuccess = result.IsSuccess
+                && operation.Kind == CalibreMutationOperationKind.SetMetadata;
+            if (metadataSuccess != (result.VerifiedMetadataValues is not null
+                    && !string.IsNullOrWhiteSpace(result.VerifiedManagedPath)
+                    && !string.IsNullOrWhiteSpace(result.VerifiedAuthorSort))
+                || !metadataSuccess && (result.VerifiedMetadataValues is not null
+                    || result.VerifiedManagedPath is not null || result.VerifiedAuthorSort is not null))
+                return false;
         }
         return failureSeen == (response.FailureCode is not null);
     }

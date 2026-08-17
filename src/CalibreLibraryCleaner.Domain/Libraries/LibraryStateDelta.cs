@@ -145,6 +145,7 @@ public enum LibraryMetadataField
     Identifiers,
     Series,
     SeriesIndex,
+    Cover,
 }
 
 public sealed record SetMetadataLibraryStateDelta : LibraryStateDelta
@@ -156,20 +157,31 @@ public sealed record SetMetadataLibraryStateDelta : LibraryStateDelta
         DateTimeOffset appliedAtUtc,
         CalibreBookId recordId,
         LibraryMetadataField field,
-        IEnumerable<string> values)
+        IEnumerable<string> values,
+        string? verifiedManagedPath = null,
+        string? verifiedAuthorSort = null)
         : base(generationId, expectedRevision, operationId, appliedAtUtc)
     {
         ArgumentNullException.ThrowIfNull(values);
         if (!Enum.IsDefined(field)) throw new ArgumentOutOfRangeException(nameof(field));
+        if (verifiedManagedPath is { Length: > 1_024 }
+            || verifiedManagedPath is not null && verifiedManagedPath.Any(char.IsControl)
+            || verifiedAuthorSort is { Length: > 512 }
+            || verifiedAuthorSort is not null && verifiedAuthorSort.Any(char.IsControl))
+            throw new ArgumentException("Verified Calibre metadata exceeds its bounds.");
         RecordId = recordId;
         Field = field;
         Values = Array.AsReadOnly(values.Select(value => value ?? throw new ArgumentException(
             "Metadata values cannot contain null.", nameof(values))).ToArray());
+        VerifiedManagedPath = verifiedManagedPath;
+        VerifiedAuthorSort = verifiedAuthorSort;
     }
 
     public CalibreBookId RecordId { get; }
     public LibraryMetadataField Field { get; }
     public IReadOnlyList<string> Values { get; }
+    public string? VerifiedManagedPath { get; }
+    public string? VerifiedAuthorSort { get; }
 }
 
 public static class LibraryStateDeltaPolicy
@@ -449,7 +461,7 @@ public static class LibraryStateDeltaPolicy
     private static CalibreBook UpdateMetadata(CalibreBook source, SetMetadataLibraryStateDelta delta)
     {
         string title = source.Title;
-        string authorSort = source.AuthorSort;
+        string authorSort = delta.VerifiedAuthorSort ?? source.AuthorSort;
         IReadOnlyList<BookAuthor> authors = source.Authors;
         IReadOnlyList<BookIdentifier> identifiers = source.Identifiers;
         BookPublicationMetadata publication = source.PublicationMetadata;
@@ -473,7 +485,7 @@ public static class LibraryStateDeltaPolicy
                 break;
         }
         return new(source.Id, title, authorSort, authors, identifiers, source.Formats,
-            source.RelativeDirectory, publication);
+            delta.VerifiedManagedPath ?? source.RelativeDirectory, publication);
     }
 
     private static BookPublicationMetadata UpdatePublication(
@@ -485,6 +497,7 @@ public static class LibraryStateDeltaPolicy
         string? series = source.Series;
         decimal? seriesIndex = source.SeriesIndex;
         IReadOnlyList<string> languages = source.Languages;
+        bool hasCover = source.HasCover;
         switch (delta.Field)
         {
             case LibraryMetadataField.Publisher:
@@ -507,10 +520,13 @@ public static class LibraryStateDeltaPolicy
                 seriesIndex = index is null ? null : decimal.Parse(index,
                     System.Globalization.CultureInfo.InvariantCulture);
                 break;
+            case LibraryMetadataField.Cover:
+                hasCover = delta.Values.Count == 1 && bool.Parse(delta.Values[0]);
+                break;
             default:
                 throw new InvalidOperationException("The metadata field is not a publication field.");
         }
-        return new(publisher, publicationDate, series, seriesIndex, languages, source.HasCover);
+        return new(publisher, publicationDate, series, seriesIndex, languages, hasCover);
     }
 
     private static string Single(SetMetadataLibraryStateDelta delta) => delta.Values.Count == 1

@@ -1,0 +1,63 @@
+{
+  "schemaVersion": "edition-metadata-fusion-fixture/1.0",
+  "scenarios": [
+    {
+      "id": "shared-isbn-agreement-is-high",
+      "proposals": [
+        { "provider": "open-library", "bookId": 1, "editionId": "ol-1", "title": "Pride and Prejudice", "authors": ["Jane Austen"], "isbn": "9780141439518", "publisher": "Penguin", "year": 2003, "score": 10008, "reasons": ["METADATA.EDITION.ISBN_EXACT"] },
+        { "provider": "google-books", "bookId": 1, "editionId": "gb-1", "title": "Pride and Prejudice", "authors": ["Jane Austen"], "isbn": "9780141439518", "publisher": "Penguin", "year": 2003, "score": 10007, "reasons": ["METADATA.EDITION.ISBN_EXACT"] }
+      ],
+      "expectedConfidence": "High",
+      "expectedSelected": true,
+      "expectedPublisher": "Penguin"
+    },
+    {
+      "id": "conflicting-editions-are-low",
+      "proposals": [
+        { "provider": "open-library", "bookId": 1, "editionId": "ol-2", "title": "Shared Work", "authors": ["Alex Writer"], "isbn": "9780306406157", "publisher": "First", "year": 2001, "score": 10008, "reasons": ["METADATA.EDITION.ISBN_EXACT"] },
+        { "provider": "google-books", "bookId": 1, "editionId": "gb-2", "title": "Shared Work", "authors": ["Alex Writer"], "isbn": "9780140328721", "publisher": "Second", "year": 2009, "score": 10008, "reasons": ["METADATA.EDITION.ISBN_EXACT"] }
+      ],
+      "expectedConfidence": "Low",
+      "expectedSelected": false,
+      "expectedPublisher": "Second"
+    },
+    {
+      "id": "shared-isbn-fills-missing-publisher",
+      "proposals": [
+        { "provider": "open-library", "bookId": 1, "editionId": "ol-3", "title": "Filled Work", "authors": ["Jamie Author"], "isbn": "9780306406157", "publisher": null, "year": 2005, "score": 10020, "reasons": ["METADATA.EDITION.ISBN_EXACT"] },
+        { "provider": "google-books", "bookId": 1, "editionId": "gb-3", "title": "Filled Work", "authors": ["Jamie Author"], "isbn": "9780306406157", "publisher": "Canonical Publisher", "year": 2005, "score": 10008, "reasons": ["METADATA.EDITION.ISBN_EXACT"] }
+      ],
+      "expectedConfidence": "High",
+      "expectedSelected": true,
+      "expectedPublisher": "Canonical Publisher"
+    },
+    {
+      "id": "single-exact-title-author-is-medium",
+      "proposals": [
+        { "provider": "open-library", "bookId": 1, "editionId": "ol-4", "title": "Exact Work", "authors": ["Exact Author"], "isbn": null, "publisher": "Publisher", "year": 2010, "score": 4007, "reasons": ["METADATA.EDITION.TITLE_EXACT", "METADATA.EDITION.AUTHOR_EXACT"] }
+      ],
+      "expectedConfidence": "Medium",
+      "expectedSelected": true,
+      "expectedPublisher": "Publisher"
+    },
+    {
+      "id": "no-provider-proposal-is-unavailable",
+      "proposals": [],
+      "expectedConfidence": "Unavailable",
+      "expectedSelected": false,
+      "expectedPublisher": null
+    }
+  ],
+  "subjectScenarios": [
+    {
+      "id": "one-unified-group-and-two-singletons",
+      "bookIds": [4, 2, 1, 3],
+      "groupMemberIds": [2, 3],
+      "selectedKeeperId": 3,
+      "proposalBookIds": [1, 2, 3],
+      "expectedSubjectKinds": ["Unified", "Singleton", "Singleton"],
+      "expectedTargetIds": [3, 1, 4],
+      "expectedConfidences": ["High", "High", "Unavailable"]
+    }
+  ]
+}

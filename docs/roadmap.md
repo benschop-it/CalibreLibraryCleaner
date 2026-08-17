@@ -1,135 +1,53 @@
 # Roadmap
 
-The historical milestone plans are archived under `docs/archive/`. This roadmap is
-the current prioritized product direction.
+Calibre Library Cleaner has one remaining product finish line: complete a one-time
+cleanup of a messy disposable Calibre library copy, accept the result, and use that
+copy to replace the original library. The active
+[execution plan](plans/finish-one-time-library-cleanup.md) governs implementation.
 
-## Completed baseline
+## Proven baseline
 
-### Foundation and read-only analysis
+- Read-only Exact analysis with stable-observation SHA-256 reuse.
+- Exact keeper review and supported worker-only cleanup.
+- Residual reconciliation, bounded Expanded discovery, and disjoint Unified
+  same-work/language Candidate groups.
+- Unified keeper override and Skip followed by supported worker-only cleanup.
+- External-backup confirmation, stop-on-ambiguity, and explicit Rescan after failure.
+- Large-library acceptance on a 27,952-record disposable copy.
+- Enabled-by-default Open Library same-work evidence with local fallback.
+- Optional Ollama observations that do not affect grouping or cleanup.
 
-- .NET 10 WPF/Clean Architecture solution, DI, structured logging, tests, and ADRs.
-- Read-only Calibre catalog/path loading and streaming SHA-256.
-- Exact binary and exact normalized metadata evidence.
-- EPUB assessment and isolated bounded PDF assessment.
-- Persisted library state, assessment reuse, EPUB signature cache, and visible
-  progress.
+Matching calibration is frozen. Metadata enrichment must not change the existing
+grouping authority.
 
-### Staged cleanup
+## Remaining sequence
 
-- Exact-only Scan and Exact keeper review/cleanup.
-- Read-only post-Exact residual reconciliation.
-- Bounded deterministic Expanded discovery with candidate-only EPUB content.
-- Disjoint Unified Candidate groups, evidence, generated keeper, override, and Skip.
-- Fixed persistent `calibre-debug` worker for Exact and Candidate cleanup.
-- External-backup confirmation, stop-on-ambiguity, and no automated recovery.
-- Large-library safety, performance, progress, cache-reuse, and cleanup acceptance.
+1. Remove review ambiguity and prevent analysis/cleanup operation overlap.
+2. Add provider-neutral rich edition contracts and cached Open Library metadata.
+3. Add independent Google Books metadata and protected per-user API-key settings.
+4. Select one coherent proposal per Unified group or singleton with deterministic
+   confidence and default-selection policy.
+5. Build scalable proposal review with filters, provenance, cover preview, and Apply
+   overrides.
+6. Apply only checked metadata through the fixed Calibre worker and verify read-back.
+7. Publish a deterministic complete Windows release including the isolated PDF worker,
+   then accept the packaged workflow on an explicitly backed-up disposable
+   representative library. Package construction and smoke verification are complete;
+   destructive workflow acceptance remains pending.
+8. After explicit approval, normalize Calibre-managed names as a separate final
+   action through supported Calibre behavior.
 
-### Simplification already completed
-
-- Removed general cleanup plans/execution history.
-- Removed application-created backup bundles.
-- Removed rollback/recovery UI and mutation fallback.
-- Removed standalone Metadata/Expanded mutation and `Cleanup all`.
-- Retained Metadata/Expanded as read-only evidence views.
-
-## Priority 1: Measure and improve matching
-
-Completed measurement foundation:
-
-- versioned labeled calibration/holdout corpus with hard negatives, editions,
-  translations, damaged metadata, format diversity, and minimal CC0 sourced works;
-- full Domain pipeline evaluator with pair/group/candidate/language/keeper metrics;
-- opaque stage-specific false-positive/false-negative reports and cap diagnostics;
-- contradiction-aware Exact Metadata removed all 20 measured false positives;
-- edition-neutral title similarity recovered all 10 previously unproposed positives;
-- enabled-by-default Open Library evidence recovered both sourced public-domain
-   work families with bounded cache-first lookup and local fallback;
-- reviewed semantic baseline: 100% precision, 95.6897% recall, 97.7974% F1,
-   100% candidate-route recall, 95.2830% keeper coverage, and 100% keeper
-  accuracy on scored groups.
-
-Matching calibration is now frozen. The remaining ten synthetic ambiguous-content
-cases are retained as known limitations rather than targets for more metadata
-heuristics. New matching evidence may be evaluated later only as a genuine product
-capability with independently expanded data.
-
-## Priority 2: Fast incremental analysis and caches
-
-Completed first slice: versioned SHA-256 reuse now requires current safe-path/reparse
-preflight and exact stable file observation, uses bounded path-private atomic cache
-entries, supports forced verification at the Application boundary, and reports
-fresh/reused files and bytes.
-
-Next:
-
-1. Add selective/periodic byte validation and expose forced verification in the UI.
-2. Unify cache identity/provenance across hashes, assessments, signatures,
-   enrichment, embeddings, and derived evidence.
-3. Invalidate/recompute affected records and candidate neighborhoods instead of the
-   whole residual library where practical.
-4. Track cold/warm duration, bytes read, cache hits, memory, parser work, and log
-   volume as regression baselines.
-
-## Priority 3: Richer local matching evidence
-
-1. Add PDF cross-document fingerprints with explicit all-page versus sampled
-   coverage.
-2. Add calibrated content-language detection.
-3. Add cover/visual and richer ebook structural comparison where labeled metrics
-   justify it.
-4. Improve cross-format evidence without retaining prose or claiming unsupported
-   equivalence.
-
-## Priority 4: Bibliographic and local-model evidence
-
-Completed:
-
-- provider-neutral work resolution, evidence provenance, and Domain fusion;
-- enabled-by-default Open Library search with field disclosure, bounded requests,
-  rate limiting, reduced cache, and local fallback.
-- fixed-loopback Ollama metadata-embedding observations with complete runtime/model
-   provenance and reduced comparison cache; final `embeddinggemma` calibration found
-   positives at 850-932 and hard negatives at 647-850, so no threshold was activated.
-
-Closed for now:
-
-- metadata-only embedding calibration cannot preserve both perfect corpus precision
-  and recall with one threshold;
-- model output remains observational;
-- future privacy-safe content models require a separate product plan and new data,
-  not continued tuning of this corpus.
-
-## Priority 5: Review experience
-
-- Cover preview/comparison and richer side-by-side evidence.
-- Fast filtering/sorting for large Candidate sets.
-- Better explanation of edition/revision/illustration uncertainty.
-- Metadata/series normalization suggestions.
-- Efficient bulk Skip/keeper review without requiring review of every group.
-
-## Priority 6: Simplify mutation state
-
-After matching/cache work is stable:
-
-- replace detailed projected delta/journal/checkpoint machinery with minimal durable
-  workflow/run status where safe;
-- retain one worker, deterministic operation ordering, backup confirmation,
-  stop-on-ambiguity, and explicit Rescan before another mutation; and
-- delete complexity rather than adding rollback/recovery features.
-
-## Optional later work
-
-- Multi-library comparison.
-- Cross-platform UI evaluation with a separate process/filesystem decision.
-- Plugin boundaries only if they cannot bypass matching provenance or worker-only
-  mutation.
-- Cloud AI only after a new privacy/authority decision; it is not currently accepted.
+Implement and verify this sequence one step at a time. Provider failure leaves
+metadata unchanged and never blocks duplicate cleanup.
 
 ## Explicitly not planned
 
-- Application-managed undo, rollback, or recovery.
-- Application-created backup bundles.
-- Guaranteed arbitrary cancellation or resumable partial analysis.
-- Direct SQLite or Calibre-managed filesystem mutation.
-- A second mutation engine or command fallback.
-- Reintroducing general cleanup plans or category-specific cleanup commands.
+- Further matching calibration, heuristic tuning, embeddings, local models, or new
+  matching providers.
+- Periodic verification, generalized cache architecture, incremental neighborhoods,
+  background maintenance, or synchronization.
+- Application-managed backup, undo, rollback, recovery, or resume.
+- A second mutation engine, direct SQLite writes, or direct managed-file mutation.
+- Cloud AI, OCR, book-content upload, plugins, multi-library comparison, or
+  cross-platform work.
+- Installer work beyond a practical Windows release ZIP unless requested.

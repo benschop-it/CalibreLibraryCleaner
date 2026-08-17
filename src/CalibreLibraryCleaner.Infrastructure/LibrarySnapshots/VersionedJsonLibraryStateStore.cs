@@ -504,7 +504,8 @@ internal sealed class VersionedJsonLibraryStateStore(
             value.Authors.ToArray(), [value.Title, value.AuthorSort]),
         SetMetadataLibraryStateDelta value => new("set-metadata", value.ExpectedRevision.Value,
             value.OperationId, value.AppliedAtUtc, value.RecordId.Value, value.Field.ToString(),
-            null, null, null, null, value.Values.ToArray(), null),
+            null, null, null, null, value.Values.ToArray(), null,
+            value.VerifiedManagedPath, value.VerifiedAuthorSort),
         _ => throw new ArgumentOutOfRangeException(nameof(delta), delta.GetType().Name, "Unsupported persisted state delta."),
     };
 
@@ -532,7 +533,7 @@ internal sealed class VersionedJsonLibraryStateStore(
             "set-metadata" => new SetMetadataLibraryStateDelta(generation, revision,
                 value.OperationId, value.AppliedAtUtc, recordId,
                 Enum.Parse<LibraryMetadataField>(value.Format ?? string.Empty, false),
-                value.Values ?? []),
+                value.Values ?? [], value.VerifiedManagedPath, value.VerifiedAuthorSort),
             _ => throw new InvalidDataException("The persisted state delta kind is unsupported."),
         };
     }
@@ -919,5 +920,7 @@ internal sealed class VersionedJsonLibraryStateStore(
         long? PreviousSizeInBytes,
         string? PreviousSha256,
         string[]? Values,
-        string[]? ExtraValues);
+        string[]? ExtraValues,
+        string? VerifiedManagedPath = null,
+        string? VerifiedAuthorSort = null);
 }

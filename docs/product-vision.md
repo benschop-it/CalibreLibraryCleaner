@@ -2,17 +2,19 @@
 
 ## Product
 
-Calibre Library Cleaner is a local-first Windows application that finds records for
-the same work, explains the evidence, selects a practical keeper, and consolidates a
-large Calibre library through supported Calibre tooling.
+Calibre Library Cleaner is a local-first Windows application for one focused job: clean
+a messy disposable copy of a Calibre library, review the result, and replace the
+original library when the copy is accepted.
 
-The product is designed for users who maintain a complete external backup of their
-library. Cleanup is therefore optimized for useful matching and high throughput,
-not for application-managed rollback or recovery.
+The application finds records for the same work and language, explains the evidence,
+selects a practical keeper, improves retained bibliographic metadata from trusted
+online sources, and applies approved changes through supported Calibre tooling.
 
 ## Primary goal
 
-Make duplicate discovery as smart as possible while keeping repeated analysis fast.
+Complete one safe, understandable cleanup from analysis through duplicate
+consolidation, metadata improvement, release acceptance, and final Calibre-managed
+name normalization.
 
 An executable Candidate group means **the same work and language**. It may include
 different editions, revisions, illustrations, or formatting. The application makes
@@ -21,11 +23,13 @@ Skip the group. Published groups are processed unless skipped.
 
 ## Priorities
 
-1. Matching precision and recall.
-2. Cold and warm performance, incremental caches, and bounded resource use.
-3. Explainable evidence and efficient keeper/Skip review.
-4. Simple, reliable mutation through one supported Calibre worker.
-5. Progress visibility so long operations never look hung.
+1. Preserve the proven Exact and Unified Candidate duplicate-cleanup behavior.
+2. Produce one coherent, attributed online-edition proposal for every expected
+  retained record without blocking cleanup when providers fail.
+3. Make proposal confidence, default selection, keeper override, and Skip efficient
+  to review at large-library scale.
+4. Apply only approved changes through one supported Calibre worker.
+5. Package and accept the complete Windows workflow before normalizing managed names.
 
 Cancellation, resumable partial analysis, automated rollback, and automated recovery
 are not primary product goals.
@@ -40,32 +44,18 @@ are not primary product goals.
 - A failed or ambiguous mutation stops; the user restores externally if necessary
   and runs an explicit Rescan before further cleanup.
 
-## Evidence strategy
+## Metadata strategy
 
-Matching grows by combining independent, versioned evidence:
+- Preserve the existing matching decision independently from metadata enrichment.
+- Query Open Library and Google Books independently after disclosing transmitted
+  bibliographic field categories; Google Books requires an optional protected key.
+- Select one coherent edition rather than freely mixing conflicting records.
+- Show provenance, confidence, disagreement, and a user-controlled Apply checkbox.
+- Preserve local tags, ratings, comments, custom columns, and unrelated identifiers.
+- Leave metadata unchanged when a proposal is unchecked or unavailable.
 
-- local metadata, authors, identifiers, series, language, and binary fingerprints;
-- EPUB and PDF content/structure evidence;
-- cover and visual evidence where useful;
-- configured online bibliographic providers, enabled by default and recorded with
-  provenance; and
-- local ML/embedding evidence for difficult title, author, language, and content
-  variants.
-
-No single weak signal silently determines a group. Evidence and contradictions stay
-visible, and external/provider failure falls back to local matching.
-
-## Performance strategy
-
-- Stage Exact cleanup before expensive residual matching.
-- Cache hashes, assessments, signatures, enrichment, and model outputs by stable
-  input identity plus algorithm/model/resource versions.
-- Reuse unchanged SHA-256 values, with selective or periodic byte validation.
-- Recompute affected records and candidate neighborhoods instead of the complete
-  library where practical.
-- Bound concurrency and parser resources.
-- Measure cold/warm durations, cache hit rates, memory, candidate counts, and
-  mutation throughput on disposable large libraries.
+Provider failure never blocks duplicate cleanup. Online results are proposals and
+never mutation authority.
 
 ## Implemented baseline
 
@@ -80,13 +70,21 @@ visible, and external/provider failure falls back to local matching.
 - Persistent assessment/signature caches and measured progress.
 - Fixed persistent Calibre mutation worker for Exact and Candidate cleanup.
 - External-backup confirmation and no automated recovery.
+- Stable-observation SHA-256 reuse with forced verification at the Application
+  boundary.
+- Enabled-by-default Open Library same-work evidence with reduced caching.
+- Optional configured Ollama observations that remain non-authoritative and do not
+  affect grouping or cleanup after failed threshold calibration.
 
 ## Success measures
 
-- Better labeled-corpus precision and recall than the current matcher.
-- More true same-work records found without unbounded pair comparison.
-- Warm scans and Candidate preparation reuse most unchanged work.
-- Progress remains visibly active throughout long phases.
-- Tens-of-thousands-record libraries complete within measured, improving resource
-  budgets.
-- Cleanup remains explainable and uses no direct database or managed-file writes.
+- Every expected retained record receives one coherent proposal or an explicit
+  unavailable outcome.
+- High/Medium proposals default checked; Low proposals default unchecked and remain
+  easy to review.
+- Provider failure leaves metadata unchanged without blocking duplicate cleanup.
+- Checked metadata updates preserve local-only fields and verify through Calibre.
+- The packaged Windows build includes the PDF worker and completes the workflow on a
+  disposable representative library.
+- Final name normalization uses supported Calibre behavior and no direct filesystem
+  mutation.
