@@ -2,8 +2,9 @@
 
 This directory contains only active execution plans.
 
-There is no active execution plan. The next Priority 2 slice is periodic/selective
-byte validation plus a user-facing forced-verification command.
+Current plan:
+
+- [Finish the One-Time Library Cleanup Workflow](finish-one-time-library-cleanup.md)
 
 Keep active plans current during implementation, then move them to
 `../archive/plans/` after completion and documentation reconciliation.
