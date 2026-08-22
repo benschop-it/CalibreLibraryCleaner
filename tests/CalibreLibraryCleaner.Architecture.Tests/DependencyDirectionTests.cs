@@ -198,10 +198,37 @@ public sealed class DependencyDirectionTests
         source.Should().Contain("VirtualizingPanel.VirtualizationMode=\"Recycling\"");
         source.Should().Contain("SelectedItem=\"{Binding SelectedMetadataReviewSubject, Mode=TwoWay}\"");
         source.Should().Contain("AutomationProperties.Name=\"Resize metadata review details\"");
+        source.Should().Contain("<RowDefinition Height=\"3*\" MinHeight=\"180\" />");
+        source.Should().Contain("<RowDefinition Height=\"5\" />");
+        source.Should().Contain("<RowDefinition Height=\"2*\" MinHeight=\"160\" />");
+        source.Should().NotContain("<RowDefinition Height=\"2*\" MinHeight=\"160\" MaxHeight=");
         source.Should().NotContain("RowDetailsVisibilityMode=\"Visible\"");
         source.Should().Contain("Text=\"{Binding Reasons, Mode=OneWay}\"");
         source.Should().Contain("Text=\"{Binding Provenance, Mode=OneWay}\"");
         source.Should().Contain("IsChecked=\"{Binding Apply, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}\"");
+    }
+
+    [Fact]
+    public void ExactReviewKeepsGroupAndMemberGridsVisible()
+    {
+        XDocument window = XDocument.Load(Path.Combine(
+            RepositoryRoot, "src", WpfProject, "MainWindow.xaml"));
+        XElement tab = window.Descendants().Single(element =>
+            element.Name.LocalName == "TabItem"
+            && (string?)element.Attribute("Header") == "_Exact file duplicates");
+        XElement grid = tab.Elements().Single(element => element.Name.LocalName == "Grid");
+        string?[] heights = grid.Elements().Single(element => element.Name.LocalName == "Grid.RowDefinitions")
+            .Elements().Where(element => element.Name.LocalName == "RowDefinition")
+            .Select(element => (string?)element.Attribute("Height")).ToArray();
+        XElement members = grid.Descendants().Single(element =>
+            element.Name.LocalName == "DataGrid"
+            && element.Attributes().Any(attribute => attribute.Name.LocalName == "AutomationProperties.Name"
+                && attribute.Value == "Records and formats in selected exact file group"));
+        string? memberRow = members.Parent?.Attributes().Single(attribute =>
+            attribute.Name.LocalName == "Grid.Row").Value;
+
+        heights.Should().Equal("Auto", "*", "*");
+        memberRow.Should().Be("2");
     }
 
     [Fact]
@@ -517,7 +544,22 @@ public sealed class DependencyDirectionTests
             RepositoryRoot, "src", InfrastructureProject, "Calibre", "PersistentCalibreMutationWorkerFactory.cs"));
 
         worker.Should().Contain("transfer_format").And.Contain("remove_formats")
-            .And.Contain("remove_books");
+            .And.Contain("remove_books")
+            .And.Contain("def canonical_text(value):")
+            .And.Contain("def canonical_author_sort(value):")
+            .And.Contain("cache.set_field(calibre_field, {book_id: value}, do_path_update=True)")
+            .And.Contain("canonical_text(item) for item in verified")
+            .And.Contain("canonical_text(item) for item in expected")
+            .And.Contain("def clear_metadata_caches(cache, field, book_id):")
+            .And.Contain("if field == \"authors\":")
+            .And.Contain("cache.clear_caches()")
+            .And.Contain("cache.clear_caches(book_ids={book_id})")
+            .And.Contain("!= requested_author_sorts:")
+            .And.Contain("cache.set_sort_for_authors(dict(zip(author_ids, requested_author_sorts)), update_books=True)")
+            .And.Contain("cache.cover(book_id) != normalized")
+            .And.Contain("return {\"values\": verified, \"managedPath\": managed_path")
+            .And.Contain("metadata_cover_readback_failed")
+            .And.Contain("\"metadata_{}_readback_failed\".format(field)");
         (worker + factory).Should().NotContain("--permanent")
             .And.NotContain("restore_database").And.NotContain("backup_metadata")
             .And.NotContain("shell");

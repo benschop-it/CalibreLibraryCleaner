@@ -265,7 +265,8 @@ internal sealed class PersistentCalibreMutationWorkerSession(
                 value.OperationId, value.Kind, value.RecordId.Value, value.CanonicalFormat,
                 value.TargetRecordId?.Value, value.ExpectedFingerprint?.SizeInBytes,
                 value.ExpectedFingerprint?.Sha256.Value, value.Metadata?.Field,
-                value.Metadata?.Values, value.Metadata?.Source, value.Metadata?.StagedCoverFileName,
+                value.Metadata?.Values, value.Metadata?.AuthorSortValues, value.Metadata?.Source,
+                value.Metadata?.StagedCoverFileName,
                 value.Metadata?.StagedCoverFingerprint?.SizeInBytes,
                 value.Metadata?.StagedCoverFingerprint?.Sha256.Value)).ToArray();
             try
@@ -284,7 +285,8 @@ internal sealed class PersistentCalibreMutationWorkerSession(
                     response.OperationResults!.Select(value => new CalibreMutationOperationResult(
                         value.OperationId, value.Kind, value.IsSuccess, value.FailureCode,
                         value.VerifiedMetadataValues, value.VerifiedManagedPath,
-                        value.VerifiedAuthorSort)).ToArray(),
+                        value.VerifiedAuthorSort, value.VerifiedAuthorSortValues,
+                        value.IsSkipped, value.SkipCode)).ToArray(),
                     response.FailureCode);
             }
             catch (Exception exception) when (exception is IOException or InvalidDataException
@@ -362,17 +364,27 @@ internal sealed class PersistentCalibreMutationWorkerSession(
             if (!result.IsSuccess) failureSeen = true;
             else if (failureSeen) return false;
             if (result.IsSuccess == (result.FailureCode is not null)) return false;
+            if (result.IsSkipped != (result.IsSuccess && result.SkipCode is not null)
+                || result.SkipCode is { Length: > 128 }
+                || result.SkipCode?.Any(char.IsControl) == true)
+                return false;
         }
         foreach ((CalibreMutationWorkerOperationResultMessage result, CalibreMutationOperation operation) in
                  response.OperationResults.Zip(request.Operations))
         {
-            bool metadataSuccess = result.IsSuccess
+            bool metadataSuccess = result.IsSuccess && !result.IsSkipped
                 && operation.Kind == CalibreMutationOperationKind.SetMetadata;
+            bool authorSortSuccess = metadataSuccess && operation.Metadata?.AuthorSortValues is not null;
             if (metadataSuccess != (result.VerifiedMetadataValues is not null
                     && !string.IsNullOrWhiteSpace(result.VerifiedManagedPath)
                     && !string.IsNullOrWhiteSpace(result.VerifiedAuthorSort))
                 || !metadataSuccess && (result.VerifiedMetadataValues is not null
-                    || result.VerifiedManagedPath is not null || result.VerifiedAuthorSort is not null))
+                    || result.VerifiedManagedPath is not null || result.VerifiedAuthorSort is not null)
+                || authorSortSuccess != (result.VerifiedAuthorSortValues is not null)
+                || result.VerifiedAuthorSortValues is not null
+                    && (result.VerifiedAuthorSortValues.Count != operation.Metadata!.Values.Count
+                        || result.VerifiedAuthorSortValues.Any(value =>
+                            string.IsNullOrWhiteSpace(value) || value.Length > 512)))
                 return false;
         }
         return failureSeen == (response.FailureCode is not null);

@@ -79,6 +79,79 @@ public sealed class CalibreMutationWorkerBoundaryTests
     }
 
     [Fact]
+    public async Task AuthorNormalizationReturnsVerifiedPerAuthorSorts()
+    {
+        using ControlledCalibreExecutable executable = new();
+        using TemporaryDirectory temporary = new();
+        using ServiceProvider provider = Provider(executable);
+        string library = Path.Combine(temporary.Path, "library");
+        Directory.CreateDirectory(library);
+        File.WriteAllBytes(Path.Combine(library, "metadata.db"), [0x00]);
+        CalibreToolDescriptor tool = (await provider.GetRequiredService<ICalibreToolDiscovery>()
+            .DiscoverAndProbeAsync(library, CancellationToken.None)).Tool!;
+        CalibreMetadataSourceIdentity source = new(
+            "calibre-author-normalization", "1.0", "local-library", "author-normalization/1.0");
+
+        CalibreMutationWorkerOpenResult opened = await provider
+            .GetRequiredService<ICalibreMutationWorkerFactory>()
+            .TryOpenAsync(new(tool, library, "87f7ed1f-59a8-45a6-975a-7e06fd84780d"),
+                CancellationToken.None);
+        await using ICalibreMutationWorkerSession session = opened.Session!;
+        CalibreMutationChunkResult result = await session.ExecuteChunkAsync(new(
+            "author-normalization",
+            [CalibreMutationOperation.SetMetadata(
+                "authors:1",
+                new(1),
+                new(
+                    LibraryMetadataField.Authors,
+                    ["Frederik Pohl", "Jack Williamson"],
+                    source,
+                    authorSortValues: ["Pohl, Frederik", "Williamson, Jack"]))]),
+            CancellationToken.None);
+
+        result.IsSuccess.Should().BeTrue(result.FailureCode);
+        CalibreMutationOperationResult operation = result.OperationResults.Should().ContainSingle().Subject;
+        operation.VerifiedMetadataValues.Should().Equal("Frederik Pohl", "Jack Williamson");
+        operation.VerifiedAuthorSortValues.Should().Equal("Pohl, Frederik", "Williamson, Jack");
+    }
+
+    [Fact]
+    public async Task VerifiedUnchangedMetadataReturnsTypedSkipWithoutVerifiedMutationValues()
+    {
+        using ControlledCalibreExecutable executable = new();
+        using TemporaryDirectory temporary = new();
+        using ServiceProvider provider = Provider(executable);
+        string library = Path.Combine(temporary.Path, "library");
+        Directory.CreateDirectory(library);
+        File.WriteAllBytes(Path.Combine(library, "metadata.db"), [0x00]);
+        CalibreToolDescriptor tool = (await provider.GetRequiredService<ICalibreToolDiscovery>()
+            .DiscoverAndProbeAsync(library, CancellationToken.None)).Tool!;
+        CalibreMetadataSourceIdentity source = new(
+            "qualified-provider", "1.0", "qualified-edition", "qualified-policy/1.0");
+
+        CalibreMutationWorkerOpenResult opened = await provider
+            .GetRequiredService<ICalibreMutationWorkerFactory>()
+            .TryOpenAsync(new(tool, library, "87f7ed1f-59a8-45a6-975a-7e06fd84780d"),
+                CancellationToken.None);
+        await using ICalibreMutationWorkerSession session = opened.Session!;
+        CalibreMutationChunkResult result = await session.ExecuteChunkAsync(new(
+            "metadata-skip-chunk",
+            [CalibreMutationOperation.SetMetadata(
+                "skip-unchanged:metadata:1:publisher",
+                new(1),
+                new(LibraryMetadataField.Publisher, ["Proposed"], source))]),
+            CancellationToken.None);
+
+        result.IsSuccess.Should().BeTrue(result.FailureCode);
+        CalibreMutationOperationResult operation = result.OperationResults.Should().ContainSingle().Subject;
+        operation.IsSkipped.Should().BeTrue();
+        operation.SkipCode.Should().Be("metadata_values_invalid");
+        operation.VerifiedMetadataValues.Should().BeNull();
+        operation.VerifiedManagedPath.Should().BeNull();
+        operation.VerifiedAuthorSort.Should().BeNull();
+    }
+
+    [Fact]
     public async Task MissingTrustedSiblingFailsBeforeMutation()
     {
         using ControlledCalibreExecutable executable = new();

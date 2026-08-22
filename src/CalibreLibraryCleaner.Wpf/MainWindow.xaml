@@ -180,9 +180,7 @@
         <Grid Margin="8">
           <Grid.RowDefinitions>
             <RowDefinition Height="Auto" />
-            <RowDefinition Height="3*" MinHeight="180" />
-            <RowDefinition Height="5" />
-            <RowDefinition Height="2*" MinHeight="180" />
+            <RowDefinition Height="*" />
             <RowDefinition Height="*" />
           </Grid.RowDefinitions>
           <StackPanel Grid.Row="0" Margin="0,0,0,8">
@@ -315,11 +313,20 @@
             <RowDefinition Height="*" />
             <RowDefinition Height="*" />
           </Grid.RowDefinitions>
-          <TextBlock Grid.Row="0"
-                     Margin="0,0,0,8"
-                     FontWeight="Bold"
-                     Text="{Binding UnifiedCandidateSummary}"
-                     TextWrapping="Wrap" />
+            <DockPanel Grid.Row="0" Margin="0,0,0,8">
+              <Button DockPanel.Dock="Right"
+                MinWidth="110"
+                Margin="16,0,0,0"
+                Padding="8,4"
+                Content="Skip _all groups"
+                Command="{Binding SkipAllUnifiedCandidatesCommand}"
+                AutomationProperties.Name="Skip all Unified Candidate groups"
+                ToolTip="Mark every current Unified Candidate group as Skip without changing the library" />
+              <TextBlock VerticalAlignment="Center"
+                   FontWeight="Bold"
+                   Text="{Binding UnifiedCandidateSummary}"
+                   TextWrapping="Wrap" />
+            </DockPanel>
           <GroupBox Grid.Row="1" Header="Unified candidate groups">
             <DataGrid ItemsSource="{Binding UnifiedCandidateGroups}"
                       SelectedItem="{Binding SelectedUnifiedCandidateGroup}"
@@ -383,7 +390,9 @@
         <Grid Margin="8">
           <Grid.RowDefinitions>
             <RowDefinition Height="Auto" />
-            <RowDefinition Height="*" />
+            <RowDefinition Height="3*" MinHeight="180" />
+            <RowDefinition Height="5" />
+            <RowDefinition Height="2*" MinHeight="160" />
           </Grid.RowDefinitions>
           <DockPanel Grid.Row="0" Margin="0,0,0,8">
             <TextBlock DockPanel.Dock="Left"
@@ -392,6 +401,12 @@
                        Text="{Binding MetadataReviewSummary}"
                        TextWrapping="Wrap" />
             <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" Margin="16,0,0,0">
+              <Button Margin="0,0,12,0"
+                      Padding="8,4"
+                      Content="Clear all _Apply"
+                      Command="{Binding ClearAllMetadataApplyCommand}"
+                      AutomationProperties.Name="Clear all metadata Apply choices"
+                      ToolTip="Uncheck every current metadata proposal and persist the choices without changing the library" />
               <Label Target="{Binding ElementName=MetadataReviewFilterBox}"
                      Content="_Show:" />
               <ComboBox x:Name="MetadataReviewFilterBox"

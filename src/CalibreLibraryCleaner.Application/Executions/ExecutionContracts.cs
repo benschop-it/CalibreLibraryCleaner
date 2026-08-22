@@ -97,7 +97,8 @@ public sealed record CalibreMetadataMutation
         IEnumerable<string> values,
         CalibreMetadataSourceIdentity source,
         string? stagedCoverFileName = null,
-        FormatFileFingerprint? stagedCoverFingerprint = null)
+        FormatFileFingerprint? stagedCoverFingerprint = null,
+        IEnumerable<string>? authorSortValues = null)
     {
         ArgumentNullException.ThrowIfNull(values);
         ArgumentNullException.ThrowIfNull(source);
@@ -118,11 +119,20 @@ public sealed record CalibreMetadataMutation
             && (stagedCoverFileName.Length > 128
                 || stagedCoverFileName != Path.GetFileName(stagedCoverFileName)))
             throw new ArgumentException("The staged cover filename is invalid.", nameof(stagedCoverFileName));
+        string[]? boundedAuthorSorts = authorSortValues?.Select(value => value
+            ?? throw new ArgumentException("Author sorts cannot contain null.", nameof(authorSortValues))).ToArray();
+        if (boundedAuthorSorts is not null
+                && field != LibraryMetadataField.Authors
+            || boundedAuthorSorts is not null
+                && (boundedAuthorSorts.Length != boundedValues.Length
+                    || boundedAuthorSorts.Any(value => string.IsNullOrWhiteSpace(value) || value.Length > 512)))
+            throw new ArgumentException("Metadata author sorts are invalid.", nameof(authorSortValues));
         Field = field;
         Values = Array.AsReadOnly(boundedValues);
         Source = source;
         StagedCoverFileName = stagedCoverFileName;
         StagedCoverFingerprint = stagedCoverFingerprint;
+        AuthorSortValues = boundedAuthorSorts is null ? null : Array.AsReadOnly(boundedAuthorSorts);
     }
 
     public LibraryMetadataField Field { get; }
@@ -130,6 +140,7 @@ public sealed record CalibreMetadataMutation
     public CalibreMetadataSourceIdentity Source { get; }
     public string? StagedCoverFileName { get; }
     public FormatFileFingerprint? StagedCoverFingerprint { get; }
+    public IReadOnlyList<string>? AuthorSortValues { get; }
 }
 
 public sealed record CalibreMutationOperation
@@ -235,7 +246,10 @@ public sealed record CalibreMutationOperationResult(
     string? FailureCode = null,
     IReadOnlyList<string>? VerifiedMetadataValues = null,
     string? VerifiedManagedPath = null,
-    string? VerifiedAuthorSort = null);
+    string? VerifiedAuthorSort = null,
+    IReadOnlyList<string>? VerifiedAuthorSortValues = null,
+    bool IsSkipped = false,
+    string? SkipCode = null);
 
 public sealed record CalibreMutationChunkResult(
     string ChunkId,

@@ -159,7 +159,8 @@ public sealed record SetMetadataLibraryStateDelta : LibraryStateDelta
         LibraryMetadataField field,
         IEnumerable<string> values,
         string? verifiedManagedPath = null,
-        string? verifiedAuthorSort = null)
+        string? verifiedAuthorSort = null,
+        IEnumerable<string>? verifiedAuthorSortValues = null)
         : base(generationId, expectedRevision, operationId, appliedAtUtc)
     {
         ArgumentNullException.ThrowIfNull(values);
@@ -175,6 +176,14 @@ public sealed record SetMetadataLibraryStateDelta : LibraryStateDelta
             "Metadata values cannot contain null.", nameof(values))).ToArray());
         VerifiedManagedPath = verifiedManagedPath;
         VerifiedAuthorSort = verifiedAuthorSort;
+        VerifiedAuthorSortValues = verifiedAuthorSortValues is null
+            ? null
+            : Array.AsReadOnly(verifiedAuthorSortValues.ToArray());
+        if (VerifiedAuthorSortValues is not null
+            && (field != LibraryMetadataField.Authors
+                || VerifiedAuthorSortValues.Count != Values.Count
+                || VerifiedAuthorSortValues.Any(value => string.IsNullOrWhiteSpace(value) || value.Length > 512)))
+            throw new ArgumentException("Verified author sorts are invalid.", nameof(verifiedAuthorSortValues));
     }
 
     public CalibreBookId RecordId { get; }
@@ -182,6 +191,32 @@ public sealed record SetMetadataLibraryStateDelta : LibraryStateDelta
     public IReadOnlyList<string> Values { get; }
     public string? VerifiedManagedPath { get; }
     public string? VerifiedAuthorSort { get; }
+    public IReadOnlyList<string>? VerifiedAuthorSortValues { get; }
+}
+
+public sealed record SkipMetadataLibraryStateDelta : LibraryStateDelta
+{
+    public SkipMetadataLibraryStateDelta(
+        LibraryStateGenerationId generationId,
+        LibraryStateRevision expectedRevision,
+        string operationId,
+        DateTimeOffset appliedAtUtc,
+        CalibreBookId recordId,
+        LibraryMetadataField field,
+        string reasonCode)
+        : base(generationId, expectedRevision, operationId, appliedAtUtc)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(reasonCode);
+        if (!Enum.IsDefined(field) || reasonCode.Length > 128 || reasonCode.Any(char.IsControl))
+            throw new ArgumentException("Skipped metadata evidence is invalid.");
+        RecordId = recordId;
+        Field = field;
+        ReasonCode = reasonCode.Trim();
+    }
+
+    public CalibreBookId RecordId { get; }
+    public LibraryMetadataField Field { get; }
+    public string ReasonCode { get; }
 }
 
 public static class LibraryStateDeltaPolicy
@@ -201,6 +236,7 @@ public static class LibraryStateDeltaPolicy
                 state.Snapshot, removeWithContent.RecordId, requireEmpty: false),
             CreateRecordLibraryStateDelta createRecord => CreateRecord(state.Snapshot, createRecord),
             SetMetadataLibraryStateDelta setMetadata => SetMetadata(state.Snapshot, setMetadata),
+            SkipMetadataLibraryStateDelta skipMetadata => SkipMetadata(state.Snapshot, skipMetadata),
             _ => throw new ArgumentOutOfRangeException(nameof(delta), delta.GetType().Name, "Unsupported library-state delta."),
         };
         return new(state.GenerationId, state.Revision.Next(), LibraryStateStatus.Authoritative,
@@ -288,6 +324,15 @@ public static class LibraryStateDeltaPolicy
             throw new InvalidOperationException("The delta expected a different library-state revision.");
         if (delta.AppliedAtUtc < projectedAt)
             throw new InvalidOperationException("The delta predates the current projected state.");
+    }
+
+    private static LibrarySnapshot SkipMetadata(
+        LibrarySnapshot snapshot,
+        SkipMetadataLibraryStateDelta delta)
+    {
+        if (!snapshot.Books.Any(value => value.Id == delta.RecordId))
+            throw new InvalidOperationException("The skipped metadata target is not present.");
+        return snapshot;
     }
 
     private static void ApplyRemoveFormat(
@@ -472,7 +517,10 @@ public static class LibraryStateDeltaPolicy
                 break;
             case LibraryMetadataField.Authors:
                 if (delta.Values.Count == 0) throw new InvalidOperationException("Authors cannot be empty.");
-                authors = delta.Values.Select(value => new BookAuthor(null, value, value)).ToArray();
+                authors = delta.Values.Select((value, index) => new BookAuthor(
+                    null,
+                    value,
+                    delta.VerifiedAuthorSortValues?[index] ?? value)).ToArray();
                 break;
             case LibraryMetadataField.AuthorSort:
                 authorSort = Single(delta);

@@ -8,6 +8,7 @@ using CalibreLibraryCleaner.Wpf.Services;
 using CalibreLibraryCleaner.Wpf.ViewModels;
 using FakeItEasy;
 using FluentAssertions;
+using Microsoft.Extensions.Logging;
 using Xunit;
 
 namespace CalibreLibraryCleaner.Wpf.Tests.ViewModels;
@@ -119,14 +120,21 @@ public sealed class ExactBinaryCleanupPlanWorkspaceViewModelTests
         IExactDuplicateCleanupConfirmationService confirmation =
             A.Fake<IExactDuplicateCleanupConfirmationService>();
         A.CallTo(() => confirmation.ConfirmExternalBackup(A<int>._)).Returns(true);
+        CapturingLogger<ExactBinaryCleanupPlanWorkspaceViewModel> logger = new();
         ExactBinaryCleanupPlanWorkspaceViewModel viewModel = new(
-            useCase, confirmation, stateSession, clock);
+            useCase, confirmation, stateSession, clock, logger: logger);
         viewModel.UpdateContext(snapshot, [row]);
 
         await viewModel.RemoveDuplicatesCommand.ExecuteAsync(null);
 
         viewModel.ResultSummary.Should().Contain("Removed 1 duplicate format")
             .And.Contain("deleted 1 empty record");
+        logger.Entries.Should().Contain(value =>
+            value.EventId.Name == "UserVisibleExactResult"
+            && value.Message == viewModel.ResultSummary);
+        logger.Entries.Should().Contain(value =>
+            value.EventId.Name == "UserVisibleExactStatus"
+            && value.Message == viewModel.Status);
         stateSession.GetCurrent(snapshot.Identity.LibraryRoot)!.Snapshot.Books
             .Select(value => value.Id).Should().Equal(new CalibreBookId(2));
         stateSession.GetCurrent(snapshot.Identity.LibraryRoot)!.WorkflowCheckpoint.Phase.Should()
@@ -148,6 +156,21 @@ public sealed class ExactBinaryCleanupPlanWorkspaceViewModelTests
         return new(new(id), "Book", "Author", [new(new(id), "Author", "Author")], [],
             [new("EPUB", "book", $"{directory}/book.epub", FormatFileStatus.Present,
                 fingerprint, new(fingerprint.SizeInBytes, now, now, 0))], directory);
+    }
+
+    private sealed class CapturingLogger<T> : ILogger<T>
+    {
+        public List<(LogLevel Level, EventId EventId, string Message)> Entries { get; } = [];
+
+        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+        public bool IsEnabled(LogLevel logLevel) => true;
+        public void Log<TState>(
+            LogLevel logLevel,
+            EventId eventId,
+            TState state,
+            Exception? exception,
+            Func<TState, Exception?, string> formatter) =>
+            Entries.Add((logLevel, eventId, formatter(state, exception)));
     }
 
 }

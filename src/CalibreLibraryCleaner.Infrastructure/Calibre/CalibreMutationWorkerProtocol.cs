@@ -8,7 +8,7 @@ namespace CalibreLibraryCleaner.Infrastructure.Calibre;
 
 internal static class CalibreMutationWorkerProtocol
 {
-    public const string Version = "calibre-mutation-worker-protocol/1.0";
+    public const string Version = "calibre-mutation-worker-protocol/1.2";
     public const string ReadyKind = "ready";
     public const string ExecuteChunkKind = "executeChunk";
     public const string ChunkResultKind = "chunkResult";
@@ -120,6 +120,7 @@ internal sealed record CalibreMutationWorkerOperationMessage(
     string? ExpectedSha256,
     LibraryMetadataField? MetadataField,
     IReadOnlyList<string>? MetadataValues,
+    IReadOnlyList<string>? MetadataAuthorSortValues,
     CalibreMetadataSourceIdentity? MetadataSource,
     string? StagedCoverFileName,
     long? StagedCoverSizeInBytes,
@@ -140,4 +141,7 @@ internal sealed record CalibreMutationWorkerOperationResultMessage(
     string? FailureCode = null,
     IReadOnlyList<string>? VerifiedMetadataValues = null,
     string? VerifiedManagedPath = null,
-    string? VerifiedAuthorSort = null);
+    string? VerifiedAuthorSort = null,
+    IReadOnlyList<string>? VerifiedAuthorSortValues = null,
+    bool IsSkipped = false,
+    string? SkipCode = null);

@@ -180,6 +180,51 @@ public sealed class PrepareMetadataReviewUseCase(
         }
     }
 
+    public async Task<MetadataReviewWorkspace> SetAllApplyAsync(
+        MetadataReviewWorkspace workspace,
+        bool apply,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(workspace);
+        ReviewedMetadataSubject[] reviewed = workspace.Subjects.Select(current =>
+        {
+            if (current.Subject.Proposal.Confidence == FusedEditionMetadataConfidence.Unavailable)
+                return new ReviewedMetadataSubject(current.Subject, false, false, null);
+            MetadataReviewDecision? decision = MetadataReviewDecisionPolicy.CreateOverride(
+                current.Subject, workspace.GenerationId, workspace.Revision, apply);
+            return decision is null
+                ? new ReviewedMetadataSubject(
+                    current.Subject, current.Subject.Proposal.IsSelectedByDefault, false, null)
+                : new ReviewedMetadataSubject(current.Subject, decision.Apply, true, decision.Key);
+        }).ToArray();
+        MetadataReviewWorkspace next = new(
+            workspace.LibraryRoot,
+            workspace.GenerationId,
+            workspace.Revision,
+            reviewed,
+            workspace.PersistenceAvailable,
+            workspace.PersistenceProblemCode,
+            workspace.DeferredQueryCount);
+        try
+        {
+            await decisionStore.WriteAsync(
+                next.LibraryRoot, CurrentDecisions(next), cancellationToken).ConfigureAwait(false);
+            return next;
+        }
+        catch (OperationCanceledException) { throw; }
+        catch (Exception exception) when (IsPersistenceFailure(exception))
+        {
+            return new(
+                next.LibraryRoot,
+                next.GenerationId,
+                next.Revision,
+                next.Subjects,
+                persistenceAvailable: false,
+                "METADATA_REVIEW.DECISION_WRITE_FAILED",
+                next.DeferredQueryCount);
+        }
+    }
+
     public static MetadataReviewWorkspace Retarget(
         MetadataReviewWorkspace workspace,
         UnifiedCandidateGroupId groupId,

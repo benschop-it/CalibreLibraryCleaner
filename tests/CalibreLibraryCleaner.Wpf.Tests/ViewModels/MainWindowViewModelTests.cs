@@ -17,12 +17,36 @@ using FakeItEasy;
 using FluentAssertions;
 using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 using Xunit;
 
 namespace CalibreLibraryCleaner.Wpf.Tests.ViewModels;
 
 public sealed class MainWindowViewModelTests
 {
+    [Fact]
+    public void OperationProgressIncludesCompletedAndTotalCounts()
+    {
+        MainWindowViewModel.FormatOperationProgress("Processing metadata", 400, 20_206)
+            .Should().Be("Processing metadata (400 of 20,206).");
+    }
+
+    [Fact]
+    public void MetadataResultSeparatesUpdatedAndVerifiedUnchangedCounts()
+    {
+        UnifiedCandidateCleanupResult result = new(
+            new(Guid.Parse("99999999-8888-7777-6666-555555555555")),
+            UnifiedCandidateCleanupState.Completed,
+            0, 0, 0, 0, [],
+            UpdatedMetadataFieldCount: 123,
+            SkippedMetadataFieldCount: 7,
+            OmittedMetadataCoverCount: 2,
+            OmittedMetadataAuthorFieldCount: 3);
+
+        MainWindowViewModel.FormatMetadataResultSummary(result)
+            .Should().Be("Updated 123 metadata field(s); skipped 7 verified-unchanged field(s); omitted 2 transiently unavailable cover(s); omitted 3 ambiguous author field(s).");
+    }
+
     [Fact]
     public void OnlineMetadataSettingsOwnsSharedOperationLease()
     {
@@ -325,6 +349,8 @@ public sealed class MainWindowViewModelTests
             A.Fake<IUnifiedCandidateCleanupConfirmationService>();
         A.CallTo(() => confirmation.ConfirmExternalBackup(1)).Returns(true);
         List<MetadataReviewDecision> metadataDecisions = [];
+        int metadataProviderRequests = 0;
+        CapturingLogger<MainWindowViewModel> logger = new();
         ExecuteUnifiedCandidateCleanupRequest? captured = null;
         A.CallTo(() => executor.ExecuteAsync(
                 A<ExecuteUnifiedCandidateCleanupRequest>._,
@@ -335,14 +361,14 @@ public sealed class MainWindowViewModelTests
             {
                 current = analyzed.AdvanceWorkflow(
                     LibraryWorkflowPhase.CandidateCleanupCompleted, analyzed.ProjectedAtUtc);
-                return new UnifiedCandidateCleanupResult(
+                return Task.FromResult(new UnifiedCandidateCleanupResult(
                     new(Guid.Parse("99999999-8888-7777-6666-555555555555")),
                     UnifiedCandidateCleanupState.Completed,
                     0,
                     1,
                     1,
                     0,
-                    []);
+                    []));
             });
         MainWindowViewModel viewModel = CreateViewModel(
             A.Fake<ILibraryFolderPicker>(), out _, out _, out _, new(store), stateSession,
@@ -350,11 +376,22 @@ public sealed class MainWindowViewModelTests
             candidatePreparation: preparation,
             candidateExecutor: executor,
             candidateConfirmation: confirmation,
-            prepareMetadataReview: CreateMetadataReviewUseCase(metadataDecisions));
+            prepareMetadataReview: CreateMetadataReviewUseCase(
+                metadataDecisions, () => metadataProviderRequests++),
+            logger: logger);
+        List<bool> bulkSkipStates = [];
+        viewModel.SkipAllUnifiedCandidatesCommand.CanExecuteChanged += (_, _) =>
+            bulkSkipStates.Add(viewModel.SkipAllUnifiedCandidatesCommand.CanExecute(null));
         await viewModel.InitializeAsync();
         viewModel.SelectedPersistedLibraryPath = libraryRoot;
         await viewModel.LoadPersistedSnapshotCommand.ExecuteAsync(null);
+        bulkSkipStates.Should().Contain(true);
         UnifiedCandidateGroupRowViewModel group = viewModel.UnifiedCandidateGroups.Single();
+        viewModel.SkipAllUnifiedCandidatesCommand.CanExecute(null).Should().BeTrue();
+        viewModel.SkipAllUnifiedCandidatesCommand.Execute(null);
+        group.Skip.Should().BeTrue();
+        viewModel.StatusMessage.Should().Be("Marked 1 Candidate group(s) to Skip.");
+        group.Skip = false;
         viewModel.SelectedUnifiedCandidateMember = group.Members.Single(value => value.BookId == 1);
 
         await viewModel.CandidateCleanupCommand.ExecuteAsync(null);
@@ -378,6 +415,31 @@ public sealed class MainWindowViewModelTests
         viewModel.CandidateCleanupCommand.CanExecute(null).Should().BeTrue();
         viewModel.CandidateCleanupAutomationName.Should().Be("Prepare online metadata review");
         viewModel.CandidateCleanupResultSummary.Should().Contain("removed 1 format");
+        logger.Entries.Should().Contain(value =>
+            value.EventId.Name == "UserVisibleOperationResult"
+            && value.Message == viewModel.CandidateCleanupResultSummary);
+
+        await viewModel.CandidateCleanupCommand.ExecuteAsync(null);
+
+        viewModel.UnifiedCandidateGroups.Should().ContainSingle();
+        metadataProviderRequests.Should().BeGreaterThan(0);
+        viewModel.ErrorMessage.Should().BeEmpty();
+        viewModel.StatusMessage.Should().StartWith("Online metadata review ready");
+        logger.Entries.Should().Contain(value =>
+            value.EventId.Name == "UserVisibleStatus"
+            && value.Message == viewModel.StatusMessage);
+        logger.Entries.Should().Contain(value =>
+            value.EventId.Name == "UserVisibleMetadataReviewSummary"
+            && value.Message == viewModel.MetadataReviewSummary);
+        UnifiedCandidateMemberRowViewModel staleAlternate = viewModel.SelectedUnifiedCandidateGroup!.Members
+            .Single(value => value.BookId == 2);
+        Action selectStaleCandidateMember = () => viewModel.SelectedUnifiedCandidateMember = staleAlternate;
+        selectStaleCandidateMember.Should().NotThrow();
+        A.CallTo(() => executor.ExecuteAsync(
+                A<ExecuteUnifiedCandidateCleanupRequest>._,
+                A<IProgress<UnifiedCandidateCleanupProgress>?>._,
+                A<CancellationToken>._))
+            .MustHaveHappenedOnceExactly();
     }
 
     [Fact]
@@ -415,8 +477,10 @@ public sealed class MainWindowViewModelTests
         first.SelectedMetadataReviewSubject.Should().BeSameAs(row);
         string proposedEdition = row.Provenance;
 
-        row.Apply = false;
-        await row.PersistApplyCommand.ExecuteAsync(null);
+        first.ClearAllMetadataApplyCommand.CanExecute(null).Should().BeTrue();
+        await first.ClearAllMetadataApplyCommand.ExecuteAsync(null);
+        first.ClearAllMetadataApplyCommand.CanExecute(null).Should().BeFalse();
+        row = first.MetadataReviewSubjects.Should().ContainSingle().Subject;
         row.Apply.Should().BeFalse();
         row.IsOverride.Should().BeTrue();
         first.SelectedMetadataReviewSubject.Should().BeSameAs(row);
@@ -440,6 +504,63 @@ public sealed class MainWindowViewModelTests
         restored.Apply.Should().BeFalse();
         restored.IsOverride.Should().BeTrue();
         restored.Provenance.Should().Be(proposedEdition);
+    }
+
+    [Fact]
+    public async Task CompletedWorkflowRunsAuthorNormalizationThroughBackupPrompt()
+    {
+        const string libraryRoot = "C:\\Books";
+        CalibreBook book = new(
+            new(1), "Book", "Woods, Stuart",
+            [new(new(1), "Woods, Stuart", "Woods, Stuart")], [], [], "Woods, Stuart/Book");
+        LibrarySnapshot snapshot = new(
+            new("87f7ed1f-59a8-45a6-975a-7e06fd84780d", 27, libraryRoot),
+            new DateTimeOffset(2026, 8, 1, 12, 0, 0, TimeSpan.Zero), [book], []);
+        LibraryWorkflowSource source = new(
+            new(Guid.Parse("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee")), new(3));
+        LibraryState completed = WorkflowState(snapshot, LibraryWorkflowPhase.Completed, source);
+        ILibrarySnapshotStore store = A.Fake<ILibrarySnapshotStore>();
+        A.CallTo(() => store.ListAsync(A<CancellationToken>._)).Returns([new(libraryRoot, snapshot.ScannedAt)]);
+        ILibraryStateSession session = A.Fake<ILibraryStateSession>();
+        A.CallTo(() => session.LoadAsync(libraryRoot, A<CancellationToken>._))
+            .Returns(LibraryStateSessionOutcome.Success(completed));
+        A.CallTo(() => session.GetCurrent(libraryRoot)).Returns(completed);
+        IUnifiedCandidateCleanupExecutor executor = A.Fake<IUnifiedCandidateCleanupExecutor>();
+        ExecuteUnifiedCandidateCleanupRequest? captured = null;
+        A.CallTo(() => executor.ExecuteAsync(
+                A<ExecuteUnifiedCandidateCleanupRequest>._,
+                A<IProgress<UnifiedCandidateCleanupProgress>?>._,
+                A<CancellationToken>._))
+            .Invokes(call => captured = call.GetArgument<ExecuteUnifiedCandidateCleanupRequest>(0))
+            .Returns(new UnifiedCandidateCleanupResult(
+                new(Guid.Parse("99999999-8888-7777-6666-555555555555")),
+                UnifiedCandidateCleanupState.Completed, 0, 0, 0, 0, [], UpdatedMetadataFieldCount: 1));
+        IMetadataMutationConfirmationService confirmation = A.Fake<IMetadataMutationConfirmationService>();
+        A.CallTo(() => confirmation.ConfirmAuthorNormalization(1)).Returns(true);
+        CapturingLogger<MainWindowViewModel> logger = new();
+        MainWindowViewModel viewModel = CreateViewModel(
+            A.Fake<ILibraryFolderPicker>(), out _, out _, out _, new(store), session,
+            workflowOptions: LibraryWorkflowOptions.Staged,
+            candidateExecutor: executor,
+            metadataConfirmation: confirmation,
+            logger: logger);
+        await viewModel.InitializeAsync();
+        viewModel.SelectedPersistedLibraryPath = libraryRoot;
+        await viewModel.LoadPersistedSnapshotCommand.ExecuteAsync(null);
+
+        viewModel.CandidateCleanupAutomationName.Should().Be("Normalize author names");
+        await viewModel.CandidateCleanupCommand.ExecuteAsync(null);
+
+        captured.Should().NotBeNull();
+        captured!.NormalizeAuthors.Should().BeTrue();
+        captured.MetadataReview.Should().BeNull();
+        captured.GroupSelections.Should().BeEmpty();
+        viewModel.CandidateCleanupResultSummary.Should().Be(
+            "Normalized 1 book author record(s); skipped 0 verified-unchanged record(s).");
+        viewModel.StatusMessage.Should().Be("Author normalization completed.");
+        logger.Entries.Should().Contain(value =>
+            value.EventId.Name == "UserVisibleOperationResult"
+            && value.Message == viewModel.CandidateCleanupResultSummary);
     }
 
     [Fact]
@@ -697,6 +818,65 @@ public sealed class MainWindowViewModelTests
             A<LibrarySnapshot>.That.Matches(value => value.Identity.LibraryRoot == "library"),
             A<CancellationToken>._))
             .MustHaveHappenedOnceExactly();
+    }
+
+    [Fact]
+    public async Task ScanShowsActiveFeedbackWhileAuthoritativeStateIsPersisting()
+    {
+        ILibraryFolderPicker picker = A.Fake<ILibraryFolderPicker>();
+        ILibrarySnapshotStore store = A.Fake<ILibrarySnapshotStore>();
+        ILibraryStateSession stateSession = A.Fake<ILibraryStateSession>();
+        TaskCompletionSource<LibrarySnapshot> persistenceStarted = new(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        TaskCompletionSource<LibraryStateSessionOutcome> persistence = new(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        A.CallTo(() => stateSession.StartFromExactAnalysisAsync(
+                A<LibrarySnapshot>._, A<CancellationToken>._))
+            .ReturnsLazily(call =>
+            {
+                persistenceStarted.TrySetResult(call.GetArgument<LibrarySnapshot>(0)!);
+                return persistence.Task;
+            });
+        A.CallTo(() => store.ListAsync(A<CancellationToken>._)).Returns([]);
+        A.CallTo(() => picker.PickFolder(A<string?>._)).Returns("library");
+        MainWindowViewModel viewModel = CreateViewModel(
+            picker,
+            out ILibraryPathResolver resolver,
+            out ICalibreMetadataReader reader,
+            out IFormatFileHasher hasher,
+            new(store),
+            stateSession,
+            workflowOptions: LibraryWorkflowOptions.Staged);
+        ValidatedLibraryLocation location = new("library", "database");
+        A.CallTo(() => resolver.ValidateAsync("library", A<CancellationToken>._))
+            .Returns(LibraryValidationOutcome.Success(location));
+        A.CallTo(() => reader.ReadAsync(
+                location, A<IProgress<LibraryScanProgress>?>._, A<CancellationToken>._))
+            .Returns(CalibreCatalogReadOutcome.Success(CreateCatalog()));
+        A.CallTo(() => resolver.ResolveFormat(
+            location,
+            A<string>.That.IsNotNull(),
+            A<string>.That.IsNotNull(),
+            A<string>.That.IsNotNull()))
+            .Returns(ResolvedFormatPathOutcome.Success(new("library", "full", "Book/Book.epub")));
+        A.CallTo(() => hasher.HashAsync(
+                A<IReadOnlyList<FormatHashRequest>>._,
+                A<int>._,
+                A<IProgress<FormatHashProgress>?>._,
+                A<CancellationToken>._))
+            .Returns([FormatHashResult.Failure(0, FormatHashResultStatus.Missing, "missing")]);
+        await viewModel.SelectLibraryCommand.ExecuteAsync(null);
+
+        Task scan = viewModel.ScanCommand.ExecuteAsync(null);
+        LibrarySnapshot snapshot = await persistenceStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
+
+        viewModel.IsBusy.Should().BeTrue();
+        viewModel.IsProgressIndeterminate.Should().BeTrue();
+        viewModel.StatusMessage.Should().Be("Saving authoritative scan state...");
+        LibraryState state = LibraryState.FromScan(snapshot, new(Guid.NewGuid()))
+            .AdvanceWorkflow(LibraryWorkflowPhase.ExactReady, snapshot.ScannedAt);
+        persistence.SetResult(LibraryStateSessionOutcome.Success(state));
+        await scan;
     }
 
     [Fact]
@@ -1108,7 +1288,9 @@ public sealed class MainWindowViewModelTests
         IUnifiedCandidateCleanupConfirmationService? candidateConfirmation = null,
         LibraryOperationCoordinator? operationCoordinator = null,
         IOnlineMetadataSettingsDialogService? onlineMetadataSettingsDialog = null,
-        PrepareMetadataReviewUseCase? prepareMetadataReview = null)
+        PrepareMetadataReviewUseCase? prepareMetadataReview = null,
+        IMetadataMutationConfirmationService? metadataConfirmation = null,
+        ILogger<MainWindowViewModel>? logger = null)
     {
         resolver = A.Fake<ILibraryPathResolver>();
         reader = A.Fake<ICalibreMetadataReader>();
@@ -1127,7 +1309,9 @@ public sealed class MainWindowViewModelTests
             unifiedCandidateConfirmation: candidateConfirmation,
             operationCoordinator: operationCoordinator,
             onlineMetadataSettingsDialog: onlineMetadataSettingsDialog,
-            prepareMetadataReview: prepareMetadataReview);
+            prepareMetadataReview: prepareMetadataReview,
+            metadataMutationConfirmation: metadataConfirmation,
+            logger: logger);
     }
 
     private static PrepareMetadataReviewUseCase CreateMetadataReviewUseCase(
@@ -1184,6 +1368,21 @@ public sealed class MainWindowViewModelTests
                 });
             return provider;
         }
+    }
+
+    private sealed class CapturingLogger<T> : ILogger<T>
+    {
+        public List<(LogLevel Level, EventId EventId, string Message)> Entries { get; } = [];
+
+        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+        public bool IsEnabled(LogLevel logLevel) => true;
+        public void Log<TState>(
+            LogLevel logLevel,
+            EventId eventId,
+            TState state,
+            Exception? exception,
+            Func<TState, Exception?, string> formatter) =>
+            Entries.Add((logLevel, eventId, formatter(state, exception)));
     }
 
     private static LibraryState WorkflowState(

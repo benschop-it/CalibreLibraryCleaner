@@ -16,6 +16,10 @@ verified.
   Calibre APIs.
 - A failed or ambiguous mutation stops. No retry or alternate mutation engine runs;
   explicit Rescan is required before another mutation.
+- A metadata operation rejected before any state change may be logged and skipped only
+  when the worker proves the complete target field, cover, managed path, author sort,
+  and protected local fields exactly match their pre-write state. Any changed or
+  unreadable post-state remains ambiguous and stops the run.
 
 ## Implemented workflow
 
@@ -236,12 +240,26 @@ bounded, HTTPS-only, outside the library, and removed after the run.
   duplicate-cleanup selection surface.
 - Prevent Scan, Load, Exact cleanup, Candidate preparation, Candidate cleanup, and
   final normalization from overlapping.
+- Write every primary user-visible workflow status, progress/result summary, error,
+  and recovery action verbatim to the normal bounded application log. Use stable event
+  names so acceptance can retrieve Exact, Candidate, metadata-review, final counters,
+  and controlled failure text without manual transcription.
 
 ### Approved mutation and release
 
 - Send only checked supported metadata fields through a narrow typed operation on the
   fixed persistent worker, apply them through supported Calibre APIs before deleting
   source records, and verify read-back.
+- During pre-mutation cover staging, retry bounded transient timeout, transport, HTTP,
+  and refused-extra-redirect outcomes. If retries are exhausted, omit only that cover
+  operation, report it separately, and keep other approved metadata eligible. Invalid
+  trust chains, response type/content/bounds, or local staging remain blocking.
+- Persist each successfully validated cover immediately in a bounded, versioned cache
+  keyed by complete cover identity and validation-policy bounds. Revalidate cached
+  bytes, dimensions, size, and SHA-256 before copying them into disposable worker
+  staging. Corruption, loss, incompatibility, or cache unavailability becomes a miss;
+  it never invents a cover or blocks an otherwise valid download. Report cache hits,
+  downloads, and omissions during preparation.
 - Stop on failed or ambiguous metadata mutation and require explicit Rescan.
 - Store an optional Google Books key per Windows user with Windows protection; never
   log, export, cache, or redisplay its plaintext.
@@ -250,8 +268,14 @@ bounded, HTTPS-only, outside the library, and removed after the run.
   and a file size/SHA-256 manifest. Exclude symbols, tests, caches, credentials, logs,
   state, staging data, and source-machine paths. Package acceptance uses the executable
   directly and remains destructive only on an explicitly backed-up disposable library.
-- After separate explicit approval, offer final Calibre-managed name normalization
-  through supported Calibre behavior only.
+- After explicit approval, offer final Calibre-managed name normalization through
+  supported Calibre behavior only. For author names with exactly one nonempty
+  `Family| Given` separator, preview and convert display names to `Given Family` while
+  preserving exact per-author and book sort values as `Family, Given`. Leave multi-
+  separator, empty-side, or otherwise ambiguous names unchanged for explicit review.
+  After metadata completion has converted legacy pipes to commas, normalize only books
+  where every current author display equals its exact one-comma per-author sort. Keep
+  mixed/nonmatching books unchanged.
 
 ## Explicit non-goals
 

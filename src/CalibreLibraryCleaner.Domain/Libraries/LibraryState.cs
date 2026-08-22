@@ -261,6 +261,7 @@ public sealed record LibraryState
             LibraryWorkflowPhase.CandidatePreparationReady => next == LibraryWorkflowPhase.CandidateAnalysisReady,
             LibraryWorkflowPhase.CandidateAnalysisReady => next == LibraryWorkflowPhase.CandidateCleanupCompleted,
             LibraryWorkflowPhase.CandidateCleanupCompleted => next == LibraryWorkflowPhase.Completed,
+            LibraryWorkflowPhase.Completed => next == LibraryWorkflowPhase.Completed,
             _ => false,
         };
 }

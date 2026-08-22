@@ -14,10 +14,12 @@ using CalibreLibraryCleaner.Domain.Recommendations;
 using CalibreLibraryCleaner.Wpf.Services;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 
 namespace CalibreLibraryCleaner.Wpf.ViewModels;
 
-public sealed class MainWindowViewModel : ObservableObject, IDisposable
+public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
 {
     private readonly ValidateLibraryUseCase _validateLibrary;
     private readonly ScanLibraryUseCase _scanLibrary;
@@ -36,6 +38,7 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
     private readonly IOnlineMetadataSettingsDialogService? _onlineMetadataSettingsDialog;
     private readonly PrepareMetadataReviewUseCase? _prepareMetadataReview;
     private readonly LibraryOperationCoordinator _operationCoordinator;
+    private readonly ILogger<MainWindowViewModel> _logger;
     private readonly SynchronizationContext? _uiContext;
     private readonly BulkObservableCollection<BookRowViewModel> _books = [];
     private readonly BulkObservableCollection<string> _persistedLibraryPaths = [];
@@ -120,7 +123,8 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
         LibraryOperationCoordinator? operationCoordinator = null,
         IOnlineMetadataSettingsDialogService? onlineMetadataSettingsDialog = null,
         PrepareMetadataReviewUseCase? prepareMetadataReview = null,
-        IMetadataMutationConfirmationService? metadataMutationConfirmation = null)
+        IMetadataMutationConfirmationService? metadataMutationConfirmation = null,
+        ILogger<MainWindowViewModel>? logger = null)
     {
         _validateLibrary = validateLibrary;
         _scanLibrary = scanLibrary;
@@ -139,6 +143,7 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
         _onlineMetadataSettingsDialog = onlineMetadataSettingsDialog;
         _prepareMetadataReview = prepareMetadataReview;
         _operationCoordinator = operationCoordinator ?? new();
+        _logger = logger ?? NullLogger<MainWindowViewModel>.Instance;
         _uiContext = SynchronizationContext.Current;
         if (_libraryStateSession is not null)
             _libraryStateSession.StateChanged += OnLibraryStateChanged;
@@ -201,6 +206,12 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
             ShowOnlineMetadataSettings,
             () => !IsBusy && !_operationCoordinator.IsOperationActive
                 && _onlineMetadataSettingsDialog is not null);
+        SkipAllUnifiedCandidatesCommand = new RelayCommand(
+            SkipAllUnifiedCandidates,
+            CanSkipAllUnifiedCandidates);
+        ClearAllMetadataApplyCommand = new AsyncRelayCommand(
+            ClearAllMetadataApplyAsync,
+            CanClearAllMetadataApply);
         CandidateCleanupCommand = new AsyncRelayCommand(CandidateCleanupAsync, CanRunCandidateCleanup);
     }
 
@@ -238,19 +249,30 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
     public string StatusMessage
     {
         get => _statusMessage;
-        private set => SetProperty(ref _statusMessage, value);
+        private set
+        {
+            if (SetProperty(ref _statusMessage, value)) LogUserVisibleStatus(_logger, value);
+        }
     }
 
     public string ErrorMessage
     {
         get => _errorMessage;
-        private set => SetProperty(ref _errorMessage, value);
+        private set
+        {
+            if (SetProperty(ref _errorMessage, value) && value.Length > 0)
+                LogUserVisibleError(_logger, value);
+        }
     }
 
     public string ErrorAction
     {
         get => _errorAction;
-        private set => SetProperty(ref _errorAction, value);
+        private set
+        {
+            if (SetProperty(ref _errorAction, value) && value.Length > 0)
+                LogUserVisibleErrorAction(_logger, value);
+        }
     }
 
     public bool IsOperationActive => _operationCoordinator.IsOperationActive;
@@ -329,7 +351,11 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
     public string ExactDuplicateSummary
     {
         get => _exactDuplicateSummary;
-        private set => SetProperty(ref _exactDuplicateSummary, value);
+        private set
+        {
+            if (SetProperty(ref _exactDuplicateSummary, value))
+                LogUserVisibleExactSummary(_logger, value);
+        }
     }
 
     public string MetadataDuplicateSummary
@@ -347,19 +373,31 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
     public string UnifiedCandidateSummary
     {
         get => _unifiedCandidateSummary;
-        private set => SetProperty(ref _unifiedCandidateSummary, value);
+        private set
+        {
+            if (SetProperty(ref _unifiedCandidateSummary, value))
+                LogUserVisibleCandidateSummary(_logger, value);
+        }
     }
 
     public string MetadataReviewSummary
     {
         get => _metadataReviewSummary;
-        private set => SetProperty(ref _metadataReviewSummary, value);
+        private set
+        {
+            if (SetProperty(ref _metadataReviewSummary, value))
+                LogUserVisibleMetadataSummary(_logger, value);
+        }
     }
 
     public string CandidateCleanupResultSummary
     {
         get => _candidateCleanupResultSummary;
-        private set => SetProperty(ref _candidateCleanupResultSummary, value);
+        private set
+        {
+            if (SetProperty(ref _candidateCleanupResultSummary, value) && value.Length > 0)
+                LogUserVisibleResult(_logger, value);
+        }
     }
 
     public string CandidateCleanupAutomationName => CandidatePhase() switch
@@ -369,7 +407,8 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
         LibraryWorkflowPhase.CandidateCleanupCompleted when _metadataReviewWorkspace is null =>
             "Prepare online metadata review",
         LibraryWorkflowPhase.CandidateCleanupCompleted => "Apply checked metadata",
-        LibraryWorkflowPhase.Completed => "Candidate cleanup completed",
+        LibraryWorkflowPhase.Completed when AuthorNormalizationCount() > 0 => "Normalize author names",
+        LibraryWorkflowPhase.Completed => "Author normalization complete",
         _ => "Candidate cleanup unavailable",
     };
 
@@ -383,7 +422,9 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
             "Resolve online metadata only for records retained after Candidate cleanup",
         LibraryWorkflowPhase.CandidateCleanupCompleted =>
             "Apply checked online metadata proposals after backup confirmation",
-        LibraryWorkflowPhase.Completed => "Candidate cleanup is complete for this workflow generation",
+        LibraryWorkflowPhase.Completed when AuthorNormalizationCount() > 0 =>
+            "Convert conservative Lastname, Firstname author entries to Firstname Lastname while preserving exact Calibre sort values",
+        LibraryWorkflowPhase.Completed => "No conservative author normalization candidates remain",
         _ => "Available after Exact cleanup completes for the current workflow generation",
     };
 
@@ -697,6 +738,10 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
 
     public IRelayCommand OnlineMetadataSettingsCommand { get; }
 
+    public IRelayCommand SkipAllUnifiedCandidatesCommand { get; }
+
+    public IAsyncRelayCommand ClearAllMetadataApplyCommand { get; }
+
     public IAsyncRelayCommand CandidateCleanupCommand { get; }
 
     public async Task InitializeAsync(CancellationToken cancellationToken = default)
@@ -723,6 +768,8 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
         ScanCommand.NotifyCanExecuteChanged();
         LoadPersistedSnapshotCommand.NotifyCanExecuteChanged();
         OnlineMetadataSettingsCommand.NotifyCanExecuteChanged();
+        SkipAllUnifiedCandidatesCommand.NotifyCanExecuteChanged();
+        ClearAllMetadataApplyCommand.NotifyCanExecuteChanged();
         CandidateCleanupCommand.NotifyCanExecuteChanged();
     }
 
@@ -818,6 +865,10 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
                 bool statePersisted = false;
                 if (_libraryStateSession is not null)
                 {
+                    StatusMessage = "Saving authoritative scan state...";
+                    IsProgressIndeterminate = true;
+                    ProgressPercentage = 0;
+                    await Task.Yield();
                     LibraryStateSessionOutcome stateStart = _workflowOptions.IsStaged
                         ? await _libraryStateSession.StartFromExactAnalysisAsync(
                             outcome.Snapshot!, _scanCancellation.Token).ConfigureAwait(true)
@@ -1321,8 +1372,45 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
             LibraryWorkflowPhase.CandidateCleanupCompleted => _metadataReviewWorkspace is null
                 ? _prepareMetadataReview is not null
                 : _executeUnifiedCandidateCleanup is not null && _metadataMutationConfirmation is not null,
+            LibraryWorkflowPhase.Completed => _executeUnifiedCandidateCleanup is not null
+                && _metadataMutationConfirmation is not null
+                && AuthorNormalizationCount() > 0,
             _ => false,
         };
+    }
+
+    private bool CanSkipAllUnifiedCandidates() => !IsBusy
+        && !_operationCoordinator.IsOperationActive
+        && CandidatePhase() == LibraryWorkflowPhase.CandidateAnalysisReady
+        && _unifiedCandidateGroups.Count > 0;
+
+    private void SkipAllUnifiedCandidates()
+    {
+        foreach (UnifiedCandidateGroupRowViewModel group in _unifiedCandidateGroups) group.Skip = true;
+        StatusMessage = $"Marked {_unifiedCandidateGroups.Count:N0} Candidate group(s) to Skip.";
+    }
+
+    private bool CanClearAllMetadataApply() => !IsBusy
+        && !_operationCoordinator.IsOperationActive
+        && _metadataReviewWorkspace?.Subjects.Any(value => value.Apply) == true;
+
+    private async Task ClearAllMetadataApplyAsync()
+    {
+        if (_metadataReviewWorkspace is null || _prepareMetadataReview is null || _currentSnapshot is null) return;
+        await _metadataReviewDecisionGate.WaitAsync().ConfigureAwait(true);
+        try
+        {
+            using IDisposable? operation = _operationCoordinator.TryBegin();
+            if (operation is null) return;
+            _metadataReviewWorkspace = await _prepareMetadataReview.SetAllApplyAsync(
+                _metadataReviewWorkspace, apply: false, CancellationToken.None).ConfigureAwait(true);
+            ApplyMetadataReviewWorkspace(_metadataReviewWorkspace, _currentSnapshot);
+            StatusMessage = "Cleared all metadata Apply choices. Apply checked metadata will make no metadata changes.";
+        }
+        finally
+        {
+            _metadataReviewDecisionGate.Release();
+        }
     }
 
     private async Task CandidateCleanupAsync()
@@ -1347,6 +1435,43 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
         }
         try
         {
+            if (startingPhase == LibraryWorkflowPhase.Completed)
+            {
+                int bookCount = AuthorNormalizationCount(startingState.Snapshot);
+                if (bookCount == 0 || _metadataMutationConfirmation is null
+                    || !_metadataMutationConfirmation.ConfirmAuthorNormalization(bookCount))
+                {
+                    StatusMessage = bookCount == 0
+                        ? "No conservative author normalization candidates remain."
+                        : "Author normalization canceled. Confirm a complete external backup before retrying.";
+                    return;
+                }
+                IsProgressIndeterminate = false;
+                Progress<UnifiedCandidateCleanupProgress> normalizationProgress = new(value =>
+                    UpdateOperationProgress(value.Message, value.CompletedOperations, value.TotalOperations));
+                UnifiedCandidateCleanupResult normalizationResult = await _executeUnifiedCandidateCleanup!.ExecuteAsync(new(
+                    SelectedLibraryPath,
+                    startingState.GenerationId,
+                    startingState.Revision,
+                    [],
+                    ExternalBackupConfirmed: true,
+                    MetadataReview: null,
+                    NormalizeAuthors: true), normalizationProgress, _scanCancellation.Token).ConfigureAwait(true);
+                CandidateCleanupResultSummary = $"Normalized {normalizationResult.UpdatedMetadataFieldCount:N0} book author record(s); "
+                    + $"skipped {normalizationResult.SkippedMetadataFieldCount:N0} verified-unchanged record(s).";
+                LibraryState? normalizationFinal = _libraryStateSession.GetCurrent(SelectedLibraryPath);
+                if (normalizationFinal is not null)
+                {
+                    SnapshotPresentation presentation = await PreparePresentationAsync(
+                        normalizationFinal.Snapshot, CancellationToken.None).ConfigureAwait(true);
+                    ApplySnapshot(normalizationFinal.Snapshot, presentation, normalizationFinal.IsAuthoritative);
+                }
+                StatusMessage = normalizationResult.IsCompleted
+                    ? "Author normalization completed."
+                    : string.Join(" ", normalizationResult.Issues.Select(value => $"{value.Code}: {value.Explanation}"));
+                return;
+            }
+
             if (startingPhase == LibraryWorkflowPhase.CandidatePreparationReady)
             {
                 LibraryState? refreshed = startingState;
@@ -1415,7 +1540,7 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
                     [],
                     ExternalBackupConfirmed: true,
                     _metadataReviewWorkspace), metadataProgress, _scanCancellation.Token).ConfigureAwait(true);
-                CandidateCleanupResultSummary = $"Updated {metadataResult.UpdatedMetadataFieldCount:N0} metadata field(s).";
+                CandidateCleanupResultSummary = FormatMetadataResultSummary(metadataResult);
                 LibraryState? metadataFinal = _libraryStateSession.GetCurrent(SelectedLibraryPath);
                 if (metadataFinal is not null)
                 {
@@ -1479,6 +1604,12 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
                 ? "Candidate preparation canceled without mutation."
                 : "Candidate cleanup cancellation was requested; review the terminal state before continuing.";
         }
+        catch (Exception exception) when (exception is ArgumentException or InvalidOperationException)
+        {
+            ErrorMessage = exception.Message;
+            ErrorAction = "Reload the authoritative state or run an explicit Scan if the library changed.";
+            StatusMessage = "The current workflow action stopped without replacing the displayed state.";
+        }
         finally
         {
             await StopCandidateHeartbeatAsync().ConfigureAwait(true);
@@ -1526,10 +1657,19 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
 
     private void UpdateOperationProgress(string message, int completed, int total)
     {
-        StatusMessage = message;
+        StatusMessage = FormatOperationProgress(message, completed, total);
         IsProgressIndeterminate = total <= 0;
         ProgressPercentage = total <= 0 ? 0 : 100d * completed / total;
     }
+
+    internal static string FormatOperationProgress(string message, int completed, int total) =>
+        total <= 0 ? message : $"{message} ({completed:N0} of {total:N0}).";
+
+    internal static string FormatMetadataResultSummary(UnifiedCandidateCleanupResult result) =>
+        $"Updated {result.UpdatedMetadataFieldCount:N0} metadata field(s); "
+        + $"skipped {result.SkippedMetadataFieldCount:N0} verified-unchanged field(s); "
+        + $"omitted {result.OmittedMetadataCoverCount:N0} transiently unavailable cover(s); "
+        + $"omitted {result.OmittedMetadataAuthorFieldCount:N0} ambiguous author field(s).";
 
     private void UpdatePresentationProgress(CandidatePreparationProgress progress)
     {
@@ -1652,8 +1792,17 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
         ? null
         : _libraryStateSession?.GetCurrent(SelectedLibraryPath)?.WorkflowCheckpoint.Phase;
 
+    private int AuthorNormalizationCount() => _currentSnapshot is null
+        ? 0
+        : AuthorNormalizationCount(_currentSnapshot);
+
+    private static int AuthorNormalizationCount(LibrarySnapshot snapshot) => snapshot.Books.Count(book =>
+        PipeAuthorNameNormalizationPolicy.TryNormalizeBook(book.Authors, out _, out _));
+
     private void NotifyCandidateCleanupStateChanged()
     {
+        SkipAllUnifiedCandidatesCommand.NotifyCanExecuteChanged();
+        ClearAllMetadataApplyCommand.NotifyCanExecuteChanged();
         CandidateCleanupCommand.NotifyCanExecuteChanged();
         OnPropertyChanged(nameof(CandidateCleanupAutomationName));
         OnPropertyChanged(nameof(CandidateCleanupToolTip));
@@ -1756,13 +1905,10 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
             && _metadataReviewWorkspace.Revision == state.Revision
             && PathsEqual(_metadataReviewWorkspace.LibraryRoot, state.Snapshot.Identity.LibraryRoot))
             return;
-        MetadataReviewKeeperSelection[] keeperSelections = _unifiedCandidateGroups
-            .Select(value => new MetadataReviewKeeperSelection(value.CandidateGroupId, value.KeeperBookId))
-            .ToArray();
         IProgress<EditionMetadataEnrichmentProgress> progress = new SynchronizedProgress<EditionMetadataEnrichmentProgress>(
             _uiContext, UpdateMetadataReviewProgress);
         MetadataReviewWorkspace workspace = await _prepareMetadataReview.ExecuteAsync(
-            state, keeperSelections, progress, cancellationToken).ConfigureAwait(true);
+            state, [], progress, cancellationToken).ConfigureAwait(true);
         ApplyMetadataReviewWorkspace(workspace, state.Snapshot);
     }
 
@@ -1819,7 +1965,9 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
 
     private void RetargetMetadataReview(UnifiedCandidateGroupId groupId, CalibreBookId targetBookId)
     {
-        if (_metadataReviewWorkspace is null || _currentSnapshot is null) return;
+        if (_metadataReviewWorkspace is null
+            || _currentSnapshot is null
+            || !_metadataReviewWorkspace.Subjects.Any(value => value.Subject.UnifiedGroupId == groupId)) return;
         _metadataReviewWorkspace = PrepareMetadataReviewUseCase.Retarget(
             _metadataReviewWorkspace, groupId, targetBookId);
         MetadataReviewSubjectId subjectId = _metadataReviewWorkspace.Subjects.Single(value =>
@@ -2113,6 +2261,27 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
     private sealed record RecommendationReviewKey(
         string LibraryUuid,
         ExactMetadataDuplicateGroupId GroupId);
+
+    [LoggerMessage(EventId = 900, EventName = "UserVisibleStatus", Level = LogLevel.Information, Message = "{Message}")]
+    private static partial void LogUserVisibleStatus(ILogger logger, string message);
+
+    [LoggerMessage(EventId = 901, EventName = "UserVisibleError", Level = LogLevel.Error, Message = "{Message}")]
+    private static partial void LogUserVisibleError(ILogger logger, string message);
+
+    [LoggerMessage(EventId = 902, EventName = "UserVisibleRecoveryAction", Level = LogLevel.Warning, Message = "{Message}")]
+    private static partial void LogUserVisibleErrorAction(ILogger logger, string message);
+
+    [LoggerMessage(EventId = 903, EventName = "UserVisibleOperationResult", Level = LogLevel.Information, Message = "{Message}")]
+    private static partial void LogUserVisibleResult(ILogger logger, string message);
+
+    [LoggerMessage(EventId = 904, EventName = "UserVisibleExactSummary", Level = LogLevel.Information, Message = "{Message}")]
+    private static partial void LogUserVisibleExactSummary(ILogger logger, string message);
+
+    [LoggerMessage(EventId = 905, EventName = "UserVisibleCandidateSummary", Level = LogLevel.Information, Message = "{Message}")]
+    private static partial void LogUserVisibleCandidateSummary(ILogger logger, string message);
+
+    [LoggerMessage(EventId = 906, EventName = "UserVisibleMetadataReviewSummary", Level = LogLevel.Information, Message = "{Message}")]
+    private static partial void LogUserVisibleMetadataSummary(ILogger logger, string message);
 
     private sealed class BulkObservableCollection<T> : ObservableCollection<T>
     {

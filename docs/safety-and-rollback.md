@@ -82,9 +82,38 @@ paths; verified live paths are projected without direct filesystem mutation. Fin
 managed-name normalization remains a separate, explicit action and may use supported
 Calibre behavior only.
 
+Approved author-name normalization is conservative: only one nonempty
+`Family| Given` separator is executable. The fixed worker must write display authors,
+set exact per-author sorts through Calibre's `set_sort_for_authors`, verify ordered
+display names, each per-author sort, the book-level joined author sort, and the live
+managed path. Ambiguous names remain unchanged. This action requires its own complete
+external-backup confirmation and follows the same stop-and-Rescan rule.
+
+For post-metadata comma-form input, a whole book is executable only when every linked
+author display exactly equals its current per-author sort and each value has one
+nonempty comma. The request carries both ordered display names and ordered exact sorts.
+The worker verifies those current names/sorts as preconditions before writing anything.
+
 ## Failure handling
 
 Preflight or worker-start failure stops before mutation.
+
+Cover download is a bounded pre-mutation preparation step. Exhausted transient
+timeout, transport, HTTP, or refused-extra-redirect outcomes may omit only the
+affected cover before the durable intent is created; other approved metadata remains
+eligible and the omitted count/reasons are reported without URLs or bibliographic
+data. Unsupported endpoints/redirect targets, invalid response type/content/bounds,
+unsafe paths, and local staging failures remain blocking. No untrusted redirect is
+followed.
+
+Successfully validated covers are atomically persisted in a separate bounded cache
+before mutation. Cache identity includes the cache-policy version, source ID, URL,
+maximum cover bytes, and maximum dimensions. Every hit revalidates physical paths,
+manifest identity, byte bounds, JPEG dimensions, and SHA-256 before materializing a
+copy in disposable worker staging. Corrupt, missing, incompatible, or unavailable
+cache state is a miss. Capacity is bounded by both bytes and entry count, with oldest
+entries removed first. The cache contains provider cover bytes and opaque identities;
+ordinary logs contain aggregate hit/download/omission counts only.
 
 After mutation begins, any failed, ambiguous, interrupted, or unverifiable worker
 outcome:
@@ -94,6 +123,12 @@ outcome:
 2. stops without retrying, continuing, inferring a successful prefix, or switching
    engines; and
 3. blocks further mutation until explicit Rescan.
+
+A verified-unchanged metadata rejection is not a failed mutation outcome. The worker
+may continue only after comparing the complete post-operation target field, cover,
+managed path, author sort, and protected local fields with their pre-write values and
+proving equality. It emits a typed skipped result and no-op state delta. It does not
+retry. Any changed or unreadable post-state follows the stop-and-Rescan rule above.
 
 The current implementation marks detailed projected state uncertain and retains
 markers/deltas/checkpoints. The accepted target may simplify this to minimal durable

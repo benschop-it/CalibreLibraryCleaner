@@ -2,9 +2,8 @@
 
 This directory contains only active execution plans.
 
-Current plan:
-
-- [Finish the One-Time Library Cleanup Workflow](finish-one-time-library-cleanup.md)
+There are no active execution plans. The completed one-time cleanup plan is archived
+under `../archive/plans/`.
 
 Keep active plans current during implementation, then move them to
 `../archive/plans/` after completion and documentation reconciliation.

@@ -26,9 +26,8 @@ decision.
 
 ## Current work
 
-Active execution plans live under [plans/](plans/). The current plan records the
-explicit one-time cleanup scope for remaining work. Its unimplemented outcomes are
-targets rather than current production behavior.
+Active execution plans live under [plans/](plans/). There are currently no active
+plans; the completed one-time cleanup plan is under [archive/plans](archive/plans/).
 
 ## Workflows and evidence
 
@@ -36,8 +35,8 @@ Reusable procedures and measured acceptance evidence live under
 [workflows/](workflows/). They support, but do not override, the current core docs
 and accepted ADRs.
 
-The current deterministic package evidence and pending destructive acceptance gate
-are recorded in [Windows release acceptance](workflows/windows-release-acceptance.md).
+The accepted deterministic package and destructive workflow evidence are recorded in
+[Windows release acceptance](workflows/windows-release-acceptance.md).
 
 ## Historical material
 

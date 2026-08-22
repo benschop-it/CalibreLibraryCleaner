@@ -1,9 +1,8 @@
 # Roadmap
 
-Calibre Library Cleaner has one remaining product finish line: complete a one-time
-cleanup of a messy disposable Calibre library copy, accept the result, and use that
-copy to replace the original library. The active
-[execution plan](plans/finish-one-time-library-cleanup.md) governs implementation.
+Calibre Library Cleaner's one-time cleanup finish line is complete. The packaged
+workflow was accepted on a backed-up disposable library copy; the completed execution
+plan is archived under `archive/plans/`.
 
 ## Proven baseline
 
@@ -20,7 +19,7 @@ copy to replace the original library. The active
 Matching calibration is frozen. Metadata enrichment must not change the existing
 grouping authority.
 
-## Remaining sequence
+## Completed sequence
 
 1. Remove review ambiguity and prevent analysis/cleanup operation overlap.
 2. Add provider-neutral rich edition contracts and cached Open Library metadata.
@@ -32,13 +31,13 @@ grouping authority.
 6. Apply only checked metadata through the fixed Calibre worker and verify read-back.
 7. Publish a deterministic complete Windows release including the isolated PDF worker,
    then accept the packaged workflow on an explicitly backed-up disposable
-   representative library. Package construction and smoke verification are complete;
-   destructive workflow acceptance remains pending.
+  representative library. Package construction, smoke verification, destructive
+  workflow acceptance, restart, and Calibre-open checks are complete.
 8. After explicit approval, normalize Calibre-managed names as a separate final
    action through supported Calibre behavior.
 
-Implement and verify this sequence one step at a time. Provider failure leaves
-metadata unchanged and never blocks duplicate cleanup.
+This sequence is implemented and accepted. Provider failure leaves metadata unchanged
+and never blocks duplicate cleanup.
 
 ## Explicitly not planned
 

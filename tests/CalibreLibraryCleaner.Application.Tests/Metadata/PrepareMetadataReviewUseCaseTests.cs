@@ -68,6 +68,26 @@ public sealed class PrepareMetadataReviewUseCaseTests
     }
 
     [Fact]
+    public async Task BulkClearPersistsAllDefaultSelectionsAsUncheckedInOneWrite()
+    {
+        Harness harness = Harness.Create();
+        MetadataReviewWorkspace workspace = await harness.UseCase.ExecuteAsync(
+            harness.State, [], null, CancellationToken.None);
+        Fake.ClearRecordedCalls(harness.Store);
+
+        MetadataReviewWorkspace cleared = await harness.UseCase.SetAllApplyAsync(
+            workspace, apply: false, CancellationToken.None);
+
+        cleared.Subjects.Should().OnlyContain(value => !value.Apply && value.IsOverride);
+        A.CallTo(() => harness.Store.WriteAsync(
+                cleared.LibraryRoot,
+                A<IReadOnlyList<MetadataReviewDecision>>.That.Matches(value =>
+                    value.Count == cleared.Subjects.Count && value.All(decision => !decision.Apply)),
+                A<CancellationToken>._))
+            .MustHaveHappenedOnceExactly();
+    }
+
+    [Fact]
     public async Task PersistenceFailureKeepsSessionReviewAndDoesNotThrow()
     {
         Harness harness = Harness.Create();

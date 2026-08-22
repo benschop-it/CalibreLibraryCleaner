@@ -21,7 +21,12 @@ public sealed record EditionCoverStagingRequest
 
 public sealed record StagedEditionCover(string FileName, FormatFileFingerprint Fingerprint);
 
-public sealed record EditionCoverStagingProgress(int Completed, int Total);
+public sealed record EditionCoverStagingProgress(
+    int Completed,
+    int Total,
+    int CacheHits = 0,
+    int Downloads = 0,
+    int Omitted = 0);
 
 public interface IEditionCoverStagingSession : IAsyncDisposable
 {
@@ -31,7 +36,10 @@ public interface IEditionCoverStagingSession : IAsyncDisposable
 
 public sealed record EditionCoverStagingResult(
     IEditionCoverStagingSession? Session,
-    string? FailureCode)
+    string? FailureCode,
+    int CompletedCount = 0,
+    int TotalCount = 0,
+    IReadOnlyDictionary<string, string>? SkippedCovers = null)
 {
     public bool IsSuccess => Session is not null && FailureCode is null;
 }

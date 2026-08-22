@@ -3,11 +3,12 @@ import json
 import os
 import sys
 import tempfile
+import unicodedata
 from datetime import datetime
 from decimal import Decimal, InvalidOperation
 
 
-PROTOCOL_VERSION = "calibre-mutation-worker-protocol/1.0"
+PROTOCOL_VERSION = "calibre-mutation-worker-protocol/1.2"
 MAXIMUM_MESSAGE_BYTES = 1048576
 MAXIMUM_OPERATIONS = 100
 CAPABILITIES = ["setMetadata", "transferFormat", "removeFormat", "removeRecord"]
@@ -49,11 +50,13 @@ def unique_object(pairs):
     return result
 
 
-def operation_result(operation, success, failure_code=None, metadata=None):
+def operation_result(operation, success, failure_code=None, metadata=None,
+                     skipped=False, skip_code=None):
     result = {
         "operationId": operation["operationId"],
         "kind": operation["kind"],
         "isSuccess": success,
+        "isSkipped": skipped,
     }
     if failure_code is not None:
         result["failureCode"] = failure_code
@@ -61,13 +64,17 @@ def operation_result(operation, success, failure_code=None, metadata=None):
         result["verifiedMetadataValues"] = metadata["values"]
         result["verifiedManagedPath"] = metadata["managedPath"]
         result["verifiedAuthorSort"] = metadata["authorSort"]
+        if metadata.get("authorSortValues") is not None:
+            result["verifiedAuthorSortValues"] = metadata["authorSortValues"]
+    if skip_code is not None:
+        result["skipCode"] = skip_code
     return result
 
 
 def validate_operation(operation):
     required = {"operationId", "kind", "recordId", "canonicalFormat", "targetRecordId",
                 "expectedSizeInBytes", "expectedSha256", "metadataField", "metadataValues",
-                "metadataSource", "stagedCoverFileName", "stagedCoverSizeInBytes",
+                "metadataAuthorSortValues", "metadataSource", "stagedCoverFileName", "stagedCoverSizeInBytes",
                 "stagedCoverSha256"}
     if not isinstance(operation, dict) or set(operation) != required:
         raise ValueError("operation_invalid")
@@ -79,7 +86,7 @@ def validate_operation(operation):
         raise ValueError("operation_kind_invalid")
     if not isinstance(operation["recordId"], int) or operation["recordId"] <= 0:
         raise ValueError("record_id_invalid")
-    metadata_names = ("metadataField", "metadataValues", "metadataSource",
+    metadata_names = ("metadataField", "metadataValues", "metadataAuthorSortValues", "metadataSource",
                       "stagedCoverFileName", "stagedCoverSizeInBytes", "stagedCoverSha256")
     if kind == "setMetadata":
         if any(operation[name] is not None for name in
@@ -116,6 +123,7 @@ def validate_operation(operation):
 def validate_metadata(operation):
     field = operation["metadataField"]
     values = operation["metadataValues"]
+    author_sorts = operation["metadataAuthorSortValues"]
     source = operation["metadataSource"]
     if field not in METADATA_FIELDS or not isinstance(values, list) or len(values) > 32 \
             or any(not isinstance(value, str) or len(value) > 2048 for value in values) \
@@ -150,6 +158,11 @@ def validate_metadata(operation):
             or field == "languages" and not 1 <= len(values) <= 8 \
             or field == "identifiers" and not 1 <= len(values) <= 32:
         raise ValueError("metadata_values_invalid")
+    if author_sorts is not None and (field != "authors" or not isinstance(author_sorts, list)
+            or len(author_sorts) != len(values)
+            or any(not isinstance(value, str) or not value or len(value) > 512
+                   for value in author_sorts)):
+        raise ValueError("metadata_author_sorts_invalid")
 
 
 def validate_chunk(message):
@@ -210,6 +223,28 @@ def local_values(cache, book_id):
     return values
 
 
+def clear_metadata_caches(cache, field, book_id):
+    if field == "authors":
+        cache.clear_caches()
+    else:
+        cache.clear_caches(book_ids={book_id})
+
+
+def metadata_state(cache, operation):
+    book_id = operation["recordId"]
+    field = operation["metadataField"]
+    clear_metadata_caches(cache, field, book_id)
+    calibre_field = {"authorSort": "author_sort", "publicationDate": "pubdate",
+                     "seriesIndex": "series_index"}.get(field, field)
+    value = cache.cover(book_id) if field == "cover" else cache.field_for(calibre_field, book_id)
+    return {
+        "field": value,
+        "local": local_values(cache, book_id),
+        "path": cache.field_for("path", book_id),
+        "authorSort": cache.field_for("author_sort", book_id),
+    }
+
+
 def staged_cover(operation):
     if not COVER_DIRECTORY:
         raise ValueError("metadata_cover_staging_unavailable")
@@ -250,6 +285,18 @@ def canonical_datetime(value):
         raise ValueError("metadata_publication_date_invalid") from exception
 
 
+def canonical_text(value):
+    return " ".join(value.split())
+
+
+def canonical_author_sort(value):
+    if not isinstance(value, str) or value.count(",") != 1:
+        return None
+    family, given = (canonical_text(unicodedata.normalize("NFC", part))
+                     for part in value.split(",", 1))
+    return family + ", " + given if family and given else None
+
+
 def set_metadata(cache, operation):
     book_id = operation["recordId"]
     field = operation["metadataField"]
@@ -258,12 +305,13 @@ def set_metadata(cache, operation):
         raise ValueError("metadata_target_missing")
     preserved = local_values(cache, book_id)
     expected = values
+    requested_author_sorts = operation["metadataAuthorSortValues"]
     if field == "cover":
         normalized = staged_cover(operation)
         cache.set_cover({book_id: normalized})
-        metadata = cache.get_metadata(book_id, get_cover=True, cover_as_data=True)
-        if metadata.cover_data[1] != normalized:
-            raise ValueError("metadata_readback_failed")
+        cache.clear_caches(book_ids={book_id})
+        if cache.cover(book_id) != normalized:
+            raise ValueError("metadata_cover_readback_failed")
         verified = ["true"]
     else:
         calibre_field = {"authorSort": "author_sort", "publicationDate": "pubdate",
@@ -294,7 +342,26 @@ def set_metadata(cache, operation):
                 current[name] = identifier
             value = current
             expected = current
+        elif field == "authors" and requested_author_sorts is not None:
+            current_names = list(cache.field_for("authors", book_id) or [])
+            current_ids = tuple(cache.field_ids_for("authors", book_id) or ())
+            current_data = cache.author_data(current_ids)
+            current_sorts = [current_data[author_id]["sort"] for author_id in current_ids]
+            if len(current_ids) != len(requested_author_sorts) \
+                    or [canonical_author_sort(value) for value in current_names] != requested_author_sorts \
+                    or [canonical_author_sort(value) for value in current_sorts] != requested_author_sorts:
+                raise ValueError("metadata_author_normalization_precondition_failed")
         cache.set_field(calibre_field, {book_id: value}, do_path_update=True)
+        clear_metadata_caches(cache, field, book_id)
+        if field == "authors" and requested_author_sorts is not None:
+            author_ids = tuple(cache.field_ids_for("authors", book_id) or ())
+            if len(author_ids) != len(requested_author_sorts):
+                raise ValueError("metadata_author_sort_readback_failed")
+            author_data = cache.author_data(author_ids)
+            if [author_data[author_id]["sort"] for author_id in author_ids] \
+                    != requested_author_sorts:
+                cache.set_sort_for_authors(dict(zip(author_ids, requested_author_sorts)), update_books=True)
+                clear_metadata_caches(cache, field, book_id)
         actual = cache.field_for(calibre_field, book_id)
         if field == "publicationDate":
             matches = actual is not None and actual == value
@@ -306,22 +373,34 @@ def set_metadata(cache, operation):
             actual = dict(actual or {})
             matches = actual == expected
             verified = [f"{name}:{actual[name]}" for name in sorted(actual)]
-        elif field in {"authors", "languages"}:
+        elif field == "authors":
+            verified = list(actual or [])
+            matches = [canonical_text(item) for item in verified] == [
+                canonical_text(item) for item in expected]
+            if matches and requested_author_sorts is not None:
+                author_ids = tuple(cache.field_ids_for("authors", book_id) or ())
+                author_data = cache.author_data(author_ids)
+                verified_author_sorts = [author_data[author_id]["sort"] for author_id in author_ids]
+                matches = verified_author_sorts == requested_author_sorts \
+                    and cache.field_for("author_sort", book_id) == " & ".join(requested_author_sorts)
+        elif field == "languages":
             verified = list(actual or [])
             matches = verified == expected
         else:
             verified = [actual] if actual is not None else []
             matches = actual == value
         if not matches:
-            raise ValueError("metadata_readback_failed")
+            raise ValueError("metadata_{}_readback_failed".format(field))
     if local_values(cache, book_id) != preserved:
         raise ValueError("metadata_local_fields_changed")
     managed_path = cache.field_for("path", book_id)
     author_sort = cache.field_for("author_sort", book_id)
     if not isinstance(managed_path, str) or not managed_path or len(managed_path) > 1024 \
             or not isinstance(author_sort, str) or not author_sort or len(author_sort) > 512:
-        raise ValueError("metadata_readback_failed")
-    return {"values": verified, "managedPath": managed_path, "authorSort": author_sort}
+        raise ValueError("metadata_context_readback_failed")
+    return {"values": verified, "managedPath": managed_path, "authorSort": author_sort,
+            "authorSortValues": verified_author_sorts if field == "authors"
+            and requested_author_sorts is not None else None}
 
 
 def execute_chunk(cache, message):
@@ -332,8 +411,19 @@ def execute_chunk(cache, message):
     failure_code = None
     try:
         for operation in (value for value in operations if value["kind"] == "setMetadata"):
+            before = metadata_state(cache, operation)
             mutation_started = True
-            metadata = set_metadata(cache, operation)
+            try:
+                metadata = set_metadata(cache, operation)
+            except Exception as exception:
+                if metadata_state(cache, operation) == before:
+                    skip_code = str(exception) if isinstance(exception, ValueError) \
+                        else "calibre_api_failure"
+                    results.append(operation_result(
+                        operation, True, skipped=True, skip_code=skip_code))
+                    completed_ids.add(operation["operationId"])
+                    continue
+                raise
             results.append(operation_result(operation, True, metadata=metadata))
             completed_ids.add(operation["operationId"])
 

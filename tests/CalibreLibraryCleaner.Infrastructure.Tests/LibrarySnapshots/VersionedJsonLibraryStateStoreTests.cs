@@ -73,6 +73,93 @@ public sealed class VersionedJsonLibraryStateStoreTests
     }
 
     [Fact]
+    public async Task VerifiedUnchangedMetadataSkipRoundTripsWithoutChangingSnapshot()
+    {
+        using TemporaryDirectory directory = new();
+        InfrastructureExecutionFixture fixture = InfrastructureExecutionTestData.Create(directory.Path);
+        string cache = Path.Combine(directory.Path, "state-cache");
+        VersionedJsonLibraryStateStore store = new(new() { StorageRoot = cache });
+        LibraryState baseline = LibraryState.FromScan(fixture.Snapshot,
+            new(Guid.Parse("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee")));
+        CalibreBook target = baseline.Snapshot.Books[0];
+        LibraryStateMutationIntent intent = new(
+            "metadata-intent", baseline.GenerationId, baseline.Revision, 1,
+            baseline.ProjectedAtUtc.AddSeconds(1));
+        SkipMetadataLibraryStateDelta skip = new(
+            baseline.GenerationId,
+            baseline.Revision,
+            "metadata-skip",
+            baseline.ProjectedAtUtc.AddSeconds(1),
+            target.Id,
+            LibraryMetadataField.Publisher,
+            "metadata_values_invalid");
+        LibraryState projected = LibraryStateDeltaPolicy.Apply(baseline, skip);
+        await store.WriteBaselineAsync(baseline, CancellationToken.None);
+        await store.WriteMutationIntentAsync(
+            baseline.Snapshot.Identity.LibraryRoot, intent, CancellationToken.None);
+
+        await store.AppendDeltaBatchAsync(
+            baseline.Snapshot.Identity.LibraryRoot,
+            [skip],
+            projected,
+            compactIfThresholdReached: false,
+            intent.IntentId,
+            completeMutationIntent: true,
+            CancellationToken.None);
+        LibraryState? loaded = await new VersionedJsonLibraryStateStore(new() { StorageRoot = cache })
+            .ReadAsync(baseline.Snapshot.Identity.LibraryRoot, CancellationToken.None);
+
+        loaded!.Revision.Should().Be(baseline.Revision.Next());
+        loaded.Snapshot.Should().BeEquivalentTo(baseline.Snapshot);
+        loaded.Status.Should().Be(LibraryStateStatus.Authoritative);
+    }
+
+    [Fact]
+    public async Task VerifiedPerAuthorSortsRoundTrip()
+    {
+        using TemporaryDirectory directory = new();
+        InfrastructureExecutionFixture fixture = InfrastructureExecutionTestData.Create(directory.Path);
+        string cache = Path.Combine(directory.Path, "state-cache");
+        VersionedJsonLibraryStateStore store = new(new() { StorageRoot = cache });
+        LibraryState baseline = LibraryState.FromScan(
+            fixture.Snapshot, new(Guid.Parse("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee")));
+        CalibreBook target = baseline.Snapshot.Books[0];
+        SetMetadataLibraryStateDelta authors = new(
+            baseline.GenerationId,
+            baseline.Revision,
+            "normalize-authors",
+            baseline.ProjectedAtUtc.AddSeconds(1),
+            target.Id,
+            LibraryMetadataField.Authors,
+            ["Frederik Pohl", "Jack Williamson"],
+            "Pohl, Frederik/Book",
+            "Pohl, Frederik & Williamson, Jack",
+            ["Pohl, Frederik", "Williamson, Jack"]);
+        LibraryState projected = LibraryStateDeltaPolicy.Apply(baseline, authors);
+        LibraryStateMutationIntent intent = new(
+            "normalize-intent", baseline.GenerationId, baseline.Revision, 1, authors.AppliedAtUtc);
+        await store.WriteBaselineAsync(baseline, CancellationToken.None);
+        await store.WriteMutationIntentAsync(
+            baseline.Snapshot.Identity.LibraryRoot, intent, CancellationToken.None);
+        await store.AppendDeltaBatchAsync(
+            baseline.Snapshot.Identity.LibraryRoot,
+            [authors],
+            projected,
+            false,
+            intent.IntentId,
+            true,
+            CancellationToken.None);
+
+        LibraryState loaded = (await new VersionedJsonLibraryStateStore(new() { StorageRoot = cache })
+            .ReadAsync(baseline.Snapshot.Identity.LibraryRoot, CancellationToken.None))!;
+
+        CalibreBook book = loaded.Snapshot.Books.Single(value => value.Id == target.Id);
+        book.Authors.Select(value => value.Name).Should().Equal("Frederik Pohl", "Jack Williamson");
+        book.Authors.Select(value => value.SortName).Should().Equal("Pohl, Frederik", "Williamson, Jack");
+        book.AuthorSort.Should().Be("Pohl, Frederik & Williamson, Jack");
+    }
+
+    [Fact]
     public async Task ListReadsManifestWithoutOpeningTheLargeBaseline()
     {
         using TemporaryDirectory directory = new();

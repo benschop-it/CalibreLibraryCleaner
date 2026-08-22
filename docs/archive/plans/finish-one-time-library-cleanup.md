@@ -946,9 +946,9 @@ Policy `author-name-normalization/1.2.0` accepts exact family/given equivalence 
 NFC and whitespace canonicalization while still rejecting different names. The exact
 five live records passed 5 of 5 through the production worker on a disposable catalog
 clone, including canonical sorts and fresh managed paths, leaving zero candidates.
-All temporary data was removed and the complete 816-test suite passes. A short
-Completed-state five-record packaged follow-up remains pending; no workflow replay is
-required.
+All temporary data was removed and the complete 816-test suite passes. At that point,
+only a short Completed-state five-record packaged follow-up was pending; no workflow
+replay was required.
 
 The packaged follow-up completed all five edge records in 11,138 ms. Final state is
 authoritative at revision 1,840 with no pending mutation or uncertainty. Fresh Calibre

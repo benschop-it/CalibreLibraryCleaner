@@ -6,16 +6,19 @@ using CalibreLibraryCleaner.Domain.Libraries;
 using CalibreLibraryCleaner.Wpf.Services;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 
 namespace CalibreLibraryCleaner.Wpf.ViewModels;
 
-public sealed class ExactBinaryCleanupPlanWorkspaceViewModel : ObservableObject, IDisposable
+public sealed partial class ExactBinaryCleanupPlanWorkspaceViewModel : ObservableObject, IDisposable
 {
     private readonly ExecuteBulkExactDuplicateCleanupUseCase _execute;
     private readonly IExactDuplicateCleanupConfirmationService _confirmation;
     private readonly ILibraryStateSession _libraryState;
     private readonly IClock _clock;
     private readonly LibraryOperationCoordinator _operationCoordinator;
+    private readonly ILogger<ExactBinaryCleanupPlanWorkspaceViewModel> _logger;
     private LibrarySnapshot? _snapshot;
     private LibraryState? _state;
     private IReadOnlyList<ExactDuplicateGroupRowViewModel> _groups = [];
@@ -30,13 +33,15 @@ public sealed class ExactBinaryCleanupPlanWorkspaceViewModel : ObservableObject,
         IExactDuplicateCleanupConfirmationService confirmation,
         ILibraryStateSession libraryState,
         IClock clock,
-        LibraryOperationCoordinator? operationCoordinator = null)
+        LibraryOperationCoordinator? operationCoordinator = null,
+        ILogger<ExactBinaryCleanupPlanWorkspaceViewModel>? logger = null)
     {
         _execute = execute;
         _confirmation = confirmation;
         _libraryState = libraryState;
         _clock = clock;
         _operationCoordinator = operationCoordinator ?? new();
+        _logger = logger ?? NullLogger<ExactBinaryCleanupPlanWorkspaceViewModel>.Instance;
         _operationCoordinator.StateChanged += OnOperationStateChanged;
         RemoveDuplicatesCommand = new AsyncRelayCommand(RemoveDuplicatesAsync, CanRemoveDuplicates);
     }
@@ -46,19 +51,30 @@ public sealed class ExactBinaryCleanupPlanWorkspaceViewModel : ObservableObject,
     public string Status
     {
         get => _status;
-        private set => SetProperty(ref _status, value);
+        private set
+        {
+            if (SetProperty(ref _status, value)) LogUserVisibleExactStatus(_logger, value);
+        }
     }
 
     public string ProgressMessage
     {
         get => _progressMessage;
-        private set => SetProperty(ref _progressMessage, value);
+        private set
+        {
+            if (SetProperty(ref _progressMessage, value) && value.Length > 0)
+                LogUserVisibleExactProgress(_logger, value);
+        }
     }
 
     public string ResultSummary
     {
         get => _resultSummary;
-        private set => SetProperty(ref _resultSummary, value);
+        private set
+        {
+            if (SetProperty(ref _resultSummary, value) && value.Length > 0)
+                LogUserVisibleExactResult(_logger, value);
+        }
     }
 
     public double ProgressPercentage
@@ -193,4 +209,13 @@ public sealed class ExactBinaryCleanupPlanWorkspaceViewModel : ObservableObject,
 
     private void OnOperationStateChanged(object? sender, EventArgs eventArgs) =>
         RemoveDuplicatesCommand.NotifyCanExecuteChanged();
+
+    [LoggerMessage(EventId = 920, EventName = "UserVisibleExactStatus", Level = LogLevel.Information, Message = "{Message}")]
+    private static partial void LogUserVisibleExactStatus(ILogger logger, string message);
+
+    [LoggerMessage(EventId = 921, EventName = "UserVisibleExactProgress", Level = LogLevel.Information, Message = "{Message}")]
+    private static partial void LogUserVisibleExactProgress(ILogger logger, string message);
+
+    [LoggerMessage(EventId = 922, EventName = "UserVisibleExactResult", Level = LogLevel.Information, Message = "{Message}")]
+    private static partial void LogUserVisibleExactResult(ILogger logger, string message);
 }

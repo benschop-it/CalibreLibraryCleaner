@@ -505,7 +505,11 @@ internal sealed class VersionedJsonLibraryStateStore(
         SetMetadataLibraryStateDelta value => new("set-metadata", value.ExpectedRevision.Value,
             value.OperationId, value.AppliedAtUtc, value.RecordId.Value, value.Field.ToString(),
             null, null, null, null, value.Values.ToArray(), null,
-            value.VerifiedManagedPath, value.VerifiedAuthorSort),
+            value.VerifiedManagedPath, value.VerifiedAuthorSort,
+            value.VerifiedAuthorSortValues?.ToArray()),
+        SkipMetadataLibraryStateDelta value => new("skip-metadata", value.ExpectedRevision.Value,
+            value.OperationId, value.AppliedAtUtc, value.RecordId.Value, value.Field.ToString(),
+            null, null, null, null, null, [value.ReasonCode]),
         _ => throw new ArgumentOutOfRangeException(nameof(delta), delta.GetType().Name, "Unsupported persisted state delta."),
     };
 
@@ -533,7 +537,13 @@ internal sealed class VersionedJsonLibraryStateStore(
             "set-metadata" => new SetMetadataLibraryStateDelta(generation, revision,
                 value.OperationId, value.AppliedAtUtc, recordId,
                 Enum.Parse<LibraryMetadataField>(value.Format ?? string.Empty, false),
-                value.Values ?? [], value.VerifiedManagedPath, value.VerifiedAuthorSort),
+                value.Values ?? [], value.VerifiedManagedPath, value.VerifiedAuthorSort,
+                value.VerifiedAuthorSortValues),
+            "skip-metadata" => new SkipMetadataLibraryStateDelta(generation, revision,
+                value.OperationId, value.AppliedAtUtc, recordId,
+                Enum.Parse<LibraryMetadataField>(value.Format ?? string.Empty, false),
+                value.ExtraValues?.Single()
+                    ?? throw new InvalidDataException("Skipped metadata has no reason code.")),
             _ => throw new InvalidDataException("The persisted state delta kind is unsupported."),
         };
     }
@@ -922,5 +932,6 @@ internal sealed class VersionedJsonLibraryStateStore(
         string[]? Values,
         string[]? ExtraValues,
         string? VerifiedManagedPath = null,
-        string? VerifiedAuthorSort = null);
+        string? VerifiedAuthorSort = null,
+        string[]? VerifiedAuthorSortValues = null);
 }

@@ -16,7 +16,7 @@ if (values is ["-e", _, "--", _, string libraryUuid])
         File.AppendAllText(control.LogPath, JsonSerializer.Serialize(values) + Environment.NewLine);
     WriteWorkerMessage(new
     {
-        protocolVersion = "calibre-mutation-worker-protocol/1.0",
+        protocolVersion = "calibre-mutation-worker-protocol/1.2",
         kind = "ready",
         libraryUuid,
         capabilities,
@@ -32,7 +32,7 @@ if (values is ["-e", _, "--", _, string libraryUuid])
         {
             WriteWorkerMessage(new
             {
-                protocolVersion = "calibre-mutation-worker-protocol/1.0",
+                protocolVersion = "calibre-mutation-worker-protocol/1.2",
                 kind = "stopped",
                 mutationStarted = false,
             });
@@ -41,7 +41,7 @@ if (values is ["-e", _, "--", _, string libraryUuid])
         JsonElement operations = root.GetProperty("operations");
         WriteWorkerMessage(new
         {
-            protocolVersion = "calibre-mutation-worker-protocol/1.0",
+            protocolVersion = "calibre-mutation-worker-protocol/1.2",
             kind = "chunkResult",
             chunkId = root.GetProperty("chunkId").GetString(),
             mutationStarted = true,
@@ -50,17 +50,34 @@ if (values is ["-e", _, "--", _, string libraryUuid])
                 operationId = operation.GetProperty("operationId").GetString(),
                 kind = operation.GetProperty("kind").GetString(),
                 isSuccess = true,
+                isSkipped = operation.GetProperty("operationId").GetString()!.StartsWith(
+                    "skip-unchanged", StringComparison.Ordinal),
+                skipCode = operation.GetProperty("operationId").GetString()!.StartsWith(
+                    "skip-unchanged", StringComparison.Ordinal)
+                    ? "metadata_values_invalid"
+                    : null,
                 verifiedMetadataValues = operation.GetProperty("kind").GetString() == "setMetadata"
+                    && !operation.GetProperty("operationId").GetString()!.StartsWith(
+                        "skip-unchanged", StringComparison.Ordinal)
                     ? operation.GetProperty("metadataField").GetString() == "cover"
                         ? verifiedCoverValues
                         : operation.GetProperty("metadataValues").EnumerateArray()
                             .Select(value => value.GetString()).ToArray()
                     : null,
                 verifiedManagedPath = operation.GetProperty("kind").GetString() == "setMetadata"
+                    && !operation.GetProperty("operationId").GetString()!.StartsWith(
+                        "skip-unchanged", StringComparison.Ordinal)
                     ? "Verified/Managed/Path"
                     : null,
                 verifiedAuthorSort = operation.GetProperty("kind").GetString() == "setMetadata"
+                    && !operation.GetProperty("operationId").GetString()!.StartsWith(
+                        "skip-unchanged", StringComparison.Ordinal)
                     ? "Verified Author Sort"
+                    : null,
+                verifiedAuthorSortValues = operation.GetProperty("kind").GetString() == "setMetadata"
+                    && operation.TryGetProperty("metadataAuthorSortValues", out JsonElement sorts)
+                    && sorts.ValueKind == JsonValueKind.Array
+                    ? sorts.EnumerateArray().Select(value => value.GetString()).ToArray()
                     : null,
             }).ToArray(),
         });
