@@ -669,11 +669,14 @@ public sealed class ExecuteUnifiedCandidateCleanupUseCaseTests
             LibraryStateSession state = new(store);
             LibraryState exact = (await state.StartFromExactAnalysisAsync(
                 snapshot, CancellationToken.None)).State!;
-            LibraryState completed = (await state.AdvanceWorkflowAsync(
-                snapshot.Identity.LibraryRoot,
-                LibraryWorkflowPhase.CandidatePreparationReady,
-                Now,
-                CancellationToken.None)).State!;
+            LibraryState completed = exact.WorkflowCheckpoint.Phase
+                == LibraryWorkflowPhase.CandidatePreparationReady
+                ? exact
+                : (await state.AdvanceWorkflowAsync(
+                    snapshot.Identity.LibraryRoot,
+                    LibraryWorkflowPhase.CandidatePreparationReady,
+                    Now,
+                    CancellationToken.None)).State!;
             LibraryState refreshed = (await state.StartFromPostExactRefreshAsync(
                 snapshot,
                 new(completed.GenerationId, completed.Revision),

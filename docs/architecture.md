@@ -31,7 +31,7 @@ Explicit Exact Scan
   -> catalog/path resolution
   -> safe SHA-256 identity reuse or full hashing
   -> Exact groups
-  -> Exact review and worker cleanup
+  -> automatic no-group advancement, or Exact review and worker cleanup
   -> read-only residual reconciliation
   -> assessment/signature reuse and misses
   -> exact-metadata + Expanded discovery

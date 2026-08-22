@@ -36,21 +36,25 @@ An explicit Scan:
 - builds byte-identical format groups;
 - excludes ambiguous exact title/author buckets with decisive known language or
   validated strong-identifier conflicts; and
-- publishes an authoritative `ExactReady` generation.
+- publishes an authoritative `ExactReady` generation when groups require review, or
+  automatically advances the authoritative generation to `CandidatePreparationReady`
+  when no Exact groups exist.
 
 Exact analysis does not run EPUB/PDF assessment or Candidate matching.
 
 ### 2. Exact cleanup
 
-The user reviews the generated keeper for each byte-identical same-format group and
-may override it or Skip the group. Exact cleanup:
+When groups exist, the user reviews the generated keeper for each byte-identical
+same-format group and may override it or Skip the group. Exact cleanup:
 
-- requires external-backup confirmation even for a NothingToDo run;
+- is skipped automatically, without backup confirmation or worker startup, when the
+  authoritative Exact scan contains no groups;
+- exposes one cleanup action in the Exact review tab when groups exist;
 - transfers unambiguous complementary formats to one keeper;
 - removes duplicate/transferred source formats;
 - removes records only when they become empty;
 - leaves conflicting or ambiguous records unchanged; and
-- advances to `CandidatePreparationReady` after Completed or NothingToDo.
+- advances to `CandidatePreparationReady` after completed cleanup.
 
 ### 3. Candidate preparation
 

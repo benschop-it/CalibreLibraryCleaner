@@ -54,6 +54,58 @@ public sealed class LibraryStateSessionTests
     }
 
     [Fact]
+    public async Task ExactAnalysisWithoutGroupsAutomaticallyAdvancesToCandidatePreparation()
+    {
+        ILibraryStateStore store = A.Fake<ILibraryStateStore>();
+        using LibraryStateSession session = new(store);
+        LibrarySnapshot snapshot = new(
+            new("87f7ed1f-59a8-45a6-975a-7e06fd84780d", 27, "C:\\library"),
+            ScannedAt,
+            [Book(1)],
+            []);
+
+        LibraryStateSessionOutcome outcome = await session.StartFromExactAnalysisAsync(
+            snapshot, CancellationToken.None);
+
+        outcome.IsSuccess.Should().BeTrue();
+        outcome.State!.WorkflowCheckpoint.Phase.Should()
+            .Be(LibraryWorkflowPhase.CandidatePreparationReady);
+        outcome.State.IsWorkflowCheckpointCurrent.Should().BeTrue();
+        A.CallTo(() => store.WriteBaselineAsync(
+            A<LibraryState>.That.Matches(state =>
+                state.WorkflowCheckpoint.Phase == LibraryWorkflowPhase.CandidatePreparationReady),
+            A<CancellationToken>._)).MustHaveHappenedOnceExactly();
+    }
+
+    [Fact]
+    public async Task LoadingPersistedZeroGroupExactReadyStateAutomaticallyAdvancesCheckpoint()
+    {
+        ILibraryStateStore store = A.Fake<ILibraryStateStore>();
+        LibrarySnapshot snapshot = new(
+            new("87f7ed1f-59a8-45a6-975a-7e06fd84780d", 27, "C:\\library"),
+            ScannedAt,
+            [Book(1)],
+            []);
+        LibraryState persisted = LibraryState.FromScan(snapshot, Generation)
+            .AdvanceWorkflow(LibraryWorkflowPhase.ExactReady, ScannedAt);
+        A.CallTo(() => store.ReadAsync(snapshot.Identity.LibraryRoot, A<CancellationToken>._))
+            .Returns(persisted);
+        using LibraryStateSession session = new(store);
+
+        LibraryStateSessionOutcome outcome = await session.LoadAsync(
+            snapshot.Identity.LibraryRoot, CancellationToken.None);
+
+        outcome.IsSuccess.Should().BeTrue();
+        outcome.State!.WorkflowCheckpoint.Phase.Should()
+            .Be(LibraryWorkflowPhase.CandidatePreparationReady);
+        A.CallTo(() => store.WriteWorkflowCheckpointAsync(
+            snapshot.Identity.LibraryRoot,
+            A<LibraryState>.That.Matches(state =>
+                state.WorkflowCheckpoint.Phase == LibraryWorkflowPhase.CandidatePreparationReady),
+            A<CancellationToken>._)).MustHaveHappenedOnceExactly();
+    }
+
+    [Fact]
     public async Task PostExactRefreshPublishesNewGenerationWithExactSourceProvenance()
     {
         ILibraryStateStore store = A.Fake<ILibraryStateStore>();

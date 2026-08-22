@@ -226,7 +226,12 @@ public sealed class LibraryStateSession(ILibraryStateStore? store = null) : ILib
         ArgumentNullException.ThrowIfNull(snapshot);
         LibraryState state = LibraryState.FromScan(snapshot, new(Guid.NewGuid()));
         if (exactReady)
+        {
             state = state.AdvanceWorkflow(LibraryWorkflowPhase.ExactReady, snapshot.ScannedAt);
+            if (snapshot.ExactBinaryDuplicateGroups.Count == 0)
+                state = state.AdvanceWorkflow(
+                    LibraryWorkflowPhase.CandidatePreparationReady, snapshot.ScannedAt);
+        }
         await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
@@ -259,6 +264,15 @@ public sealed class LibraryStateSession(ILibraryStateStore? store = null) : ILib
             LibraryState? state = await store.ReadAsync(libraryRoot, cancellationToken).ConfigureAwait(false);
             if (state is null)
                 return LibraryStateSessionOutcome.Failure("LIBRARY_STATE.NOT_FOUND", "No persisted authoritative library state exists.");
+            if (state.IsWorkflowCheckpointCurrent
+                && state.WorkflowCheckpoint.Phase == LibraryWorkflowPhase.ExactReady
+                && state.Snapshot.ExactBinaryDuplicateGroups.Count == 0)
+            {
+                state = state.AdvanceWorkflow(
+                    LibraryWorkflowPhase.CandidatePreparationReady, state.ProjectedAtUtc);
+                await store.WriteWorkflowCheckpointAsync(
+                    state.Snapshot.Identity.LibraryRoot, state, cancellationToken).ConfigureAwait(false);
+            }
             _states[state.Snapshot.Identity.LibraryRoot] = state;
             return LibraryStateSessionOutcome.Success(state);
         }

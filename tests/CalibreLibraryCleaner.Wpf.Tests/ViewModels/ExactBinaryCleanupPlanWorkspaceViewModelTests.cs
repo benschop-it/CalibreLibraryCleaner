@@ -16,7 +16,7 @@ namespace CalibreLibraryCleaner.Wpf.Tests.ViewModels;
 public sealed class ExactBinaryCleanupPlanWorkspaceViewModelTests
 {
     [Fact]
-    public async Task NothingToDoCompletesExactStageWithoutStartingWorker()
+    public async Task ZeroGroupSessionHasAlreadyCompletedExactStageWithoutWorker()
     {
         DateTimeOffset now = new(2026, 8, 10, 12, 0, 0, TimeSpan.Zero);
         LibrarySnapshot snapshot = new(
@@ -33,12 +33,6 @@ public sealed class ExactBinaryCleanupPlanWorkspaceViewModelTests
         IExactDuplicateCleanupConfirmationService confirmation =
             A.Fake<IExactDuplicateCleanupConfirmationService>();
         LibraryOperationCoordinator operationCoordinator = new();
-        A.CallTo(() => confirmation.ConfirmExternalBackup(0)).ReturnsLazily(() =>
-        {
-            operationCoordinator.IsOperationActive.Should().BeTrue();
-            operationCoordinator.TryBegin().Should().BeNull();
-            return true;
-        });
         ICleanupExecutionIdGenerator executionIds = A.Fake<ICleanupExecutionIdGenerator>();
         A.CallTo(() => executionIds.Create()).Returns(new CleanupExecutionId(
             Guid.Parse("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee")));
@@ -56,13 +50,12 @@ public sealed class ExactBinaryCleanupPlanWorkspaceViewModelTests
             operationCoordinator);
         viewModel.UpdateContext(snapshot, []);
 
-        await viewModel.RemoveDuplicatesCommand.ExecuteAsync(null);
-
         stateSession.GetCurrent(snapshot.Identity.LibraryRoot)!.WorkflowCheckpoint.Phase.Should()
             .Be(LibraryWorkflowPhase.CandidatePreparationReady);
-        viewModel.Status.Should().Contain("no library changes were required");
+        viewModel.Status.Should().Be("Exact cleanup is complete for this workflow generation.");
         viewModel.RemoveDuplicatesCommand.CanExecute(null).Should().BeFalse();
         operationCoordinator.IsOperationActive.Should().BeFalse();
+        A.CallTo(() => confirmation.ConfirmExternalBackup(A<int>._)).MustNotHaveHappened();
         A.CallTo(() => tools.DiscoverAndProbeAsync(A<string>._, A<CancellationToken>._))
             .MustNotHaveHappened();
         A.CallTo(() => workers.TryOpenAsync(

@@ -72,7 +72,7 @@ public sealed class MainWindowViewModelTests
     }
 
     [Fact]
-    public async Task StagedScanPublishesExactReadyAndKeepsCandidateCleanupDisabled()
+    public async Task StagedScanWithoutExactGroupsMakesCandidatePreparationAvailable()
     {
         ILibraryFolderPicker picker = A.Fake<ILibraryFolderPicker>();
         ILibraryStateSession stateSession = A.Fake<ILibraryStateSession>();
@@ -85,7 +85,8 @@ public sealed class MainWindowViewModelTests
                 LibrarySnapshot snapshot = call.GetArgument<LibrarySnapshot>(0)!;
                 current = LibraryState.FromScan(snapshot,
                         new(Guid.Parse("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee")))
-                    .AdvanceWorkflow(LibraryWorkflowPhase.ExactReady, snapshot.ScannedAt);
+                    .AdvanceWorkflow(LibraryWorkflowPhase.ExactReady, snapshot.ScannedAt)
+                    .AdvanceWorkflow(LibraryWorkflowPhase.CandidatePreparationReady, snapshot.ScannedAt);
                 return Task.FromResult(LibraryStateSessionOutcome.Success(current));
             });
         A.CallTo(() => stateSession.GetCurrent(A<string>.That.IsNotNull())).ReturnsLazily(() => current);
@@ -95,7 +96,8 @@ public sealed class MainWindowViewModelTests
             out ICalibreMetadataReader reader,
             out IFormatFileHasher hasher,
             stateSession: stateSession,
-            workflowOptions: LibraryWorkflowOptions.Staged);
+            workflowOptions: LibraryWorkflowOptions.Staged,
+            candidatePreparation: A.Fake<ICandidatePreparationWorkflow>());
         ValidatedLibraryLocation location = new("library", "database");
         A.CallTo(() => resolver.ValidateAsync("library", A<CancellationToken>._))
             .Returns(LibraryValidationOutcome.Success(location));
@@ -120,9 +122,10 @@ public sealed class MainWindowViewModelTests
         await viewModel.SelectLibraryCommand.ExecuteAsync(null);
         await viewModel.ScanCommand.ExecuteAsync(null);
 
-        current!.WorkflowCheckpoint.Phase.Should().Be(LibraryWorkflowPhase.ExactReady);
+        current!.WorkflowCheckpoint.Phase.Should().Be(LibraryWorkflowPhase.CandidatePreparationReady);
         viewModel.StatusMessage.Should().StartWith("Exact-only analysis complete");
-        viewModel.CandidateCleanupCommand.CanExecute(null).Should().BeFalse();
+        viewModel.CandidateCleanupCommand.CanExecute(null).Should().BeTrue();
+        viewModel.CandidateCleanupAutomationName.Should().Be("Prepare Candidate review");
         A.CallTo(() => stateSession.StartFromExactAnalysisAsync(
             A<LibrarySnapshot>._, A<CancellationToken>._)).MustHaveHappenedOnceExactly();
         A.CallTo(() => stateSession.StartFromScanAsync(

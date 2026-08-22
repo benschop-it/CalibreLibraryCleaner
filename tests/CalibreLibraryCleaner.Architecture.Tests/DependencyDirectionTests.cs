@@ -232,6 +232,22 @@ public sealed class DependencyDirectionTests
     }
 
     [Fact]
+    public void ExactCleanupHasOneVisibleActionInTheExactReviewTab()
+    {
+        XDocument window = XDocument.Load(Path.Combine(
+            RepositoryRoot, "src", WpfProject, "MainWindow.xaml"));
+        XElement[] actions = window.Descendants().Where(element =>
+            element.Name.LocalName == "Button"
+            && element.Attributes().Any(attribute => attribute.Name.LocalName == "Command"
+                && attribute.Value.Contains("RemoveDuplicatesCommand", StringComparison.Ordinal))).ToArray();
+
+        actions.Should().ContainSingle();
+        actions[0].Ancestors().Should().Contain(element =>
+            element.Name.LocalName == "TabItem"
+            && (string?)element.Attribute("Header") == "_Exact file duplicates");
+    }
+
+    [Fact]
     public void CoreAndWpfSourceDoNotImplementFileHashing()
     {
         string[] projectNames = [DomainProject, ApplicationProject, WpfProject];
