@@ -77,7 +77,7 @@ public sealed class PrepareMetadataReviewUseCase(
             state.Snapshot, providerResults, keeperSelections);
         int deferredQueryCount = providerResults.Providers
             .Where(value => value.Enabled && value.RequestLimitReached)
-            .Sum(value => Math.Max(0, value.QueryCount - value.CacheHits - value.ProviderRequests));
+            .Sum(value => Math.Max(0, value.QueryCount - value.CompletedQueryCount));
         IReadOnlyList<MetadataReviewDecision> decisions;
         try
         {
@@ -183,13 +183,33 @@ public sealed class PrepareMetadataReviewUseCase(
     public async Task<MetadataReviewWorkspace> SetAllApplyAsync(
         MetadataReviewWorkspace workspace,
         bool apply,
+        CancellationToken cancellationToken) => await SetApplyAsync(
+            workspace,
+            workspace.Subjects.Where(value =>
+                    value.Subject.Proposal.Confidence != FusedEditionMetadataConfidence.Unavailable)
+                .Select(value => value.Subject.Id)
+                .ToArray(),
+            apply,
+            cancellationToken).ConfigureAwait(false);
+
+    public async Task<MetadataReviewWorkspace> SetApplyAsync(
+        MetadataReviewWorkspace workspace,
+        IReadOnlyCollection<MetadataReviewSubjectId> subjectIds,
+        bool apply,
         CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(workspace);
+        ArgumentNullException.ThrowIfNull(subjectIds);
+        HashSet<MetadataReviewSubjectId> selected = subjectIds.ToHashSet();
+        if (selected.Count != subjectIds.Count
+            || selected.Any(subjectId => workspace.Subjects.All(value => value.Subject.Id != subjectId)))
+            throw new ArgumentException("Metadata review selections are not current.", nameof(subjectIds));
+        if (selected.Count == 0) return workspace;
         ReviewedMetadataSubject[] reviewed = workspace.Subjects.Select(current =>
         {
-            if (current.Subject.Proposal.Confidence == FusedEditionMetadataConfidence.Unavailable)
-                return new ReviewedMetadataSubject(current.Subject, false, false, null);
+            if (!selected.Contains(current.Subject.Id)
+                || current.Subject.Proposal.Confidence == FusedEditionMetadataConfidence.Unavailable)
+                return current;
             MetadataReviewDecision? decision = MetadataReviewDecisionPolicy.CreateOverride(
                 current.Subject, workspace.GenerationId, workspace.Revision, apply);
             return decision is null

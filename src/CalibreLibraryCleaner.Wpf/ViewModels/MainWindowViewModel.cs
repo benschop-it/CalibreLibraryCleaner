@@ -56,6 +56,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
     private readonly SemaphoreSlim _metadataReviewDecisionGate = new(1, 1);
     private IReadOnlyList<MetadataDuplicateGroupRowViewModel> _allMetadataDuplicateGroups = [];
     private MetadataReviewSubjectRowViewModel[] _allMetadataReviewSubjects = [];
+    private MetadataReviewSubjectRowViewModel[] _selectedMetadataReviewSubjects = [];
     private CancellationTokenSource? _scanCancellation;
     private string _selectedLibraryPath = string.Empty;
     private string? _selectedPersistedLibraryPath;
@@ -212,6 +213,15 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         ClearAllMetadataApplyCommand = new AsyncRelayCommand(
             ClearAllMetadataApplyAsync,
             CanClearAllMetadataApply);
+        CheckAllMetadataApplyCommand = new AsyncRelayCommand(
+            CheckAllMetadataApplyAsync,
+            CanCheckAllMetadataApply);
+        CheckSelectedMetadataApplyCommand = new AsyncRelayCommand(
+            () => SetSelectedMetadataApplyAsync(true),
+            () => CanSetSelectedMetadataApply(true));
+        UncheckSelectedMetadataApplyCommand = new AsyncRelayCommand(
+            () => SetSelectedMetadataApplyAsync(false),
+            () => CanSetSelectedMetadataApply(false));
         CandidateCleanupCommand = new AsyncRelayCommand(CandidateCleanupAsync, CanRunCandidateCleanup);
     }
 
@@ -742,6 +752,12 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
 
     public IAsyncRelayCommand ClearAllMetadataApplyCommand { get; }
 
+    public IAsyncRelayCommand CheckAllMetadataApplyCommand { get; }
+
+    public IAsyncRelayCommand CheckSelectedMetadataApplyCommand { get; }
+
+    public IAsyncRelayCommand UncheckSelectedMetadataApplyCommand { get; }
+
     public IAsyncRelayCommand CandidateCleanupCommand { get; }
 
     public async Task InitializeAsync(CancellationToken cancellationToken = default)
@@ -769,7 +785,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         LoadPersistedSnapshotCommand.NotifyCanExecuteChanged();
         OnlineMetadataSettingsCommand.NotifyCanExecuteChanged();
         SkipAllUnifiedCandidatesCommand.NotifyCanExecuteChanged();
-        ClearAllMetadataApplyCommand.NotifyCanExecuteChanged();
+        NotifyMetadataApplyCommands();
         CandidateCleanupCommand.NotifyCanExecuteChanged();
     }
 
@@ -1394,7 +1410,36 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         && !_operationCoordinator.IsOperationActive
         && _metadataReviewWorkspace?.Subjects.Any(value => value.Apply) == true;
 
-    private async Task ClearAllMetadataApplyAsync()
+    private bool CanCheckAllMetadataApply() => !IsBusy
+        && !_operationCoordinator.IsOperationActive
+        && _metadataReviewWorkspace?.Subjects.Any(value =>
+            value.Subject.Proposal.Confidence != FusedEditionMetadataConfidence.Unavailable
+            && !value.Apply) == true;
+
+    private bool CanSetSelectedMetadataApply(bool apply) => !IsBusy
+        && !_operationCoordinator.IsOperationActive
+        && _selectedMetadataReviewSubjects.Any(value => value.CanApply && value.Apply != apply);
+
+    public void UpdateMetadataReviewSelection(
+        IEnumerable<MetadataReviewSubjectRowViewModel> subjects)
+    {
+        ArgumentNullException.ThrowIfNull(subjects);
+        _selectedMetadataReviewSubjects = subjects
+            .Where(_allMetadataReviewSubjects.Contains)
+            .Distinct()
+            .ToArray();
+        NotifyMetadataApplyCommands();
+    }
+
+    private Task ClearAllMetadataApplyAsync() => SetAllMetadataApplyAsync(
+        false,
+        "Cleared all metadata Apply choices. Apply checked metadata will make no metadata changes.");
+
+    private Task CheckAllMetadataApplyAsync() => SetAllMetadataApplyAsync(
+        true,
+        "Checked all available metadata Apply choices.");
+
+    private async Task SetAllMetadataApplyAsync(bool apply, string status)
     {
         if (_metadataReviewWorkspace is null || _prepareMetadataReview is null || _currentSnapshot is null) return;
         await _metadataReviewDecisionGate.WaitAsync().ConfigureAwait(true);
@@ -1403,9 +1448,33 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
             using IDisposable? operation = _operationCoordinator.TryBegin();
             if (operation is null) return;
             _metadataReviewWorkspace = await _prepareMetadataReview.SetAllApplyAsync(
-                _metadataReviewWorkspace, apply: false, CancellationToken.None).ConfigureAwait(true);
+                _metadataReviewWorkspace, apply, CancellationToken.None).ConfigureAwait(true);
             ApplyMetadataReviewWorkspace(_metadataReviewWorkspace, _currentSnapshot);
-            StatusMessage = "Cleared all metadata Apply choices. Apply checked metadata will make no metadata changes.";
+            StatusMessage = status;
+        }
+        finally
+        {
+            _metadataReviewDecisionGate.Release();
+        }
+    }
+
+    private async Task SetSelectedMetadataApplyAsync(bool apply)
+    {
+        if (_metadataReviewWorkspace is null || _prepareMetadataReview is null || _currentSnapshot is null) return;
+        MetadataReviewSubjectId[] subjectIds = _selectedMetadataReviewSubjects
+            .Where(value => value.CanApply && value.Apply != apply)
+            .Select(value => value.SubjectId)
+            .ToArray();
+        if (subjectIds.Length == 0) return;
+        await _metadataReviewDecisionGate.WaitAsync().ConfigureAwait(true);
+        try
+        {
+            using IDisposable? operation = _operationCoordinator.TryBegin();
+            if (operation is null) return;
+            _metadataReviewWorkspace = await _prepareMetadataReview.SetApplyAsync(
+                _metadataReviewWorkspace, subjectIds, apply, CancellationToken.None).ConfigureAwait(true);
+            ApplyMetadataReviewWorkspace(_metadataReviewWorkspace, _currentSnapshot);
+            StatusMessage = $"{(apply ? "Checked" : "Unchecked")} {subjectIds.Length:N0} selected metadata Apply choice(s).";
         }
         finally
         {
@@ -1802,10 +1871,18 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
     private void NotifyCandidateCleanupStateChanged()
     {
         SkipAllUnifiedCandidatesCommand.NotifyCanExecuteChanged();
-        ClearAllMetadataApplyCommand.NotifyCanExecuteChanged();
+        NotifyMetadataApplyCommands();
         CandidateCleanupCommand.NotifyCanExecuteChanged();
         OnPropertyChanged(nameof(CandidateCleanupAutomationName));
         OnPropertyChanged(nameof(CandidateCleanupToolTip));
+    }
+
+    private void NotifyMetadataApplyCommands()
+    {
+        ClearAllMetadataApplyCommand.NotifyCanExecuteChanged();
+        CheckAllMetadataApplyCommand.NotifyCanExecuteChanged();
+        CheckSelectedMetadataApplyCommand.NotifyCanExecuteChanged();
+        UncheckSelectedMetadataApplyCommand.NotifyCanExecuteChanged();
     }
 
     private bool CanLoadPersistedSnapshot() => !IsBusy
@@ -1910,6 +1987,8 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         MetadataReviewWorkspace workspace = await _prepareMetadataReview.ExecuteAsync(
             state, [], progress, cancellationToken).ConfigureAwait(true);
         ApplyMetadataReviewWorkspace(workspace, state.Snapshot);
+        IsProgressIndeterminate = false;
+        ProgressPercentage = 100;
     }
 
     private void UpdateMetadataReviewProgress(EditionMetadataEnrichmentProgress value)
@@ -1934,6 +2013,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
                 books[value.Subject.TargetBookId],
                 PersistMetadataApplyAsync))
             .ToArray();
+        UpdateMetadataReviewSelection([]);
         ApplyMetadataReviewFilter();
         NotifyCandidateCleanupStateChanged();
     }
@@ -2013,12 +2093,14 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
             : $"{visible.Length:N0} of {_allMetadataReviewSubjects.Length:N0} subjects visible; "
                 + $"High {high:N0}, Medium {medium:N0}, Low {low:N0}, Unavailable {unavailable:N0}.{persistence}";
         if (deferred.Length > 0) MetadataReviewSummary += deferred;
+        NotifyMetadataApplyCommands();
     }
 
     private void ClearMetadataReview()
     {
         _metadataReviewWorkspace = null;
         _allMetadataReviewSubjects = [];
+        UpdateMetadataReviewSelection([]);
         _metadataReviewSubjects.ReplaceAll([]);
         SelectedMetadataReviewSubject = null;
         MetadataReviewSummary = "Complete Candidate cleanup, then prepare online metadata proposals for retained records.";

@@ -197,6 +197,12 @@ public sealed class DependencyDirectionTests
         source.Should().Contain("EnableColumnVirtualization=\"True\"");
         source.Should().Contain("VirtualizingPanel.VirtualizationMode=\"Recycling\"");
         source.Should().Contain("SelectedItem=\"{Binding SelectedMetadataReviewSubject, Mode=TwoWay}\"");
+        source.Should().Contain("SelectionMode=\"Extended\"");
+        source.Should().Contain("SelectionChanged=\"MetadataReviewSubjectsGrid_SelectionChanged\"");
+        source.Should().Contain("Command=\"{Binding CheckSelectedMetadataApplyCommand}\"");
+        source.Should().Contain("Command=\"{Binding UncheckSelectedMetadataApplyCommand}\"");
+        source.Should().Contain("Command=\"{Binding CheckAllMetadataApplyCommand}\"");
+        source.Should().Contain("Command=\"{Binding ClearAllMetadataApplyCommand}\"");
         source.Should().Contain("AutomationProperties.Name=\"Resize metadata review details\"");
         source.Should().Contain("<RowDefinition Height=\"3*\" MinHeight=\"180\" />");
         source.Should().Contain("<RowDefinition Height=\"5\" />");
@@ -232,7 +238,7 @@ public sealed class DependencyDirectionTests
     }
 
     [Fact]
-    public void ExactCleanupHasOneVisibleActionInTheExactReviewTab()
+    public void ExactCleanupHasOneVisibleActionInTheTopWorkflowBar()
     {
         XDocument window = XDocument.Load(Path.Combine(
             RepositoryRoot, "src", WpfProject, "MainWindow.xaml"));
@@ -242,9 +248,9 @@ public sealed class DependencyDirectionTests
                 && attribute.Value.Contains("RemoveDuplicatesCommand", StringComparison.Ordinal))).ToArray();
 
         actions.Should().ContainSingle();
-        actions[0].Ancestors().Should().Contain(element =>
-            element.Name.LocalName == "TabItem"
-            && (string?)element.Attribute("Header") == "_Exact file duplicates");
+        actions[0].Ancestors().Should().NotContain(element => element.Name.LocalName == "TabItem");
+        actions[0].Attributes().Single(attribute => attribute.Name.LocalName == "Grid.Column")
+            .Value.Should().Be("6");
     }
 
     [Fact]

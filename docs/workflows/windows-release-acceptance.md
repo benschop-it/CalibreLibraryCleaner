@@ -57,13 +57,13 @@ time while remaining bounded on a slow workstation.
 | --- | --- |
 | Version | `0.1.0` |
 | ZIP | `CalibreLibraryCleaner-0.1.0-win-x64-framework-dependent.zip` |
-| Compressed bytes | 9,358,833 |
+| Compressed bytes | 9,377,505 |
 | Payload files in manifest | 79 |
-| ZIP SHA-256 | `13a4e0590c4664ef3cb9ab5cec09da76498ecf42c8c8c6ec421d9df04e5e3dc8` |
+| ZIP SHA-256 | `2e9efc8a320043ac6fc45c74324bc8c4252801b17d4798970cdc9ba5be83de60` |
 | Reproducibility | Not rerun after the acceptance fixes; an earlier deterministic package reproduced across two complete builds |
 | Direct packaged smoke | Passed |
 | Smoke final state | 0 new processes; 0 new extraction directories |
-| Live provider requests | Metadata review cache completion/retry accepted before this rebuild |
+| Live provider requests | Bounded provider `1.2.0` recall measurement accepted; full replay stopped as unjustified |
 | Destructive library mutation | Accepted; final authoritative revision 1,840 |
 
 ## Interrupted acceptance attempt
@@ -513,8 +513,8 @@ exact sorts and moving the managed path. All temporary qualification files were
 removed. The complete build and 812-test suite, formatting, diff, diagnostics, and
 vulnerability checks pass. The package with SHA-256
 `13a4e0590c4664ef3cb9ab5cec09da76498ecf42c8c8c6ec421d9df04e5e3dc8`
-passes its verifier and direct packaged smoke. Packaged final-action acceptance remains
-pending.
+passes its verifier and direct packaged smoke. At that point, packaged final-action
+acceptance remained pending.
 
 The subsequent 1,869-book final action stopped at chunk 1 operation 2 after one
 uncommitted success. Both operations targeted books sharing one Calibre author entity;

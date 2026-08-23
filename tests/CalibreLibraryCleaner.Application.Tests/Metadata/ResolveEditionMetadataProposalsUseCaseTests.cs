@@ -29,6 +29,7 @@ public sealed class ResolveEditionMetadataProposalsUseCaseTests
             [Book(1), Book(2)], null, CancellationToken.None)).Providers.Single();
 
         result.QueryCount.Should().Be(1);
+        result.CompletedQueryCount.Should().Be(1);
         result.ProviderRequests.Should().Be(1);
         result.Proposals.Keys.Should().BeEquivalentTo([new CalibreBookId(1), new CalibreBookId(2)]);
         result.Proposals.Values.Should().OnlyContain(value =>
@@ -36,6 +37,78 @@ public sealed class ResolveEditionMetadataProposalsUseCaseTests
             && value.Candidate!.EditionId == "/books/OL7353617M");
         A.CallTo(() => provider.SearchAsync(A<EditionMetadataLookupQuery>._, A<CancellationToken>._))
             .MustHaveHappenedOnceExactly();
+    }
+
+    [Fact]
+    public async Task IsbnNotFoundFallsBackToOriginalTitleAndAuthorQuery()
+    {
+        IEditionMetadataProvider provider = A.Fake<IEditionMetadataProvider>();
+        A.CallTo(() => provider.Identity).Returns(ProviderIdentity);
+        List<EditionMetadataLookupQuery> searched = [];
+        A.CallTo(() => provider.SearchAsync(A<EditionMetadataLookupQuery>._, A<CancellationToken>._))
+            .ReturnsLazily(call =>
+            {
+                EditionMetadataLookupQuery query = call.GetArgument<EditionMetadataLookupQuery>(0)!;
+                searched.Add(query);
+                return Task.FromResult(query.Identifier is not null
+                    ? new EditionMetadataSearchResult(
+                        ProviderIdentity, EditionMetadataSearchStatus.NotFound, Now)
+                    : new EditionMetadataSearchResult(
+                        ProviderIdentity,
+                        EditionMetadataSearchStatus.Success,
+                        Now,
+                        [Candidate("9780306406157")]));
+            });
+        ResolveEditionMetadataProposalsUseCase useCase = Create(
+            provider, A.Fake<IEditionMetadataProposalCache>());
+
+        EditionMetadataProposalBatchResult result = (await useCase.ExecuteAsync(
+            [Book(1)], null, CancellationToken.None)).Providers.Single();
+
+        result.ProviderRequests.Should().Be(2);
+        result.ProposedRecords.Should().Be(1);
+        searched.Select(value => value.Fields).Should().Equal(
+            EditionMetadataQueryFields.Identifier,
+            EditionMetadataQueryFields.Title | EditionMetadataQueryFields.Authors);
+        result.Proposals[new(1)].ReasonCodes.Should().Contain("METADATA.EDITION.TITLE_EXACT")
+            .And.Contain("METADATA.EDITION.AUTHOR_EXACT")
+            .And.NotContain("METADATA.EDITION.ISBN_EXACT");
+    }
+
+    [Fact]
+    public async Task LanguageConstrainedNotFoundFallsBackWithoutLanguage()
+    {
+        IEditionMetadataProvider provider = A.Fake<IEditionMetadataProvider>();
+        A.CallTo(() => provider.Identity).Returns(ProviderIdentity);
+        List<EditionMetadataLookupQuery> searched = [];
+        A.CallTo(() => provider.SearchAsync(A<EditionMetadataLookupQuery>._, A<CancellationToken>._))
+            .ReturnsLazily(call =>
+            {
+                EditionMetadataLookupQuery query = call.GetArgument<EditionMetadataLookupQuery>(0)!;
+                searched.Add(query);
+                return Task.FromResult(query.Language is not null
+                    ? new EditionMetadataSearchResult(
+                        ProviderIdentity, EditionMetadataSearchStatus.NotFound, Now)
+                    : Search(query));
+            });
+        ResolveEditionMetadataProposalsUseCase useCase = Create(
+            provider, A.Fake<IEditionMetadataProposalCache>());
+        CalibreBook book = new(
+            new(1),
+            "Pride and Prejudice",
+            "Austen, Jane",
+            [new(new(1), "Jane Austen", "Austen, Jane")],
+            [],
+            [],
+            "Author/Book (1)",
+            new(languages: ["eng"]));
+
+        EditionMetadataProposalBatchResult result = (await useCase.ExecuteAsync(
+            [book], null, CancellationToken.None)).Providers.Single();
+
+        result.ProviderRequests.Should().Be(2);
+        searched.Select(value => value.Language).Should().Equal("en", null);
+        result.ProposedRecords.Should().Be(1);
     }
 
     [Fact]
@@ -83,11 +156,33 @@ public sealed class ResolveEditionMetadataProposalsUseCaseTests
 
         result.RequestLimitReached.Should().BeTrue();
         result.ProviderRequests.Should().Be(1);
+        result.CompletedQueryCount.Should().Be(1);
         progress[^1].CompletedQueries.Should().Be(1);
         progress[^1].TotalQueries.Should().Be(3);
         progress[^1].Detail.Should().Contain("2 uncached queries deferred");
         A.CallTo(() => provider.SearchAsync(
             A<EditionMetadataLookupQuery>._, A<CancellationToken>._)).MustHaveHappenedOnceExactly();
+    }
+
+    [Fact]
+    public async Task BudgetedProviderReportsActualRequestsAgainstHardLimit()
+    {
+        BudgetedProvider provider = new();
+        IClock clock = A.Fake<IClock>();
+        A.CallTo(() => clock.GetUtcNow()).Returns(Now);
+        ResolveEditionMetadataProposalsUseCase useCase = new(
+            [provider],
+            A.Fake<IEditionMetadataProposalCache>(),
+            clock,
+            new(maximumProviderRequestsPerRun: 2));
+
+        EditionMetadataProposalBatchResult result = (await useCase.ExecuteAsync(
+            [Book(1), Book(2, "9780306406157")], null, CancellationToken.None)).Providers.Single();
+
+        result.ProviderRequests.Should().Be(2);
+        result.CompletedQueryCount.Should().Be(1);
+        result.RequestLimitReached.Should().BeTrue();
+        provider.ReceivedBudgets.Should().Equal(2);
     }
 
     [Fact]
@@ -242,12 +337,12 @@ public sealed class ResolveEditionMetadataProposalsUseCaseTests
         10_008,
         ["METADATA.EDITION.ISBN_EXACT"]);
 
-    private static EditionMetadataCandidate Candidate() => new(
+    private static EditionMetadataCandidate Candidate(string isbn = "9780141439518") => new(
         "/works/OL66554W",
         "/books/OL7353617M",
         "Pride and Prejudice",
         ["Jane Austen"],
-        [new("isbn", "9780141439518")],
+        [new("isbn", isbn)],
         "Penguin Classics",
         new(2003),
         ["eng"]);
@@ -280,6 +375,29 @@ public sealed class ResolveEditionMetadataProposalsUseCaseTests
         {
             Searches++;
             throw new InvalidOperationException("Unavailable provider must not be searched.");
+        }
+    }
+
+    private sealed class BudgetedProvider :
+        IEditionMetadataProvider,
+        IBudgetedEditionMetadataProvider
+    {
+        public EditionMetadataProviderIdentity Identity => ProviderIdentity;
+        public List<int> ReceivedBudgets { get; } = [];
+
+        public Task<EditionMetadataSearchResult> SearchAsync(
+            EditionMetadataLookupQuery query,
+            CancellationToken cancellationToken) => throw new InvalidOperationException(
+                "Resolver must use the budget-aware provider contract.");
+
+        public Task<EditionMetadataSearchExecution> SearchAsync(
+            EditionMetadataLookupQuery query,
+            int maximumProviderRequests,
+            CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            ReceivedBudgets.Add(maximumProviderRequests);
+            return Task.FromResult(new EditionMetadataSearchExecution(Search(query), 2));
         }
     }
 }

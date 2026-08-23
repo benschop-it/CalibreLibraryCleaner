@@ -11,10 +11,11 @@ namespace CalibreLibraryCleaner.Infrastructure.Bibliographic;
 
 internal sealed class OpenLibraryBibliographicProvider(
     HttpClient httpClient,
-    OpenLibraryOptions options) : IBibliographicProvider, IEditionMetadataProvider, IDisposable
+    OpenLibraryOptions options) : IBibliographicProvider, IEditionMetadataProvider,
+    IBudgetedEditionMetadataProvider, IDisposable
 {
     private const string ProviderVersion = "open-library-search-1.0.0";
-    private const string EditionProviderVersion = "open-library-edition-search/1.0.0";
+    private const string EditionProviderVersion = "open-library-edition-search/1.2.0";
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
         PropertyNameCaseInsensitive = false,
@@ -94,15 +95,29 @@ internal sealed class OpenLibraryBibliographicProvider(
 
     public async Task<EditionMetadataSearchResult> SearchAsync(
         EditionMetadataLookupQuery query,
+        CancellationToken cancellationToken) => (await SearchAsync(
+            query, 1, cancellationToken).ConfigureAwait(false)).Result;
+
+    Task<EditionMetadataSearchExecution> IBudgetedEditionMetadataProvider.SearchAsync(
+        EditionMetadataLookupQuery query,
+        int maximumProviderRequests,
+        CancellationToken cancellationToken) => SearchAsync(
+            query, maximumProviderRequests, cancellationToken);
+
+    private async Task<EditionMetadataSearchExecution> SearchAsync(
+        EditionMetadataLookupQuery query,
+        int maximumProviderRequests,
         CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(query);
+        ArgumentOutOfRangeException.ThrowIfLessThan(maximumProviderRequests, 1);
         EditionMetadataProviderIdentity editionIdentity = ((IEditionMetadataProvider)this).Identity;
         if (query.Provider != editionIdentity)
             throw new ArgumentException("The query targets another edition metadata provider.", nameof(query));
         if (!options.Enabled)
-            return Unavailable("OPEN_LIBRARY.DISABLED");
+            return new(Unavailable("OPEN_LIBRARY.DISABLED"), 0);
 
+        int requestCount = 0;
         await WaitForRateSlotAsync(cancellationToken).ConfigureAwait(false);
         try
         {
@@ -112,39 +127,86 @@ internal sealed class OpenLibraryBibliographicProvider(
             request.Headers.TryAddWithoutValidation("User-Agent", userAgent);
             using CancellationTokenSource timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
             timeout.CancelAfter(options.RequestTimeout);
+            requestCount++;
             using HttpResponseMessage response = await httpClient.SendAsync(
                 request, HttpCompletionOption.ResponseHeadersRead, timeout.Token).ConfigureAwait(false);
             if (response.StatusCode == HttpStatusCode.NotFound)
-                return new(editionIdentity, EditionMetadataSearchStatus.NotFound, DateTimeOffset.UtcNow,
-                    problemCode: "OPEN_LIBRARY.NOT_FOUND");
+                return new(new(editionIdentity, EditionMetadataSearchStatus.NotFound, DateTimeOffset.UtcNow,
+                    problemCode: "OPEN_LIBRARY.NOT_FOUND"), requestCount);
             if (!response.IsSuccessStatusCode)
-                return Unavailable($"OPEN_LIBRARY.HTTP_{(int)response.StatusCode}");
+                return new(Unavailable($"OPEN_LIBRARY.HTTP_{(int)response.StatusCode}"), requestCount);
             if (response.Content.Headers.ContentLength > options.MaximumResponseBytes)
-                return Unavailable("OPEN_LIBRARY.RESPONSE_TOO_LARGE");
+                return new(Unavailable("OPEN_LIBRARY.RESPONSE_TOO_LARGE"), requestCount);
 
             byte[] bytes = await ReadBoundedAsync(
                 response.Content, options.MaximumResponseBytes, timeout.Token).ConfigureAwait(false);
             OpenLibraryEditionSearchDocument? document = JsonSerializer.Deserialize<OpenLibraryEditionSearchDocument>(
                 bytes, JsonOptions);
-            EditionMetadataCandidate[] candidates = (document?.Docs ?? [])
+            OpenLibraryEditionWork[] works = (document?.Docs ?? []).Take(5).ToArray();
+            EditionMetadataCandidate[] candidates = works
+                .SelectMany(CreateCandidatesForWork)
+                .GroupBy(value => value.Candidate.EditionId, StringComparer.Ordinal)
+                .Select(group => group.First())
+                .OrderByDescending(value => CandidateRichness(value.Candidate))
+                .ThenBy(value => value.WorkIndex)
+                .ThenBy(value => value.EditionIndex)
+                .Select(value => value.Candidate)
                 .Take(5)
-                .Select(TryCreateEditionCandidate)
-                .Where(value => value is not null)
-                .Select(value => value!)
                 .ToArray();
-            return candidates.Length == 0
+            OpenLibraryEditionWork? fallbackWork = candidates.Length == 0 && maximumProviderRequests >= 2
+                ? works.FirstOrDefault(value => IsCompatibleFallbackWork(query, value))
+                : null;
+            if (fallbackWork is not null)
+            {
+                await WaitForRateSlotAsync(cancellationToken).ConfigureAwait(false);
+                using HttpRequestMessage editionsRequest = new(
+                    HttpMethod.Get, BuildWorkEditionsRelativeUri(fallbackWork.Key!));
+                editionsRequest.Headers.TryAddWithoutValidation("User-Agent", userAgent);
+                using CancellationTokenSource editionsTimeout =
+                    CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+                editionsTimeout.CancelAfter(options.RequestTimeout);
+                requestCount++;
+                using HttpResponseMessage editionsResponse = await httpClient.SendAsync(
+                    editionsRequest, HttpCompletionOption.ResponseHeadersRead, editionsTimeout.Token)
+                    .ConfigureAwait(false);
+                if (editionsResponse.IsSuccessStatusCode)
+                {
+                    if (editionsResponse.Content.Headers.ContentLength > options.MaximumResponseBytes)
+                        return new(Unavailable("OPEN_LIBRARY.RESPONSE_TOO_LARGE"), requestCount);
+                    byte[] editionBytes = await ReadBoundedAsync(
+                        editionsResponse.Content, options.MaximumResponseBytes, editionsTimeout.Token)
+                        .ConfigureAwait(false);
+                    OpenLibraryWorkEditionsDocument? editions =
+                        JsonSerializer.Deserialize<OpenLibraryWorkEditionsDocument>(editionBytes, JsonOptions);
+                    candidates = (editions?.Entries ?? [])
+                        .Take(5)
+                        .Select(value => TryCreateWorkEditionCandidate(fallbackWork, value))
+                        .Where(value => value is not null)
+                        .Select(value => value!)
+                        .OrderByDescending(CandidateRichness)
+                        .ThenBy(value => value.EditionId, StringComparer.Ordinal)
+                        .Take(5)
+                        .ToArray();
+                }
+                else if (editionsResponse.StatusCode != HttpStatusCode.NotFound)
+                {
+                    return new(Unavailable($"OPEN_LIBRARY.HTTP_{(int)editionsResponse.StatusCode}"), requestCount);
+                }
+            }
+            EditionMetadataSearchResult result = candidates.Length == 0
                 ? new(editionIdentity, EditionMetadataSearchStatus.NotFound, DateTimeOffset.UtcNow,
                     problemCode: "OPEN_LIBRARY.NO_COMPATIBLE_EDITIONS")
                 : new(editionIdentity, EditionMetadataSearchStatus.Success, DateTimeOffset.UtcNow, candidates);
+            return new(result, requestCount);
         }
         catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
         {
-            return Unavailable("OPEN_LIBRARY.TIMEOUT");
+            return new(Unavailable("OPEN_LIBRARY.TIMEOUT"), requestCount);
         }
         catch (Exception exception) when (exception is HttpRequestException or IOException
             or JsonException or ArgumentException or OverflowException)
         {
-            return Unavailable("OPEN_LIBRARY.UNAVAILABLE");
+            return new(Unavailable("OPEN_LIBRARY.UNAVAILABLE"), requestCount);
         }
 
         EditionMetadataSearchResult Unavailable(string problem) => new(
@@ -204,16 +266,20 @@ internal sealed class OpenLibraryBibliographicProvider(
         return "search.json?" + string.Join('&', parameters);
     }
 
-    private static EditionMetadataCandidate? TryCreateEditionCandidate(OpenLibraryEditionWork work)
+    private static string BuildWorkEditionsRelativeUri(string workId) =>
+        workId.TrimStart('/') + "/editions.json?limit=5";
+
+    private static EditionMetadataCandidate? TryCreateEditionCandidate(
+        OpenLibraryEditionWork work,
+        OpenLibraryEdition edition)
     {
-        OpenLibraryEdition? edition = work.Editions?.Docs?.FirstOrDefault();
-        if (!IsWorkId(work.Key) || !IsEditionId(edition?.Key)
-            || string.IsNullOrWhiteSpace(edition?.Title) && string.IsNullOrWhiteSpace(work.Title)
+        if (!IsWorkId(work.Key) || !IsEditionId(edition.Key)
+            || string.IsNullOrWhiteSpace(edition.Title) && string.IsNullOrWhiteSpace(work.Title)
             || work.AuthorName is not { Length: > 0 })
             return null;
         try
         {
-            EditionMetadataIdentifier[] identifiers = (edition!.Isbn ?? [])
+            EditionMetadataIdentifier[] identifiers = (edition.Isbn ?? [])
                 .Select(TryCreateIsbn).Where(value => value is not null).Select(value => value!)
                 .Distinct().Take(16).ToArray();
             int? coverId = edition.CoverId is > 0 ? edition.CoverId : null;
@@ -237,6 +303,97 @@ internal sealed class OpenLibraryBibliographicProvider(
         }
     }
 
+    private static int CandidateRichness(EditionMetadataCandidate candidate) =>
+        candidate.Identifiers.Count
+        + (candidate.Publisher is null ? 0 : 1)
+        + (candidate.PublicationDate is null ? 0 : 1)
+        + candidate.Languages.Count
+        + (candidate.Series is null ? 0 : 1)
+        + (candidate.Cover is null ? 0 : 1);
+
+    private static IEnumerable<IndexedEditionCandidate> CreateCandidatesForWork(
+        OpenLibraryEditionWork work,
+        int workIndex)
+    {
+        IndexedEditionCandidate[] editions = (work.Editions?.Docs ?? [])
+            .Take(5)
+            .Select((edition, editionIndex) => new
+            {
+                Candidate = TryCreateEditionCandidate(work, edition),
+                EditionIndex = editionIndex,
+            })
+            .Where(value => value.Candidate is not null)
+            .Select(value => new IndexedEditionCandidate(
+                value.Candidate!, workIndex, value.EditionIndex))
+            .ToArray();
+        return editions;
+    }
+
+    private static bool IsUsableWork(OpenLibraryEditionWork work) =>
+        IsWorkId(work.Key) && !string.IsNullOrWhiteSpace(work.Title)
+        && work.AuthorName is { Length: > 0 };
+
+    private static bool IsCompatibleFallbackWork(
+        EditionMetadataLookupQuery query,
+        OpenLibraryEditionWork work)
+    {
+        if (!IsUsableWork(work)) return false;
+        if (query.Identifier is not null) return true;
+        string[] queryAuthors = CandidateMetadataNormalizer.AuthorKeys(query.Authors);
+        string[] workAuthors = CandidateMetadataNormalizer.AuthorKeys(work.AuthorName!);
+        if (!CandidateMetadataNormalizer.HaveCompatibleAuthorIdentity(queryAuthors, workAuthors)) return false;
+        string[] queryTitleKeys = CandidateMetadataNormalizer.TitleKeys(query.Title!);
+        string[] workTitleKeys = CandidateMetadataNormalizer.TitleKeys(work.Title!);
+        return queryTitleKeys.Intersect(workTitleKeys, StringComparer.Ordinal).Any()
+            || CandidateMetadataNormalizer.TitleSimilarityPermille(
+                CandidateMetadataNormalizer.TitleTokens(query.Title!),
+                CandidateMetadataNormalizer.TitleTokens(work.Title!)) >= 500;
+    }
+
+    private static EditionMetadataCandidate? TryCreateWorkEditionCandidate(
+        OpenLibraryEditionWork work,
+        OpenLibraryWorkEdition edition)
+    {
+        if (!IsUsableWork(work) || !IsEditionId(edition.Key)
+            || string.IsNullOrWhiteSpace(edition.Title) && string.IsNullOrWhiteSpace(work.Title))
+            return null;
+        try
+        {
+            EditionMetadataIdentifier[] identifiers = (edition.Isbn10 ?? [])
+                .Concat(edition.Isbn13 ?? [])
+                .Select(TryCreateIsbn).Where(value => value is not null).Select(value => value!)
+                .Distinct().Take(16).ToArray();
+            string[] languages = (edition.Languages ?? [])
+                .Select(value => value.Key)
+                .Where(value => value is not null && value.StartsWith("/languages/", StringComparison.Ordinal))
+                .Select(value => value![11..])
+                .ToArray();
+            int? coverId = edition.Covers?.FirstOrDefault(value => value > 0);
+            return new(
+                work.Key!,
+                edition.Key!,
+                string.IsNullOrWhiteSpace(edition.Title) ? work.Title! : edition.Title!,
+                work.AuthorName!,
+                identifiers,
+                edition.Publishers?.FirstOrDefault(value => !string.IsNullOrWhiteSpace(value)),
+                ParsePublicationDate(edition.PublishDate),
+                languages,
+                edition.Series?.FirstOrDefault(value => !string.IsNullOrWhiteSpace(value)),
+                cover: coverId is null or 0 ? null : new(
+                    coverId.Value.ToString(CultureInfo.InvariantCulture),
+                    $"https://covers.openlibrary.org/b/id/{coverId.Value.ToString(CultureInfo.InvariantCulture)}-L.jpg"));
+        }
+        catch (ArgumentException)
+        {
+            return null;
+        }
+    }
+
+    private sealed record IndexedEditionCandidate(
+        EditionMetadataCandidate Candidate,
+        int WorkIndex,
+        int EditionIndex);
+
     private static EditionMetadataIdentifier? TryCreateIsbn(string value)
     {
         try { return new("isbn", value); }
@@ -250,7 +407,7 @@ internal sealed class OpenLibraryBibliographicProvider(
         if (DateTime.TryParseExact(normalized, "yyyy", CultureInfo.InvariantCulture,
                 DateTimeStyles.None, out DateTime year))
             return new(year.Year);
-        string[] monthFormats = ["yyyy-MM", "MMMM yyyy", "MMM yyyy"];
+        string[] monthFormats = ["yyyy-MM", "MMMM yyyy", "MMM yyyy", "yyyy MMMM", "yyyy MMM"];
         if (DateTime.TryParseExact(normalized, monthFormats, CultureInfo.InvariantCulture,
                 DateTimeStyles.AllowWhiteSpaces, out DateTime month))
             return new(month.Year, month.Month);
@@ -319,4 +476,21 @@ internal sealed class OpenLibraryBibliographicProvider(
         [property: JsonPropertyName("publish_date")] string[]? PublishDate,
         [property: JsonPropertyName("cover_i")] int? CoverId,
         [property: JsonPropertyName("series")] string[]? Series);
+
+    private sealed record OpenLibraryWorkEditionsDocument(
+        [property: JsonPropertyName("entries")] OpenLibraryWorkEdition[]? Entries);
+
+    private sealed record OpenLibraryWorkEdition(
+        [property: JsonPropertyName("key")] string? Key,
+        [property: JsonPropertyName("title")] string? Title,
+        [property: JsonPropertyName("isbn_10")] string[]? Isbn10,
+        [property: JsonPropertyName("isbn_13")] string[]? Isbn13,
+        [property: JsonPropertyName("publishers")] string[]? Publishers,
+        [property: JsonPropertyName("publish_date")] string? PublishDate,
+        [property: JsonPropertyName("languages")] OpenLibraryLanguageReference[]? Languages,
+        [property: JsonPropertyName("covers")] int[]? Covers,
+        [property: JsonPropertyName("series")] string[]? Series);
+
+    private sealed record OpenLibraryLanguageReference(
+        [property: JsonPropertyName("key")] string? Key);
 }

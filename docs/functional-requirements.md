@@ -49,7 +49,7 @@ same-format group and may override it or Skip the group. Exact cleanup:
 
 - is skipped automatically, without backup confirmation or worker startup, when the
   authoritative Exact scan contains no groups;
-- exposes one cleanup action in the Exact review tab when groups exist;
+- exposes one cleanup action in the top workflow bar when groups exist;
 - transfers unambiguous complementary formats to one keeper;
 - removes duplicate/transferred source formats;
 - removes records only when they become empty;
@@ -171,9 +171,16 @@ be arbitrarily cancelled after it starts.
 Provider-neutral edition queries, candidates, provider-specific proposals, and
 selection reasons are implemented separately from same-work matching evidence. A
 cache-first read-only use case can resolve every queryable retained record from each
-provider independently. The Open Library adapter requests one nested relevance-ranked
-edition per work and extracts bounded title, authors, validated ISBNs, publisher,
-publication date, language, series, and cover reference. Google Books uses a bounded
+provider independently. The Open Library adapter inspects up to five works and five
+nested editions per work, ranks field-rich compatible editions, and returns at most
+five candidates with bounded title, authors, validated ISBNs, publisher, publication
+date, language, series, and cover reference. After a strict miss, Application may try
+bounded variants in order: no language, primary author, and conservative core title.
+If search returns a title/author-compatible work without a usable nested edition,
+Open Library may spend one additional request to inspect at most five records from
+that work's supported editions endpoint. Every actual request, including this
+fallback, counts against the provider limit; broader retrieval is still validated
+against the original book metadata. Google Books uses a bounded
 partial-response volumes query and extracts title/subtitle, authors, validated ISBNs,
 publisher, publication date, and language; cover fields are not requested in this
 step. One provider failure does not block the other. A separate opaque-key cache
@@ -200,6 +207,10 @@ provider resolution/fusion and prepares review subjects. The WPF review
 surface shows compact current metadata and a visually distinct proposed row with
 Apply, confidence, reasons, provenance, all supported fields, and cover availability.
 Filters are All, Applied automatically, Needs review, and Unavailable.
+The review grid supports extended full-row selection for contiguous Shift ranges and
+disjoint Ctrl selections. Check selected, Uncheck selected, Check all, and Clear all
+change applicable proposals in one bounded persisted decision write; all-subject
+actions are independent of the active filter.
 
 Only user Apply overrides are persisted. Each bounded decision is keyed by subject
 ID, fusion policy version, primary provider/version/edition identity, generation, and
@@ -222,6 +233,10 @@ bounded, HTTPS-only, outside the library, and removed after the run.
 - Resolve rich edition candidates from Open Library and optional keyed Google Books
   independently, with bounded requests, complete provenance, versioned cache
   identity, and failure isolation.
+- Accept a different edition of the same work when exact-edition metadata is
+  unavailable; retrieval variants do not by themselves raise confidence.
+- For an Open Library search result with no usable nested edition, permit one
+  additional counted request for at most five editions of a compatible work.
 - Persist each successful, NotFound, or transiently unavailable provider result as it
   completes. Reuse normal results for the configured cache lifetime and unavailable
   results for a short cooldown so interrupted review resumes without repeating failed

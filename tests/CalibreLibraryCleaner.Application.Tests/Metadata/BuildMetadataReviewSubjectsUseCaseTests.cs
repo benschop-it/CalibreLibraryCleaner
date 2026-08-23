@@ -124,6 +124,7 @@ public sealed class BuildMetadataReviewSubjectsUseCaseTests
         provider,
         proposals.ToDictionary(value => value.BookId),
         proposals.Length,
+        proposals.Length,
         0,
         0,
         proposals.Length,

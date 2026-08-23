@@ -37,7 +37,7 @@ public sealed record EditionMetadataProviderIdentity
 
 public sealed record EditionMetadataLookupQuery
 {
-    public const string PolicyVersion = "edition-metadata-query/1.0.0";
+    public const string PolicyVersion = "edition-metadata-query/1.4.0";
     private const EditionMetadataQueryFields AllFields = EditionMetadataQueryFields.Identifier
         | EditionMetadataQueryFields.Title | EditionMetadataQueryFields.Authors
         | EditionMetadataQueryFields.Language;
@@ -90,25 +90,82 @@ public sealed record EditionMetadataLookupQuery
 
     public static EditionMetadataLookupQuery Create(
         CalibreBook book,
+        EditionMetadataProviderIdentity provider) => CreateVariants(book, provider)[0];
+
+    public static IReadOnlyList<EditionMetadataLookupQuery> CreateVariants(
+        CalibreBook book,
         EditionMetadataProviderIdentity provider)
     {
         ArgumentNullException.ThrowIfNull(book);
         string? isbn = book.Identifiers.Select(value =>
                 CandidateMetadataNormalizer.NormalizeStrongIdentifier(value.Type, value.Value))
             .FirstOrDefault(value => value?.StartsWith("ISBN:", StringComparison.Ordinal) == true);
-        if (isbn is not null)
-            return new(book.Id, provider, EditionMetadataQueryFields.Identifier,
-                isbn, null, null, null);
         string[] authors = book.Authors.Select(value => value.Name).ToArray();
         string[] languages = book.PublicationMetadata.Languages
             .Select(CandidateMetadataNormalizer.NormalizeLanguage)
             .Where(value => value is not null).Distinct(StringComparer.Ordinal)
             .Select(value => value!).Take(2).ToArray();
         string? language = languages.Length == 1 ? languages[0] : null;
-        EditionMetadataQueryFields fields = EditionMetadataQueryFields.Title
-            | EditionMetadataQueryFields.Authors;
-        if (language is not null) fields |= EditionMetadataQueryFields.Language;
-        return new(book.Id, provider, fields, null, book.Title, authors, language);
+        List<EditionMetadataLookupQuery> variants = [];
+        if (isbn is not null)
+            variants.Add(new(book.Id, provider, EditionMetadataQueryFields.Identifier,
+                isbn, null, null, null));
+        Add(book.Title, authors, language);
+        if (language is not null) Add(book.Title, authors, null);
+        if (authors.Length > 1) Add(book.Title, [authors[0]], null);
+        string coreTitle = CoreTitle(book.Title);
+        if (!string.Equals(coreTitle, book.Title, StringComparison.Ordinal))
+            Add(coreTitle, [authors[0]], null);
+        return new ReadOnlyCollection<EditionMetadataLookupQuery>(variants
+            .DistinctBy(value => new
+            {
+                value.Identifier,
+                value.Title,
+                Authors = string.Join('\u001f', value.Authors),
+                value.Language,
+            })
+            .Take(5)
+            .ToArray());
+
+        void Add(string title, IReadOnlyList<string> queryAuthors, string? queryLanguage)
+        {
+            EditionMetadataQueryFields fields = EditionMetadataQueryFields.Title
+                | EditionMetadataQueryFields.Authors;
+            if (queryLanguage is not null) fields |= EditionMetadataQueryFields.Language;
+            variants.Add(new(book.Id, provider, fields, null, title, queryAuthors, queryLanguage));
+        }
+    }
+
+    public static EditionMetadataLookupQuery CreateValidation(
+        CalibreBook book,
+        EditionMetadataProviderIdentity provider)
+    {
+        ArgumentNullException.ThrowIfNull(book);
+        EditionMetadataLookupQuery[] variants = CreateVariants(book, provider).ToArray();
+        EditionMetadataLookupQuery text = variants.First(value => value.Title is not null);
+        return new(
+            book.Id,
+            provider,
+            text.Fields,
+            null,
+            text.Title,
+            text.Authors,
+            text.Language);
+    }
+
+    internal static string CoreTitle(string title)
+    {
+        foreach (string separator in new[] { " / ", ": ", " - " })
+        {
+            int index = title.IndexOf(separator, StringComparison.Ordinal);
+            if (index > 0) return title[..index].Trim();
+        }
+        foreach ((char Open, char Close) in new[] { ('(', ')'), ('[', ']') })
+        {
+            int index = title.LastIndexOf(Open);
+            if (index > 0 && title.EndsWith(Close)) return title[..index].Trim();
+        }
+        return title;
     }
 
     private static string? NormalizeIdentifier(string? value)
@@ -432,11 +489,18 @@ public static class EditionMetadataProposalPolicy
                 ? "METADATA.EDITION.AUTHOR_EXACT"
                 : "METADATA.EDITION.AUTHOR_COMPATIBLE");
 
+            string queryCoreTitle = EditionMetadataLookupQuery.CoreTitle(query.Title!);
+            string candidateCoreTitle = EditionMetadataLookupQuery.CoreTitle(candidate.Title);
             bool exactTitle = CandidateMetadataNormalizer.TitleKeys(query.Title!).Intersect(
-                CandidateMetadataNormalizer.TitleKeys(candidate.Title), StringComparer.Ordinal).Any();
-            int titleSimilarity = CandidateMetadataNormalizer.TitleSimilarityPermille(
+                    CandidateMetadataNormalizer.TitleKeys(candidate.Title), StringComparer.Ordinal).Any()
+                || CandidateMetadataNormalizer.TitleKeys(queryCoreTitle).Intersect(
+                    CandidateMetadataNormalizer.TitleKeys(candidateCoreTitle), StringComparer.Ordinal).Any();
+            int titleSimilarity = Math.Max(CandidateMetadataNormalizer.TitleSimilarityPermille(
                 CandidateMetadataNormalizer.TitleTokens(query.Title!),
-                CandidateMetadataNormalizer.TitleTokens(candidate.Title));
+                CandidateMetadataNormalizer.TitleTokens(candidate.Title)),
+                CandidateMetadataNormalizer.TitleSimilarityPermille(
+                    CandidateMetadataNormalizer.TitleTokens(queryCoreTitle),
+                    CandidateMetadataNormalizer.TitleTokens(candidateCoreTitle)));
             if (!exactTitle && titleSimilarity < 500) return null;
             score += exactTitle ? 3_000 : 2 * titleSimilarity;
             reasons.Add(exactTitle

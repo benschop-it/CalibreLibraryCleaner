@@ -428,6 +428,8 @@ public sealed class MainWindowViewModelTests
         metadataProviderRequests.Should().BeGreaterThan(0);
         viewModel.ErrorMessage.Should().BeEmpty();
         viewModel.StatusMessage.Should().StartWith("Online metadata review ready");
+        viewModel.IsProgressIndeterminate.Should().BeFalse();
+        viewModel.ProgressPercentage.Should().Be(100);
         logger.Entries.Should().Contain(value =>
             value.EventId.Name == "UserVisibleStatus"
             && value.Message == viewModel.StatusMessage);
@@ -488,6 +490,21 @@ public sealed class MainWindowViewModelTests
         row.IsOverride.Should().BeTrue();
         first.SelectedMetadataReviewSubject.Should().BeSameAs(row);
         row.Provenance.Should().Be(proposedEdition);
+
+        first.CheckAllMetadataApplyCommand.CanExecute(null).Should().BeTrue();
+        await first.CheckAllMetadataApplyCommand.ExecuteAsync(null);
+        row = first.MetadataReviewSubjects.Should().ContainSingle().Subject;
+        row.Apply.Should().BeTrue();
+        first.UpdateMetadataReviewSelection([row]);
+        first.UncheckSelectedMetadataApplyCommand.CanExecute(null).Should().BeTrue();
+        await first.UncheckSelectedMetadataApplyCommand.ExecuteAsync(null);
+        row = first.MetadataReviewSubjects.Should().ContainSingle().Subject;
+        row.Apply.Should().BeFalse();
+        first.UpdateMetadataReviewSelection([row]);
+        first.CheckSelectedMetadataApplyCommand.CanExecute(null).Should().BeTrue();
+        await first.CheckSelectedMetadataApplyCommand.ExecuteAsync(null);
+        first.MetadataReviewSubjects.Should().ContainSingle().Which.Apply.Should().BeTrue();
+        await first.ClearAllMetadataApplyCommand.ExecuteAsync(null);
         persisted.Should().ContainSingle(value => !value.Apply);
 
         MainWindowViewModel restarted = CreateViewModel(

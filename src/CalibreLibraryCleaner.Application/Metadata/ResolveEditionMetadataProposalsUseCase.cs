@@ -13,6 +13,31 @@ public interface IEditionMetadataProvider
         CancellationToken cancellationToken);
 }
 
+public interface IBudgetedEditionMetadataProvider
+{
+    Task<EditionMetadataSearchExecution> SearchAsync(
+        EditionMetadataLookupQuery query,
+        int maximumProviderRequests,
+        CancellationToken cancellationToken);
+}
+
+public sealed record EditionMetadataSearchExecution
+{
+    public EditionMetadataSearchExecution(
+        EditionMetadataSearchResult result,
+        int providerRequests)
+    {
+        ArgumentNullException.ThrowIfNull(result);
+        ArgumentOutOfRangeException.ThrowIfNegative(providerRequests);
+        ArgumentOutOfRangeException.ThrowIfGreaterThan(providerRequests, 10);
+        Result = result;
+        ProviderRequests = providerRequests;
+    }
+
+    public EditionMetadataSearchResult Result { get; }
+    public int ProviderRequests { get; }
+}
+
 public interface IEditionMetadataProviderAvailability
 {
     Task<bool> IsAvailableAsync(CancellationToken cancellationToken);
@@ -75,6 +100,7 @@ public sealed record EditionMetadataProposalBatchResult(
     EditionMetadataProviderIdentity Provider,
     IReadOnlyDictionary<CalibreBookId, EditionMetadataProposal> Proposals,
     int QueryCount,
+    int CompletedQueryCount,
     int UnqueryableRecordCount,
     int CacheHits,
     int ProviderRequests,
@@ -89,6 +115,7 @@ public sealed record EditionMetadataProposalBatchResult(
         provider,
         new Dictionary<CalibreBookId, EditionMetadataProposal>(),
         0,
+            0,
         unqueryableRecordCount,
         0,
         0,
@@ -151,12 +178,12 @@ public sealed class ResolveEditionMetadataProposalsUseCase
         if (!_options.Enabled || provider is IEditionMetadataProviderAvailability availability
             && !await availability.IsAvailableAsync(cancellationToken).ConfigureAwait(false))
             return EditionMetadataProposalBatchResult.Disabled(provider.Identity, 0);
-        EditionMetadataLookupQuery[] queries = books.OrderBy(value => value.Id.Value)
-            .Select(book => TryCreateQuery(provider, book))
+        QueryPlan[] queries = books.OrderBy(value => value.Id.Value)
+            .Select(book => TryCreateQueryPlan(provider, book))
             .Where(value => value is not null).Select(value => value!).ToArray();
         int unqueryable = books.Count - queries.Length;
-        IGrouping<QueryKey, EditionMetadataLookupQuery>[] groups = queries
-            .GroupBy(QueryKey.Create)
+        IGrouping<QueryPlanKey, QueryPlan>[] groups = queries
+            .GroupBy(QueryPlanKey.Create)
             .OrderBy(value => value.Key.SortKey, StringComparer.Ordinal).ToArray();
         Dictionary<CalibreBookId, EditionMetadataProposal> proposals = [];
         int completed = 0;
@@ -170,46 +197,63 @@ public sealed class ResolveEditionMetadataProposalsUseCase
         progress?.Report(new(provider.Identity, 0, groups.Length, 0, 0, 0, 0,
             "Online edition metadata lookup enabled; transmitting ISBN or title, author, and optional language fields."));
 
-        foreach (IGrouping<QueryKey, EditionMetadataLookupQuery> group in groups)
+        foreach (IGrouping<QueryPlanKey, QueryPlan> group in groups)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            EditionMetadataLookupQuery representative = group.First();
-            EditionMetadataProposal? proposal = await TryReadCacheAsync(
-                representative, minimumRetrievedAt, cancellationToken).ConfigureAwait(false);
-            if (proposal?.Status == EditionMetadataProposalStatus.Unavailable
-                && proposal.RetrievedAtUtc < minimumUnavailableRetrievedAt)
-                proposal = null;
-            if (proposal is not null)
+            QueryPlan representative = group.First();
+            EditionMetadataProposal? proposal = null;
+            bool deferred = false;
+            foreach (EditionMetadataLookupQuery variant in representative.Variants)
             {
-                cacheHits++;
+                EditionMetadataProposal? variantProposal = await TryReadCacheAsync(
+                    variant, minimumRetrievedAt, cancellationToken).ConfigureAwait(false);
+                if (variantProposal?.Status == EditionMetadataProposalStatus.Unavailable
+                    && variantProposal.RetrievedAtUtc < minimumUnavailableRetrievedAt)
+                    variantProposal = null;
+                if (variantProposal is not null)
+                {
+                    cacheHits++;
+                    proposal = variantProposal;
+                }
+                else if (requests >= _options.MaximumProviderRequestsPerRun)
+                {
+                    limitReached = true;
+                    deferred = proposal is null;
+                    progress?.Report(new(
+                        provider.Identity,
+                        completed,
+                        groups.Length,
+                        cacheHits,
+                        requests,
+                        proposals.Values.Count(value => value.Status == EditionMetadataProposalStatus.Proposed),
+                        failures,
+                        $"Online request limit reached; {groups.Length - completed - (proposal is null ? 0 : 1):N0} uncached queries deferred."));
+                    break;
+                }
+                else
+                {
+                    EditionMetadataSearchExecution execution = await SearchAsync(
+                        provider,
+                        variant,
+                        _options.MaximumProviderRequestsPerRun - requests,
+                        cancellationToken).ConfigureAwait(false);
+                    requests += execution.ProviderRequests;
+                    EditionMetadataLookupQuery validation = variant.Identifier is null
+                        ? representative.Validation
+                        : variant;
+                    proposal = ForQuery(
+                        EditionMetadataProposalPolicy.Resolve(validation, execution.Result),
+                        variant);
+                    if (proposal.Status == EditionMetadataProposalStatus.Unavailable) failures++;
+                    await TryWriteCacheAsync(variant, proposal, cancellationToken).ConfigureAwait(false);
+                }
+                if (proposal.Status != EditionMetadataProposalStatus.NotFound) break;
             }
-            else if (requests >= _options.MaximumProviderRequestsPerRun)
-            {
-                limitReached = true;
-                progress?.Report(new(
-                    provider.Identity,
-                    completed,
-                    groups.Length,
-                    cacheHits,
-                    requests,
-                    proposals.Values.Count(value => value.Status == EditionMetadataProposalStatus.Proposed),
-                    failures,
-                    $"Online request limit reached; {groups.Length - completed:N0} uncached queries deferred."));
-                break;
-            }
-            else
-            {
-                requests++;
-                EditionMetadataSearchResult search = await SearchAsync(
-                    provider, representative, cancellationToken).ConfigureAwait(false);
-                proposal = EditionMetadataProposalPolicy.Resolve(representative, search);
-                if (proposal.Status == EditionMetadataProposalStatus.Unavailable) failures++;
-                await TryWriteCacheAsync(representative, proposal, cancellationToken).ConfigureAwait(false);
-            }
+            if (deferred) break;
 
             if (proposal is not null)
             {
-                foreach (EditionMetadataLookupQuery query in group)
+                foreach (QueryPlan query in group)
                     proposals[query.BookId] = ForBook(proposal, query.BookId);
             }
             completed++;
@@ -221,7 +265,10 @@ public sealed class ResolveEditionMetadataProposalsUseCase
                 requests,
                 proposals.Values.Count(value => value.Status == EditionMetadataProposalStatus.Proposed),
                 failures,
-                "Resolving bounded online edition metadata."));
+                limitReached
+                    ? $"Online request limit reached; {groups.Length - completed:N0} uncached queries deferred."
+                    : "Resolving bounded online edition metadata."));
+            if (limitReached) break;
         }
 
         await TryPruneCacheAsync(cancellationToken).ConfigureAwait(false);
@@ -229,6 +276,7 @@ public sealed class ResolveEditionMetadataProposalsUseCase
             provider.Identity,
             proposals,
             groups.Length,
+            completed,
             unqueryable,
             cacheHits,
             requests,
@@ -238,13 +286,16 @@ public sealed class ResolveEditionMetadataProposalsUseCase
             true);
     }
 
-    private static EditionMetadataLookupQuery? TryCreateQuery(
+    private static QueryPlan? TryCreateQueryPlan(
         IEditionMetadataProvider provider,
         CalibreBook book)
     {
         try
         {
-            return EditionMetadataLookupQuery.Create(book, provider.Identity);
+            return new(
+                book.Id,
+                EditionMetadataLookupQuery.CreateValidation(book, provider.Identity),
+                EditionMetadataLookupQuery.CreateVariants(book, provider.Identity));
         }
         catch (ArgumentException)
         {
@@ -265,23 +316,30 @@ public sealed class ResolveEditionMetadataProposalsUseCase
         catch (Exception exception) when (IsRecoverable(exception)) { return null; }
     }
 
-    private async Task<EditionMetadataSearchResult> SearchAsync(
+    private async Task<EditionMetadataSearchExecution> SearchAsync(
         IEditionMetadataProvider provider,
         EditionMetadataLookupQuery query,
+        int maximumProviderRequests,
         CancellationToken cancellationToken)
     {
         try
         {
-            return await provider.SearchAsync(query, cancellationToken).ConfigureAwait(false);
+            if (provider is IBudgetedEditionMetadataProvider budgeted)
+                return await budgeted.SearchAsync(
+                    query, maximumProviderRequests, cancellationToken).ConfigureAwait(false);
+            EditionMetadataSearchResult result = await provider.SearchAsync(
+                query, cancellationToken).ConfigureAwait(false);
+            return new(result, 1);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
         catch (Exception exception) when (IsRecoverable(exception))
         {
-            return new(
-                provider.Identity,
-                EditionMetadataSearchStatus.Unavailable,
-                _clock.GetUtcNow(),
-                problemCode: "EDITION_METADATA_PROVIDER.UNAVAILABLE");
+            return new(new(
+                    provider.Identity,
+                    EditionMetadataSearchStatus.Unavailable,
+                    _clock.GetUtcNow(),
+                    problemCode: "EDITION_METADATA_PROVIDER.UNAVAILABLE"),
+                1);
         }
     }
 
@@ -321,6 +379,19 @@ public sealed class ResolveEditionMetadataProposalsUseCase
         value.ReasonCodes,
         value.ProblemCode);
 
+    private static EditionMetadataProposal ForQuery(
+        EditionMetadataProposal value,
+        EditionMetadataLookupQuery query) => new(
+        query.BookId,
+        value.Provider,
+        query.Fields,
+        value.RetrievedAtUtc,
+        value.Status,
+        value.Candidate,
+        value.MatchScore,
+        value.ReasonCodes,
+        value.ProblemCode);
+
     private static bool IsRecoverable(Exception exception) => exception is IOException
         or UnauthorizedAccessException
         or InvalidDataException
@@ -329,22 +400,19 @@ public sealed class ResolveEditionMetadataProposalsUseCase
         or ArgumentException
         or OverflowException;
 
-    private sealed record QueryKey(
-        EditionMetadataProviderIdentity Provider,
-        EditionMetadataQueryFields Fields,
-        string? Identifier,
-        string? Title,
-        string Authors,
-        string? Language)
-    {
-        public string SortKey => Identifier ?? string.Join('|', Title, Authors, Language);
+    private sealed record QueryPlan(
+        CalibreBookId BookId,
+        EditionMetadataLookupQuery Validation,
+        IReadOnlyList<EditionMetadataLookupQuery> Variants);
 
-        public static QueryKey Create(EditionMetadataLookupQuery value) => new(
-            value.Provider,
-            value.Fields,
-            value.Identifier,
-            value.Title,
-            string.Join('\u001f', value.Authors),
-            value.Language);
+    private sealed record QueryPlanKey(string SortKey)
+    {
+        public static QueryPlanKey Create(QueryPlan value) => new(string.Join('\u001e',
+            value.Variants.Select(variant => string.Join('\u001f',
+                ((int)variant.Fields).ToString(System.Globalization.CultureInfo.InvariantCulture),
+                variant.Identifier,
+                variant.Title,
+                string.Join('\u001d', variant.Authors),
+                variant.Language))));
     }
 }

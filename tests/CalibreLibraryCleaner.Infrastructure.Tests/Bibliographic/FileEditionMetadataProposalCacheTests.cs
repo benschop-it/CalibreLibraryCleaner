@@ -1,3 +1,6 @@
+using System.Globalization;
+using System.Security.Cryptography;
+using System.Text;
 using CalibreLibraryCleaner.Domain.Libraries;
 using CalibreLibraryCleaner.Domain.Metadata;
 using CalibreLibraryCleaner.Infrastructure.Bibliographic;
@@ -11,6 +14,8 @@ public sealed class FileEditionMetadataProposalCacheTests
 {
     private static readonly EditionMetadataProviderIdentity Provider = new(
         "open-library", "open-library-edition-search/1.0.0");
+    private static readonly EditionMetadataProviderIdentity CurrentProvider = new(
+        "open-library", "open-library-edition-search/1.2.0");
     private static readonly DateTimeOffset RetrievedAt = new(2026, 8, 16, 12, 0, 0, TimeSpan.Zero);
 
     [Fact]
@@ -59,9 +64,42 @@ public sealed class FileEditionMetadataProposalCacheTests
             .Should().BeNull();
     }
 
-    private static EditionMetadataLookupQuery Query(CalibreBookId? bookId = null) => new(
+    [Fact]
+    public async Task CurrentOpenLibraryQueryReusesValidLegacyEntryButRetriesOldExtractionMiss()
+    {
+        using TemporaryDirectory directory = new();
+        FileEditionMetadataProposalCache cache = new(new(directory.Path));
+        EditionMetadataLookupQuery query = Query(provider: CurrentProvider);
+        await cache.WriteAsync(query, Proposal(query), CancellationToken.None);
+        await MoveCurrentEntryToLegacyIdentityAsync(directory.Path, query);
+
+        EditionMetadataProposal? loaded = await cache.TryReadAsync(
+            query, RetrievedAt.AddDays(-1), CancellationToken.None);
+
+        loaded.Should().NotBeNull();
+        loaded!.Provider.Should().Be(CurrentProvider);
+
+        using TemporaryDirectory missDirectory = new();
+        FileEditionMetadataProposalCache missCache = new(new(missDirectory.Path));
+        EditionMetadataProposal miss = new(
+            query.BookId,
+            query.Provider,
+            query.Fields,
+            RetrievedAt,
+            EditionMetadataProposalStatus.NotFound,
+            problemCode: "OPEN_LIBRARY.NO_COMPATIBLE_EDITIONS");
+        await missCache.WriteAsync(query, miss, CancellationToken.None);
+        await MoveCurrentEntryToLegacyIdentityAsync(missDirectory.Path, query);
+
+        (await missCache.TryReadAsync(query, RetrievedAt.AddDays(-1), CancellationToken.None))
+            .Should().BeNull();
+    }
+
+    private static EditionMetadataLookupQuery Query(
+        CalibreBookId? bookId = null,
+        EditionMetadataProviderIdentity? provider = null) => new(
         bookId ?? new(1),
-        Provider,
+        provider ?? Provider,
         EditionMetadataQueryFields.Title | EditionMetadataQueryFields.Authors
             | EditionMetadataQueryFields.Language,
         null,
@@ -71,7 +109,7 @@ public sealed class FileEditionMetadataProposalCacheTests
 
     private static EditionMetadataProposal Proposal(EditionMetadataLookupQuery query) => new(
         query.BookId,
-        Provider,
+        query.Provider,
         query.Fields,
         RetrievedAt,
         EditionMetadataProposalStatus.Proposed,
@@ -88,4 +126,43 @@ public sealed class FileEditionMetadataProposalCacheTests
             cover: new("8225261", "https://covers.openlibrary.org/b/id/8225261-L.jpg")),
         4_208,
         ["METADATA.EDITION.AUTHOR_COMPATIBLE", "METADATA.EDITION.TITLE_EXACT"]);
+
+    private static async Task MoveCurrentEntryToLegacyIdentityAsync(
+        string root,
+        EditionMetadataLookupQuery query)
+    {
+        string currentPath = Directory.GetFiles(root, "*.json").Single();
+        string legacyIdentity = Identity(
+            query, "edition-metadata-query/1.0.0", "open-library-edition-search/1.0.0");
+        string json = await File.ReadAllTextAsync(currentPath);
+        string currentIdentity = Path.GetFileNameWithoutExtension(currentPath);
+        json = json.Replace(query.Provider.Version, "open-library-edition-search/1.0.0", StringComparison.Ordinal)
+            .Replace(EditionMetadataLookupQuery.PolicyVersion, "edition-metadata-query/1.0.0", StringComparison.Ordinal)
+            .Replace(currentIdentity, legacyIdentity, StringComparison.Ordinal);
+        await File.WriteAllTextAsync(Path.Combine(root, legacyIdentity + ".json"), json);
+        File.Delete(currentPath);
+    }
+
+    private static string Identity(
+        EditionMetadataLookupQuery query,
+        string queryPolicyVersion,
+        string providerVersion)
+    {
+        StringBuilder canonical = new();
+        Append("edition-metadata-proposal-cache/1.0");
+        Append(queryPolicyVersion);
+        Append(EditionMetadataProposal.PolicyVersion);
+        Append(query.Provider.Id);
+        Append(providerVersion);
+        Append(((int)query.Fields).ToString(CultureInfo.InvariantCulture));
+        Append(query.Identifier ?? string.Empty);
+        Append(query.Title ?? string.Empty);
+        foreach (string author in query.Authors) Append(author);
+        Append(query.Language ?? string.Empty);
+        return Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(canonical.ToString())));
+
+        void Append(string value) => canonical
+            .Append(Encoding.UTF8.GetByteCount(value).ToString(CultureInfo.InvariantCulture))
+            .Append(':').Append(value).Append('|');
+    }
 }

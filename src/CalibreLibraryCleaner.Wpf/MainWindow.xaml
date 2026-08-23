@@ -29,6 +29,7 @@
         <ColumnDefinition Width="Auto" />
         <ColumnDefinition Width="Auto" />
         <ColumnDefinition Width="Auto" />
+        <ColumnDefinition Width="Auto" />
       </Grid.ColumnDefinitions>
       <Label Grid.Column="0"
              Target="{Binding ElementName=LibraryPathBox}"
@@ -69,7 +70,15 @@
               Padding="8,4"
               Content="_Cancel"
               Command="{Binding CancelCommand}" />
-            <Button Grid.Column="6"
+      <Button Grid.Column="6"
+              MinWidth="100"
+              Margin="0,0,8,0"
+              Padding="8,4"
+              Content="_Exact cleanup"
+              Command="{Binding ExactBinaryCleanupPlans.RemoveDuplicatesCommand}"
+              AutomationProperties.Name="Run Exact cleanup"
+              ToolTip="Run reviewed Exact cleanup when exact file duplicate groups exist" />
+            <Button Grid.Column="7"
               MinWidth="120"
               Margin="0,0,8,0"
               Padding="8,4"
@@ -77,7 +86,7 @@
               Command="{Binding CandidateCleanupCommand}"
               AutomationProperties.Name="{Binding CandidateCleanupAutomationName}"
               ToolTip="{Binding CandidateCleanupToolTip}" />
-      <Button Grid.Column="7"
+      <Button Grid.Column="8"
               MinWidth="130"
               Padding="8,4"
               Content="Online _metadata..."
@@ -181,8 +190,6 @@
                        Text="Select another member row to change the keeper, or Skip a group. Remove duplicates processes every remaining eligible group, merges complementary formats when unambiguous, and deletes empty records."
                        TextWrapping="Wrap" />
             <StackPanel Margin="0,8,0,0" DataContext="{Binding ExactBinaryCleanupPlans}">
-                    <Button HorizontalAlignment="Left" Padding="12,6" Content="_Exact cleanup"
-                      Command="{Binding RemoveDuplicatesCommand}" />
               <TextBlock Margin="0,5,0,0" Text="{Binding Status}" FontWeight="Bold" TextWrapping="Wrap" />
               <ProgressBar Height="14" Margin="0,5,0,0" Minimum="0" Maximum="100" Value="{Binding ProgressPercentage, Mode=OneWay}" />
               <TextBlock Margin="0,3,0,0" Text="{Binding ProgressMessage}" TextWrapping="Wrap" />
@@ -385,33 +392,57 @@
             <RowDefinition Height="5" />
             <RowDefinition Height="2*" MinHeight="160" />
           </Grid.RowDefinitions>
-          <DockPanel Grid.Row="0" Margin="0,0,0,8">
-            <TextBlock DockPanel.Dock="Left"
-                       VerticalAlignment="Center"
+          <Grid Grid.Row="0" Margin="0,0,0,8">
+            <Grid.RowDefinitions>
+              <RowDefinition Height="Auto" />
+              <RowDefinition Height="Auto" />
+            </Grid.RowDefinitions>
+            <TextBlock Grid.Row="0"
                        FontWeight="Bold"
                        Text="{Binding MetadataReviewSummary}"
                        TextWrapping="Wrap" />
-            <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" Margin="16,0,0,0">
+            <DockPanel Grid.Row="1" Margin="0,6,0,0">
+              <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" Margin="12,0,0,0">
+                <Label Target="{Binding ElementName=MetadataReviewFilterBox}"
+                       Content="_Show:" />
+                <ComboBox x:Name="MetadataReviewFilterBox"
+                          MinWidth="160"
+                          ItemsSource="{Binding MetadataReviewFilterModes}"
+                          SelectedItem="{Binding MetadataReviewFilterMode, Mode=TwoWay}" />
+              </StackPanel>
+              <WrapPanel>
+                  <Button Margin="0,0,8,0"
+                    Padding="8,4"
+                    Content="Check _selected"
+                    Command="{Binding CheckSelectedMetadataApplyCommand}"
+                    AutomationProperties.Name="Check selected metadata Apply choices" />
+                  <Button Margin="0,0,8,0"
+                    Padding="8,4"
+                    Content="_Uncheck selected"
+                    Command="{Binding UncheckSelectedMetadataApplyCommand}"
+                    AutomationProperties.Name="Uncheck selected metadata Apply choices" />
+                  <Button Margin="0,0,8,0"
+                    Padding="8,4"
+                    Content="Check _all"
+                    Command="{Binding CheckAllMetadataApplyCommand}"
+                    AutomationProperties.Name="Check all metadata Apply choices"
+                    ToolTip="Check every available metadata proposal, including rows hidden by the current filter" />
               <Button Margin="0,0,12,0"
                       Padding="8,4"
                       Content="Clear all _Apply"
                       Command="{Binding ClearAllMetadataApplyCommand}"
                       AutomationProperties.Name="Clear all metadata Apply choices"
                       ToolTip="Uncheck every current metadata proposal and persist the choices without changing the library" />
-              <Label Target="{Binding ElementName=MetadataReviewFilterBox}"
-                     Content="_Show:" />
-              <ComboBox x:Name="MetadataReviewFilterBox"
-                        MinWidth="160"
-                        ItemsSource="{Binding MetadataReviewFilterModes}"
-                        SelectedItem="{Binding MetadataReviewFilterMode, Mode=TwoWay}" />
-            </StackPanel>
-          </DockPanel>
+              </WrapPanel>
+            </DockPanel>
+          </Grid>
           <DataGrid Grid.Row="1"
                     ItemsSource="{Binding MetadataReviewSubjects}"
                     SelectedItem="{Binding SelectedMetadataReviewSubject, Mode=TwoWay}"
+                    SelectionChanged="MetadataReviewSubjectsGrid_SelectionChanged"
                     AutoGenerateColumns="False"
                     IsReadOnly="True"
-                    SelectionMode="Single"
+                    SelectionMode="Extended"
                     SelectionUnit="FullRow"
                     CanUserAddRows="False"
                     EnableRowVirtualization="True"

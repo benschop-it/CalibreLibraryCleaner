@@ -61,6 +61,41 @@ public sealed class EditionMetadataProposalTests
     }
 
     [Fact]
+    public void QueryVariantsAreBoundedFromStrictIdentityToBroaderRetrieval()
+    {
+        CalibreBook book = new(
+            new(1),
+            "Book Title: A Subtitle",
+            "Primary, Author & Secondary, Author",
+            [
+                new(new(1), "Primary Author", "Primary, Author"),
+                new(new(2), "Secondary Author", "Secondary, Author"),
+            ],
+            [new("isbn", "9780141439518")],
+            [],
+            "Author/Book",
+            new(languages: ["eng"]));
+
+        IReadOnlyList<EditionMetadataLookupQuery> variants =
+            EditionMetadataLookupQuery.CreateVariants(book, Provider);
+        EditionMetadataLookupQuery validation =
+            EditionMetadataLookupQuery.CreateValidation(book, Provider);
+
+        variants.Should().HaveCount(5);
+        variants[0].Fields.Should().Be(EditionMetadataQueryFields.Identifier);
+        variants[1].Language.Should().Be("en");
+        variants[2].Language.Should().BeNull();
+        variants[3].Authors.Should().ContainSingle("Primary Author");
+        variants[4].Title.Should().Be("Book Title");
+        validation.Fields.Should().HaveFlag(EditionMetadataQueryFields.Title)
+            .And.HaveFlag(EditionMetadataQueryFields.Authors)
+            .And.HaveFlag(EditionMetadataQueryFields.Language);
+        validation.Fields.Should().NotHaveFlag(EditionMetadataQueryFields.Identifier);
+        validation.Title.Should().Be("Book Title: A Subtitle");
+        EditionMetadataLookupQuery.PolicyVersion.Should().Be("edition-metadata-query/1.4.0");
+    }
+
+    [Fact]
     public void ProposalRetainsBoundedProviderAndSelectionProvenance()
     {
         EditionMetadataLookupQuery query = new(
@@ -88,6 +123,33 @@ public sealed class EditionMetadataProposalTests
         proposal.MatchScore.Should().BePositive();
         proposal.ReasonCodes.Should().Contain("METADATA.EDITION.TITLE_EXACT");
         proposal.Candidate.Should().BeSameAs(candidate);
+    }
+
+    [Fact]
+    public void DifferentEditionWithCoreTitleAndExactAuthorProducesProposal()
+    {
+        EditionMetadataLookupQuery query = new(
+            new(1),
+            Provider,
+            EditionMetadataQueryFields.Title | EditionMetadataQueryFields.Authors,
+            null,
+            "Quicksilver (Baroque Cycle, #1)",
+            ["Neal Stephenson"],
+            null);
+        EditionMetadataCandidate candidate = new(
+            "/works/OL18199543W",
+            "/books/OL7282656M",
+            "Quicksilver",
+            ["Neal Stephenson"],
+            [new("isbn", "9780060833169")]);
+
+        EditionMetadataProposal proposal = EditionMetadataProposalPolicy.Resolve(
+            query,
+            new(Provider, EditionMetadataSearchStatus.Success, RetrievedAt, [candidate]));
+
+        proposal.Status.Should().Be(EditionMetadataProposalStatus.Proposed);
+        proposal.ReasonCodes.Should().Contain("METADATA.EDITION.TITLE_EXACT")
+            .And.Contain("METADATA.EDITION.AUTHOR_EXACT");
     }
 
     private static EditionMetadataLookupQuery Query(QueryDocument value)

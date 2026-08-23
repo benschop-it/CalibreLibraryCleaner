@@ -27,38 +27,59 @@ internal sealed class FileEditionMetadataProposalCache(EditionMetadataProposalCa
         cancellationToken.ThrowIfCancellationRequested();
         try
         {
-            string identity = CreateIdentity(query);
             string root = GetStorageRoot();
-            string path = Path.Combine(root, identity + ".json");
-            if (!File.Exists(path) || !ExecutionPathGuard.TryRejectReparsePointLeaf(path, true, out _)) return null;
-            FileInfo info = new(path);
-            if (info.Length is <= 0 || info.Length > options.MaximumEntryBytes) return null;
-            byte[] bytes = new byte[checked((int)info.Length)];
-            await using FileStream stream = new(
-                path, FileMode.Open, FileAccess.Read, FileShare.Read, 16 * 1024,
-                FileOptions.Asynchronous | FileOptions.SequentialScan);
-            await stream.ReadExactlyAsync(bytes, cancellationToken).ConfigureAwait(false);
-            CacheDocument? document = JsonSerializer.Deserialize<CacheDocument>(bytes, JsonOptions);
-            if (document is null
-                || document.SchemaVersion != SchemaVersion
-                || document.ProviderId != query.Provider.Id
-                || document.ProviderVersion != query.Provider.Version
-                || document.QueryPolicyVersion != EditionMetadataLookupQuery.PolicyVersion
-                || document.ProposalPolicyVersion != EditionMetadataProposal.PolicyVersion
-                || document.QueryIdentity != identity
-                || document.QueryFields != query.Fields
-                || document.RetrievedAtUtc < minimumRetrievedAtUtc)
-                return null;
-            return new(
-                query.BookId,
-                query.Provider,
-                document.QueryFields,
-                document.RetrievedAtUtc,
-                document.Status,
-                Rehydrate(document.Candidate),
-                document.MatchScore,
-                document.ReasonCodes,
-                document.ProblemCode);
+            (string QueryPolicy, string ProviderVersion)[] identities = query.Provider.Id == "open-library"
+                && query.Provider.Version == "open-library-edition-search/1.2.0"
+                ?
+                [
+                    (EditionMetadataLookupQuery.PolicyVersion, query.Provider.Version),
+                    (EditionMetadataLookupQuery.PolicyVersion, "open-library-edition-search/1.1.0"),
+                    ("edition-metadata-query/1.3.0", "open-library-edition-search/1.1.0"),
+                    ("edition-metadata-query/1.2.0", "open-library-edition-search/1.1.0"),
+                    ("edition-metadata-query/1.1.0", "open-library-edition-search/1.1.0"),
+                    ("edition-metadata-query/1.0.0", "open-library-edition-search/1.0.0"),
+                ]
+                : [(EditionMetadataLookupQuery.PolicyVersion, query.Provider.Version)];
+            foreach ((string queryPolicy, string providerVersion) in identities.Distinct())
+            {
+                string identity = CreateIdentity(query, queryPolicy, providerVersion);
+                string path = Path.Combine(root, identity + ".json");
+                if (!File.Exists(path)
+                    || !ExecutionPathGuard.TryRejectReparsePointLeaf(path, true, out _)) continue;
+                FileInfo info = new(path);
+                if (info.Length is <= 0 || info.Length > options.MaximumEntryBytes) continue;
+                byte[] bytes = new byte[checked((int)info.Length)];
+                await using FileStream stream = new(
+                    path, FileMode.Open, FileAccess.Read, FileShare.Read, 16 * 1024,
+                    FileOptions.Asynchronous | FileOptions.SequentialScan);
+                await stream.ReadExactlyAsync(bytes, cancellationToken).ConfigureAwait(false);
+                CacheDocument? document = JsonSerializer.Deserialize<CacheDocument>(bytes, JsonOptions);
+                if (document is null
+                    || document.SchemaVersion != SchemaVersion
+                    || document.ProviderId != query.Provider.Id
+                    || document.ProviderVersion != providerVersion
+                    || document.QueryPolicyVersion != queryPolicy
+                    || document.ProposalPolicyVersion != EditionMetadataProposal.PolicyVersion
+                    || document.QueryIdentity != identity
+                    || document.QueryFields != query.Fields
+                    || document.RetrievedAtUtc < minimumRetrievedAtUtc)
+                    continue;
+                bool legacy = queryPolicy != EditionMetadataLookupQuery.PolicyVersion;
+                if (legacy && (document.ProblemCode == "OPEN_LIBRARY.NO_COMPATIBLE_EDITIONS"
+                    || query.Identifier is null && document.Status == EditionMetadataProposalStatus.NotFound))
+                    continue;
+                return new(
+                    query.BookId,
+                    query.Provider,
+                    document.QueryFields,
+                    document.RetrievedAtUtc,
+                    document.Status,
+                    Rehydrate(document.Candidate),
+                    document.MatchScore,
+                    document.ReasonCodes,
+                    document.ProblemCode);
+            }
+            return null;
         }
         catch (OperationCanceledException) { throw; }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException
@@ -162,14 +183,20 @@ internal sealed class FileEditionMetadataProposalCache(EditionMetadataProposalCa
         return root;
     }
 
-    private static string CreateIdentity(EditionMetadataLookupQuery query)
+    private static string CreateIdentity(EditionMetadataLookupQuery query) => CreateIdentity(
+        query, EditionMetadataLookupQuery.PolicyVersion, query.Provider.Version);
+
+    private static string CreateIdentity(
+        EditionMetadataLookupQuery query,
+        string queryPolicyVersion,
+        string providerVersion)
     {
         StringBuilder canonical = new();
         Append(canonical, SchemaVersion);
-        Append(canonical, EditionMetadataLookupQuery.PolicyVersion);
+        Append(canonical, queryPolicyVersion);
         Append(canonical, EditionMetadataProposal.PolicyVersion);
         Append(canonical, query.Provider.Id);
-        Append(canonical, query.Provider.Version);
+        Append(canonical, providerVersion);
         Append(canonical, ((int)query.Fields).ToString(CultureInfo.InvariantCulture));
         Append(canonical, query.Identifier ?? string.Empty);
         Append(canonical, query.Title ?? string.Empty);

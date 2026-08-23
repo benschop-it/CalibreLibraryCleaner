@@ -80,7 +80,7 @@ public sealed class OpenLibraryEditionMetadataProviderTests
     }
 
     [Fact]
-    public async Task MissingNestedEditionBecomesNotFoundWithoutPayloadDetails()
+    public async Task MissingNestedEditionWithoutFallbackBudgetBecomesNotFound()
     {
         RecordingHandler handler = new(_ => new(HttpStatusCode.OK)
         {
@@ -105,7 +105,142 @@ public sealed class OpenLibraryEditionMetadataProviderTests
 
         result.Status.Should().Be(EditionMetadataSearchStatus.NotFound);
         result.ProblemCode.Should().Be("OPEN_LIBRARY.NO_COMPATIBLE_EDITIONS");
-        result.ProblemCode.Should().NotContain("Private");
+        handler.RequestUris.Should().ContainSingle();
+    }
+
+    [Fact]
+    public async Task LaterValidNestedEditionIsUsedWhenFirstEditionIsMalformed()
+    {
+        RecordingHandler handler = new(_ => new(HttpStatusCode.OK)
+        {
+            Content = new StringContent(
+                """
+                {"docs":[{
+                  "key":"/works/OL66554W",
+                  "title":"Pride and Prejudice",
+                  "author_name":["Jane Austen"],
+                  "editions":{"docs":[
+                    {"key":"invalid","title":"Malformed"},
+                    {"key":"/books/OL7353617M","title":"Pride and Prejudice","publisher":["Penguin"]}
+                  ]}
+                }]}
+                """,
+                Encoding.UTF8,
+                "application/json"),
+        });
+        using HttpClient client = new(handler) { BaseAddress = new("https://openlibrary.org/") };
+        using OpenLibraryBibliographicProvider provider = new(
+            client, new(minimumRequestInterval: TimeSpan.Zero));
+        IEditionMetadataProvider editionProvider = provider;
+
+        EditionMetadataSearchResult result = await editionProvider.SearchAsync(
+            Query(editionProvider.Identity), CancellationToken.None);
+
+        result.Status.Should().Be(EditionMetadataSearchStatus.Success);
+        result.Candidates.Should().ContainSingle(value =>
+            value.EditionId == "/books/OL7353617M" && value.Publisher == "Penguin");
+        editionProvider.Identity.Version.Should().Be("open-library-edition-search/1.2.0");
+    }
+
+    [Fact]
+    public async Task ValidWorkWithoutUsableNestedEditionFetchesBoundedWorkEditions()
+    {
+        RecordingHandler handler = new(request => new(HttpStatusCode.OK)
+        {
+            Content = new StringContent(
+                        request.RequestUri!.AbsolutePath == "/search.json"
+                                ? """
+                                            {"docs":[{
+                                                "key":"/works/OL18199543W",
+                                                "title":"Quicksilver",
+                                                "author_name":["Neal Stephenson"],
+                                                "editions":{"docs":[{"key":"invalid","title":"Malformed"}]}
+                                            }]}
+                                            """
+                                : """
+                                            {"entries":[{
+                                                "key":"/books/OL7282656M",
+                                                "title":"Quicksilver",
+                                                "isbn_10":["0060833165"],
+                                                "isbn_13":["9780060833169"],
+                                                "publishers":["HarperTorch"],
+                                                "publish_date":"2006 February",
+                                                "languages":[{"key":"/languages/eng"}],
+                                                "covers":[8347523],
+                                                "series":["The Baroque Cycle, #1/8"]
+                                            }]}
+                                            """,
+        Encoding.UTF8,
+        "application/json"),
+        });
+        using HttpClient client = new(handler) { BaseAddress = new("https://openlibrary.org/") };
+        using OpenLibraryBibliographicProvider provider = new(
+            client, new(minimumRequestInterval: TimeSpan.Zero));
+        IEditionMetadataProvider editionProvider = provider;
+
+        EditionMetadataLookupQuery query = new(
+            new(1),
+            editionProvider.Identity,
+            EditionMetadataQueryFields.Title | EditionMetadataQueryFields.Authors,
+            null,
+            "Quicksilver",
+            ["Neal Stephenson"],
+            null);
+        EditionMetadataSearchExecution execution = await ((IBudgetedEditionMetadataProvider)provider)
+            .SearchAsync(query, 2, CancellationToken.None);
+
+        execution.ProviderRequests.Should().Be(2);
+        EditionMetadataSearchResult result = execution.Result;
+        EditionMetadataCandidate candidate = result.Candidates.Should().ContainSingle().Which;
+        candidate.WorkId.Should().Be("/works/OL18199543W");
+        candidate.EditionId.Should().Be("/books/OL7282656M");
+        candidate.Title.Should().Be("Quicksilver");
+        candidate.Identifiers.Should().HaveCount(2);
+        candidate.Publisher.Should().Be("HarperTorch");
+        candidate.PublicationDate.Should().Be(new EditionPublicationDate(2006, 2));
+        candidate.Languages.Should().Equal("en");
+        candidate.Series.Should().Be("The Baroque Cycle, #1/8");
+        candidate.Cover!.SourceId.Should().Be("8347523");
+        handler.RequestUris.Select(value => value.AbsolutePath).Should().Equal(
+            "/search.json", "/works/OL18199543W/editions.json");
+        handler.RequestUris[1].Query.Should().Be("?limit=5");
+    }
+
+    [Fact]
+    public async Task MultipleNestedEditionsRemainGloballyBoundedAndPreferRichMetadata()
+    {
+        RecordingHandler handler = new(_ => new(HttpStatusCode.OK)
+        {
+            Content = new StringContent(
+                                """
+                                {"docs":[{
+                                    "key":"/works/OL66554W",
+                                    "title":"Book",
+                                    "author_name":["Author"],
+                                    "editions":{"docs":[
+                                        {"key":"/books/OL7000001M","title":"Book 1"},
+                                        {"key":"/books/OL7000002M","title":"Book 2"},
+                                        {"key":"/books/OL7000003M","title":"Book 3","publisher":["Rich Publisher"],"isbn":["9780141439518"]},
+                                        {"key":"/books/OL7000004M","title":"Book 4"},
+                                        {"key":"/books/OL7000005M","title":"Book 5"},
+                                        {"key":"/books/OL7000006M","title":"Book 6"}
+                                    ]}
+                                }]}
+                                """,
+                Encoding.UTF8,
+                "application/json"),
+        });
+        using HttpClient client = new(handler) { BaseAddress = new("https://openlibrary.org/") };
+        using OpenLibraryBibliographicProvider provider = new(
+            client, new(minimumRequestInterval: TimeSpan.Zero));
+        IEditionMetadataProvider editionProvider = provider;
+
+        EditionMetadataSearchResult result = await editionProvider.SearchAsync(
+            Query(editionProvider.Identity), CancellationToken.None);
+
+        result.Candidates.Should().HaveCount(5);
+        result.Candidates.Select(value => value.EditionId).Should().OnlyHaveUniqueItems();
+        result.Candidates[0].Publisher.Should().Be("Rich Publisher");
     }
 
     [Fact]
@@ -160,6 +295,7 @@ public sealed class OpenLibraryEditionMetadataProviderTests
         HttpMessageHandler
     {
         public Uri? RequestUri { get; private set; }
+        public List<Uri> RequestUris { get; } = [];
 
         protected override Task<HttpResponseMessage> SendAsync(
             HttpRequestMessage request,
@@ -167,6 +303,7 @@ public sealed class OpenLibraryEditionMetadataProviderTests
         {
             cancellationToken.ThrowIfCancellationRequested();
             RequestUri = request.RequestUri;
+            RequestUris.Add(request.RequestUri!);
             return Task.FromResult(response(request));
         }
     }

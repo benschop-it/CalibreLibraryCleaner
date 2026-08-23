@@ -88,6 +88,43 @@ public sealed class PrepareMetadataReviewUseCaseTests
     }
 
     [Fact]
+    public async Task BulkSelectedUpdateChangesOnlySelectedSubjectsInOneWrite()
+    {
+        Harness harness = Harness.Create();
+        MetadataReviewWorkspace initial = await harness.UseCase.ExecuteAsync(
+            harness.State, [], null, CancellationToken.None);
+        ReviewedMetadataSubject first = initial.Subjects.Single();
+        MetadataReviewSubject secondSubject = new(
+            new("second-subject"),
+            first.Subject.UnifiedGroupId,
+            first.Subject.Members,
+            first.Subject.TargetBookId,
+            first.Subject.Proposal);
+        MetadataReviewWorkspace workspace = new(
+            initial.LibraryRoot,
+            initial.GenerationId,
+            initial.Revision,
+            [first, new(secondSubject, true, false, null)],
+            true);
+        Fake.ClearRecordedCalls(harness.Store);
+
+        MetadataReviewWorkspace updated = await harness.UseCase.SetApplyAsync(
+            workspace,
+            [secondSubject.Id],
+            apply: false,
+            CancellationToken.None);
+
+        updated.Subjects.Single(value => value.Subject.Id == first.Subject.Id).Apply.Should().BeTrue();
+        updated.Subjects.Single(value => value.Subject.Id == secondSubject.Id).Apply.Should().BeFalse();
+        A.CallTo(() => harness.Store.WriteAsync(
+                workspace.LibraryRoot,
+                A<IReadOnlyList<MetadataReviewDecision>>.That.Matches(value =>
+                    value.Count == 1 && value[0].Key.SubjectId == secondSubject.Id && !value[0].Apply),
+                A<CancellationToken>._))
+            .MustHaveHappenedOnceExactly();
+    }
+
+    [Fact]
     public async Task PersistenceFailureKeepsSessionReviewAndDoesNotThrow()
     {
         Harness harness = Harness.Create();

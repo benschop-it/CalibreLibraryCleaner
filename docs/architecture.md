@@ -182,8 +182,12 @@ Candidate cleanup. Domain owns bounded provider-neutral edition queries, coheren
 edition candidates, and deterministic one-provider proposal selection. Application
 runs each configured provider independently through
 cache-first orchestration, so one failure does not block another. The rate-limited
-Open Library adapter requests one nested relevance-ranked edition per work. Google
-Books uses the bounded public volumes endpoint only when a current-user DPAPI-
+Open Library adapter inspects several bounded nested editions per work and Application
+orchestrates strict-to-broader query variants with accurate request accounting. When
+search identifies a compatible work but exposes no usable nested edition, a budget-
+aware provider call may spend one additional counted request on the supported work
+editions endpoint and inspect at most five editions. Google Books uses the bounded
+public volumes endpoint only when a current-user DPAPI-
 protected API key is configured; it requests title/subtitle, authors, publisher,
 published date, industry identifiers, and language, but no cover fields in this
 slice. A separate reduced cache stores normalized proposal fields and provenance

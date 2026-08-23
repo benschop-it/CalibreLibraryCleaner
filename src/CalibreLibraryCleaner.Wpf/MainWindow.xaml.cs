@@ -26,6 +26,13 @@ public partial class MainWindow : System.Windows.Window
     private void UnifiedCandidateMembersGrid_MouseDoubleClick(object sender, MouseButtonEventArgs e) =>
         RouteRowDoubleClick(sender, e, viewModel => viewModel.OpenSelectedUnifiedCandidateCommand);
 
+    private void MetadataReviewSubjectsGrid_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (sender is DataGrid grid && DataContext is MainWindowViewModel viewModel)
+            viewModel.UpdateMetadataReviewSelection(
+                grid.SelectedItems.OfType<MetadataReviewSubjectRowViewModel>());
+    }
+
     private void RouteRowDoubleClick(
         object sender,
         MouseButtonEventArgs e,
