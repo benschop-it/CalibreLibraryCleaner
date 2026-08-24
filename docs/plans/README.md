@@ -5,6 +5,7 @@ This directory contains only active execution plans.
 Current plan:
 
 - [Improve Open Library Metadata Recall](improve-open-library-metadata-recall.md)
+- [Metadata Review Convergence](metadata-review-convergence.md)
 
 The completed one-time cleanup plan is archived under `../archive/plans/`.
 

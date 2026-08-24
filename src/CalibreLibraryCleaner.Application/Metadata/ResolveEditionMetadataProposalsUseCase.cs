@@ -58,6 +58,14 @@ public interface IEditionMetadataProposalCache
     Task PruneAsync(CancellationToken cancellationToken);
 }
 
+public interface IEditionMetadataProposalCacheMaintenance
+{
+    Task PrepareIdentifierAliasesAsync(
+        EditionMetadataProviderIdentity provider,
+        DateTimeOffset minimumRetrievedAtUtc,
+        CancellationToken cancellationToken);
+}
+
 public sealed record EditionMetadataEnrichmentOptions
 {
     public EditionMetadataEnrichmentOptions(
@@ -68,7 +76,7 @@ public sealed record EditionMetadataEnrichmentOptions
     {
         ArgumentOutOfRangeException.ThrowIfLessThan(maximumProviderRequestsPerRun, 1);
         ArgumentOutOfRangeException.ThrowIfGreaterThan(maximumProviderRequestsPerRun, 50_000);
-        TimeSpan age = maximumCacheAge ?? TimeSpan.FromDays(30);
+        TimeSpan age = maximumCacheAge ?? TimeSpan.FromDays(365);
         if (age < TimeSpan.FromHours(1) || age > TimeSpan.FromDays(365))
             throw new ArgumentOutOfRangeException(nameof(maximumCacheAge));
         TimeSpan unavailableAge = unavailableCacheAge ?? TimeSpan.FromHours(6);
@@ -195,6 +203,10 @@ public sealed class ResolveEditionMetadataProposalsUseCase
         DateTimeOffset minimumUnavailableRetrievedAt = _clock.GetUtcNow().ToUniversalTime()
             - _options.UnavailableCacheAge;
         progress?.Report(new(provider.Identity, 0, groups.Length, 0, 0, 0, 0,
+            "Preparing reusable global edition metadata cache entries."));
+        await TryPrepareIdentifierAliasesAsync(
+            provider.Identity, minimumRetrievedAt, cancellationToken).ConfigureAwait(false);
+        progress?.Report(new(provider.Identity, 0, groups.Length, 0, 0, 0, 0,
             "Online edition metadata lookup enabled; transmitting ISBN or title, author, and optional language fields."));
 
         foreach (IGrouping<QueryPlanKey, QueryPlan> group in groups)
@@ -246,6 +258,7 @@ public sealed class ResolveEditionMetadataProposalsUseCase
                         variant);
                     if (proposal.Status == EditionMetadataProposalStatus.Unavailable) failures++;
                     await TryWriteCacheAsync(variant, proposal, cancellationToken).ConfigureAwait(false);
+                    await TryWriteIdentifierAliasesAsync(proposal, cancellationToken).ConfigureAwait(false);
                 }
                 if (proposal.Status != EditionMetadataProposalStatus.NotFound) break;
             }
@@ -351,6 +364,39 @@ public sealed class ResolveEditionMetadataProposalsUseCase
         try
         {
             await _cache.WriteAsync(query, proposal, cancellationToken).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) { throw; }
+        catch (Exception exception) when (IsRecoverable(exception)) { }
+    }
+
+    private async Task TryWriteIdentifierAliasesAsync(
+        EditionMetadataProposal proposal,
+        CancellationToken cancellationToken)
+    {
+        if (proposal.Status != EditionMetadataProposalStatus.Proposed || proposal.Candidate is null) return;
+        EditionMetadataSearchResult search = new(
+            proposal.Provider,
+            EditionMetadataSearchStatus.Success,
+            proposal.RetrievedAtUtc,
+            [proposal.Candidate]);
+        foreach (EditionMetadataLookupQuery alias in EditionMetadataLookupQuery.CreateIdentifierAliases(
+                     proposal.BookId, proposal.Provider, proposal.Candidate))
+        {
+            EditionMetadataProposal aliasProposal = EditionMetadataProposalPolicy.Resolve(alias, search);
+            await TryWriteCacheAsync(alias, aliasProposal, cancellationToken).ConfigureAwait(false);
+        }
+    }
+
+    private async Task TryPrepareIdentifierAliasesAsync(
+        EditionMetadataProviderIdentity provider,
+        DateTimeOffset minimumRetrievedAtUtc,
+        CancellationToken cancellationToken)
+    {
+        if (_cache is not IEditionMetadataProposalCacheMaintenance maintenance) return;
+        try
+        {
+            await maintenance.PrepareIdentifierAliasesAsync(
+                provider, minimumRetrievedAtUtc, cancellationToken).ConfigureAwait(false);
         }
         catch (OperationCanceledException) { throw; }
         catch (Exception exception) when (IsRecoverable(exception)) { }

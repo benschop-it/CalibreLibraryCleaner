@@ -153,6 +153,30 @@ public sealed record EditionMetadataLookupQuery
             text.Language);
     }
 
+    public static IReadOnlyList<EditionMetadataLookupQuery> CreateIdentifierAliases(
+        CalibreBookId bookId,
+        EditionMetadataProviderIdentity provider,
+        EditionMetadataCandidate candidate)
+    {
+        ArgumentNullException.ThrowIfNull(provider);
+        ArgumentNullException.ThrowIfNull(candidate);
+        return new ReadOnlyCollection<EditionMetadataLookupQuery>(candidate.Identifiers
+            .Select(value => value.CanonicalValue)
+            .Where(value => value.StartsWith("ISBN:", StringComparison.Ordinal))
+            .Distinct(StringComparer.Ordinal)
+            .Order(StringComparer.Ordinal)
+            .Take(16)
+            .Select(value => new EditionMetadataLookupQuery(
+                bookId,
+                provider,
+                EditionMetadataQueryFields.Identifier,
+                value,
+                null,
+                null,
+                null))
+            .ToArray());
+    }
+
     internal static string CoreTitle(string title)
     {
         foreach (string separator in new[] { " / ", ": ", " - " })

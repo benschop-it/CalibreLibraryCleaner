@@ -12,6 +12,7 @@ public enum MetadataReviewFilterMode
     AppliedAutomatically,
     NeedsReview,
     Unavailable,
+    AlreadyApplied,
 }
 
 public sealed class MetadataReviewSubjectRowViewModel : ObservableObject
@@ -42,14 +43,19 @@ public sealed class MetadataReviewSubjectRowViewModel : ObservableObject
         ? "Singleton"
         : $"Unified ({_reviewed.Subject.Members.Count:N0})";
     public long TargetBookId => _reviewed.Subject.TargetBookId.Value;
-    public string Confidence => _reviewed.Subject.Proposal.Confidence.ToString();
+    public string Confidence => IsAlreadyApplied
+        ? "Already applied"
+        : _reviewed.Subject.Proposal.Confidence.ToString();
     public bool IsAutomaticConfidence => _reviewed.Subject.Proposal.Confidence
         is FusedEditionMetadataConfidence.High or FusedEditionMetadataConfidence.Medium;
-    public bool NeedsReview => _reviewed.Subject.Proposal.Confidence == FusedEditionMetadataConfidence.Low;
+    public bool NeedsReview => !IsAlreadyApplied
+        && _reviewed.Subject.Proposal.Confidence == FusedEditionMetadataConfidence.Low;
     public bool IsUnavailable => _reviewed.Subject.Proposal.Confidence == FusedEditionMetadataConfidence.Unavailable;
-    public bool CanApply => !IsUnavailable;
+    public bool IsAlreadyApplied => _reviewed.IsAlreadyApplied;
+    public bool CanApply => !IsUnavailable && !IsAlreadyApplied;
     public bool IsOverride => _reviewed.IsOverride;
     public string Reasons => string.Join(", ", _reviewed.Subject.Proposal.ReasonCodes);
+    public string ProviderOutcomes => FormatProviderOutcomes(_reviewed.Subject.Proposal);
     public string Provenance => FormatProvenance(_reviewed.Subject.Proposal);
 
     public bool Apply
@@ -66,6 +72,7 @@ public sealed class MetadataReviewSubjectRowViewModel : ObservableObject
         MetadataReviewFilterMode.AppliedAutomatically => IsAutomaticConfidence && Apply,
         MetadataReviewFilterMode.NeedsReview => NeedsReview,
         MetadataReviewFilterMode.Unavailable => IsUnavailable,
+        MetadataReviewFilterMode.AlreadyApplied => IsAlreadyApplied,
         _ => false,
     };
 
@@ -109,7 +116,7 @@ public sealed class MetadataReviewSubjectRowViewModel : ObservableObject
 
     private static string FormatProvenance(FusedEditionMetadataProposal proposal)
     {
-        if (proposal.Candidate is null || proposal.PrimaryProvider is null) return "Unavailable";
+        if (proposal.Candidate is null || proposal.PrimaryProvider is null) return FormatProviderOutcomes(proposal);
         string primary = $"Primary: {proposal.PrimaryProvider.Id} {proposal.PrimaryProvider.Version} / {proposal.Candidate.EditionId}";
         string providers = string.Join("; ", proposal.ProviderProposals
             .Where(value => value.Candidate is not null)
@@ -117,6 +124,40 @@ public sealed class MetadataReviewSubjectRowViewModel : ObservableObject
             .Distinct(StringComparer.Ordinal)
             .Take(16));
         return providers.Length == 0 ? primary : primary + "; Sources: " + providers;
+    }
+
+    private static string FormatProviderOutcomes(FusedEditionMetadataProposal proposal)
+    {
+        string[] outcomes = proposal.ProviderProposals
+            .GroupBy(value => value.Provider)
+            .Select(group => group.OrderByDescending(value => value.Status == EditionMetadataProposalStatus.Proposed)
+                .ThenByDescending(value => value.RetrievedAtUtc).First())
+            .OrderBy(value => value.Provider.Id, StringComparer.Ordinal)
+            .Select(value => $"{value.Provider.Id}: {Outcome(value)}")
+            .ToArray();
+        return outcomes.Length == 0 ? "No provider result" : string.Join("; ", outcomes);
+
+        static string Outcome(EditionMetadataProposal value)
+        {
+            string category = value.Status switch
+            {
+                EditionMetadataProposalStatus.Proposed => "proposal available",
+                EditionMetadataProposalStatus.Ambiguous => "ambiguous candidates",
+                EditionMetadataProposalStatus.NotFound => "no validated match",
+                EditionMetadataProposalStatus.Unavailable => "temporarily unavailable",
+                _ => value.Status.ToString(),
+            };
+            if (value.ProblemCode is null) return category;
+            string detail = value.ProblemCode switch
+            {
+                "GOOGLE_BOOKS.HTTP_429" => "HTTP 429 / quota or rate limit",
+                "GOOGLE_BOOKS.HTTP_503" => "HTTP 503 / provider backend",
+                "GOOGLE_BOOKS.NO_COMPATIBLE_VOLUMES" => "no compatible volume returned",
+                "OPEN_LIBRARY.NO_COMPATIBLE_EDITIONS" => "no compatible edition returned",
+                _ => value.ProblemCode,
+            };
+            return $"{category} ({detail}; {value.ProblemCode})";
+        }
     }
 
     private static string Date(EditionPublicationDate? value) => value is null

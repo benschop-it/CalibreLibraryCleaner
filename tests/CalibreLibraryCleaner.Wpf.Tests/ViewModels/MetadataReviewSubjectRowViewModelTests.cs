@@ -29,6 +29,29 @@ public sealed class MetadataReviewSubjectRowViewModelTests
     }
 
     [Fact]
+    public void UnavailableRowShowsConcreteProviderFailure()
+    {
+        MetadataReviewSubjectRowViewModel row = Row(1, FusedEditionMetadataConfidence.Unavailable);
+
+        row.ProviderOutcomes.Should().Be(
+            "google-books: temporarily unavailable (HTTP 429 / quota or rate limit; GOOGLE_BOOKS.HTTP_429)");
+        row.Provenance.Should().Be(row.ProviderOutcomes);
+    }
+
+    [Fact]
+    public void AlreadyAppliedRowIsUncheckedDisabledAndSeparatelyFilterable()
+    {
+        MetadataReviewSubjectRowViewModel row = Row(
+            1, FusedEditionMetadataConfidence.Low, alreadyApplied: true);
+
+        row.Confidence.Should().Be("Already applied");
+        row.Apply.Should().BeFalse();
+        row.CanApply.Should().BeFalse();
+        row.NeedsReview.Should().BeFalse();
+        row.MatchesFilter(MetadataReviewFilterMode.AlreadyApplied).Should().BeTrue();
+    }
+
+    [Fact]
     public void TwentyThousandRowsMaterializeAndFilterDeterministically()
     {
         Stopwatch stopwatch = Stopwatch.StartNew();
@@ -59,7 +82,8 @@ public sealed class MetadataReviewSubjectRowViewModelTests
 
     private static MetadataReviewSubjectRowViewModel Row(
         int id,
-        FusedEditionMetadataConfidence confidence)
+        FusedEditionMetadataConfidence confidence,
+        bool alreadyApplied = false)
     {
         EditionMetadataProviderIdentity provider = new("open-library", "provider/1.0.0");
         EditionMetadataCandidate candidate = new(
@@ -83,12 +107,19 @@ public sealed class MetadataReviewSubjectRowViewModelTests
             candidate,
             10_008,
             ["METADATA.EDITION.ISBN_EXACT"]);
+        EditionMetadataProposal unavailableProposal = new(
+            new(id),
+            new("google-books", "provider/1.0.0"),
+            EditionMetadataQueryFields.Identifier,
+            new DateTimeOffset(2026, 8, 16, 12, 0, 0, TimeSpan.Zero),
+            EditionMetadataProposalStatus.Unavailable,
+            problemCode: "GOOGLE_BOOKS.HTTP_429");
         FusedEditionMetadataProposal proposal = confidence == FusedEditionMetadataConfidence.Unavailable
             ? new(
                 confidence,
                 null,
                 null,
-                [],
+                [unavailableProposal],
                 [],
                 ["METADATA.FUSION.CONFIDENCE_UNAVAILABLE"])
             : new(
@@ -106,9 +137,10 @@ public sealed class MetadataReviewSubjectRowViewModelTests
             proposal);
         ReviewedMetadataSubject reviewed = new(
             subject,
-            proposal.IsSelectedByDefault,
+            alreadyApplied ? false : proposal.IsSelectedByDefault,
             false,
-            null);
+            null,
+            alreadyApplied);
         CalibreBook current = new(
             new(id),
             "Current Title",

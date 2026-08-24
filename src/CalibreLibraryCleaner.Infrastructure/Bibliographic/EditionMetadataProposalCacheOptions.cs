@@ -5,7 +5,7 @@ public sealed record EditionMetadataProposalCacheOptions
     public EditionMetadataProposalCacheOptions(
         string? storageRoot = null,
         long maximumEntryBytes = 64 * 1024,
-        long maximumTotalBytes = 256L * 1024 * 1024)
+        long maximumTotalBytes = 1024L * 1024 * 1024)
     {
         ArgumentOutOfRangeException.ThrowIfLessThan(maximumEntryBytes, 4 * 1024);
         ArgumentOutOfRangeException.ThrowIfGreaterThan(maximumEntryBytes, 256 * 1024);

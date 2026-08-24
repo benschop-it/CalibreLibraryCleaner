@@ -235,8 +235,7 @@ public sealed partial class ExecuteUnifiedCandidateCleanupUseCase(
             markerWritten = true;
 
             int chunkNumber = 0;
-            foreach (WorkerPlannedOperation[] chunk in operations.Chunk(
-                         CalibreMutationChunkRequest.MaximumOperationCount))
+            foreach (WorkerPlannedOperation[] chunk in ExecutionChunks(operations))
             {
                 cancellationToken.ThrowIfCancellationRequested();
                 if (!lease.IsHeld) throw new InvalidOperationException("The Candidate cleanup lease was lost.");
@@ -251,25 +250,39 @@ public sealed partial class ExecuteUnifiedCandidateCleanupUseCase(
                 if (!workerResult.IsSuccess)
                 {
                     string workerFailure = WorkerFailureCode(workerResult);
-                    int failedOperationIndex = workerResult.OperationResults
-                        .Select((value, index) => (value, index))
-                        .First(value => !value.value.IsSuccess).index;
-                    string failedOperationKind = chunk[failedOperationIndex].Operation.Metadata?.Field.ToString()
-                        ?? chunk[failedOperationIndex].Operation.Kind.ToString();
-                    int uncommittedSuccessfulPrefix = workerResult.OperationResults
-                        .Take(failedOperationIndex).Count(value => value.IsSuccess);
+                    int failedOperationIndex = Enumerable.Range(0, workerResult.OperationResults.Count)
+                        .FirstOrDefault(index => !workerResult.OperationResults[index].IsSuccess, -1);
+                    CalibreMutationOperation? failedOperation = failedOperationIndex >= 0
+                        ? chunk[failedOperationIndex].Operation
+                        : null;
+                    string failedOperationKind = failedOperation?.Metadata?.Field.ToString()
+                        ?? failedOperation?.Kind.ToString()
+                        ?? "Unknown";
+                    string failedSource = failedOperation?.Metadata?.Source is { } source
+                        ? $"{source.ProviderId}/{source.ProviderVersion}"
+                        : "none";
+                    int uncommittedSuccessfulPrefix = failedOperationIndex < 0
+                        ? 0
+                        : workerResult.OperationResults.Take(failedOperationIndex)
+                            .Count(value => value.IsSuccess);
                     await MarkUncertainAsync(
                         "CANDIDATE.WORKER_CHUNK_FAILED",
                         $"The persistent Calibre worker did not complete a Candidate cleanup chunk unambiguously ({workerFailure}).")
                         .ConfigureAwait(false);
                     LogWorkerChunkFailure(
                         _logger, executionId.ToString(), chunkNumber, completedOperations,
-                        operations.Length, failedOperationIndex + 1, failedOperationKind,
+                        operations.Length,
+                        failedOperationIndex < 0 ? 0 : completedOperations + failedOperationIndex + 1,
+                        failedOperationIndex + 1, failedOperation?.OperationId ?? "unknown",
+                        failedOperation?.RecordId.Value ?? 0, failedOperationKind, failedSource,
+                        failedOperation?.Metadata?.Values.Count ?? 0,
                         uncommittedSuccessfulPrefix, workerFailure);
                     issues.Add(Block(
                         "CANDIDATE.WORKER_CHUNK_FAILED",
                         $"The persistent Calibre worker could not complete Candidate cleanup ({workerFailure}; "
-                        + $"chunk operation {failedOperationIndex + 1:N0} was {failedOperationKind}; "
+                        + (failedOperationIndex < 0
+                            ? "the worker did not identify a failed operation; "
+                            : $"chunk operation {failedOperationIndex + 1:N0} was {failedOperationKind}; ")
                         + $"completed {completedOperations:N0} of {operations.Length:N0} committed operations)."));
                     return Result(UnifiedCandidateCleanupState.PartiallyCompleted,
                         transferred, removedFormats, removedRecords, plan.SkippedGroupCount);
@@ -485,50 +498,52 @@ public sealed partial class ExecuteUnifiedCandidateCleanupUseCase(
             {
                 throw new InvalidOperationException("A singleton metadata review subject is stale.");
             }
-            if (!state.Snapshot.Books.Any(value => value.Id == subject.TargetBookId)
-                || !targets.Add(subject.TargetBookId))
+            CalibreBook? currentBook = state.Snapshot.Books.FirstOrDefault(
+                value => value.Id == subject.TargetBookId);
+            if (currentBook is null || !targets.Add(subject.TargetBookId))
                 throw new InvalidOperationException("A metadata target is missing or duplicated.");
+            HashSet<LibraryMetadataField> applicable = EditionMetadataApplicationPolicy
+                .ApplicableFields(currentBook, candidate).ToHashSet();
+            if (applicable.Count == 0) continue;
             CalibreMetadataSourceIdentity source = new(
                 provider.Id, provider.Version, candidate.EditionId, subject.Proposal.PolicyVersion);
-            Add(LibraryMetadataField.Title, [candidate.Title]);
-            if (EditionMetadataAuthorWritePolicy.TryPrepare(candidate.Authors, out IReadOnlyList<string> authors))
+            if (applicable.Contains(LibraryMetadataField.Title))
+                Add(LibraryMetadataField.Title, [candidate.Title]);
+            if (applicable.Contains(LibraryMetadataField.Authors)
+                && EditionMetadataAuthorWritePolicy.TryPrepare(candidate.Authors, out IReadOnlyList<string> authors))
                 Add(LibraryMetadataField.Authors, authors);
-            else
+            else if (!EditionMetadataAuthorWritePolicy.TryPrepare(candidate.Authors, out _))
                 omittedAuthorFields++;
-            if (candidate.Identifiers.Count > 0)
+            if (applicable.Contains(LibraryMetadataField.Identifiers))
                 Add(LibraryMetadataField.Identifiers,
-                    candidate.Identifiers
-                        .GroupBy(value => value.Type, StringComparer.Ordinal)
-                        .Select(group => group
-                            .OrderByDescending(value => value.Type == "isbn" && value.Value.Length == 13)
-                            .ThenBy(value => value.Value, StringComparer.Ordinal)
-                            .First())
-                        .OrderBy(value => value.Type, StringComparer.Ordinal)
+                    EditionMetadataApplicationPolicy.WritableIdentifiers(candidate)
                         .Select(value => $"{value.Type}:{value.Value}")
                         .ToArray());
-            if (candidate.Publisher is not null) Add(LibraryMetadataField.Publisher, [candidate.Publisher]);
-            if (candidate.PublicationDate is not null)
+            if (applicable.Contains(LibraryMetadataField.Publisher))
+                Add(LibraryMetadataField.Publisher, [candidate.Publisher!]);
+            if (applicable.Contains(LibraryMetadataField.PublicationDate))
             {
-                EditionPublicationDate date = candidate.PublicationDate;
+                EditionPublicationDate date = candidate.PublicationDate!;
                 DateTimeOffset value = new(
                     date.Year, date.Month ?? 1, date.Day ?? 1, 0, 0, 0, TimeSpan.Zero);
                 Add(LibraryMetadataField.PublicationDate, [value.ToString("O", CultureInfo.InvariantCulture)]);
             }
-            string[] writableLanguages = candidate.Languages.Where(IsWritableLanguage).ToArray();
-            if (writableLanguages.Length > 0)
-                Add(LibraryMetadataField.Languages, writableLanguages);
-            if (candidate.Series is not null) Add(LibraryMetadataField.Series, [candidate.Series]);
-            if (candidate.SeriesIndex is not null)
+            if (applicable.Contains(LibraryMetadataField.Languages))
+                Add(LibraryMetadataField.Languages,
+                    EditionMetadataApplicationPolicy.WritableLanguages(candidate));
+            if (applicable.Contains(LibraryMetadataField.Series))
+                Add(LibraryMetadataField.Series, [candidate.Series!]);
+            if (applicable.Contains(LibraryMetadataField.SeriesIndex))
                 Add(LibraryMetadataField.SeriesIndex,
-                    [candidate.SeriesIndex.Value.ToString(CultureInfo.InvariantCulture)]);
-            if (candidate.Cover is not null)
+                    [candidate.SeriesIndex!.Value.ToString(CultureInfo.InvariantCulture)]);
+            if (applicable.Contains(LibraryMetadataField.Cover))
                 operations.Add(new(
                     subject.Id.Value,
                     subject.TargetBookId,
                     LibraryMetadataField.Cover,
                     [],
                     source,
-                    candidate.Cover));
+                    candidate.Cover!));
 
             void Add(LibraryMetadataField field, IEnumerable<string> values) => operations.Add(new(
                 subject.Id.Value, subject.TargetBookId, field, values.ToArray(), source, null));
@@ -601,6 +616,18 @@ public sealed partial class ExecuteUnifiedCandidateCleanupUseCase(
             CalibreMutationOperation.RemoveRecord($"candidate-remove-record:{value.Value}", value),
             null)),
     ];
+
+    private static IEnumerable<WorkerPlannedOperation[]> ExecutionChunks(
+        IReadOnlyList<WorkerPlannedOperation> operations)
+    {
+        foreach (WorkerPlannedOperation[] chunk in operations
+                     .Where(value => value.Operation.Metadata?.Field != LibraryMetadataField.Authors)
+                     .Chunk(CalibreMutationChunkRequest.MaximumOperationCount))
+            yield return chunk;
+        foreach (WorkerPlannedOperation author in operations.Where(
+                     value => value.Operation.Metadata?.Field == LibraryMetadataField.Authors))
+            yield return [author];
+    }
 
     private static LibraryStateDelta CreateDelta(
         LibraryStateGenerationId generation,
@@ -683,15 +710,20 @@ public sealed partial class ExecuteUnifiedCandidateCleanupUseCase(
         Exception? exception);
 
     [LoggerMessage(83, LogLevel.Error,
-        "Unified Candidate cleanup {ExecutionId} worker chunk {ChunkNumber} failed after {CompletedOperations} of {TotalOperations} committed operations. ChunkOperation={ChunkOperation}, OperationKind={OperationKind}, UncommittedSuccessfulPrefix={UncommittedSuccessfulPrefix}, FailureCode={FailureCode}.")]
+        "Unified Candidate cleanup {ExecutionId} worker chunk {ChunkNumber} failed after {CompletedOperations} of {TotalOperations} committed operations. GlobalOperation={GlobalOperation}, ChunkOperation={ChunkOperation}, OperationId={OperationId}, RecordId={RecordId}, OperationKind={OperationKind}, MetadataSource={MetadataSource}, ExpectedValueCount={ExpectedValueCount}, UncommittedSuccessfulPrefix={UncommittedSuccessfulPrefix}, FailureCode={FailureCode}.")]
     private static partial void LogWorkerChunkFailure(
         ILogger logger,
         string executionId,
         int chunkNumber,
         int completedOperations,
         int totalOperations,
+        int globalOperation,
         int chunkOperation,
+        string operationId,
+        long recordId,
         string operationKind,
+        string metadataSource,
+        int expectedValueCount,
         int uncommittedSuccessfulPrefix,
         string failureCode);
 

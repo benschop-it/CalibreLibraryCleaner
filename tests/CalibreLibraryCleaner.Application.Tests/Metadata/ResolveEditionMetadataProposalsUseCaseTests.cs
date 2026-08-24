@@ -15,6 +15,14 @@ public sealed class ResolveEditionMetadataProposalsUseCaseTests
     private static readonly DateTimeOffset Now = new(2026, 8, 16, 12, 0, 0, TimeSpan.Zero);
 
     [Fact]
+    public void DefaultOptionsRetainNormalCacheEntriesForOneYear()
+    {
+        EditionMetadataEnrichmentOptions options = new();
+
+        options.MaximumCacheAge.Should().Be(TimeSpan.FromDays(365));
+    }
+
+    [Fact]
     public async Task DuplicateQueriesUseOneProviderRequestAndReturnEveryBookProposal()
     {
         IEditionMetadataProvider provider = A.Fake<IEditionMetadataProvider>();
@@ -59,8 +67,8 @@ public sealed class ResolveEditionMetadataProposalsUseCaseTests
                         Now,
                         [Candidate("9780306406157")]));
             });
-        ResolveEditionMetadataProposalsUseCase useCase = Create(
-            provider, A.Fake<IEditionMetadataProposalCache>());
+        IEditionMetadataProposalCache cache = A.Fake<IEditionMetadataProposalCache>();
+        ResolveEditionMetadataProposalsUseCase useCase = Create(provider, cache);
 
         EditionMetadataProposalBatchResult result = (await useCase.ExecuteAsync(
             [Book(1)], null, CancellationToken.None)).Providers.Single();
@@ -73,6 +81,14 @@ public sealed class ResolveEditionMetadataProposalsUseCaseTests
         result.Proposals[new(1)].ReasonCodes.Should().Contain("METADATA.EDITION.TITLE_EXACT")
             .And.Contain("METADATA.EDITION.AUTHOR_EXACT")
             .And.NotContain("METADATA.EDITION.ISBN_EXACT");
+        A.CallTo(() => cache.WriteAsync(
+                A<EditionMetadataLookupQuery>.That.Matches(value =>
+                    value.Identifier == "ISBN:9780306406157"),
+                A<EditionMetadataProposal>.That.Matches(value =>
+                    value.Status == EditionMetadataProposalStatus.Proposed
+                    && value.ReasonCodes.Contains("METADATA.EDITION.ISBN_EXACT")),
+                A<CancellationToken>._))
+            .MustHaveHappenedOnceExactly();
     }
 
     [Fact]

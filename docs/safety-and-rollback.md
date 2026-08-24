@@ -124,6 +124,14 @@ outcome:
    engines; and
 3. blocks further mutation until explicit Rescan.
 
+To minimize this stop boundary's impact, author metadata writes execute only after
+all non-author operations have completed and been checkpointed. Each author write is
+its own worker chunk. A failed author readback therefore has no uncommitted successful
+prefix and cannot block unrelated title, identifier, publisher, date, language,
+cover, transfer, or removal work. Logs identify the exact global/chunk operation,
+operation ID, record ID, field, provider version, expected value count, and granular
+author readback failure category.
+
 A verified-unchanged metadata rejection is not a failed mutation outcome. The worker
 may continue only after comparing the complete post-operation target field, cover,
 managed path, author sort, and protected local fields with their pre-write values and

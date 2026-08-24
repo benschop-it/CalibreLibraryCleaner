@@ -88,13 +88,16 @@ public sealed class PrepareMetadataReviewUseCase(
         catch (Exception exception) when (IsPersistenceFailure(exception))
         {
             return Workspace(
-                MetadataReviewDecisionPolicy.Reconcile(subjects, state.GenerationId, state.Revision, []),
+                ApplyConvergence(state.Snapshot, MetadataReviewDecisionPolicy.Reconcile(
+                    subjects, state.GenerationId, state.Revision, [])),
                 persistenceAvailable: false,
                 "METADATA_REVIEW.DECISION_READ_FAILED",
                 deferredQueryCount);
         }
-        IReadOnlyList<ReviewedMetadataSubject> reviewed = MetadataReviewDecisionPolicy.Reconcile(
-            subjects, state.GenerationId, state.Revision, decisions);
+        IReadOnlyList<ReviewedMetadataSubject> reviewed = ApplyConvergence(
+            state.Snapshot,
+            MetadataReviewDecisionPolicy.Reconcile(
+                subjects, state.GenerationId, state.Revision, decisions));
         MetadataReviewWorkspace workspace = Workspace(
             reviewed, persistenceAvailable: true, null, deferredQueryCount);
         try
@@ -139,7 +142,8 @@ public sealed class PrepareMetadataReviewUseCase(
         if (workspace.Subjects.Count == 0 || workspace.Subjects[index].Subject.Id != subjectId)
             throw new ArgumentException("The metadata review subject is not current.", nameof(subjectId));
         ReviewedMetadataSubject current = workspace.Subjects[index];
-        if (current.Subject.Proposal.Confidence == FusedEditionMetadataConfidence.Unavailable)
+        if (current.Subject.Proposal.Confidence == FusedEditionMetadataConfidence.Unavailable
+            || current.IsAlreadyApplied)
             return workspace;
         MetadataReviewDecision? decision = MetadataReviewDecisionPolicy.CreateOverride(
             current.Subject, workspace.GenerationId, workspace.Revision, apply);
@@ -186,7 +190,8 @@ public sealed class PrepareMetadataReviewUseCase(
         CancellationToken cancellationToken) => await SetApplyAsync(
             workspace,
             workspace.Subjects.Where(value =>
-                    value.Subject.Proposal.Confidence != FusedEditionMetadataConfidence.Unavailable)
+                    value.Subject.Proposal.Confidence != FusedEditionMetadataConfidence.Unavailable
+                    && !value.IsAlreadyApplied)
                 .Select(value => value.Subject.Id)
                 .ToArray(),
             apply,
@@ -208,7 +213,8 @@ public sealed class PrepareMetadataReviewUseCase(
         ReviewedMetadataSubject[] reviewed = workspace.Subjects.Select(current =>
         {
             if (!selected.Contains(current.Subject.Id)
-                || current.Subject.Proposal.Confidence == FusedEditionMetadataConfidence.Unavailable)
+                || current.Subject.Proposal.Confidence == FusedEditionMetadataConfidence.Unavailable
+                || current.IsAlreadyApplied)
                 return current;
             MetadataReviewDecision? decision = MetadataReviewDecisionPolicy.CreateOverride(
                 current.Subject, workspace.GenerationId, workspace.Revision, apply);
@@ -243,6 +249,19 @@ public sealed class PrepareMetadataReviewUseCase(
                 "METADATA_REVIEW.DECISION_WRITE_FAILED",
                 next.DeferredQueryCount);
         }
+    }
+
+    private static ReviewedMetadataSubject[] ApplyConvergence(
+        LibrarySnapshot snapshot,
+        IReadOnlyList<ReviewedMetadataSubject> reviewed)
+    {
+        Dictionary<CalibreBookId, CalibreBook> books = snapshot.Books.ToDictionary(value => value.Id);
+        return reviewed.Select(value => value.Subject.Proposal.Candidate is { } candidate
+                && EditionMetadataApplicationPolicy.ApplicableFields(
+                    books[value.Subject.TargetBookId], candidate).Count == 0
+                ? new ReviewedMetadataSubject(value.Subject, false, false, null, isAlreadyApplied: true)
+                : value)
+            .ToArray();
     }
 
     public static MetadataReviewWorkspace Retarget(

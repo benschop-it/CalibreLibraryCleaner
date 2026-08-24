@@ -19,6 +19,14 @@ public sealed class FileEditionMetadataProposalCacheTests
     private static readonly DateTimeOffset RetrievedAt = new(2026, 8, 16, 12, 0, 0, TimeSpan.Zero);
 
     [Fact]
+    public void DefaultOptionsAllowOneGibibyteOfGlobalEntries()
+    {
+        EditionMetadataProposalCacheOptions options = new();
+
+        options.MaximumTotalBytes.Should().Be(1024L * 1024 * 1024);
+    }
+
+    [Fact]
     public async Task RoundTripUsesOpaqueKeyAndStoresNormalizedProposalWithoutRawQuery()
     {
         using TemporaryDirectory directory = new();
@@ -93,6 +101,32 @@ public sealed class FileEditionMetadataProposalCacheTests
 
         (await missCache.TryReadAsync(query, RetrievedAt.AddDays(-1), CancellationToken.None))
             .Should().BeNull();
+    }
+
+    [Fact]
+    public async Task ExistingProposalBackfillsIdentifierAliasForChangedBookMetadata()
+    {
+        using TemporaryDirectory directory = new();
+        FileEditionMetadataProposalCache cache = new(new(directory.Path));
+        EditionMetadataLookupQuery textQuery = Query(provider: CurrentProvider);
+        await cache.WriteAsync(textQuery, Proposal(textQuery), CancellationToken.None);
+
+        await cache.PrepareIdentifierAliasesAsync(
+            CurrentProvider, RetrievedAt.AddDays(-1), CancellationToken.None);
+        EditionMetadataLookupQuery identifierQuery = new(
+            new(99),
+            CurrentProvider,
+            EditionMetadataQueryFields.Identifier,
+            "ISBN:9780141439518",
+            null,
+            null,
+            null);
+        EditionMetadataProposal? loaded = await cache.TryReadAsync(
+            identifierQuery, RetrievedAt.AddDays(-1), CancellationToken.None);
+
+        loaded.Should().NotBeNull();
+        loaded!.BookId.Should().Be(new CalibreBookId(99));
+        loaded.ReasonCodes.Should().Contain("METADATA.EDITION.ISBN_EXACT");
     }
 
     private static EditionMetadataLookupQuery Query(

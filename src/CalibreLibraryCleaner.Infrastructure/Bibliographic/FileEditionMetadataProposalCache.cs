@@ -9,9 +9,10 @@ using CalibreLibraryCleaner.Infrastructure.Execution;
 namespace CalibreLibraryCleaner.Infrastructure.Bibliographic;
 
 internal sealed class FileEditionMetadataProposalCache(EditionMetadataProposalCacheOptions options) :
-    IEditionMetadataProposalCache
+    IEditionMetadataProposalCache, IEditionMetadataProposalCacheMaintenance
 {
     private const string SchemaVersion = "edition-metadata-proposal-cache/1.0";
+    private const string IdentifierAliasPolicyVersion = "edition-metadata-cache-isbn-alias/1.0";
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
         PropertyNameCaseInsensitive = false,
@@ -174,6 +175,60 @@ internal sealed class FileEditionMetadataProposalCache(EditionMetadataProposalCa
         return Task.CompletedTask;
     }
 
+    public async Task PrepareIdentifierAliasesAsync(
+        EditionMetadataProviderIdentity provider,
+        DateTimeOffset minimumRetrievedAtUtc,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(provider);
+        cancellationToken.ThrowIfCancellationRequested();
+        string root = GetStorageRoot();
+        if (!Directory.Exists(root)) return;
+        string marker = Path.Combine(root, AliasMarkerName(provider));
+        if (File.Exists(marker)) return;
+        try
+        {
+            string[] existingEntries = Directory.EnumerateFiles(
+                root, "*.json", SearchOption.TopDirectoryOnly).ToArray();
+            foreach (string path in existingEntries)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                FileInfo info = new(path);
+                if (info.Length is <= 0 || info.Length > options.MaximumEntryBytes
+                    || !ExecutionPathGuard.TryRejectReparsePointLeaf(path, true, out _)) continue;
+                CacheDocument? document = JsonSerializer.Deserialize<CacheDocument>(
+                    await File.ReadAllBytesAsync(path, cancellationToken).ConfigureAwait(false), JsonOptions);
+                if (document is null
+                    || document.SchemaVersion != SchemaVersion
+                    || document.ProviderId != provider.Id
+                    || document.ProviderVersion != provider.Version
+                    || document.QueryPolicyVersion != EditionMetadataLookupQuery.PolicyVersion
+                    || document.ProposalPolicyVersion != EditionMetadataProposal.PolicyVersion
+                    || document.Status != EditionMetadataProposalStatus.Proposed
+                    || document.RetrievedAtUtc < minimumRetrievedAtUtc
+                    || Rehydrate(document.Candidate) is not { } candidate)
+                    continue;
+                EditionMetadataSearchResult search = new(
+                    provider,
+                    EditionMetadataSearchStatus.Success,
+                    document.RetrievedAtUtc,
+                    [candidate]);
+                foreach (EditionMetadataLookupQuery alias in EditionMetadataLookupQuery.CreateIdentifierAliases(
+                             new(1), provider, candidate))
+                {
+                    EditionMetadataProposal proposal = EditionMetadataProposalPolicy.Resolve(alias, search);
+                    await WriteAsync(alias, proposal, cancellationToken).ConfigureAwait(false);
+                }
+            }
+            await File.WriteAllTextAsync(marker, IdentifierAliasPolicyVersion, cancellationToken)
+                .ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) { throw; }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException
+            or JsonException or InvalidDataException or ArgumentException or OverflowException)
+        { }
+    }
+
     private string GetStorageRoot()
     {
         string root = Path.TrimEndingDirectorySeparator(Path.GetFullPath(options.StorageRoot));
@@ -203,6 +258,15 @@ internal sealed class FileEditionMetadataProposalCache(EditionMetadataProposalCa
         foreach (string author in query.Authors) Append(canonical, author);
         Append(canonical, query.Language ?? string.Empty);
         return Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(canonical.ToString())));
+    }
+
+    private static string AliasMarkerName(EditionMetadataProviderIdentity provider)
+    {
+        string identity = string.Join('|', IdentifierAliasPolicyVersion,
+            EditionMetadataLookupQuery.PolicyVersion, EditionMetadataProposal.PolicyVersion,
+            provider.Id, provider.Version);
+        return "." + Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(identity)))
+            + ".isbn-aliases-ready";
     }
 
     private static void Append(StringBuilder target, string value) => target

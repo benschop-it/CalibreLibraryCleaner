@@ -2082,6 +2082,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         int medium = _allMetadataReviewSubjects.Count(value => value.Confidence == "Medium");
         int low = _allMetadataReviewSubjects.Count(value => value.Confidence == "Low");
         int unavailable = _allMetadataReviewSubjects.Count(value => value.IsUnavailable);
+        int alreadyApplied = _allMetadataReviewSubjects.Count(value => value.IsAlreadyApplied);
         string persistence = _metadataReviewWorkspace?.PersistenceAvailable == false
             ? " Apply overrides are session-only because durable review storage is unavailable."
             : string.Empty;
@@ -2092,6 +2093,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
             ? "No metadata review subjects are available."
             : $"{visible.Length:N0} of {_allMetadataReviewSubjects.Length:N0} subjects visible; "
                 + $"High {high:N0}, Medium {medium:N0}, Low {low:N0}, Unavailable {unavailable:N0}.{persistence}";
+        if (alreadyApplied > 0) MetadataReviewSummary += $" Already applied {alreadyApplied:N0}.";
         if (deferred.Length > 0) MetadataReviewSummary += deferred;
         NotifyMetadataApplyCommands();
     }

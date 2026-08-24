@@ -115,6 +115,7 @@ dotnet list package --vulnerable --include-transitive
 - [x] Bounded fallback variants implemented.
 - [x] Budget-aware work editions endpoint fallback implemented.
 - [x] Bounded recall replay measured.
+- [x] Successful proposal ISBN aliases and existing-cache backfill implemented.
 - [x] Standard verification passed after work editions fallback: 829 tests,
   formatting, diagnostics, diff check, and vulnerability audit.
 

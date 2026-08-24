@@ -68,24 +68,29 @@ public sealed record ReviewedMetadataSubject
         MetadataReviewSubject subject,
         bool apply,
         bool isOverride,
-        MetadataReviewDecisionKey? decisionKey)
+        MetadataReviewDecisionKey? decisionKey,
+        bool isAlreadyApplied = false)
     {
         ArgumentNullException.ThrowIfNull(subject);
         if (subject.Proposal.Confidence == FusedEditionMetadataConfidence.Unavailable
             && (apply || isOverride || decisionKey is not null)
             || isOverride != (decisionKey is not null)
-            || decisionKey is not null && decisionKey.SubjectId != subject.Id)
+            || decisionKey is not null && decisionKey.SubjectId != subject.Id
+            || isAlreadyApplied && (subject.Proposal.Candidate is null
+                || apply || isOverride || decisionKey is not null))
             throw new ArgumentException("Reviewed metadata subject is invalid.");
         Subject = subject;
         Apply = apply;
         IsOverride = isOverride;
         DecisionKey = decisionKey;
+        IsAlreadyApplied = isAlreadyApplied;
     }
 
     public MetadataReviewSubject Subject { get; }
     public bool Apply { get; }
     public bool IsOverride { get; }
     public MetadataReviewDecisionKey? DecisionKey { get; }
+    public bool IsAlreadyApplied { get; }
 }
 
 public static class MetadataReviewDecisionPolicy

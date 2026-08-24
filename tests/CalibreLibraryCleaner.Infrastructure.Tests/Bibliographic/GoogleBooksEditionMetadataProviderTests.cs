@@ -15,6 +15,12 @@ public sealed class GoogleBooksEditionMetadataProviderTests
     private const string ApiKey = "AIzaFakePrivateKey_1234567890";
 
     [Fact]
+    public void DefaultOptionsLimitRequestsToOneEveryThreeSeconds()
+    {
+        new GoogleBooksOptions().MinimumRequestInterval.Should().Be(TimeSpan.FromSeconds(3));
+    }
+
+    [Fact]
     public async Task IsbnSearchSendsDisclosedFieldsAndParsesBoundedVolumeMetadata()
     {
         RecordingHandler handler = new(ApiKey, _ => new(HttpStatusCode.OK)
@@ -135,6 +141,28 @@ public sealed class GoogleBooksEditionMetadataProviderTests
         oversizedResult.ProblemCode.Should().Be("GOOGLE_BOOKS.RESPONSE_TOO_LARGE");
         httpResult.ProblemCode.Should().NotContain(ApiKey);
         oversizedResult.ProblemCode.Should().NotContain(ApiKey);
+    }
+
+    [Fact]
+    public async Task RequestsRespectConfiguredMinimumInterval()
+    {
+        RecordingHandler handler = new(ApiKey, _ => new(HttpStatusCode.OK)
+        {
+            Content = new StringContent("{\"totalItems\":0}", Encoding.UTF8, "application/json"),
+        });
+        using HttpClient client = Client(handler);
+        using GoogleBooksEditionMetadataProvider provider = new(
+            client,
+            KeyStore(ApiKey),
+            new(minimumRequestInterval: TimeSpan.FromMilliseconds(50)));
+        System.Diagnostics.Stopwatch stopwatch = System.Diagnostics.Stopwatch.StartNew();
+
+        await provider.SearchAsync(IsbnQuery(provider.Identity), CancellationToken.None);
+        await provider.SearchAsync(IsbnQuery(provider.Identity), CancellationToken.None);
+        stopwatch.Stop();
+
+        handler.RequestCount.Should().Be(2);
+        stopwatch.Elapsed.Should().BeGreaterThanOrEqualTo(TimeSpan.FromMilliseconds(35));
     }
 
     private static EditionMetadataLookupQuery IsbnQuery(EditionMetadataProviderIdentity provider) => new(

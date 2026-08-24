@@ -57,14 +57,20 @@ time while remaining bounded on a slow workstation.
 | --- | --- |
 | Version | `0.1.0` |
 | ZIP | `CalibreLibraryCleaner-0.1.0-win-x64-framework-dependent.zip` |
-| Compressed bytes | 9,377,505 |
+| Compressed bytes | 9,391,540 |
 | Payload files in manifest | 79 |
-| ZIP SHA-256 | `2e9efc8a320043ac6fc45c74324bc8c4252801b17d4798970cdc9ba5be83de60` |
+| ZIP SHA-256 | `2ba8ad26b4cb849c6e4f673bc3216e17d47e6a3d8b93ef3176436bc9433491fc` |
 | Reproducibility | Not rerun after the acceptance fixes; an earlier deterministic package reproduced across two complete builds |
 | Direct packaged smoke | Passed |
 | Smoke final state | 0 new processes; 0 new extraction directories |
 | Live provider requests | Bounded provider `1.2.0` recall measurement accepted; full replay stopped as unjustified |
 | Destructive library mutation | Accepted; final authoritative revision 1,840 |
+
+The author-failure-isolation package was additionally accepted on a rescanned
+545-record library. A checked metadata run completed 2,348 operations: 2,347 updates,
+one verified-unchanged author display skip, and one omitted transient cover. The run
+continued after the typed skip and finished authoritative at revision 2,352 with no
+pending mutation intent or worker process.
 
 ## Interrupted acceptance attempt
 

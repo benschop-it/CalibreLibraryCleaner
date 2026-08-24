@@ -233,6 +233,11 @@ bounded, HTTPS-only, outside the library, and removed after the run.
 - Resolve rich edition candidates from Open Library and optional keyed Google Books
   independently, with bounded requests, complete provenance, versioned cache
   identity, and failure isolation.
+- Show each provider's concrete outcome and problem code on metadata review rows,
+  especially distinguishing no validated match, ambiguity, rate limiting, and
+  transient provider backend failure.
+- Pace Google Books requests at no more than one start every three seconds by default;
+  cached HTTP 429 outcomes may be selectively removed for an explicit retry.
 - Accept a different edition of the same work when exact-edition metadata is
   unavailable; retrieval variants do not by themselves raise confidence.
 - For an Open Library search result with no usable nested edition, permit one
@@ -243,12 +248,17 @@ bounded, HTTPS-only, outside the library, and removed after the run.
   requests immediately.
 - When a provider request limit is reached, stop at the actual processed query count,
   report the uncached deferred count, and never count unrequested queries as completed.
+- Execute every non-author mutation before author metadata writes, checkpoint those
+  completed operations, and isolate each author write in a one-operation worker chunk.
 - Choose one coherent best edition using validated ISBN, title/author/language,
   edition compatibility, provider agreement, completeness, and cover availability.
 - Fill a missing field from another provider only when edition identity is proven.
 - Propose supported title, authors, ISBN/identifiers, publisher, publication date,
   language, series/index, and cover without replacing local-only fields.
 - Default High/Medium confidence proposals checked and Low proposals unchecked.
+- Compare proposals with current retained metadata before review and execution. Mark
+  fully equal proposals Already applied, keep them unchecked/non-actionable, and
+  schedule only fields whose resulting supported value differs.
 
 ### Review and coordination
 

@@ -375,14 +375,20 @@ def set_metadata(cache, operation):
             verified = [f"{name}:{actual[name]}" for name in sorted(actual)]
         elif field == "authors":
             verified = list(actual or [])
-            matches = [canonical_text(item) for item in verified] == [
-                canonical_text(item) for item in expected]
-            if matches and requested_author_sorts is not None:
+            if [canonical_text(item) for item in verified] != [
+                    canonical_text(item) for item in expected]:
+                raise ValueError("metadata_authors_display_readback_failed")
+            matches = True
+            if requested_author_sorts is not None:
                 author_ids = tuple(cache.field_ids_for("authors", book_id) or ())
+                if len(author_ids) != len(requested_author_sorts):
+                    raise ValueError("metadata_authors_id_count_readback_failed")
                 author_data = cache.author_data(author_ids)
                 verified_author_sorts = [author_data[author_id]["sort"] for author_id in author_ids]
-                matches = verified_author_sorts == requested_author_sorts \
-                    and cache.field_for("author_sort", book_id) == " & ".join(requested_author_sorts)
+                if verified_author_sorts != requested_author_sorts:
+                    raise ValueError("metadata_authors_sort_readback_failed")
+                if cache.field_for("author_sort", book_id) != " & ".join(requested_author_sorts):
+                    raise ValueError("metadata_authors_book_sort_readback_failed")
         elif field == "languages":
             verified = list(actual or [])
             matches = verified == expected

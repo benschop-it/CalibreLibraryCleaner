@@ -140,12 +140,40 @@ public sealed class PrepareMetadataReviewUseCaseTests
         workspace.Subjects.Single().Apply.Should().BeTrue();
     }
 
+    [Fact]
+    public async Task AlreadyAppliedProposalIsUncheckedAndStaleOverrideIsPruned()
+    {
+        Harness harness = Harness.Create(alreadyApplied: true);
+        MetadataReviewWorkspace initial = await harness.UseCase.ExecuteAsync(
+            harness.State, [], null, CancellationToken.None);
+        MetadataReviewSubject subject = initial.Subjects.Single().Subject;
+        MetadataReviewDecision staleApply = new(
+            MetadataReviewDecisionPolicy.CreateKey(
+                subject, harness.State.GenerationId, harness.State.Revision),
+            true);
+        A.CallTo(() => harness.Store.ReadAsync(A<string>._, A<CancellationToken>._))
+            .Returns([staleApply]);
+
+        MetadataReviewWorkspace converged = await harness.UseCase.ExecuteAsync(
+            harness.State, [], null, CancellationToken.None);
+
+        ReviewedMetadataSubject reviewed = converged.Subjects.Single();
+        reviewed.IsAlreadyApplied.Should().BeTrue();
+        reviewed.Apply.Should().BeFalse();
+        reviewed.IsOverride.Should().BeFalse();
+        A.CallTo(() => harness.Store.WriteAsync(
+                converged.LibraryRoot,
+                A<IReadOnlyList<MetadataReviewDecision>>.That.IsEmpty(),
+                A<CancellationToken>._))
+            .MustHaveHappened();
+    }
+
     private sealed record Harness(
         PrepareMetadataReviewUseCase UseCase,
         IMetadataReviewDecisionStore Store,
         LibraryState State)
     {
-        public static Harness Create()
+        public static Harness Create(bool alreadyApplied = false)
         {
             EditionMetadataProviderIdentity providerIdentity = new("provider", "provider/1.0.0");
             IEditionMetadataProvider provider = A.Fake<IEditionMetadataProvider>();
@@ -160,7 +188,8 @@ public sealed class PrepareMetadataReviewUseCaseTests
                         DateTimeOffset.UnixEpoch,
                         [new(
                             "work", "edition", "Title", ["Author"],
-                            [new EditionMetadataIdentifier("isbn", "9780306406157")]) ]));
+                            [new EditionMetadataIdentifier("isbn", "9780306406157")],
+                            "Provider Publisher") ]));
                 });
             IEditionMetadataProposalCache cache = A.Fake<IEditionMetadataProposalCache>();
             IClock clock = A.Fake<IClock>();
@@ -172,7 +201,8 @@ public sealed class PrepareMetadataReviewUseCaseTests
             PrepareMetadataReviewUseCase useCase = new(resolver, store);
             CalibreBook book = new(
                 new(1), "Title", "Author", [new(new(1), "Author", "Author")],
-                [new("isbn", "9780306406157")], [], "Author/Title (1)");
+                [new("isbn", "9780306406157")], [], "Author/Title (1)",
+                new(publisher: alreadyApplied ? "Provider Publisher" : null));
             LibrarySnapshot snapshot = new(
                 new("library", 27, "C:\\library"), DateTimeOffset.UnixEpoch, [book], []);
             LibraryStateGenerationId generation = new(

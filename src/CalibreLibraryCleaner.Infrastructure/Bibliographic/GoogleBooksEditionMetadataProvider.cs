@@ -20,6 +20,8 @@ internal sealed class GoogleBooksEditionMetadataProvider(
         PropertyNameCaseInsensitive = false,
         MaxDepth = 12,
     };
+    private readonly SemaphoreSlim _rateGate = new(1, 1);
+    private DateTimeOffset _nextRequestUtc = DateTimeOffset.MinValue;
     private int _disposed;
 
     public EditionMetadataProviderIdentity Identity { get; } = new("google-books", ProviderVersion);
@@ -49,6 +51,7 @@ internal sealed class GoogleBooksEditionMetadataProvider(
 
         try
         {
+            await WaitForRateSlotAsync(cancellationToken).ConfigureAwait(false);
             using HttpRequestMessage request = new(HttpMethod.Get, BuildRelativeUri(query, apiKey));
             using CancellationTokenSource timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
             timeout.CancelAfter(options.RequestTimeout);
@@ -92,7 +95,26 @@ internal sealed class GoogleBooksEditionMetadataProvider(
 
     public void Dispose()
     {
-        if (Interlocked.Exchange(ref _disposed, 1) == 0) httpClient.Dispose();
+        if (Interlocked.Exchange(ref _disposed, 1) == 0)
+        {
+            _rateGate.Dispose();
+            httpClient.Dispose();
+        }
+    }
+
+    private async Task WaitForRateSlotAsync(CancellationToken cancellationToken)
+    {
+        await _rateGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            TimeSpan delay = _nextRequestUtc - DateTimeOffset.UtcNow;
+            if (delay > TimeSpan.Zero) await Task.Delay(delay, cancellationToken).ConfigureAwait(false);
+            _nextRequestUtc = DateTimeOffset.UtcNow + options.MinimumRequestInterval;
+        }
+        finally
+        {
+            _rateGate.Release();
+        }
     }
 
     private string BuildRelativeUri(EditionMetadataLookupQuery query, string apiKey)

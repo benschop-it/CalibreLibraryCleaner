@@ -190,9 +190,16 @@ editions endpoint and inspect at most five editions. Google Books uses the bound
 public volumes endpoint only when a current-user DPAPI-
 protected API key is configured; it requests title/subtitle, authors, publisher,
 published date, industry identifiers, and language, but no cover fields in this
-slice. A separate reduced cache stores normalized proposal fields and provenance
-under opaque provider-specific query hashes and never receives the key. The settings
-dialog displays only configured status and masked Save/Replace/Clear input.
+slice. Requests are serialized and paced at no more than one start every three seconds by
+default to avoid burst rate limits. A separate reduced cache stores normalized
+proposal fields and provenance
+under opaque provider-specific query hashes and never receives the key. This cache is
+global to the current Windows user, retains normal entries for 365 days, and prunes
+oldest entries above 1 GiB. Successful candidates are additionally indexed by every
+validated candidate ISBN, so applying provider metadata and rescanning does not turn
+that new ISBN into an avoidable online lookup. Existing successful entries are
+backfilled once per provider/query/alias policy. The settings dialog displays only
+configured status and masked Save/Replace/Clear input.
 
 Domain fusion now chooses one deterministic primary edition using validated ISBN,
 title/author/language compatibility, provider support, publisher/date/series
@@ -201,6 +208,11 @@ are filled only for a shared validated ISBN; same-provider completion additional
 accepts the identical edition ID. Conflicting provider facts lower confidence. Every
 fused result retains provider identities/versions, retrieval times, proposals, field
 sources, reasons, and `edition-metadata-fusion/1.0.0` policy identity.
+
+Mutation orchestration places author metadata writes after every non-author operation
+and sends each author write as a one-operation worker chunk. This preserves fail-closed
+readback verification while allowing all unrelated work to checkpoint before a
+Calibre author canonicalization mismatch can stop the run.
 
 After Candidate cleanup, projected Unified groups are cleared and Application creates
 one metadata-review subject for every retained record. Candidate preparation,

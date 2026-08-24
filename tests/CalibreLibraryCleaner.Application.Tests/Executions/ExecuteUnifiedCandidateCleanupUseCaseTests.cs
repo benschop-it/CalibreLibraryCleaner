@@ -78,8 +78,10 @@ public sealed class ExecuteUnifiedCandidateCleanupUseCaseTests
 
         result.State.Should().Be(UnifiedCandidateCleanupState.Completed);
         CalibreMutationOperation[] operations = harness.Chunks.SelectMany(value => value.Operations).ToArray();
-        operations.Should().HaveCount(8);
+        operations.Should().HaveCount(7);
         operations.Should().OnlyContain(value => value.Kind == CalibreMutationOperationKind.SetMetadata);
+        operations.Should().NotContain(value =>
+            value.Metadata != null && value.Metadata.Field == LibraryMetadataField.Languages);
         operations.Single(value => value.Metadata?.Field == LibraryMetadataField.Identifiers)
             .Metadata!.Values.Should().Equal("isbn:9780140328721");
         CalibreBook keeper = harness.State.GetCurrent(harness.Snapshot.Identity.LibraryRoot)!
@@ -98,7 +100,7 @@ public sealed class ExecuteUnifiedCandidateCleanupUseCaseTests
             false));
         A.CallTo(() => harness.Store.WriteMutationIntentAsync(
             harness.Snapshot.Identity.LibraryRoot,
-            A<LibraryStateMutationIntent>.That.Matches(value => value.OperationCount == 8),
+            A<LibraryStateMutationIntent>.That.Matches(value => value.OperationCount == 7),
             A<CancellationToken>._)).MustHaveHappenedOnceExactly();
     }
 
@@ -242,8 +244,13 @@ public sealed class ExecuteUnifiedCandidateCleanupUseCaseTests
             && value.Explanation.Contains("completed 0 of", StringComparison.Ordinal));
         harness.Logger.Messages.Should().ContainSingle(value =>
             value.Contains("FailureCode=metadata_readback_failed", StringComparison.Ordinal)
+            && value.Contains("GlobalOperation=1", StringComparison.Ordinal)
             && value.Contains("ChunkOperation=1", StringComparison.Ordinal)
+            && value.Contains("OperationId=candidate-metadata:1:title", StringComparison.Ordinal)
+            && value.Contains("RecordId=1", StringComparison.Ordinal)
             && value.Contains("OperationKind=Title", StringComparison.Ordinal)
+            && value.Contains("MetadataSource=qualified-provider/1.0", StringComparison.Ordinal)
+            && value.Contains("ExpectedValueCount=1", StringComparison.Ordinal)
             && value.Contains("UncommittedSuccessfulPrefix=0", StringComparison.Ordinal));
         attempted.Should().NotBeNull();
         attempted!.Operations[0].Kind.Should().Be(CalibreMutationOperationKind.SetMetadata);
@@ -261,6 +268,21 @@ public sealed class ExecuteUnifiedCandidateCleanupUseCaseTests
     }
 
     [Fact]
+    public async Task AuthorMetadataRunsLastInSingleOperationChunk()
+    {
+        Harness harness = await Harness.CreateAsync([Book(1, Format(1, "EPUB", 'a'))]);
+
+        UnifiedCandidateCleanupResult result = await harness.ExecuteMetadataAsync(Candidate());
+
+        result.State.Should().Be(UnifiedCandidateCleanupState.Completed);
+        harness.Chunks.Should().HaveCount(2);
+        harness.Chunks[0].Operations.Should().NotContain(value =>
+            value.Metadata != null && value.Metadata.Field == LibraryMetadataField.Authors);
+        harness.Chunks[1].Operations.Should().ContainSingle(value =>
+            value.Metadata != null && value.Metadata.Field == LibraryMetadataField.Authors);
+    }
+
+    [Fact]
     public async Task CheckedSingletonExecutesMetadataWithoutCleanupOperations()
     {
         Harness harness = await Harness.CreateAsync([Book(1, Format(1, "EPUB", 'a'))]);
@@ -272,6 +294,25 @@ public sealed class ExecuteUnifiedCandidateCleanupUseCaseTests
             .Should().OnlyContain(value => value.Kind == CalibreMutationOperationKind.SetMetadata);
         harness.State.GetCurrent(harness.Snapshot.Identity.LibraryRoot)!.Snapshot.Books
             .Should().ContainSingle(value => value.Title == "Qualified Title");
+    }
+
+    [Fact]
+    public async Task StaleCheckedAlreadyAppliedCandidateCreatesNoWorkerOperations()
+    {
+        Harness harness = await Harness.CreateAsync([Book(1, Format(1, "EPUB", 'a'))]);
+        EditionMetadataCandidate candidate = new(
+            "work",
+            "edition",
+            "Book 1",
+            ["Author"],
+            languages: ["en"]);
+
+        UnifiedCandidateCleanupResult result = await harness.ExecuteMetadataAsync(candidate);
+
+        result.State.Should().Be(UnifiedCandidateCleanupState.NothingToDo);
+        harness.Chunks.Should().BeEmpty();
+        A.CallTo(() => harness.Workers.TryOpenAsync(
+            A<OpenCalibreMutationWorkerRequest>._, A<CancellationToken>._)).MustNotHaveHappened();
     }
 
     [Fact]
@@ -324,11 +365,22 @@ public sealed class ExecuteUnifiedCandidateCleanupUseCaseTests
         A.CallTo(() => harness.Store.AppendDeltaBatchAsync(
                 A<string>._,
                 A<IReadOnlyList<LibraryStateDelta>>.That.Matches(values =>
-                    values.Count == result.SkippedMetadataFieldCount
-                    && values.All(value => value is SkipMetadataLibraryStateDelta)),
+                    values.Count == result.SkippedMetadataFieldCount - 1
+                    && values.All(value => value is SkipMetadataLibraryStateDelta
+                        && ((SkipMetadataLibraryStateDelta)value).Field != LibraryMetadataField.Authors)),
                 A<LibraryState>._,
                 A<bool>._,
                 A<string>._,
+                false,
+                A<CancellationToken>._))
+            .MustHaveHappenedOnceExactly();
+        A.CallTo(() => harness.Store.AppendDeltaBatchAsync(
+                A<string>._,
+                A<IReadOnlyList<LibraryStateDelta>>.That.Matches(values =>
+                    values.Count == 1 && values.Single() is SkipMetadataLibraryStateDelta),
+                A<LibraryState>._,
+                A<bool>._,
+                A<string?>._,
                 true,
                 A<CancellationToken>._))
             .MustHaveHappenedOnceExactly();
@@ -470,6 +522,12 @@ public sealed class ExecuteUnifiedCandidateCleanupUseCaseTests
         result.State.Should().Be(UnifiedCandidateCleanupState.PartiallyCompleted);
         harness.State.GetCurrent(harness.Snapshot.Identity.LibraryRoot)!.Status
             .Should().Be(LibraryStateStatus.Uncertain);
+        harness.Logger.Messages.Should().ContainSingle(value =>
+            value.Contains("GlobalOperation=0", StringComparison.Ordinal)
+            && value.Contains("ChunkOperation=0", StringComparison.Ordinal)
+            && value.Contains("OperationId=unknown", StringComparison.Ordinal)
+            && value.Contains("RecordId=0", StringComparison.Ordinal)
+            && value.Contains("OperationKind=Unknown", StringComparison.Ordinal));
         A.CallTo(() => harness.Worker.ExecuteChunkAsync(
             A<CalibreMutationChunkRequest>._, A<CancellationToken>._)).MustHaveHappenedOnceExactly();
     }
