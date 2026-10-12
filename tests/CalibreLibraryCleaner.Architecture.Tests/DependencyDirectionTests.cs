@@ -232,6 +232,23 @@ public sealed class DependencyDirectionTests
     }
 
     [Fact]
+    public void DevelopmentBuildCopiesCompletePdfWorkerRuntimeClosure()
+    {
+        XDocument project = XDocument.Load(Path.Combine(
+            RepositoryRoot, "src", WpfProject, $"{WpfProject}.csproj"));
+        XElement target = project.Descendants().Single(element =>
+            element.Name.LocalName == "Target"
+            && (string?)element.Attribute("Name") == "CopyPdfInspectionWorkerForDevelopmentBuild");
+        XElement workerFiles = target.Descendants().Single(element =>
+            element.Name.LocalName == "_PdfInspectionWorkerFile");
+        XElement copy = target.Descendants().Single(element => element.Name.LocalName == "Copy");
+
+        ((string?)workerFiles.Attribute("Include")).Should().EndWith("net10.0\\**\\*");
+        ((string?)copy.Attribute("DestinationFiles")).Should().Contain("%(RecursiveDir)");
+        ((string?)copy.Attribute("DestinationFolder")).Should().BeNull();
+    }
+
+    [Fact]
     public void ExactReviewKeepsGroupAndMemberGridsVisible()
     {
         XDocument window = XDocument.Load(Path.Combine(
