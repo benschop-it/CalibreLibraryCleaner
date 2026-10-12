@@ -5,12 +5,128 @@ using System.Text;
 using System.Text.Json;
 using CalibreLibraryCleaner.Application.Abstractions;
 using CalibreLibraryCleaner.Application.Assessments.Pdf;
+using CalibreLibraryCleaner.Application.Metadata;
 using CalibreLibraryCleaner.Domain.Assessments;
 
 namespace CalibreLibraryCleaner.Infrastructure.Pdf;
 
-public sealed class IsolatedPdfInspector(PdfWorkerOptions options) : IPdfInspector
+public sealed class IsolatedPdfInspector(PdfWorkerOptions options) : IPdfInspector, IPdfAuthorMetadataInspector
 {
+    public async Task<EmbeddedAuthorMetadataObservation> InspectAuthorMetadataAsync(
+        PdfInspectionRequest request,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        request.Limits.Validate();
+        EmbeddedAuthorMetadataCacheKey key = new(
+            "PDF", request.Fingerprint, EmbeddedAuthorMetadataVersions.PdfExtractor,
+            EmbeddedAuthorMetadataVersions.PdfLimits);
+        string executable = Path.GetFullPath(options.ExecutablePath);
+        if (!File.Exists(executable)) return Failed("PDF_AUTHOR_METADATA.WORKER_MISSING");
+        ProcessStartInfo startInfo = CreateStartInfo(executable, request.Limits);
+        using Process process = new() { StartInfo = startInfo };
+        try
+        {
+            if (!process.Start()) return Failed("PDF_AUTHOR_METADATA.WORKER_START_FAILED");
+        }
+        catch (Exception exception) when (exception is InvalidOperationException or IOException
+                                           or System.ComponentModel.Win32Exception)
+        {
+            return Failed("PDF_AUTHOR_METADATA.WORKER_START_FAILED");
+        }
+
+        IDisposable? assignedJob = null;
+        if (OperatingSystem.IsWindows())
+        {
+            try { assignedJob = options.JobObjectFactory(process, request.Limits.WorkingSetBytes); }
+            catch (Exception) { }
+            if (assignedJob is null)
+            {
+                await TryTerminateAsync(process).ConfigureAwait(false);
+                return Failed("PDF_AUTHOR_METADATA.WORKER_JOB_FAILED");
+            }
+        }
+
+        using IDisposable? job = assignedJob;
+        Stopwatch elapsed = Stopwatch.StartNew();
+        PdfWorkerMessageBudget responseBudget = new(request.Limits.MaximumWorkerMessageBytes);
+        Task discardError = DrainDiscardedErrorAsync(process.StandardError, CancellationToken.None);
+        using CancellationTokenSource wallTime = new(TimeSpan.FromSeconds(request.Limits.WallTimeSeconds));
+        using CancellationTokenSource linked = CancellationTokenSource.CreateLinkedTokenSource(
+            cancellationToken, wallTime.Token);
+        CancellationToken token = linked.Token;
+        try
+        {
+            await PdfWorkerProtocol.WriteAsync(
+                process.StandardInput,
+                new PdfWorkerRequestMessage(PdfWorkerProtocol.Version, "AuthorMetadataRequest", request),
+                request.Limits.MaximumWorkerMessageBytes,
+                token).ConfigureAwait(false);
+            Task<PdfWorkerOutputMessage> read = PdfWorkerProtocol.ReadAsync<PdfWorkerOutputMessage>(
+                process.StandardOutput,
+                request.Limits.MaximumWorkerMessageBytes,
+                token,
+                budget: responseBudget);
+            while (!read.IsCompleted)
+            {
+                await Task.WhenAny(read, Task.Delay(100, token)).ConfigureAwait(false);
+                PdfInspectionProblemCode? resourceFailure = CheckResources(process, request.Limits);
+                if (resourceFailure is not null)
+                {
+                    await TryTerminateAsync(process).ConfigureAwait(false);
+                    return Failed($"PDF_AUTHOR_METADATA.{resourceFailure.Value.ToString().ToUpperInvariant()}");
+                }
+            }
+            PdfWorkerOutputMessage message = await read.ConfigureAwait(false);
+            if (message.ProtocolVersion != PdfWorkerProtocol.Version
+                || message.Kind != "AuthorMetadataCompleted"
+                || message.AuthorMetadata is null
+                || message.Header is not null
+                || message.Progress is not null
+                || message.Result is not null
+                || message.FailureCode is not null
+                || message.AuthorMetadata.Format != key.Format
+                || message.AuthorMetadata.SizeInBytes != key.Fingerprint.SizeInBytes
+                || message.AuthorMetadata.Sha256 != key.Fingerprint.Sha256.Value
+                || message.AuthorMetadata.ExtractorVersion != key.ExtractorVersion
+                || message.AuthorMetadata.LimitsVersion != key.LimitsVersion)
+            {
+                await TryTerminateAsync(process).ConfigureAwait(false);
+                return Failed("PDF_AUTHOR_METADATA.WORKER_PROTOCOL_INVALID");
+            }
+            process.StandardInput.Close();
+            await process.WaitForExitAsync(token).ConfigureAwait(false);
+            await discardError.ConfigureAwait(false);
+            return process.ExitCode == 0 && CurrentIdentityMatches(request)
+                ? new(
+                    key,
+                    message.AuthorMetadata.Status,
+                    message.AuthorMetadata.EmbeddedTitle,
+                    message.AuthorMetadata.Authors,
+                    message.AuthorMetadata.ProblemCode)
+                : Failed("PDF_AUTHOR_METADATA.CHANGED_FILE");
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            await TryTerminateAsync(process).ConfigureAwait(false);
+            throw;
+        }
+        catch (OperationCanceledException)
+        {
+            await TryTerminateAsync(process).ConfigureAwait(false);
+            return Failed("PDF_AUTHOR_METADATA.PARSER_TIMEOUT");
+        }
+        catch (Exception exception) when (exception is IOException or InvalidDataException
+                                           or EndOfStreamException or JsonException)
+        {
+            await TryTerminateAsync(process).ConfigureAwait(false);
+            return Failed("PDF_AUTHOR_METADATA.WORKER_PROTOCOL_INVALID");
+        }
+
+        EmbeddedAuthorMetadataObservation Failed(string code) => new(
+            key, EmbeddedAuthorMetadataStatus.Unavailable, null, [], code);
+    }
+
     public async Task<PdfInspectionResult> InspectAsync(
         PdfInspectionRequest request,
         Func<PdfDocumentHeaderFacts, CancellationToken, ValueTask<IReadOnlyList<int>>> selectPages,
@@ -28,19 +144,7 @@ public sealed class IsolatedPdfInspector(PdfWorkerOptions options) : IPdfInspect
             return PdfInspectionResult.Failed(request.BookId, request.ExpectedRelativePath, PdfInspectionProblemCode.WorkerCrashed, PdfOpenStatus.WorkerFailed);
         }
 
-        ProcessStartInfo startInfo = new(executable)
-        {
-            UseShellExecute = false,
-            CreateNoWindow = true,
-            RedirectStandardInput = true,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-        };
-        startInfo.ArgumentList.Add("--stdio");
-        startInfo.Environment.Clear();
-        startInfo.Environment["DOTNET_GCHeapHardLimit"] = request.Limits.ManagedHeapBytes.ToString("X", CultureInfo.InvariantCulture);
-        startInfo.Environment["DOTNET_EnableDiagnostics"] = "0";
-        startInfo.Environment["COMPlus_EnableDiagnostics"] = "0";
+        ProcessStartInfo startInfo = CreateStartInfo(executable, request.Limits);
 
         using Process process = new() { StartInfo = startInfo };
         try
@@ -257,6 +361,11 @@ public sealed class IsolatedPdfInspector(PdfWorkerOptions options) : IPdfInspect
             return true;
         }
 
+        return CurrentIdentityMatches(request);
+    }
+
+    internal static bool CurrentIdentityMatches(PdfInspectionRequest request)
+    {
         try
         {
             string root = Path.TrimEndingDirectorySeparator(Path.GetFullPath(request.LibraryRoot));
@@ -300,6 +409,24 @@ public sealed class IsolatedPdfInspector(PdfWorkerOptions options) : IPdfInspect
         {
             return false;
         }
+    }
+
+    private static ProcessStartInfo CreateStartInfo(string executable, PdfInspectionLimits limits)
+    {
+        ProcessStartInfo startInfo = new(executable)
+        {
+            UseShellExecute = false,
+            CreateNoWindow = true,
+            RedirectStandardInput = true,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+        };
+        startInfo.ArgumentList.Add("--stdio");
+        startInfo.Environment.Clear();
+        startInfo.Environment["DOTNET_GCHeapHardLimit"] = limits.ManagedHeapBytes.ToString("X", CultureInfo.InvariantCulture);
+        startInfo.Environment["DOTNET_EnableDiagnostics"] = "0";
+        startInfo.Environment["COMPlus_EnableDiagnostics"] = "0";
+        return startInfo;
     }
 
     private static async Task DrainDiscardedErrorAsync(StreamReader reader, CancellationToken cancellationToken)

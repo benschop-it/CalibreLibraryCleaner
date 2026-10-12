@@ -2,6 +2,7 @@ using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using CalibreLibraryCleaner.Application.Assessments.Pdf;
+using CalibreLibraryCleaner.Application.Metadata;
 using CalibreLibraryCleaner.Domain.Libraries;
 
 namespace CalibreLibraryCleaner.Infrastructure.Pdf;
@@ -177,4 +178,28 @@ internal sealed record PdfWorkerOutputMessage(
     PdfDocumentHeaderFacts? Header = null,
     PdfInspectionProgress? Progress = null,
     PdfInspectionResult? Result = null,
+    PdfWorkerAuthorMetadataMessage? AuthorMetadata = null,
     PdfInspectionProblemCode? FailureCode = null);
+
+internal sealed record PdfWorkerAuthorMetadataMessage(
+    string Format,
+    long SizeInBytes,
+    string Sha256,
+    string ExtractorVersion,
+    string LimitsVersion,
+    EmbeddedAuthorMetadataStatus Status,
+    string? EmbeddedTitle,
+    IReadOnlyList<string> Authors,
+    string? ProblemCode)
+{
+    public static PdfWorkerAuthorMetadataMessage From(EmbeddedAuthorMetadataObservation value) => new(
+        value.Key.Format,
+        value.Key.Fingerprint.SizeInBytes,
+        value.Key.Fingerprint.Sha256.Value,
+        value.Key.ExtractorVersion,
+        value.Key.LimitsVersion,
+        value.Status,
+        value.EmbeddedTitle,
+        value.Authors,
+        value.ProblemCode);
+}

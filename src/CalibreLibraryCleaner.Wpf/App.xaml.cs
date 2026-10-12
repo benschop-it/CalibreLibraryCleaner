@@ -58,6 +58,7 @@ public partial class App : System.Windows.Application
         builder.Services.AddSingleton<ResolveBibliographicEvidenceUseCase>();
         builder.Services.AddSingleton<ResolveEditionMetadataProposalsUseCase>();
         builder.Services.AddSingleton<PrepareMetadataReviewUseCase>();
+        builder.Services.AddSingleton<InspectEmbeddedAuthorMetadataUseCase>();
         builder.Services.AddSingleton<ObserveLocalEmbeddingEvidenceUseCase>(serviceProvider =>
         {
             Infrastructure.LocalModels.OllamaEmbeddingOptions options = serviceProvider

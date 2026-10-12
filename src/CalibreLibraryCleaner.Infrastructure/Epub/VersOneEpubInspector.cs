@@ -11,6 +11,7 @@ using System.Xml.Linq;
 using CalibreLibraryCleaner.Application.Abstractions;
 using CalibreLibraryCleaner.Application.Assessments;
 using CalibreLibraryCleaner.Application.Libraries;
+using CalibreLibraryCleaner.Application.Metadata;
 using CalibreLibraryCleaner.Domain.Assessments;
 using CalibreLibraryCleaner.Domain.Libraries;
 using CalibreLibraryCleaner.Domain.Matching;
@@ -34,6 +35,45 @@ internal sealed partial class VersOneEpubInspector(ILogger<VersOneEpubInspector>
         LogLevel.Debug,
         new EventId(1, nameof(InspectionFailed)),
         "EPUB inspection returned a structured failure with code {ReasonCode}");
+
+    public async Task<EmbeddedAuthorMetadataObservation> InspectAuthorMetadataAsync(
+        EpubInspectionRequest request,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        EmbeddedAuthorMetadataCacheKey key = new(
+            "EPUB", request.Fingerprint, EmbeddedAuthorMetadataVersions.EpubExtractor,
+            EmbeddedAuthorMetadataVersions.EpubLimits);
+        try
+        {
+            EnsureCurrentFile(request);
+            if (request.Observation.Length == 0 || request.Observation.Length > request.Limits.MaximumFileBytes)
+                return Unavailable("EPUB_AUTHOR_METADATA.FILE_BOUNDS");
+            PreflightResult preflight = await PreflightAsync(request, cancellationToken).ConfigureAwait(false);
+            if (preflight.Problem is not null)
+                return Unavailable($"EPUB_AUTHOR_METADATA.{preflight.Problem.Code.ToString().ToUpperInvariant()}");
+            (string? title, string[] authors) = await ReadPackageAuthorMetadataAsync(
+                request, cancellationToken).ConfigureAwait(false);
+            EnsureCurrentFile(request);
+            return authors.Length == 0
+                ? new(key, EmbeddedAuthorMetadataStatus.Missing, title, [])
+                : new(key, EmbeddedAuthorMetadataStatus.Available, title, authors);
+        }
+        catch (OperationCanceledException) { throw; }
+        catch (FileChangedException)
+        {
+            return Unavailable("EPUB_AUTHOR_METADATA.CHANGED_FILE");
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException
+                                           or SecurityException or InvalidDataException or XmlException
+                                           or InspectionLimitException or OverflowException)
+        {
+            return Unavailable("EPUB_AUTHOR_METADATA.UNAVAILABLE");
+        }
+
+        EmbeddedAuthorMetadataObservation Unavailable(string code) => new(
+            key, EmbeddedAuthorMetadataStatus.Unavailable, null, [], code);
+    }
 
     public async Task<EpubInspectionResult> InspectAsync(
         EpubInspectionRequest request,
@@ -1698,6 +1738,36 @@ internal sealed partial class VersOneEpubInspector(ILogger<VersOneEpubInspector>
                 .Where(problem => problem.IssueCode is not null)
                 .Select(problem => new EpubInspectionIssue(problem.IssueCode!.Value, "Preflight"))
                 .ToArray());
+    }
+
+    private static async Task<(string? Title, string[] Authors)> ReadPackageAuthorMetadataAsync(
+        EpubInspectionRequest request,
+        CancellationToken cancellationToken)
+    {
+        await using FileStream file = OpenRead(request.FullPath);
+        EnsureCurrentFile(request);
+        using CancellationCheckingStream guarded = new(file, cancellationToken);
+        using ZipArchive archive = new(guarded, ZipArchiveMode.Read, leaveOpen: true);
+        ReadBudget readBudget = new(request.Limits.MaximumDeclaredUncompressedBytes);
+        Dictionary<string, ZipArchiveEntry> entries = archive.Entries.ToDictionary(
+            entry => NormalizeRequired(entry.FullName), StringComparer.Ordinal);
+        XDocument container = await ReadXmlAsync(
+            entries["META-INF/container.xml"], request.Limits.MaximumXmlBytes, readBudget,
+            cancellationToken).ConfigureAwait(false);
+        string? packageReference = container.Descendants()
+            .FirstOrDefault(element => element.Name.LocalName == "rootfile")
+            ?.Attribute("full-path")?.Value;
+        if (!EpubArchivePathResolver.TryNormalizeEntryName(packageReference, out string packagePath)
+            || !entries.TryGetValue(packagePath, out ZipArchiveEntry? packageEntry))
+            throw new InvalidDataException("Package path is invalid.");
+        XDocument package = await ReadXmlAsync(
+            packageEntry, request.Limits.MaximumXmlBytes, readBudget, cancellationToken)
+            .ConfigureAwait(false);
+        XElement? metadata = package.Root?.Descendants()
+            .FirstOrDefault(element => element.Name.LocalName == "metadata");
+        string? title = Bound(metadata?.Descendants()
+            .FirstOrDefault(element => element.Name.LocalName == "title")?.Value);
+        return (title, Values(metadata, "creator"));
     }
 
     private static FileStream OpenRead(string path) => new(path, new FileStreamOptions

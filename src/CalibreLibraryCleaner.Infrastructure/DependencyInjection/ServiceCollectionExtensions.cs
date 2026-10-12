@@ -61,6 +61,8 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<IEditionMetadataProposalCache, FileEditionMetadataProposalCache>();
         services.AddSingleton(new MetadataReviewDecisionStoreOptions());
         services.AddSingleton<IMetadataReviewDecisionStore, FileMetadataReviewDecisionStore>();
+        services.AddSingleton(new EmbeddedAuthorMetadataCacheOptions());
+        services.AddSingleton<IEmbeddedAuthorMetadataCache, FileEmbeddedAuthorMetadataCache>();
         services.AddSingleton(new EditionCoverStagingOptions());
         services.AddSingleton<IEditionCoverStager>(provider => new BoundedEditionCoverStager(
             new HttpClient(new SocketsHttpHandler { AllowAutoRedirect = false })
@@ -119,7 +121,11 @@ public static class ServiceCollectionExtensions
             return new OllamaLocalEmbeddingProvider(client, embeddingOptions);
         });
         services.AddSingleton(new PdfWorkerOptions());
-        services.AddSingleton<IPdfInspector, IsolatedPdfInspector>();
+        services.AddSingleton<IsolatedPdfInspector>();
+        services.AddSingleton<IPdfInspector>(provider =>
+            provider.GetRequiredService<IsolatedPdfInspector>());
+        services.AddSingleton<IPdfAuthorMetadataInspector>(provider =>
+            provider.GetRequiredService<IsolatedPdfInspector>());
         services.AddSingleton<IRecommendationExporter, VersionedJsonRecommendationExporter>();
         services.AddSingleton(new CalibreExecutionOptions());
         services.AddSingleton(new ExecutionStorageOptions());

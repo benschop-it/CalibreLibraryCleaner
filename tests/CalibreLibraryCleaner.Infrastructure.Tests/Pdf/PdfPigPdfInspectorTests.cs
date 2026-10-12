@@ -1,4 +1,5 @@
 using CalibreLibraryCleaner.Application.Assessments.Pdf;
+using CalibreLibraryCleaner.Application.Metadata;
 using CalibreLibraryCleaner.Domain.Assessments;
 using CalibreLibraryCleaner.Infrastructure.Pdf;
 using CalibreLibraryCleaner.Infrastructure.Tests.Execution;
@@ -11,6 +12,19 @@ namespace CalibreLibraryCleaner.Infrastructure.Tests.Pdf;
 public sealed class PdfPigPdfInspectorTests
 {
     private readonly PdfPigPdfInspector inspector = new();
+
+    [Fact]
+    public async Task AuthorMetadataInspectionReadsXmpCreatorsWithoutPages()
+    {
+        const string xmp = "<x:xmpmeta xmlns:x=\"adobe:ns:meta/\" xmlns:dc=\"http://purl.org/dc/elements/1.1/\" xmlns:rdf=\"http://www.w3.org/1999/02/22-rdf-syntax-ns#\"><rdf:RDF><rdf:Description><dc:creator><rdf:Seq><rdf:li>First Writer</rdf:li><rdf:li>Second Writer</rdf:li></rdf:Seq></dc:creator></rdf:Description></rdf:RDF></x:xmpmeta>";
+        using SyntheticPdfFixture fixture = SyntheticPdfFixture.CreateXmpDocument(xmp);
+
+        EmbeddedAuthorMetadataObservation result = await PdfPigPdfInspector
+            .InspectAuthorMetadataAsync(fixture.CreateRequest(), CancellationToken.None);
+
+        result.Status.Should().Be(EmbeddedAuthorMetadataStatus.Available);
+        result.Authors.Should().Equal("First Writer", "Second Writer");
+    }
 
     [Fact]
     public async Task InspectAsyncReadsBoundedTextMetadataAndValidIsbnEvidence()
@@ -563,6 +577,28 @@ public sealed class PdfPigPdfInspectorTests
 
         result.OpenStatus.Should().Be(PdfOpenStatus.Opened, System.Text.Json.JsonSerializer.Serialize(result));
         result.PageFacts.Should().ContainSingle(page => page.Parsed && page.HasUsefulText);
+    }
+
+    [Fact]
+    public async Task IsolatedInspectorReturnsAuthorMetadataWithoutPageSelection()
+    {
+        using SyntheticPdfFixture fixture = SyntheticPdfFixture.CreateText(
+            pageCount: 20, author: "Metadata Writer");
+        string worker = Path.Combine(
+            FindRepositoryRoot(),
+            "src",
+            "CalibreLibraryCleaner.PdfWorker",
+            "bin",
+            "Debug",
+            "net10.0",
+            OperatingSystem.IsWindows() ? "CalibreLibraryCleaner.PdfWorker.exe" : "CalibreLibraryCleaner.PdfWorker");
+        IsolatedPdfInspector isolated = new(new PdfWorkerOptions { ExecutablePath = worker });
+
+        EmbeddedAuthorMetadataObservation result = await isolated.InspectAuthorMetadataAsync(
+            fixture.CreateRequest(), CancellationToken.None);
+
+        result.Status.Should().Be(EmbeddedAuthorMetadataStatus.Available);
+        result.Authors.Should().Equal("Metadata Writer");
     }
 
     [Fact]

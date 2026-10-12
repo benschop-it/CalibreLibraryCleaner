@@ -8,6 +8,7 @@ using System.Xml;
 using CalibreLibraryCleaner.Application.Abstractions;
 using CalibreLibraryCleaner.Application.Assessments;
 using CalibreLibraryCleaner.Application.Libraries;
+using CalibreLibraryCleaner.Application.Metadata;
 using CalibreLibraryCleaner.Domain.Assessments;
 using CalibreLibraryCleaner.Domain.Libraries;
 using CalibreLibraryCleaner.Infrastructure.Epub;
@@ -21,6 +22,28 @@ namespace CalibreLibraryCleaner.Infrastructure.Tests.Epub;
 
 public sealed class VersOneEpubInspectorTests
 {
+    [Fact]
+    public async Task AuthorMetadataInspectionStopsBeforeMissingSpineContent()
+    {
+        using TemporaryDirectory directory = new();
+        string path = Path.Combine(directory.Path, "MetadataOnly.epub");
+        SyntheticEpubBuilder.CreateFromEntries(
+            path,
+            StandardEntries(
+                packageBody: "<manifest><item id=\"missing\" href=\"missing.xhtml\" media-type=\"application/xhtml+xml\"/></manifest><spine><itemref idref=\"missing\"/></spine>")
+            .Where(entry => entry.Name != "OEBPS/chapter.xhtml"));
+        EpubInspectionRequest request = await CreateRequestAsync(path);
+        using ServiceProvider provider = TestServices.CreateProvider();
+
+        EmbeddedAuthorMetadataObservation result = await provider.GetRequiredService<IEpubInspector>()
+            .InspectAuthorMetadataAsync(request, CancellationToken.None);
+
+        result.Status.Should().Be(EmbeddedAuthorMetadataStatus.Available);
+        result.EmbeddedTitle.Should().Be("Synthetic");
+        result.Authors.Should().Equal("Author");
+        result.Key.Fingerprint.Should().Be(request.Fingerprint);
+    }
+
     [Fact]
     public async Task ValidSyntheticEpubIsInspectedWithoutExtraction()
     {

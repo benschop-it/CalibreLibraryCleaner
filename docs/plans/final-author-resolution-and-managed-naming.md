@@ -421,6 +421,30 @@ TestCalibre DLL while its test-created process was exiting. The failed test and
 provenance round-trip both passed on isolated rerun (2/2). The solution build passed
 all projects. Standard whole-solution verification remains for the completed plan.
 
+Selective embedded-metadata inspection is now implemented for unresolved demanded
+EPUB/PDF formats. EPUB inspection performs existing physical identity and archive
+preflight, then reads only `container.xml` and the OPF metadata before stopping; a
+missing spine document fixture confirms it does not traverse content. PDF inspection
+runs only in the isolated PdfWorker with the existing cleared environment, Job Object,
+heap/CPU/working-set/wall-time limits, strict file/hash checks, and bounded protocol.
+Its metadata request reads Info and bounded XMP `dc:creator` values without the
+DocumentOpened/PageSelection exchange or page parsing. PDF Creator/Producer software
+is not treated as author evidence.
+
+Observations contain only bounded title/author facts, status/problem code, exact file
+fingerprint, extractor version, and limits version. A separate 256 MiB/100,000-entry
+atomic cache uses opaque SHA-256 filenames, exact identity validation, reparse checks,
+and oldest-first pruning; corruption, version changes, and cache I/O failures become
+misses. Final preparation validates the library once, touches only `NeedsInspection`
+EPUB/PDF formats, uses cache hits before path resolution, and reports cache-hit and
+inspection counters. Clean records produce no cache, path-resolution, or inspector
+calls. Front-matter escalation remains the next unimplemented evidence stage.
+
+Embedded-metadata slice verification passed the complete Application suite (243/243),
+complete Infrastructure suite (283/283), focused missing-spine/cache/XMP/isolated-
+worker tests, and a full solution build. Formatting required only scoped CRLF final-
+newline correction on new files; standard completed-plan gates remain pending.
+
 ## Final outcome
 
 Implementation in progress. The first read-only policy/review slice and the minimal

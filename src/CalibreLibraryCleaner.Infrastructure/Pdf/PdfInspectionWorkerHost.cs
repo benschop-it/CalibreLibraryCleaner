@@ -2,6 +2,7 @@ using System.Text;
 using System.Text.Json;
 using System.Threading.Channels;
 using CalibreLibraryCleaner.Application.Assessments.Pdf;
+using CalibreLibraryCleaner.Application.Metadata;
 
 namespace CalibreLibraryCleaner.Infrastructure.Pdf;
 
@@ -22,7 +23,7 @@ public static class PdfInspectionWorkerHost
                 PdfInspectionLimits.V1.MaximumWorkerMessageBytes,
                 cancellationToken).ConfigureAwait(false);
             if (!string.Equals(request.ProtocolVersion, PdfWorkerProtocol.Version, StringComparison.Ordinal)
-                || !string.Equals(request.Kind, "Request", StringComparison.Ordinal)
+                || request.Kind is not ("Request" or "AuthorMetadataRequest")
                 || request.Request is null)
             {
                 return 2;
@@ -38,6 +39,21 @@ public static class PdfInspectionWorkerHost
         try
         {
             limits.Validate();
+            if (request.Kind == "AuthorMetadataRequest")
+            {
+                EmbeddedAuthorMetadataObservation observation = await PdfPigPdfInspector
+                    .InspectAuthorMetadataAsync(request.Request, cancellationToken).ConfigureAwait(false);
+                await PdfWorkerProtocol.WriteAsync(
+                    writer,
+                    new PdfWorkerOutputMessage(
+                        PdfWorkerProtocol.Version,
+                        "AuthorMetadataCompleted",
+                        AuthorMetadata: PdfWorkerAuthorMetadataMessage.From(observation)),
+                    limits.MaximumWorkerMessageBytes,
+                    cancellationToken,
+                    outputBudget).ConfigureAwait(false);
+                return 0;
+            }
             using SemaphoreSlim writeGate = new(1, 1);
             int managedHeapWarning = 0;
             Channel<PdfInspectionProgress> progressChannel = Channel.CreateBounded<PdfInspectionProgress>(

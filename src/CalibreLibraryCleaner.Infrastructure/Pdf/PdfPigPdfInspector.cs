@@ -7,6 +7,7 @@ using System.Text.RegularExpressions;
 using System.Xml;
 using CalibreLibraryCleaner.Application.Abstractions;
 using CalibreLibraryCleaner.Application.Assessments.Pdf;
+using CalibreLibraryCleaner.Application.Metadata;
 using CalibreLibraryCleaner.Domain.Assessments;
 using CalibreLibraryCleaner.Domain.Libraries;
 using UglyToad.PdfPig;
@@ -22,6 +23,72 @@ namespace CalibreLibraryCleaner.Infrastructure.Pdf;
 internal sealed partial class PdfPigPdfInspector : IPdfInspector
 {
     private const int BufferSize = 128 * 1024;
+
+    internal static async Task<EmbeddedAuthorMetadataObservation> InspectAuthorMetadataAsync(
+        PdfInspectionRequest request,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        request.Limits.Validate();
+        EmbeddedAuthorMetadataCacheKey key = new(
+            "PDF", request.Fingerprint, EmbeddedAuthorMetadataVersions.PdfExtractor,
+            EmbeddedAuthorMetadataVersions.PdfLimits);
+        if (!TryValidatePath(request, out PdfInspectionProblemCode pathProblem))
+            return Unavailable(pathProblem);
+        try
+        {
+            FileInfo initial = new(request.FullPath);
+            if (!initial.Exists || initial.Length == 0 || initial.Length > request.Limits.MaximumFileBytes
+                || !MatchesObservation(initial, request))
+                return Unavailable(PdfInspectionProblemCode.ChangedFile);
+            await using FileStream stream = OpenRead(request.FullPath);
+            RawPreflightFacts raw = await InspectRawFileAsync(stream, request, cancellationToken)
+                .ConfigureAwait(false);
+            if (raw.Problem is { } problem) return Unavailable(problem);
+            if (!CryptographicOperations.FixedTimeEquals(
+                    Convert.FromHexString(raw.Sha256),
+                    Convert.FromHexString(request.Fingerprint.Sha256.Value)))
+                return Unavailable(PdfInspectionProblemCode.ChangedFile);
+            stream.Position = 0;
+            QuotaFilterProvider filterProvider = new(request.Limits);
+            using PdfDocument document = PdfDocument.Open(stream, new ParsingOptions
+            {
+                UseLenientParsing = false,
+                SkipMissingFonts = false,
+                ClipPaths = false,
+                UseActualText = false,
+                MaxStackDepth = request.Limits.MaximumStackDepth,
+                Logger = SilentPdfPigLog.Instance,
+                FilterProvider = filterProvider,
+            });
+            if (document.Structure.CrossReferenceTable.ObjectOffsets.Count > request.Limits.MaximumObjects)
+                return Unavailable(PdfInspectionProblemCode.ObjectLimitExceeded);
+            MetadataFacts metadata = ReadMetadata(document.Information, request.Limits);
+            if (metadata.LimitExceeded) return Unavailable(PdfInspectionProblemCode.MetadataLimitExceeded);
+            XmpReadResult xmp = ReadXmp(document, request.Limits, cancellationToken);
+            if (xmp.Problem is { } xmpProblem) return Unavailable(xmpProblem);
+            List<string> authors = [];
+            if (metadata.Summary.Author.Status == PdfMetadataValueStatus.Present)
+                authors.Add(metadata.Summary.Author.Value!);
+            authors.AddRange(xmp.Authors);
+            string[] distinct = authors.Distinct(StringComparer.Ordinal).Take(32).ToArray();
+            EnsureUnchanged(initial, request);
+            return distinct.Length == 0
+                ? new(key, EmbeddedAuthorMetadataStatus.Missing, metadata.Summary.Title.Value, [])
+                : new(key, EmbeddedAuthorMetadataStatus.Available, metadata.Summary.Title.Value, distinct);
+        }
+        catch (OperationCanceledException) { throw; }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException
+                                           or SecurityException or InvalidDataException or ArgumentException
+                                           or NotSupportedException or PdfDocumentFormatException)
+        {
+            return Unavailable(PdfInspectionProblemCode.MalformedStructure);
+        }
+
+        EmbeddedAuthorMetadataObservation Unavailable(PdfInspectionProblemCode code) => new(
+            key, EmbeddedAuthorMetadataStatus.Unavailable, null, [],
+            $"PDF_AUTHOR_METADATA.{code.ToString().ToUpperInvariant()}");
+    }
 
     public async Task<PdfInspectionResult> InspectAsync(
         PdfInspectionRequest request,
@@ -545,12 +612,12 @@ internal sealed partial class PdfPigPdfInspector : IPdfInspector
         {
             if (!document.TryGetXmpMetadata(out XmpMetadata? metadata) || metadata is null)
             {
-                return new(string.Empty, null, false);
+                return new(string.Empty, [], null, false);
             }
 
             if (metadata.MetadataStreamToken.Data.Length > limits.MaximumXmpBytes)
             {
-                return new(string.Empty, PdfInspectionProblemCode.MetadataLimitExceeded, false);
+                return new(string.Empty, [], PdfInspectionProblemCode.MetadataLimitExceeded, false);
             }
 
             bool resourceWarning = metadata.MetadataStreamToken.Data.Length > limits.XmpWarningBytes;
@@ -559,7 +626,7 @@ internal sealed partial class PdfPigPdfInspector : IPdfInspector
             {
                 if (bytes.Length > limits.MaximumXmpBytes)
                 {
-                    return new(string.Empty, PdfInspectionProblemCode.MetadataLimitExceeded, resourceWarning);
+                    return new(string.Empty, [], PdfInspectionProblemCode.MetadataLimitExceeded, resourceWarning);
                 }
 
                 XmlReaderSettings settings = new()
@@ -572,10 +639,14 @@ internal sealed partial class PdfPigPdfInspector : IPdfInspector
                     IgnoreProcessingInstructions = true,
                 };
                 StringBuilder evidence = new(Math.Min(limits.MaximumEarlyIdentifierCharacters, 4096));
+                List<string> authors = [];
+                StringBuilder author = new(256);
                 using MemoryStream input = new(bytes, writable: false);
                 using XmlReader reader = XmlReader.Create(input, settings);
                 int nodes = 0;
                 int allowedFieldDepth = -1;
+                int creatorDepth = -1;
+                int authorItemDepth = -1;
                 while (reader.Read())
                 {
                     if ((nodes++ & 0xff) == 0)
@@ -585,11 +656,19 @@ internal sealed partial class PdfPigPdfInspector : IPdfInspector
 
                     if (reader.Depth > limits.MaximumStackDepth)
                     {
-                        return new(string.Empty, PdfInspectionProblemCode.StackDepthExceeded, true);
+                        return new(string.Empty, [], PdfInspectionProblemCode.StackDepthExceeded, true);
                     }
 
                     if (reader.NodeType == XmlNodeType.Element)
                     {
+                        if (creatorDepth < 0 && reader.LocalName.Equals("creator", StringComparison.OrdinalIgnoreCase))
+                            creatorDepth = reader.Depth;
+                        else if (creatorDepth >= 0 && authorItemDepth < 0
+                                 && reader.LocalName.Equals("li", StringComparison.OrdinalIgnoreCase))
+                        {
+                            authorItemDepth = reader.Depth;
+                            author.Clear();
+                        }
                         if (allowedFieldDepth < 0 && IsAllowedXmpIdentifierField(reader.LocalName))
                         {
                             allowedFieldDepth = reader.Depth;
@@ -616,13 +695,29 @@ internal sealed partial class PdfPigPdfInspector : IPdfInspector
                         AppendBounded(evidence, reader.Value, limits.MaximumEarlyIdentifierCharacters);
                     }
 
+                    if (authorItemDepth >= 0 && reader.NodeType is XmlNodeType.Text or XmlNodeType.CDATA)
+                        AppendBounded(author, reader.Value, limits.MaximumRetainedMetadataCharacters);
+
+                    if (authorItemDepth >= 0 && reader.NodeType == XmlNodeType.EndElement
+                        && reader.Depth == authorItemDepth)
+                    {
+                        string value = author.ToString().Trim();
+                        if (value.Length > 0 && authors.Count < 32) authors.Add(value);
+                        authorItemDepth = -1;
+                    }
+
+                    if (creatorDepth >= 0 && reader.NodeType == XmlNodeType.EndElement
+                        && reader.Depth == creatorDepth)
+                        creatorDepth = -1;
+
                     if (allowedFieldDepth >= 0 && reader.NodeType == XmlNodeType.EndElement && reader.Depth == allowedFieldDepth)
                     {
                         allowedFieldDepth = -1;
                     }
                 }
 
-                return new(evidence.ToString(), null, resourceWarning || bytes.Length > limits.XmpWarningBytes);
+                return new(evidence.ToString(), authors, null,
+                    resourceWarning || bytes.Length > limits.XmpWarningBytes);
             }
             finally
             {
@@ -631,7 +726,7 @@ internal sealed partial class PdfPigPdfInspector : IPdfInspector
         }
         catch (Exception exception) when ((exception is DecoderFallbackException or XmlException) || IsParserFailure(exception))
         {
-            return new(string.Empty, PdfInspectionProblemCode.MalformedMetadata, false);
+            return new(string.Empty, [], PdfInspectionProblemCode.MalformedMetadata, false);
         }
     }
 
@@ -1263,6 +1358,7 @@ internal sealed partial class PdfPigPdfInspector : IPdfInspector
 
     private sealed record XmpReadResult(
         string IdentifierText,
+        IReadOnlyList<string> Authors,
         PdfInspectionProblemCode? Problem,
         bool ResourceWarning);
 
