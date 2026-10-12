@@ -82,17 +82,19 @@ paths; verified live paths are projected without direct filesystem mutation. Fin
 managed-name normalization remains a separate, explicit action and may use supported
 Calibre behavior only.
 
-Approved author-name normalization is conservative: only one nonempty
-`Family| Given` separator is executable. The fixed worker must write display authors,
-set exact per-author sorts through Calibre's `set_sort_for_authors`, verify ordered
-display names, each per-author sort, the book-level joined author sort, and the live
-managed path. Ambiguous names remain unchanged. This action requires its own complete
-external-backup confirmation and follows the same stop-and-Rescan rule.
+Final author preparation is read-only and opens only exact-identity EPUB/PDF demand.
+Verified online/current authors outrank embedded/front-matter evidence; unavailable,
+limited, encrypted, conflicting, and role-ambiguous evidence remains non-executable.
+Conservative one-separator normalization retains exact per-author sorts; all other
+corrections require an explicit checked review bound to current generation, revision,
+title, ordered authors/sorts, formats, fingerprints, and policy versions.
 
-For post-metadata comma-form input, a whole book is executable only when every linked
-author display exactly equals its current per-author sort and each value has one
-nonempty comma. The request carries both ordered display names and ordered exact sorts.
-The worker verifies those current names/sorts as preconditions before writing anything.
+The confirmed final mutation writes checked authors through the fixed worker, then
+uses typed `update_path` for retained formatted records. Worker read-back must prove
+two-level ID-suffixed containment, registered basenames/availability, unchanged format
+bytes, format/record counts, and preserved metadata/local fields. Any mismatch is an
+ambiguous mutation: stop immediately and require Rescan. Internal storage and
+unregistered files are neither adopted nor moved.
 
 ## Failure handling
 

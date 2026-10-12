@@ -33,8 +33,9 @@ grouping authority.
    then accept the packaged workflow on an explicitly backed-up disposable
   representative library. Package construction, smoke verification, destructive
   workflow acceptance, restart, and Calibre-open checks are complete.
-8. After explicit approval, normalize Calibre-managed names as a separate final
-   action through supported Calibre behavior.
+8. Prepare reviewed final author corrections from protected current metadata and
+  selective local evidence, apply only checked corrections, then refresh retained
+  Calibre-managed folders/format names through verified worker-only `update_path`.
 
 This sequence is implemented and accepted. Provider failure leaves metadata unchanged
 and never blocks duplicate cleanup.

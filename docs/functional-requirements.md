@@ -297,14 +297,19 @@ bounded, HTTPS-only, outside the library, and removed after the run.
   and a file size/SHA-256 manifest. Exclude symbols, tests, caches, credentials, logs,
   state, staging data, and source-machine paths. Package acceptance uses the executable
   directly and remains destructive only on an explicitly backed-up disposable library.
-- After explicit approval, offer final Calibre-managed name normalization through
-  supported Calibre behavior only. For author names with exactly one nonempty
-  `Family| Given` separator, preview and convert display names to `Given Family` while
-  preserving exact per-author and book sort values as `Family, Given`. Leave multi-
-  separator, empty-side, or otherwise ambiguous names unchanged for explicit review.
-  After metadata completion has converted legacy pipes to commas, normalize only books
-  where every current author display equals its exact one-comma per-author sort. Keep
-  mixed/nonmatching books unchanged.
+- After metadata completion, prepare a separate read-only final author review for all
+  retained records. Preserve verified online authors and credible current metadata;
+  screen deterministic placeholder/number/title/separator signals; reuse exact-key
+  EPUB/PDF metadata; and inspect bounded front matter only for unresolved demand.
+  Keep editor/translator roles visible without promoting them to authors. Only
+  conservative pipe/comma normalization defaults checked; embedded/content-derived
+  corrections require explicit Apply and unresolved/conflicting rows remain unchecked.
+- A separately confirmed final mutation applies only checked stale-validated author
+  corrections, then refreshes every retained formatted record through the fixed
+  worker's typed Calibre `update_path` operation. Verify and project actual two-level
+  `(record ID)` paths, registered basenames, format availability/count, unchanged
+  fingerprints/bytes, and preserved metadata/local fields. No-op metadata tricks,
+  direct renames, retries, or fallback engines are permitted.
 
 ## Explicit non-goals
 

@@ -220,6 +220,14 @@ and a matching size/SHA-256 manifest; rejects forbidden content; and launches th
 packaged executable's no-UI smoke mode directly. Rebuilding identical inputs must
 produce the same ZIP hash. Final disposable-library acceptance is explicit and opt-in.
 
+Final-author tests cover deterministic suspicion false positives, applied-author
+provenance/reload, cache identity/corruption, clean-record zero demand, cold/warm
+EPUB/PDF demand scaling, explicit byline roles, three-document/five-page/text limits,
+no retained prose, review defaults/bulk choices/staleness, author-before-refresh
+ordering, naming-only runs, protocol 1.3 validation, two-level ID-suffixed paths,
+actual basename projection, unchanged fingerprints/bytes/counts/local fields, and
+real-Calibre disposable worker acceptance.
+
 Do not add tests for periodic maintenance, generalized recovery, synchronization,
 plugins, cross-platform behavior, or Ollama activation.
 

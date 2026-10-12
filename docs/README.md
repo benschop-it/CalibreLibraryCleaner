@@ -27,7 +27,9 @@ decision.
 ## Current work
 
 Active execution plans are listed in the [plans index](plans/README.md), including
-the [final author resolution and managed naming plan](plans/final-author-resolution-and-managed-naming.md).
+current provider/review follow-up work. The completed
+[final author resolution and managed naming plan](archive/plans/final-author-resolution-and-managed-naming.md)
+is archived with its implementation and acceptance evidence.
 The completed one-time cleanup plan is under [archive/plans](archive/plans/).
 
 ## Workflows and evidence

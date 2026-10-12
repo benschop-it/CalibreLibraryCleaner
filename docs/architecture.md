@@ -235,6 +235,15 @@ The fixed persistent worker merges identifiers from the live Cache, verifies sto
 local fields and exact read-back, and returns the live managed path and author sort for
 state projection. Provider/model evidence still has no direct mutation authority.
 
+After metadata completion, a separate final-author review screens retained metadata,
+reuses fingerprint/version-bound EPUB/PDF observations, and selectively escalates to
+three EPUB spine documents or five isolated-PDF pages with no retained prose. Atomic
+bounded caches store only author/title candidates, roles, locations, coverage, hashes,
+versions, and technical status. WPF presents a virtualized checked review bound to
+current state identity. Final execution isolates author writes, then protocol 1.3
+invokes public Calibre `update_path` for retained formatted records and projects only
+verified actual paths/basenames plus unchanged format fingerprints.
+
 ## Windows release assembly
 
 Release packaging publishes the WPF application and PDF worker independently for

@@ -53,20 +53,20 @@ mutation or begin product implementation.
 
 ## Relevant requirements
 
-- [Repository instructions](../../AGENTS.md): read-only analysis, worker-only
+- [Repository instructions](../../../AGENTS.md): read-only analysis, worker-only
   mutation, external-backup confirmation, privacy, bounded resources, and dependency
   direction.
-- [Functional requirements](../functional-requirements.md): separate Candidate and
+- [Functional requirements](../../functional-requirements.md): separate Candidate and
   metadata runs; explicit final author normalization; operation exclusion.
-- [Safety assumptions](../safety-and-rollback.md): supported path updates, verified
+- [Safety assumptions](../../safety-and-rollback.md): supported path updates, verified
   metadata/local-field preservation, stop on ambiguity, and explicit Rescan.
-- [Architecture](../architecture.md), [test strategy](../test-strategy.md), and
-  [roadmap](../roadmap.md): reuse the accepted one-time cleanup baseline; do not
+- [Architecture](../../architecture.md), [test strategy](../../test-strategy.md), and
+  [roadmap](../../roadmap.md): reuse the accepted one-time cleanup baseline; do not
   reopen matching calibration.
-- Accepted ADRs [0001](../adr/0001-read-only-calibre-access.md),
-  [0002](../adr/0002-clean-architecture.md),
-  [0015](../adr/0015-persistent-calibre-api-mutation-worker.md), and
-  [0021](../adr/0021-matching-first-performance-oriented-product.md).
+- Accepted ADRs [0001](../../adr/0001-read-only-calibre-access.md),
+  [0002](../../adr/0002-clean-architecture.md),
+  [0015](../../adr/0015-persistent-calibre-api-mutation-worker.md), and
+  [0021](../../adr/0021-matching-first-performance-oriented-product.md).
 - Current user decisions: allow `(ID)` suffixes; ignore internal storage; preserve
   separate records under `Unknown`; keep correct online authors; inspect books
   selectively rather than reopen the entire library.
@@ -361,14 +361,16 @@ and wait for the user to close it; do not route builds into alternate artifact p
 - Independent active metadata plans may touch the same execution/review surfaces;
   coordinate compatible changes without broadening or replacing those plans.
 
-## Unresolved questions
+## Resolved implementation questions
 
-- Implementation gate: determine the smallest reliable way to preserve successfully
-  applied author provenance through final review and reload using current state.
-- Implementation gate: confirm supported Calibre behavior for refreshing names when
-  title/author metadata itself is unchanged, including verified format-name read-back.
-- Validate the proposed three-document/five-page inspection ceilings against small
-  generated/labeled fixtures; change only with measured evidence and recorded rationale.
+- Successfully applied author provenance uses the existing projected state: provider/
+  proposal identity plus SHA-256 of exact ordered read-back authors. It survives reload,
+  unrelated metadata changes, and clears on an unproven author replacement.
+- Calibre 9.12 no-op `set_field` does not refresh stale names. Public `update_path`
+  does, so protocol 1.3 exposes only that supported typed capability with full read-back.
+- Three EPUB documents, five PDF pages, and 32,768 useful characters per unit remain
+  the frozen V1 ceilings after labeled boundary fixtures and generated cold/warm demand
+  measurement; no evidence justified increasing them.
 
 No further user choice is required to begin the first read-only policy slice once
 implementation is explicitly approved. Conflicts, unsupported layouts, and unresolved
@@ -383,8 +385,8 @@ authors stay visible/non-executable rather than being silently "solved."
 - [x] Suspicion/source-preservation policy and cache-first review implemented.
 - [x] Selective embedded/front-matter evidence implemented and measured.
 - [x] Final review and worker-only naming execution implemented.
-- [ ] Focused/standard checks and disposable-library acceptance completed.
-- [ ] Current documentation reconciled and plan archived.
+- [x] Focused/standard checks and disposable-library acceptance completed.
+- [x] Current documentation reconciled and plan archived.
 
 The first read-only slice adds deterministic suspicion reasons, conservative
 source precedence, immutable generation/revision/format-bound review facts, and
@@ -408,8 +410,8 @@ no-op title/author `set_field(..., do_path_update=True)` reports no change and l
 stale directories and format basenames unchanged. Public `update_path({book_id})`
 then changed `Initial Author/Initial Title (1)` and its TXT basename to the current
 `Final Author/Final Title (1)` and `Final Title - Final Author.txt`, preserving one
-record and one format. A future typed worker refresh operation must therefore use
-and verify `update_path`; it must not use temporary metadata or assume no-op writes
+record and one format. The implemented typed worker refresh therefore uses and
+verifies `update_path`; it does not use temporary metadata or assume no-op writes
 refresh names. The disposable probe is retained under `scripts/` and removes its
 temporary library in `finally`.
 
@@ -529,7 +531,7 @@ metadata, then bounded front matter with truthful progress and no confirmation o
 mutation worker. Rows expose Apply, status/source, current/proposed display names and
 sorts, coverage, reasons, and role/location detail with All/Checked/Needs review/
 Unresolved/Conflicting filters plus row, selected-row, Check all, and Clear all choices. The second
-activation is enabled only when at least one correction is checked, requires the
+activation is enabled for checked corrections or retained managed naming, requires the
 existing external-backup confirmation, and submits the exact reviewed workspace to
 the stale-validating executor. Successful persisted loads/scans clear session-bound
 review state. Focused tests prove preparation does not confirm or execute and the
@@ -573,7 +575,7 @@ unchanged, the typed stopped handshake completed, and the temporary library/conf
 were deleted. The reusable acceptance harness lives under `scripts/` and requires the
 explicit disposable marker.
 
-The full solution build passed. The full test run completed 930 of 931 tests before
+The full solution build passed. The final full test run completed 931 of 932 tests before
 the known viewer-launch fixture intermittently retained its copied TestCalibre DLL
 during teardown; all managed-name tests passed, and the viewer test passed alone after
 its test child exited. Formatting and diff checks passed after scoped new-file newline
@@ -593,9 +595,10 @@ covered by the existing hostile-input/resource tests.
 
 ## Final outcome
 
-Implementation in progress. The first read-only policy/review slice and the minimal
-applied-author provenance marker are implemented and verified; no Calibre library
-mutation was performed. Selective fresh inspection, front-matter evidence, review UI,
-typed worker naming execution, performance measurements, complete standard gates,
-and disposable-library mutation acceptance remain pending. Record actual outcomes
-here as the remaining slices are completed.
+Implementation and documentation are complete. The final workflow preserves verified
+authors, screens and selectively inspects suspect records, presents checked review,
+applies only stale-validated corrections, and refreshes retained Calibre-managed names
+through verified worker-only `update_path`. Cold/warm generated demand measurement,
+complete repository gates, vulnerability audit, and disposable Calibre 9.12 fixed-
+worker acceptance are recorded above. No personal library was used; release use still
+requires the application's explicit external-backup confirmation.
