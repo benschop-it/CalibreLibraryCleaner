@@ -381,7 +381,7 @@ authors stay visible/non-executable rather than being silently "solved."
 - [x] Implementation plan created and indexed.
 - [x] Implementation explicitly approved and rollback point staged where applicable.
 - [x] Suspicion/source-preservation policy and cache-first review implemented.
-- [ ] Selective embedded/front-matter evidence implemented and measured.
+- [x] Selective embedded/front-matter evidence implemented and measured.
 - [x] Final review and worker-only naming execution implemented.
 - [ ] Focused/standard checks and disposable-library acceptance completed.
 - [ ] Current documentation reconciled and plan archived.
@@ -581,6 +581,15 @@ correction.
 
 The package vulnerability audit completed against NuGet.org with no vulnerable
 direct or transitive packages reported for any production or test project.
+
+A generated 5,000-record orchestration diagnostic with 200 suspect records split
+evenly across EPUB and PDF measured 557 ms cold and 385 ms warm on this development
+machine. Cold demand performed exactly 200 inspections, including 100 isolated-PDF
+worker demands; the warm run reused exactly 200 cache entries and launched zero PDF
+workers. The other 4,800 credible records caused no format demand. This fixture
+measures screening/demand/cache orchestration rather than physical parser bytes or
+peak process memory; parser byte/resource ceilings and worker watchdog behavior remain
+covered by the existing hostile-input/resource tests.
 
 ## Final outcome
 
