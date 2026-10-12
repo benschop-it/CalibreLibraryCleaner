@@ -102,7 +102,9 @@ public sealed partial class ExecuteUnifiedCandidateCleanupUseCase(
                 if (request.GroupSelections.Count != 0 || request.MetadataReview is not null)
                     throw new InvalidOperationException("Author normalization accepts no Candidate or metadata review selections.");
                 plan = new([], [], [], 0);
-                metadataTemplates = BuildAuthorNormalizationOperations(initial);
+                metadataTemplates = request.FinalAuthorReview is null
+                    ? BuildAuthorNormalizationOperations(initial)
+                    : BuildFinalAuthorReviewOperations(initial, request);
             }
         }
         catch (Exception exception) when (exception is ArgumentException or InvalidOperationException)
@@ -579,6 +581,55 @@ public sealed partial class ExecuteUnifiedCandidateCleanupUseCase(
                 null,
                 sorts);
         }).Where(value => value is not null).Select(value => value!).ToArray();
+    }
+
+    private static MetadataOperationTemplate[] BuildFinalAuthorReviewOperations(
+        LibraryState state,
+        ExecuteUnifiedCandidateCleanupRequest request)
+    {
+        FinalAuthorReviewWorkspace workspace = request.FinalAuthorReview
+            ?? throw new InvalidOperationException("Final author review is unavailable.");
+        if (workspace.GenerationId != request.ExpectedGeneration
+            || workspace.Revision != request.ExpectedRevision
+            || !PathsEqual(workspace.LibraryRoot, request.LibraryRoot))
+            throw new InvalidOperationException("The final author review workspace is stale.");
+        Dictionary<CalibreBookId, CalibreBook> books = state.Snapshot.Books.ToDictionary(value => value.Id);
+        HashSet<CalibreBookId> targets = [];
+        List<MetadataOperationTemplate> operations = [];
+        foreach (FinalAuthorReviewSubject subject in workspace.Subjects.Where(value => value.Apply))
+        {
+            if (!subject.CanApply
+                || subject.Resolution.ProposedDisplayNames.Count == 0
+                || !targets.Add(subject.BookId)
+                || !books.TryGetValue(subject.BookId, out CalibreBook? current)
+                || current.Title != subject.CurrentTitle
+                || !current.Authors.SequenceEqual(subject.CurrentAuthors)
+                || !CurrentFormats(current).SequenceEqual(subject.Formats))
+                throw new InvalidOperationException("A final author review selection is stale or invalid.");
+            IReadOnlyList<string>? sorts = subject.Resolution.ProposedSortNames.Count == 0
+                ? null
+                : subject.Resolution.ProposedSortNames;
+            CalibreMetadataSourceIdentity source = new(
+                "calibre-final-author-review",
+                "calibre-final-author-review/1.0.0",
+                subject.BookId.Value.ToString(CultureInfo.InvariantCulture),
+                AuthorSourcePreservationPolicy.PolicyVersion);
+            operations.Add(new(
+                $"final-author-review/{subject.BookId.Value}",
+                subject.BookId,
+                LibraryMetadataField.Authors,
+                subject.Resolution.ProposedDisplayNames,
+                source,
+                null,
+                sorts));
+        }
+        return operations.ToArray();
+
+        static IEnumerable<FinalAuthorFormatIdentity> CurrentFormats(CalibreBook book) => book.Formats
+            .OrderBy(value => value.Format, StringComparer.Ordinal)
+            .ThenBy(value => value.ExpectedRelativePath, StringComparer.Ordinal)
+            .Select(value => new FinalAuthorFormatIdentity(
+                value.Format, value.ExpectedRelativePath, value.FileStatus, value.Fingerprint));
     }
 
     private static WorkerPlannedOperation[] BuildWorkerOperations(

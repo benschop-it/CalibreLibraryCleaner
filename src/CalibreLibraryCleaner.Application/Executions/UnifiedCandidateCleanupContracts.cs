@@ -27,7 +27,8 @@ public sealed record ExecuteUnifiedCandidateCleanupRequest(
     IReadOnlyList<UnifiedCandidateCleanupSelection> GroupSelections,
     bool ExternalBackupConfirmed,
     MetadataReviewWorkspace? MetadataReview = null,
-    bool NormalizeAuthors = false);
+    bool NormalizeAuthors = false,
+    FinalAuthorReviewWorkspace? FinalAuthorReview = null);
 
 public enum UnifiedCandidateCleanupState
 {

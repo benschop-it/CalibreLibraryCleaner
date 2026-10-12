@@ -501,6 +501,19 @@ observation cache tests passed on an isolated no-build rerun (6/6). Formatting a
 diff checks passed after scoped CRLF final-newline correction. No production library
 was opened or mutated by these tests.
 
+Final-author review subjects now carry immutable Apply choices: conservative
+normalization follows its existing checked default, while embedded/content-derived
+proposals remain unchecked. Bulk/selected choice helpers preserve the complete
+generation/revision/evidence workspace. The Completed-phase executor accepts an
+optional final-review workspace, validates library root, generation, revision,
+current title, ordered author names/sorts, format paths/status/fingerprints, proposal
+presence, and unique targets, then schedules only checked author updates. Content-
+derived corrections intentionally omit the legacy comma/pipe author-sort precondition.
+Focused tests prove one checked correction creates one author operation, unchecked
+review starts no worker, and stale title identity fails preflight before worker
+startup. The legacy direct normalization request remains temporarily compatible until
+the WPF command is switched to mandatory preparation/review.
+
 ## Final outcome
 
 Implementation in progress. The first read-only policy/review slice and the minimal

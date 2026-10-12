@@ -140,6 +140,69 @@ public sealed class ExecuteUnifiedCandidateCleanupUseCaseTests
     }
 
     [Fact]
+    public async Task CompletedWorkflowAppliesOnlyCheckedContentDerivedAuthorCorrection()
+    {
+        CalibreBook book = new(
+            new(1), "Book", "Unknown", [new(new(1), "Unknown", "Unknown")], [],
+            [Format(1, "EPUB", 'a')], "Unknown/Book (1)");
+        Harness harness = await Harness.CreateAsync([book]);
+        await harness.AdvanceToCompletedAsync();
+        LibraryState current = harness.State.GetCurrent(harness.Snapshot.Identity.LibraryRoot)!;
+
+        UnifiedCandidateCleanupResult result = await harness.ExecuteFinalAuthorReviewAsync(
+            FinalWorkspace(current, apply: true));
+
+        result.State.Should().Be(UnifiedCandidateCleanupState.Completed);
+        CalibreMutationOperation operation = harness.Chunks.SelectMany(value => value.Operations)
+            .Should().ContainSingle().Subject;
+        operation.Metadata!.Values.Should().Equal("Reliable Writer");
+        operation.Metadata.AuthorSortValues.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task UncheckedFinalAuthorReviewStartsNoWorker()
+    {
+        CalibreBook book = new(
+            new(1), "Book", "Unknown", [new(new(1), "Unknown", "Unknown")], [],
+            [Format(1, "EPUB", 'a')], "Unknown/Book (1)");
+        Harness harness = await Harness.CreateAsync([book]);
+        await harness.AdvanceToCompletedAsync();
+        LibraryState current = harness.State.GetCurrent(harness.Snapshot.Identity.LibraryRoot)!;
+
+        UnifiedCandidateCleanupResult result = await harness.ExecuteFinalAuthorReviewAsync(
+            FinalWorkspace(current, apply: false));
+
+        result.State.Should().Be(UnifiedCandidateCleanupState.NothingToDo);
+        harness.Chunks.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task StaleFinalAuthorReviewFailsBeforeWorkerStartup()
+    {
+        CalibreBook book = new(
+            new(1), "Book", "Unknown", [new(new(1), "Unknown", "Unknown")], [],
+            [Format(1, "EPUB", 'a')], "Unknown/Book (1)");
+        Harness harness = await Harness.CreateAsync([book]);
+        await harness.AdvanceToCompletedAsync();
+        LibraryState current = harness.State.GetCurrent(harness.Snapshot.Identity.LibraryRoot)!;
+        FinalAuthorReviewWorkspace workspace = FinalWorkspace(current, apply: true);
+        FinalAuthorReviewSubject stale = workspace.Subjects.Single();
+        FinalAuthorReviewSubject changed = new(
+            stale.BookId, "Changed title", stale.CurrentAuthors, stale.Formats, stale.Resolution,
+            stale.EvidenceCoverage, stale.NeedsInspection, stale.FrontMatterEvidence, stale.Apply);
+        workspace = new(
+            workspace.LibraryRoot, workspace.GenerationId, workspace.Revision, [changed],
+            workspace.ScreenedCount, workspace.KnownCount, workspace.CompatibleEvidenceCount,
+            workspace.AppliedOnlineProvenanceAvailable);
+
+        UnifiedCandidateCleanupResult result = await harness.ExecuteFinalAuthorReviewAsync(workspace);
+
+        result.State.Should().Be(UnifiedCandidateCleanupState.PreflightFailed);
+        result.Issues.Should().ContainSingle(value => value.Code == "CANDIDATE.PLAN_INVALID");
+        harness.Chunks.Should().BeEmpty();
+    }
+
+    [Fact]
     public async Task StrictCombinedCommaAuthorsBecomeSeparateDisplayAuthors()
     {
         Harness harness = await Harness.CreateAsync([Book(1, Format(1, "EPUB", 'a'))]);
@@ -662,6 +725,38 @@ public sealed class ExecuteUnifiedCandidateCleanupUseCaseTests
             A<CalibreMutationChunkRequest>._, A<CancellationToken>._)).MustNotHaveHappened();
     }
 
+    private static FinalAuthorReviewWorkspace FinalWorkspace(LibraryState state, bool apply)
+    {
+        CalibreBook book = state.Snapshot.Books.Single();
+        AuthorResolution resolution = new(
+            AuthorResolutionStatus.Suspect,
+            CurrentAuthorProtection.Unverified,
+            [AuthorSuspicionReasonCodes.Placeholder],
+            [new(AuthorEvidenceSource.EpubFrontMatter, "fixture", ["Reliable Writer"])],
+            AuthorProposalSource.ContentDerivedFrontMatter,
+            ["Reliable Writer"],
+            selectedByDefault: false);
+        FinalAuthorReviewSubject subject = new(
+            book.Id,
+            book.Title,
+            book.Authors,
+            book.Formats.Select(value => new FinalAuthorFormatIdentity(
+                value.Format, value.ExpectedRelativePath, value.FileStatus, value.Fingerprint)),
+            resolution,
+            FinalAuthorEvidenceCoverage.EpubFrontMatter,
+            needsInspection: false,
+            apply: apply);
+        return new(
+            state.Snapshot.Identity.LibraryRoot,
+            state.GenerationId,
+            state.Revision,
+            [subject],
+            1,
+            0,
+            1,
+            appliedOnlineProvenanceAvailable: false);
+    }
+
     private sealed class Harness
     {
         private readonly ExecuteUnifiedCandidateCleanupUseCase _useCase;
@@ -897,6 +992,20 @@ public sealed class ExecuteUnifiedCandidateCleanupUseCaseTests
                 [],
                 true,
                 NormalizeAuthors: true), null, CancellationToken.None);
+        }
+
+        public Task<UnifiedCandidateCleanupResult> ExecuteFinalAuthorReviewAsync(
+            FinalAuthorReviewWorkspace workspace)
+        {
+            LibraryState current = State.GetCurrent(Snapshot.Identity.LibraryRoot)!;
+            return _useCase.ExecuteAsync(new(
+                Snapshot.Identity.LibraryRoot,
+                current.GenerationId,
+                current.Revision,
+                [],
+                true,
+                NormalizeAuthors: true,
+                FinalAuthorReview: workspace), null, CancellationToken.None);
         }
 
         public Task<UnifiedCandidateCleanupResult> ExecuteMetadataWorkspaceAsync(

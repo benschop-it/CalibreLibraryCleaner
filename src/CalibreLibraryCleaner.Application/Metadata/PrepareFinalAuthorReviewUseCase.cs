@@ -33,7 +33,8 @@ public sealed record FinalAuthorReviewSubject
         AuthorResolution resolution,
         FinalAuthorEvidenceCoverage evidenceCoverage,
         bool needsInspection,
-        IEnumerable<FrontMatterAuthorObservation>? frontMatterEvidence = null)
+        IEnumerable<FrontMatterAuthorObservation>? frontMatterEvidence = null,
+        bool? apply = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(currentTitle);
         ArgumentNullException.ThrowIfNull(currentAuthors);
@@ -62,6 +63,10 @@ public sealed record FinalAuthorReviewSubject
         NeedsInspection = needsInspection;
         FrontMatterEvidence = new ReadOnlyCollection<FrontMatterAuthorObservation>(
             (frontMatterEvidence ?? []).ToArray());
+        CanApply = resolution.ProposalSource != AuthorProposalSource.None;
+        Apply = apply ?? resolution.SelectedByDefault;
+        if (Apply && !CanApply)
+            throw new ArgumentException("A final author subject without a proposal cannot be applied.");
     }
 
     public CalibreBookId BookId { get; }
@@ -72,6 +77,19 @@ public sealed record FinalAuthorReviewSubject
     public FinalAuthorEvidenceCoverage EvidenceCoverage { get; }
     public bool NeedsInspection { get; }
     public IReadOnlyList<FrontMatterAuthorObservation> FrontMatterEvidence { get; }
+    public bool CanApply { get; }
+    public bool Apply { get; }
+
+    public FinalAuthorReviewSubject WithApply(bool apply) => new(
+        BookId,
+        CurrentTitle,
+        CurrentAuthors,
+        Formats,
+        Resolution,
+        EvidenceCoverage,
+        NeedsInspection,
+        FrontMatterEvidence,
+        apply);
 }
 
 public sealed record FinalAuthorReviewWorkspace
@@ -150,6 +168,29 @@ public sealed record FinalAuthorReviewWorkspace
 
 public static class PrepareFinalAuthorReviewUseCase
 {
+    public static FinalAuthorReviewWorkspace SetApply(
+        FinalAuthorReviewWorkspace workspace,
+        IReadOnlyCollection<CalibreBookId> bookIds,
+        bool apply)
+    {
+        ArgumentNullException.ThrowIfNull(workspace);
+        ArgumentNullException.ThrowIfNull(bookIds);
+        HashSet<CalibreBookId> selected = bookIds.ToHashSet();
+        if (selected.Count != bookIds.Count
+            || selected.Any(id => workspace.Subjects.All(value => value.BookId != id)))
+            throw new ArgumentException("Final author review selections are not current.", nameof(bookIds));
+        FinalAuthorReviewSubject[] subjects = workspace.Subjects.Select(value =>
+            selected.Contains(value.BookId) && value.CanApply ? value.WithApply(apply) : value).ToArray();
+        return Copy(workspace, subjects);
+    }
+
+    public static FinalAuthorReviewWorkspace SetAllApply(
+        FinalAuthorReviewWorkspace workspace,
+        bool apply) => SetApply(
+        workspace,
+        workspace.Subjects.Where(value => value.CanApply).Select(value => value.BookId).ToArray(),
+        apply);
+
     public static FinalAuthorReviewWorkspace Execute(
         LibraryState state,
         IReadOnlyList<EmbeddedAuthorMetadataObservation>? embeddedObservations = null,
@@ -352,4 +393,22 @@ public static class PrepareFinalAuthorReviewUseCase
         string format,
         FormatFileFingerprint fingerprint,
         string analyzerVersion) => $"{format}:{fingerprint.Sha256.Value}:{analyzerVersion}";
+
+    private static FinalAuthorReviewWorkspace Copy(
+        FinalAuthorReviewWorkspace source,
+        IEnumerable<FinalAuthorReviewSubject> subjects) => new(
+        source.LibraryRoot,
+        source.GenerationId,
+        source.Revision,
+        subjects,
+        source.ScreenedCount,
+        source.KnownCount,
+        source.CompatibleEvidenceCount,
+        source.AppliedOnlineProvenanceAvailable,
+        source.MetadataCacheHitCount,
+        source.MetadataInspectionCount,
+        source.EmbeddedObservations,
+        source.FrontMatterObservations,
+        source.FrontMatterCacheHitCount,
+        source.FrontMatterInspectionCount);
 }
