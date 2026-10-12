@@ -571,6 +571,10 @@
             <StackPanel>
               <TextBlock FontWeight="Bold" Text="{Binding FinalAuthorReviewSummary}" TextWrapping="Wrap" />
               <WrapPanel Margin="0,6,0,0">
+                <Button Margin="0,0,8,0" Padding="8,4" Content="Check _selected"
+                  Command="{Binding CheckSelectedFinalAuthorApplyCommand}" />
+                <Button Margin="0,0,8,0" Padding="8,4" Content="_Uncheck selected"
+                  Command="{Binding UncheckSelectedFinalAuthorApplyCommand}" />
                 <Button Margin="0,0,8,0" Padding="8,4" Content="Check _all available"
                         Command="{Binding CheckAllFinalAuthorApplyCommand}" />
                 <Button Padding="8,4" Content="Clear all _Apply"
@@ -581,6 +585,7 @@
           <DataGrid Grid.Row="1"
                     ItemsSource="{Binding FinalAuthorReviewSubjects}"
                     SelectedItem="{Binding SelectedFinalAuthorReviewSubject, Mode=TwoWay}"
+                    SelectionChanged="FinalAuthorReviewSubjectsGrid_SelectionChanged"
                     AutoGenerateColumns="False"
                     IsReadOnly="True"
                     SelectionMode="Extended"

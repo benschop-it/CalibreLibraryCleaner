@@ -528,14 +528,22 @@ The first Completed-phase activation runs snapshot screening, cache-first embedd
 metadata, then bounded front matter with truthful progress and no confirmation or
 mutation worker. Rows expose Apply, status/source, current/proposed display names and
 sorts, coverage, reasons, and role/location detail with All/Checked/Needs review/
-Unresolved/Conflicting filters plus row, Check all, and Clear all choices. The second
+Unresolved/Conflicting filters plus row, selected-row, Check all, and Clear all choices. The second
 activation is enabled only when at least one correction is checked, requires the
 existing external-backup confirmation, and submits the exact reviewed workspace to
 the stale-validating executor. Successful persisted loads/scans clear session-bound
 review state. Focused tests prove preparation does not confirm or execute and the
 second activation carries the final-review payload; complete WPF tests passed 53/53
-and architecture tests passed 33/33. Efficient selected-row bulk choices remain to
-be added alongside final UI polish.
+and architecture tests passed 33/33.
+
+The final-author grid now hands extended selected rows to the view model and exposes
+Check selected/Uncheck selected alongside Check all/Clear all. Selection is validated
+against the current unfiltered workspace, cleared when filtering or workspace
+replacement changes row identity, and applied in one immutable workspace update.
+Focused workflow and architecture tests cover uncheck/recheck before reviewed
+execution and all bindings. The previously noted selected-row bulk-choice gap is
+closed; remaining UI work is limited to acceptance/polish discovered during manual
+use.
 
 ## Final outcome
 

@@ -33,6 +33,13 @@ public partial class MainWindow : System.Windows.Window
                 grid.SelectedItems.OfType<MetadataReviewSubjectRowViewModel>());
     }
 
+    private void FinalAuthorReviewSubjectsGrid_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (sender is DataGrid grid && DataContext is MainWindowViewModel viewModel)
+            viewModel.UpdateFinalAuthorReviewSelection(
+                grid.SelectedItems.OfType<FinalAuthorReviewSubjectRowViewModel>());
+    }
+
     private void RouteRowDoubleClick(
         object sender,
         MouseButtonEventArgs e,

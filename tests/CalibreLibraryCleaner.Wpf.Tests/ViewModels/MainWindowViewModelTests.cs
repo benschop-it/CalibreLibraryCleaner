@@ -577,6 +577,14 @@ public sealed class MainWindowViewModelTests
         captured.Should().BeNull();
         A.CallTo(() => confirmation.ConfirmAuthorNormalization(A<int>._)).MustNotHaveHappened();
         viewModel.FinalAuthorReviewFilterMode = FinalAuthorReviewFilterMode.All;
+        FinalAuthorReviewSubjectRowViewModel row = viewModel.FinalAuthorReviewSubjects.Should().ContainSingle().Subject;
+        row.Apply.Should().BeTrue();
+        viewModel.UpdateFinalAuthorReviewSelection([row]);
+        viewModel.UncheckSelectedFinalAuthorApplyCommand.Execute(null);
+        row = viewModel.FinalAuthorReviewSubjects.Should().ContainSingle().Subject;
+        row.Apply.Should().BeFalse();
+        viewModel.UpdateFinalAuthorReviewSelection([row]);
+        viewModel.CheckSelectedFinalAuthorApplyCommand.Execute(null);
         viewModel.FinalAuthorReviewSubjects.Should().ContainSingle().Which.Apply.Should().BeTrue();
         viewModel.CandidateCleanupAutomationName.Should().Be("Apply checked author corrections");
 

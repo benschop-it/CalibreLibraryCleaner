@@ -61,6 +61,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
     private MetadataReviewSubjectRowViewModel[] _allMetadataReviewSubjects = [];
     private MetadataReviewSubjectRowViewModel[] _selectedMetadataReviewSubjects = [];
     private FinalAuthorReviewSubjectRowViewModel[] _allFinalAuthorReviewSubjects = [];
+    private FinalAuthorReviewSubjectRowViewModel[] _selectedFinalAuthorReviewSubjects = [];
     private CancellationTokenSource? _scanCancellation;
     private string _selectedLibraryPath = string.Empty;
     private string? _selectedPersistedLibraryPath;
@@ -242,6 +243,12 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         CheckAllFinalAuthorApplyCommand = new RelayCommand(
             () => SetAllFinalAuthorApply(true),
             () => !IsBusy && _finalAuthorReviewWorkspace?.Subjects.Any(value => value.CanApply && !value.Apply) == true);
+        CheckSelectedFinalAuthorApplyCommand = new RelayCommand(
+            () => SetSelectedFinalAuthorApply(true),
+            () => CanSetSelectedFinalAuthorApply(true));
+        UncheckSelectedFinalAuthorApplyCommand = new RelayCommand(
+            () => SetSelectedFinalAuthorApply(false),
+            () => CanSetSelectedFinalAuthorApply(false));
         CandidateCleanupCommand = new AsyncRelayCommand(CandidateCleanupAsync, CanRunCandidateCleanup);
     }
 
@@ -811,6 +818,10 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
     public IRelayCommand ClearAllFinalAuthorApplyCommand { get; }
 
     public IRelayCommand CheckAllFinalAuthorApplyCommand { get; }
+
+    public IRelayCommand CheckSelectedFinalAuthorApplyCommand { get; }
+
+    public IRelayCommand UncheckSelectedFinalAuthorApplyCommand { get; }
 
     public IAsyncRelayCommand CandidateCleanupCommand { get; }
 
@@ -1492,6 +1503,36 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         NotifyMetadataApplyCommands();
     }
 
+    public void UpdateFinalAuthorReviewSelection(
+        IEnumerable<FinalAuthorReviewSubjectRowViewModel> subjects)
+    {
+        ArgumentNullException.ThrowIfNull(subjects);
+        _selectedFinalAuthorReviewSubjects = subjects
+            .Where(_allFinalAuthorReviewSubjects.Contains)
+            .Distinct()
+            .ToArray();
+        CheckSelectedFinalAuthorApplyCommand.NotifyCanExecuteChanged();
+        UncheckSelectedFinalAuthorApplyCommand.NotifyCanExecuteChanged();
+    }
+
+    private bool CanSetSelectedFinalAuthorApply(bool apply) => !IsBusy
+        && !_operationCoordinator.IsOperationActive
+        && _selectedFinalAuthorReviewSubjects.Any(value => value.CanApply && value.Apply != apply);
+
+    private void SetSelectedFinalAuthorApply(bool apply)
+    {
+        if (_finalAuthorReviewWorkspace is null) return;
+        CalibreBookId[] ids = _selectedFinalAuthorReviewSubjects
+            .Where(value => value.CanApply && value.Apply != apply)
+            .Select(value => value.BookId)
+            .ToArray();
+        if (ids.Length == 0) return;
+        _finalAuthorReviewWorkspace = PrepareFinalAuthorReviewUseCase.SetApply(
+            _finalAuthorReviewWorkspace, ids, apply);
+        ApplyFinalAuthorReviewWorkspace(_finalAuthorReviewWorkspace);
+        StatusMessage = $"{(apply ? "Checked" : "Unchecked")} {ids.Length:N0} selected final author correction(s).";
+    }
+
     private Task ClearAllMetadataApplyAsync() => SetAllMetadataApplyAsync(
         false,
         "Cleared all metadata Apply choices. Apply checked metadata will make no metadata changes.");
@@ -1961,6 +2002,8 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         NotifyMetadataApplyCommands();
         ClearAllFinalAuthorApplyCommand.NotifyCanExecuteChanged();
         CheckAllFinalAuthorApplyCommand.NotifyCanExecuteChanged();
+        CheckSelectedFinalAuthorApplyCommand.NotifyCanExecuteChanged();
+        UncheckSelectedFinalAuthorApplyCommand.NotifyCanExecuteChanged();
         CandidateCleanupCommand.NotifyCanExecuteChanged();
         OnPropertyChanged(nameof(CandidateCleanupAutomationName));
         OnPropertyChanged(nameof(CandidateCleanupToolTip));
@@ -2203,6 +2246,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         _finalAuthorReviewWorkspace = workspace;
         _allFinalAuthorReviewSubjects = workspace.Subjects.Select(value =>
             new FinalAuthorReviewSubjectRowViewModel(value, PersistFinalAuthorApplyAsync)).ToArray();
+        UpdateFinalAuthorReviewSelection([]);
         ApplyFinalAuthorReviewFilter();
         NotifyCandidateCleanupStateChanged();
     }
@@ -2248,6 +2292,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         FinalAuthorReviewSubjectRowViewModel[] visible = _allFinalAuthorReviewSubjects
             .Where(value => value.MatchesFilter(FinalAuthorReviewFilterMode)).ToArray();
         _finalAuthorReviewSubjects.ReplaceAll(visible);
+        UpdateFinalAuthorReviewSelection([]);
         SelectedFinalAuthorReviewSubject = selectedId is null
             ? visible.FirstOrDefault()
             : visible.FirstOrDefault(value => value.BookId == selectedId.Value) ?? visible.FirstOrDefault();
@@ -2269,6 +2314,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
     {
         _finalAuthorReviewWorkspace = null;
         _allFinalAuthorReviewSubjects = [];
+        UpdateFinalAuthorReviewSelection([]);
         _finalAuthorReviewSubjects.ReplaceAll([]);
         SelectedFinalAuthorReviewSubject = null;
         FinalAuthorReviewSummary = "Prepare final author review after metadata completion.";

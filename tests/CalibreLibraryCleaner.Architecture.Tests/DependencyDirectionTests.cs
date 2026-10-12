@@ -225,6 +225,9 @@ public sealed class DependencyDirectionTests
         source.Should().Contain("ItemsSource=\"{Binding FinalAuthorReviewFilterModes}\"");
         source.Should().Contain("Command=\"{Binding CheckAllFinalAuthorApplyCommand}\"");
         source.Should().Contain("Command=\"{Binding ClearAllFinalAuthorApplyCommand}\"");
+        source.Should().Contain("Command=\"{Binding CheckSelectedFinalAuthorApplyCommand}\"");
+        source.Should().Contain("Command=\"{Binding UncheckSelectedFinalAuthorApplyCommand}\"");
+        source.Should().Contain("SelectionChanged=\"FinalAuthorReviewSubjectsGrid_SelectionChanged\"");
         source.Should().Contain("AutomationProperties.Name=\"Final author review subjects\"");
     }
 
