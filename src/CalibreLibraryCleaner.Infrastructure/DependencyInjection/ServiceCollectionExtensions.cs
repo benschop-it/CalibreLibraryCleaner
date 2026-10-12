@@ -64,7 +64,11 @@ public static class ServiceCollectionExtensions
         services.AddSingleton(new MetadataReviewDecisionStoreOptions());
         services.AddSingleton<IMetadataReviewDecisionStore, FileMetadataReviewDecisionStore>();
         services.AddSingleton(new EmbeddedAuthorMetadataCacheOptions());
-        services.AddSingleton<IEmbeddedAuthorMetadataCache, FileEmbeddedAuthorMetadataCache>();
+        services.AddSingleton<FileEmbeddedAuthorMetadataCache>();
+        services.AddSingleton<IEmbeddedAuthorMetadataCache>(provider =>
+            provider.GetRequiredService<FileEmbeddedAuthorMetadataCache>());
+        services.AddSingleton<IFrontMatterAuthorCache>(provider =>
+            provider.GetRequiredService<FileEmbeddedAuthorMetadataCache>());
         services.AddSingleton(new EditionCoverStagingOptions());
         services.AddSingleton<IEditionCoverStager>(provider => new BoundedEditionCoverStager(
             new HttpClient(new SocketsHttpHandler { AllowAutoRedirect = false })

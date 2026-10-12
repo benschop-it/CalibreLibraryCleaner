@@ -13,6 +13,8 @@ public enum FinalAuthorEvidenceCoverage
     None = 0,
     EpubPackageMetadata = 1 << 0,
     PdfDocumentMetadata = 1 << 1,
+    EpubFrontMatter = 1 << 2,
+    PdfFrontMatter = 1 << 3,
 }
 
 public sealed record FinalAuthorFormatIdentity(
@@ -30,7 +32,8 @@ public sealed record FinalAuthorReviewSubject
         IEnumerable<FinalAuthorFormatIdentity> formats,
         AuthorResolution resolution,
         FinalAuthorEvidenceCoverage evidenceCoverage,
-        bool needsInspection)
+        bool needsInspection,
+        IEnumerable<FrontMatterAuthorObservation>? frontMatterEvidence = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(currentTitle);
         ArgumentNullException.ThrowIfNull(currentAuthors);
@@ -38,7 +41,9 @@ public sealed record FinalAuthorReviewSubject
         ArgumentNullException.ThrowIfNull(resolution);
         const FinalAuthorEvidenceCoverage allCoverage =
             FinalAuthorEvidenceCoverage.EpubPackageMetadata
-            | FinalAuthorEvidenceCoverage.PdfDocumentMetadata;
+            | FinalAuthorEvidenceCoverage.PdfDocumentMetadata
+            | FinalAuthorEvidenceCoverage.EpubFrontMatter
+            | FinalAuthorEvidenceCoverage.PdfFrontMatter;
         if ((evidenceCoverage & ~allCoverage) != 0
             || resolution.Status == AuthorResolutionStatus.Known && resolution.ProposalSource == AuthorProposalSource.None
             || needsInspection && resolution.Status == AuthorResolutionStatus.Known)
@@ -55,6 +60,8 @@ public sealed record FinalAuthorReviewSubject
         Resolution = resolution;
         EvidenceCoverage = evidenceCoverage;
         NeedsInspection = needsInspection;
+        FrontMatterEvidence = new ReadOnlyCollection<FrontMatterAuthorObservation>(
+            (frontMatterEvidence ?? []).ToArray());
     }
 
     public CalibreBookId BookId { get; }
@@ -64,6 +71,7 @@ public sealed record FinalAuthorReviewSubject
     public AuthorResolution Resolution { get; }
     public FinalAuthorEvidenceCoverage EvidenceCoverage { get; }
     public bool NeedsInspection { get; }
+    public IReadOnlyList<FrontMatterAuthorObservation> FrontMatterEvidence { get; }
 }
 
 public sealed record FinalAuthorReviewWorkspace
@@ -78,7 +86,11 @@ public sealed record FinalAuthorReviewWorkspace
         int compatibleEvidenceCount,
         bool appliedOnlineProvenanceAvailable,
         int metadataCacheHitCount = 0,
-        int metadataInspectionCount = 0)
+        int metadataInspectionCount = 0,
+        IEnumerable<EmbeddedAuthorMetadataObservation>? embeddedObservations = null,
+        IEnumerable<FrontMatterAuthorObservation>? frontMatterObservations = null,
+        int frontMatterCacheHitCount = 0,
+        int frontMatterInspectionCount = 0)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(libraryRoot);
         ArgumentNullException.ThrowIfNull(generationId);
@@ -90,7 +102,9 @@ public sealed record FinalAuthorReviewWorkspace
             || knownCount + values.Length != screenedCount
             || compatibleEvidenceCount < 0
             || metadataCacheHitCount < 0
-            || metadataInspectionCount < 0)
+            || metadataInspectionCount < 0
+            || frontMatterCacheHitCount < 0
+            || frontMatterInspectionCount < 0)
             throw new ArgumentException("Final author review workspace is invalid.");
         LibraryRoot = libraryRoot;
         GenerationId = generationId;
@@ -102,6 +116,12 @@ public sealed record FinalAuthorReviewWorkspace
         AppliedOnlineProvenanceAvailable = appliedOnlineProvenanceAvailable;
         MetadataCacheHitCount = metadataCacheHitCount;
         MetadataInspectionCount = metadataInspectionCount;
+        EmbeddedObservations = new ReadOnlyCollection<EmbeddedAuthorMetadataObservation>(
+            (embeddedObservations ?? []).ToArray());
+        FrontMatterObservations = new ReadOnlyCollection<FrontMatterAuthorObservation>(
+            (frontMatterObservations ?? []).ToArray());
+        FrontMatterCacheHitCount = frontMatterCacheHitCount;
+        FrontMatterInspectionCount = frontMatterInspectionCount;
         SuspicionPolicyVersion = AuthorSuspicionPolicy.PolicyVersion;
         SourcePreservationPolicyVersion = AuthorSourcePreservationPolicy.PolicyVersion;
     }
@@ -120,6 +140,10 @@ public sealed record FinalAuthorReviewWorkspace
     public bool AppliedOnlineProvenanceAvailable { get; }
     public int MetadataCacheHitCount { get; }
     public int MetadataInspectionCount { get; }
+    public IReadOnlyList<EmbeddedAuthorMetadataObservation> EmbeddedObservations { get; }
+    public IReadOnlyList<FrontMatterAuthorObservation> FrontMatterObservations { get; }
+    public int FrontMatterCacheHitCount { get; }
+    public int FrontMatterInspectionCount { get; }
     public string SuspicionPolicyVersion { get; }
     public string SourcePreservationPolicyVersion { get; }
 }
@@ -130,7 +154,10 @@ public static class PrepareFinalAuthorReviewUseCase
         LibraryState state,
         IReadOnlyList<EmbeddedAuthorMetadataObservation>? embeddedObservations = null,
         int metadataCacheHitCount = 0,
-        int metadataInspectionCount = 0)
+        int metadataInspectionCount = 0,
+        IReadOnlyList<FrontMatterAuthorObservation>? frontMatterObservations = null,
+        int frontMatterCacheHitCount = 0,
+        int frontMatterInspectionCount = 0)
     {
         ArgumentNullException.ThrowIfNull(state);
         if (!state.IsAuthoritative
@@ -140,6 +167,7 @@ public static class PrepareFinalAuthorReviewUseCase
 
         List<FinalAuthorReviewSubject> subjects = [];
         IReadOnlyList<EmbeddedAuthorMetadataObservation> observations = embeddedObservations ?? [];
+        IReadOnlyList<FrontMatterAuthorObservation> frontMatter = frontMatterObservations ?? [];
         int knownCount = 0;
         int compatibleEvidenceCount = 0;
         foreach (CalibreBook book in state.Snapshot.Books.OrderBy(value => value.Id.Value))
@@ -198,6 +226,28 @@ public static class PrepareFinalAuthorReviewUseCase
                         observation.Key.ExtractorVersion),
                     observation.Authors));
             }
+            FrontMatterAuthorObservation[] bookFrontMatter = frontMatter.Where(value =>
+                MatchesFrontMatterObservation(book, value)).ToArray();
+            foreach (FrontMatterAuthorObservation observation in bookFrontMatter)
+            {
+                compatibleEvidenceCount++;
+                coverage |= observation.Format == "EPUB"
+                    ? FinalAuthorEvidenceCoverage.EpubFrontMatter
+                    : FinalAuthorEvidenceCoverage.PdfFrontMatter;
+                foreach (FrontMatterAuthorCandidate candidate in observation.Candidates.Where(value =>
+                             value.Role == AuthorCreditRole.Author))
+                {
+                    evidence.Add(new(
+                        observation.Format == "EPUB"
+                            ? AuthorEvidenceSource.EpubFrontMatter
+                            : AuthorEvidenceSource.PdfFrontMatter,
+                        EvidenceIdentity(
+                            observation.Format,
+                            observation.Fingerprint,
+                            observation.ExtractorVersion),
+                        candidate.Names));
+                }
+            }
 
             AuthorResolution resolution = AuthorSourcePreservationPolicy.Resolve(
                 book.Title,
@@ -214,6 +264,14 @@ public static class PrepareFinalAuthorReviewUseCase
                 or AuthorResolutionStatus.Conflicting
                 || resolution.Status == AuthorResolutionStatus.Suspect
                 && resolution.ProposalSource == AuthorProposalSource.None;
+            BookFormat[] inspectableFormats = book.Formats.Where(value =>
+                value.FileStatus == FormatFileStatus.Present
+                && value.Fingerprint is not null
+                && value.Format is "EPUB" or "PDF").ToArray();
+            bool frontMatterExhausted = inspectableFormats.Length > 0
+                && inspectableFormats.All(format => bookFrontMatter.Any(value =>
+                    value.Format == format.Format && value.Fingerprint == format.Fingerprint));
+            needsInspection &= !frontMatterExhausted;
             subjects.Add(new(
                 book.Id,
                 book.Title,
@@ -225,7 +283,8 @@ public static class PrepareFinalAuthorReviewUseCase
                     value.Fingerprint)),
                 resolution,
                 coverage,
-                needsInspection));
+                needsInspection,
+                bookFrontMatter));
         }
 
         return new(
@@ -239,7 +298,11 @@ public static class PrepareFinalAuthorReviewUseCase
             appliedOnlineProvenanceAvailable: state.Snapshot.Books.Any(
                 value => value.AppliedAuthorProvenance is not null),
             metadataCacheHitCount,
-            metadataInspectionCount);
+            metadataInspectionCount,
+            observations,
+            frontMatter,
+            frontMatterCacheHitCount,
+            frontMatterInspectionCount);
     }
 
     private static bool IsCompatible(CalibreBook book, EpubAssessment assessment) =>
@@ -277,6 +340,13 @@ public static class PrepareFinalAuthorReviewUseCase
         value.FileStatus == FormatFileStatus.Present
         && string.Equals(value.Format, observation.Key.Format, StringComparison.OrdinalIgnoreCase)
         && value.Fingerprint == observation.Key.Fingerprint);
+
+    private static bool MatchesFrontMatterObservation(
+        CalibreBook book,
+        FrontMatterAuthorObservation observation) => book.Formats.Any(value =>
+        value.FileStatus == FormatFileStatus.Present
+        && string.Equals(value.Format, observation.Format, StringComparison.OrdinalIgnoreCase)
+        && value.Fingerprint == observation.Fingerprint);
 
     private static string EvidenceIdentity(
         string format,

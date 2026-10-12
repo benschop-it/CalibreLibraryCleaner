@@ -8,6 +8,8 @@ public enum AuthorEvidenceSource
 {
     EpubPackageMetadata,
     PdfDocumentMetadata,
+    EpubFrontMatter,
+    PdfFrontMatter,
 }
 
 public enum AuthorProposalSource
@@ -15,6 +17,7 @@ public enum AuthorProposalSource
     None,
     ConservativeNameOrder,
     CachedEmbeddedMetadata,
+    ContentDerivedFrontMatter,
 }
 
 public enum CurrentAuthorProtection
@@ -177,7 +180,10 @@ public static class AuthorSourcePreservationPolicy
             protection,
             current.ReasonCodes,
             observations,
-            AuthorProposalSource.CachedEmbeddedMetadata,
+            selected.Source is AuthorEvidenceSource.EpubFrontMatter
+                or AuthorEvidenceSource.PdfFrontMatter
+                ? AuthorProposalSource.ContentDerivedFrontMatter
+                : AuthorProposalSource.CachedEmbeddedMetadata,
             selected.Authors,
             selectedByDefault: false);
 

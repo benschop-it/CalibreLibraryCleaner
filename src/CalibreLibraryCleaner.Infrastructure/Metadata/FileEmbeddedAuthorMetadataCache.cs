@@ -8,7 +8,8 @@ using CalibreLibraryCleaner.Infrastructure.Execution;
 namespace CalibreLibraryCleaner.Infrastructure.Metadata;
 
 internal sealed class FileEmbeddedAuthorMetadataCache(EmbeddedAuthorMetadataCacheOptions options) :
-    IEmbeddedAuthorMetadataCache
+    IEmbeddedAuthorMetadataCache,
+    IFrontMatterAuthorCache
 {
     private const string SchemaVersion = "embedded-author-metadata-cache/1.0";
     private static readonly JsonSerializerOptions JsonOptions = new()
@@ -102,6 +103,101 @@ internal sealed class FileEmbeddedAuthorMetadataCache(EmbeddedAuthorMetadataCach
         Prune(root, cancellationToken);
     }
 
+    public async Task<FrontMatterAuthorObservation?> TryReadAsync(
+        FrontMatterAuthorCacheKey key,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(key);
+        cancellationToken.ThrowIfCancellationRequested();
+        string path = Path.Combine(StorageRoot(), FrontMatterFileName(key));
+        if (!File.Exists(path)
+            || !ExecutionPathGuard.TryRejectReparsePointLeaf(path, true, out _)) return null;
+        try
+        {
+            FileInfo info = new(path);
+            if (info.Length is <= 0 || info.Length > options.MaximumEntryBytes) return null;
+            byte[] bytes = await File.ReadAllBytesAsync(path, cancellationToken).ConfigureAwait(false);
+            FrontMatterCacheDocument document = JsonSerializer.Deserialize<FrontMatterCacheDocument>(
+                bytes, JsonOptions) ?? throw new InvalidDataException("The front-matter cache entry is empty.");
+            if (document.SchemaVersion != "front-matter-author-cache/1.0"
+                || document.Format != key.Format
+                || document.SizeInBytes != key.Fingerprint.SizeInBytes
+                || document.Sha256 != key.Fingerprint.Sha256.Value
+                || document.ExtractorVersion != key.ExtractorVersion
+                || document.LimitsVersion != key.LimitsVersion)
+                return null;
+            return new(
+                document.Format,
+                key.Fingerprint,
+                document.ExtractorVersion,
+                document.LimitsVersion,
+                document.Status,
+                document.Candidates.Select(value => new FrontMatterAuthorCandidate(
+                    value.Role, value.Names, value.UnitNumber, value.LineNumber, value.Marker)),
+                document.RequestedUnits,
+                document.CompletedUnits,
+                document.RetainedUsefulCharacters,
+                document.Truncated,
+                document.ProblemCode);
+        }
+        catch (OperationCanceledException) { throw; }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException
+                                           or JsonException or InvalidDataException
+                                           or ArgumentException or OverflowException)
+        {
+            return null;
+        }
+    }
+
+    public async Task WriteAsync(
+        FrontMatterAuthorObservation observation,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(observation);
+        cancellationToken.ThrowIfCancellationRequested();
+        FrontMatterAuthorCacheKey key = new(
+            observation.Format, observation.Fingerprint, observation.ExtractorVersion,
+            observation.LimitsVersion);
+        string root = StorageRoot();
+        if (!Directory.Exists(root))
+        {
+            Directory.CreateDirectory(root);
+            root = StorageRoot();
+        }
+        string path = Path.Combine(root, FrontMatterFileName(key));
+        if (File.Exists(path) && !ExecutionPathGuard.TryRejectReparsePointLeaf(path, true, out _))
+            throw new IOException("The front-matter author cache entry is not a physical file.");
+        FrontMatterCacheDocument document = new(
+            "front-matter-author-cache/1.0",
+            observation.Format,
+            observation.Fingerprint.SizeInBytes,
+            observation.Fingerprint.Sha256.Value,
+            observation.ExtractorVersion,
+            observation.LimitsVersion,
+            observation.Status,
+            observation.Candidates.Select(value => new FrontMatterCandidateDocument(
+                value.Role, value.Names.ToArray(), value.UnitNumber, value.LineNumber, value.Marker)).ToArray(),
+            observation.RequestedUnits,
+            observation.CompletedUnits,
+            observation.RetainedUsefulCharacters,
+            observation.Truncated,
+            observation.ProblemCode);
+        byte[] bytes = JsonSerializer.SerializeToUtf8Bytes(document, JsonOptions);
+        if (bytes.Length > options.MaximumEntryBytes)
+            throw new InvalidDataException("The front-matter author cache entry exceeds its bound.");
+        string temporary = Path.Combine(root, $".{Guid.NewGuid():N}.tmp");
+        try
+        {
+            await File.WriteAllBytesAsync(temporary, bytes, cancellationToken).ConfigureAwait(false);
+            File.Move(temporary, path, overwrite: true);
+        }
+        finally
+        {
+            if (File.Exists(temporary)) File.Delete(temporary);
+        }
+        Prune(root, cancellationToken);
+    }
+
     private void Prune(string root, CancellationToken cancellationToken)
     {
         FileInfo[] entries = Directory.EnumerateFiles(root, "*.json", SearchOption.TopDirectoryOnly)
@@ -142,6 +238,18 @@ internal sealed class FileEmbeddedAuthorMetadataCache(EmbeddedAuthorMetadataCach
         return Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(identity))) + ".json";
     }
 
+    private static string FrontMatterFileName(FrontMatterAuthorCacheKey key)
+    {
+        string identity = string.Join('\u001F',
+            "front-matter",
+            key.Format,
+            key.Fingerprint.SizeInBytes.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            key.Fingerprint.Sha256.Value,
+            key.ExtractorVersion,
+            key.LimitsVersion);
+        return Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(identity))) + ".json";
+    }
+
     private sealed record CacheDocument(
         string SchemaVersion,
         string Format,
@@ -152,5 +260,27 @@ internal sealed class FileEmbeddedAuthorMetadataCache(EmbeddedAuthorMetadataCach
         EmbeddedAuthorMetadataStatus Status,
         string? EmbeddedTitle,
         string[] Authors,
+        string? ProblemCode);
+
+    private sealed record FrontMatterCandidateDocument(
+        Domain.Metadata.AuthorCreditRole Role,
+        string[] Names,
+        int UnitNumber,
+        int LineNumber,
+        string Marker);
+
+    private sealed record FrontMatterCacheDocument(
+        string SchemaVersion,
+        string Format,
+        long SizeInBytes,
+        string Sha256,
+        string ExtractorVersion,
+        string LimitsVersion,
+        FrontMatterAuthorStatus Status,
+        FrontMatterCandidateDocument[] Candidates,
+        int RequestedUnits,
+        int CompletedUnits,
+        int RetainedUsefulCharacters,
+        bool Truncated,
         string? ProblemCode);
 }

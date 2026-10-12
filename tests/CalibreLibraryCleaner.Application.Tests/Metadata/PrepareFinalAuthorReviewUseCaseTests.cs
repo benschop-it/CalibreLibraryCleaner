@@ -142,6 +142,62 @@ public sealed class PrepareFinalAuthorReviewUseCaseTests
     }
 
     [Fact]
+    public void FrontMatterAuthorAndRolesRemainVisibleAndUnchecked()
+    {
+        CalibreBook book = Book(1, "Unknown", [Format("EPUB", "book.epub", EpubFingerprint)]);
+        FrontMatterAuthorObservation observation = new(
+            "EPUB",
+            EpubFingerprint,
+            FrontMatterAuthorVersions.EpubExtractor,
+            FrontMatterAuthorVersions.Limits,
+            FrontMatterAuthorStatus.Available,
+            [
+                new(AuthorCreditRole.Author, ["Reliable Writer"], 1, 2, "By"),
+                new(AuthorCreditRole.Editor, ["Editorial Person"], 2, 4, "Edited by"),
+            ],
+            3,
+            3,
+            1_000,
+            false);
+
+        FinalAuthorReviewSubject subject = PrepareFinalAuthorReviewUseCase.Execute(
+            State([book]), frontMatterObservations: [observation])
+            .Subjects.Should().ContainSingle().Subject;
+
+        subject.Resolution.ProposalSource.Should().Be(AuthorProposalSource.ContentDerivedFrontMatter);
+        subject.Resolution.SelectedByDefault.Should().BeFalse();
+        subject.FrontMatterEvidence.Single().Candidates.Should().HaveCount(2);
+        subject.NeedsInspection.Should().BeFalse();
+    }
+
+    [Fact]
+    public void UnavailableFrontMatterExhaustsInspectionWithoutInventingAnAuthor()
+    {
+        CalibreBook book = Book(1, "Unknown", [Format("PDF", "book.pdf", PdfFingerprint)]);
+        FrontMatterAuthorObservation observation = new(
+            "PDF",
+            PdfFingerprint,
+            FrontMatterAuthorVersions.PdfExtractor,
+            FrontMatterAuthorVersions.Limits,
+            FrontMatterAuthorStatus.Unavailable,
+            [],
+            0,
+            0,
+            0,
+            false,
+            "PDF_FRONT_MATTER.PASSWORD_REQUIRED");
+
+        FinalAuthorReviewSubject subject = PrepareFinalAuthorReviewUseCase.Execute(
+            State([book]), frontMatterObservations: [observation])
+            .Subjects.Should().ContainSingle().Subject;
+
+        subject.Resolution.ProposalSource.Should().Be(AuthorProposalSource.None);
+        subject.Resolution.Status.Should().Be(AuthorResolutionStatus.Unresolved);
+        subject.NeedsInspection.Should().BeFalse();
+        subject.FrontMatterEvidence.Single().ProblemCode.Should().Be("PDF_FRONT_MATTER.PASSWORD_REQUIRED");
+    }
+
+    [Fact]
     public void NonCompletedStateCannotPrepareFinalReview()
     {
         LibraryState state = State([Book(1, "Unknown")], phase: LibraryWorkflowPhase.CandidateCleanupCompleted);

@@ -474,6 +474,33 @@ bylines, no serialized prose sentinel, and that page six is not read. Front-matt
 cache/orchestration and final review fusion remain pending before this evidence stage
 is complete.
 
+Front-matter observations now use a separate typed schema in the shared bounded
+author-observation cache. Exact format/fingerprint/extractor/limits identity is
+required; atomic writes, reparse checks, oldest-first shared capacity pruning,
+corruption-as-miss, and path/prose exclusion match embedded metadata behavior. A
+separate escalation use case touches only review subjects still needing inspection,
+reuses cache hits before path resolution, invokes the bounded EPUB or isolated PDF
+port on misses, caches missing/unavailable outcomes as completed coverage, and
+reports truthful hit/inspection counters.
+
+Final review retains author/editor/translator candidates with unit/line locations.
+Only explicit author-role facts participate in resolution; they produce unchecked
+`ContentDerivedFrontMatter` proposals, conflicting author facts remain conflicting,
+and editor/translator facts never become authors. An observed missing/unavailable
+present format is exhausted and does not loop, while a suspect record with no
+inspectable format stays visibly unresolved. Focused cache-hit tests prove warm runs
+do not resolve paths or launch parsers. Implementation is complete for this evidence
+stage, but the combined progress checkbox remains open until cold/warm generated-data
+measurements validate the proposed ceilings and demand scaling.
+
+Complete affected-suite verification after front-matter integration passed Domain
+297/297 and Application 248/248. Infrastructure completed 289 tests before the known
+viewer-launch fixture intermittently retained its copied TestCalibre DLL during
+temporary-directory teardown; the failed viewer test plus all five shared author-
+observation cache tests passed on an isolated no-build rerun (6/6). Formatting and
+diff checks passed after scoped CRLF final-newline correction. No production library
+was opened or mutated by these tests.
+
 ## Final outcome
 
 Implementation in progress. The first read-only policy/review slice and the minimal

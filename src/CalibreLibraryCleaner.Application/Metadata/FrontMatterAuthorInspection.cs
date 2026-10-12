@@ -34,6 +34,35 @@ public static class FrontMatterAuthorVersions
     public const string Limits = "front-matter-author-limits/1.0.0";
 }
 
+public sealed record FrontMatterAuthorCacheKey
+{
+    public FrontMatterAuthorCacheKey(
+        string format,
+        FormatFileFingerprint fingerprint,
+        string extractorVersion,
+        string limitsVersion)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(format);
+        ArgumentNullException.ThrowIfNull(fingerprint);
+        ArgumentException.ThrowIfNullOrWhiteSpace(extractorVersion);
+        ArgumentException.ThrowIfNullOrWhiteSpace(limitsVersion);
+        string canonical = format.Trim().ToUpperInvariant();
+        if (canonical is not ("EPUB" or "PDF")
+            || extractorVersion.Length > 128
+            || limitsVersion.Length > 128)
+            throw new ArgumentException("Front-matter author cache identity is invalid.");
+        Format = canonical;
+        Fingerprint = fingerprint;
+        ExtractorVersion = extractorVersion.Trim();
+        LimitsVersion = limitsVersion.Trim();
+    }
+
+    public string Format { get; }
+    public FormatFileFingerprint Fingerprint { get; }
+    public string ExtractorVersion { get; }
+    public string LimitsVersion { get; }
+}
+
 public enum FrontMatterAuthorStatus
 {
     Available,
@@ -129,4 +158,15 @@ public sealed record FrontMatterAuthorObservation
     public int RetainedUsefulCharacters { get; }
     public bool Truncated { get; }
     public string? ProblemCode { get; }
+}
+
+public interface IFrontMatterAuthorCache
+{
+    Task<FrontMatterAuthorObservation?> TryReadAsync(
+        FrontMatterAuthorCacheKey key,
+        CancellationToken cancellationToken);
+
+    Task WriteAsync(
+        FrontMatterAuthorObservation observation,
+        CancellationToken cancellationToken);
 }

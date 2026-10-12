@@ -96,6 +96,20 @@ public sealed class AuthorSourcePreservationPolicyTests
         resolution.ReasonCodes.Should().Contain(AuthorSuspicionReasonCodes.ConservativeNameOrder);
     }
 
+    [Fact]
+    public void FrontMatterAuthorProducesAnUncheckedContentDerivedProposal()
+    {
+        AuthorResolution resolution = AuthorSourcePreservationPolicy.Resolve(
+            "The Book",
+            [Author("Unknown")],
+            verifiedAppliedOnlineAuthors: false,
+            [Evidence(AuthorEvidenceSource.PdfFrontMatter, "Reliable Writer")]);
+
+        resolution.ProposalSource.Should().Be(AuthorProposalSource.ContentDerivedFrontMatter);
+        resolution.ProposedDisplayNames.Should().Equal("Reliable Writer");
+        resolution.SelectedByDefault.Should().BeFalse();
+    }
+
     private static BookAuthor Author(string value) => new(new(1), value, value);
 
     private static AuthorEvidenceObservation Evidence(AuthorEvidenceSource source, string author) =>
