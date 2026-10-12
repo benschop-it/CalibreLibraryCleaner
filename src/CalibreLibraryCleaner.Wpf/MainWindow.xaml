@@ -552,6 +552,86 @@
           </Border>
         </Grid>
       </TabItem>
+      <TabItem Header="Final _authors" AutomationProperties.Name="Final author and naming review">
+        <Grid Margin="8">
+          <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="3*" MinHeight="180" />
+            <RowDefinition Height="5" />
+            <RowDefinition Height="2*" MinHeight="140" />
+          </Grid.RowDefinitions>
+          <DockPanel Grid.Row="0" Margin="0,0,0,8">
+            <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" Margin="12,0,0,0">
+              <Label Target="{Binding ElementName=FinalAuthorFilterBox}" Content="_Show:" />
+              <ComboBox x:Name="FinalAuthorFilterBox"
+                        MinWidth="145"
+                        ItemsSource="{Binding FinalAuthorReviewFilterModes}"
+                        SelectedItem="{Binding FinalAuthorReviewFilterMode, Mode=TwoWay}" />
+            </StackPanel>
+            <StackPanel>
+              <TextBlock FontWeight="Bold" Text="{Binding FinalAuthorReviewSummary}" TextWrapping="Wrap" />
+              <WrapPanel Margin="0,6,0,0">
+                <Button Margin="0,0,8,0" Padding="8,4" Content="Check _all available"
+                        Command="{Binding CheckAllFinalAuthorApplyCommand}" />
+                <Button Padding="8,4" Content="Clear all _Apply"
+                        Command="{Binding ClearAllFinalAuthorApplyCommand}" />
+              </WrapPanel>
+            </StackPanel>
+          </DockPanel>
+          <DataGrid Grid.Row="1"
+                    ItemsSource="{Binding FinalAuthorReviewSubjects}"
+                    SelectedItem="{Binding SelectedFinalAuthorReviewSubject, Mode=TwoWay}"
+                    AutoGenerateColumns="False"
+                    IsReadOnly="True"
+                    SelectionMode="Extended"
+                    SelectionUnit="FullRow"
+                    CanUserAddRows="False"
+                    EnableRowVirtualization="True"
+                    EnableColumnVirtualization="True"
+                    VirtualizingPanel.IsVirtualizing="True"
+                    VirtualizingPanel.VirtualizationMode="Recycling"
+                    ScrollViewer.CanContentScroll="True"
+                    AutomationProperties.Name="Final author review subjects">
+            <DataGrid.Columns>
+              <DataGridTemplateColumn Width="65" Header="Apply">
+                <DataGridTemplateColumn.CellTemplate>
+                  <DataTemplate>
+                    <CheckBox HorizontalAlignment="Center" VerticalAlignment="Center"
+                              IsEnabled="{Binding CanApply}"
+                              IsChecked="{Binding Apply, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                              Command="{Binding PersistApplyCommand}" />
+                  </DataTemplate>
+                </DataGridTemplateColumn.CellTemplate>
+              </DataGridTemplateColumn>
+              <DataGridTextColumn Width="70" Header="Record" Binding="{Binding RecordId}" />
+              <DataGridTextColumn Width="100" Header="Status" Binding="{Binding Status}" />
+              <DataGridTextColumn Width="150" Header="Source" Binding="{Binding Source}" />
+              <DataGridTextColumn Width="2*" MinWidth="180" Header="Current authors" Binding="{Binding CurrentAuthors}" />
+              <DataGridTextColumn Width="2*" MinWidth="180" Header="Proposed authors" Binding="{Binding ProposedAuthors}" />
+              <DataGridTextColumn Width="2*" MinWidth="160" Header="Current sorts" Binding="{Binding CurrentSorts}" />
+              <DataGridTextColumn Width="2*" MinWidth="160" Header="Proposed sorts" Binding="{Binding ProposedSorts}" />
+              <DataGridTextColumn Width="2*" MinWidth="160" Header="Coverage" Binding="{Binding Coverage}" />
+            </DataGrid.Columns>
+          </DataGrid>
+          <GridSplitter Grid.Row="2" Height="5" HorizontalAlignment="Stretch"
+                        ResizeDirection="Rows" ResizeBehavior="PreviousAndNext"
+                        Background="#B8C1C8" />
+          <Border Grid.Row="3" Margin="0,8,0,0" Padding="10"
+                  BorderBrush="#4B728A" BorderThickness="2,0,0,0"
+                  Background="#EAF4F7"
+                  DataContext="{Binding SelectedFinalAuthorReviewSubject}">
+            <ScrollViewer VerticalScrollBarVisibility="Auto">
+              <StackPanel>
+                <TextBlock FontSize="15" FontWeight="Bold" Text="Selected author evidence" />
+                <TextBlock Margin="0,6,0,0" Text="{Binding CurrentTitle, StringFormat=Title: {0}}" TextWrapping="Wrap" />
+                <TextBlock Margin="0,3,0,0" Text="{Binding Protection, StringFormat=Protection: {0}}" />
+                <TextBlock Margin="0,3,0,0" Text="{Binding Reasons, StringFormat=Reasons: {0}}" TextWrapping="Wrap" />
+                <TextBlock Margin="0,3,0,0" Text="{Binding Roles, StringFormat=Roles and locations: {0}}" TextWrapping="Wrap" />
+              </StackPanel>
+            </ScrollViewer>
+          </Border>
+        </Grid>
+      </TabItem>
       <TabItem Header="E_xpanded candidates" AutomationProperties.Name="Expanded content-confirmed candidates">
         <Grid Margin="8">
           <Grid.RowDefinitions>

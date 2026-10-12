@@ -37,6 +37,8 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
     private readonly IMetadataMutationConfirmationService? _metadataMutationConfirmation;
     private readonly IOnlineMetadataSettingsDialogService? _onlineMetadataSettingsDialog;
     private readonly PrepareMetadataReviewUseCase? _prepareMetadataReview;
+    private readonly InspectEmbeddedAuthorMetadataUseCase? _inspectEmbeddedAuthorMetadata;
+    private readonly InspectFrontMatterAuthorsUseCase? _inspectFrontMatterAuthors;
     private readonly LibraryOperationCoordinator _operationCoordinator;
     private readonly ILogger<MainWindowViewModel> _logger;
     private readonly SynchronizationContext? _uiContext;
@@ -47,6 +49,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
     private readonly BulkObservableCollection<ExpandedCandidateGroupRowViewModel> _expandedCandidateGroups = [];
     private readonly BulkObservableCollection<UnifiedCandidateGroupRowViewModel> _unifiedCandidateGroups = [];
     private readonly BulkObservableCollection<MetadataReviewSubjectRowViewModel> _metadataReviewSubjects = [];
+    private readonly BulkObservableCollection<FinalAuthorReviewSubjectRowViewModel> _finalAuthorReviewSubjects = [];
     private readonly BulkObservableCollection<EpubAssessmentRowViewModel> _epubAssessments = [];
     private readonly BulkObservableCollection<EpubAssessmentFindingRowViewModel> _epubFindings = [];
     private readonly BulkObservableCollection<PdfAssessmentRowViewModel> _pdfAssessments = [];
@@ -57,6 +60,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
     private IReadOnlyList<MetadataDuplicateGroupRowViewModel> _allMetadataDuplicateGroups = [];
     private MetadataReviewSubjectRowViewModel[] _allMetadataReviewSubjects = [];
     private MetadataReviewSubjectRowViewModel[] _selectedMetadataReviewSubjects = [];
+    private FinalAuthorReviewSubjectRowViewModel[] _allFinalAuthorReviewSubjects = [];
     private CancellationTokenSource? _scanCancellation;
     private string _selectedLibraryPath = string.Empty;
     private string? _selectedPersistedLibraryPath;
@@ -70,9 +74,11 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
     private string _metadataReviewSummary =
         "Complete Candidate cleanup, then prepare online metadata proposals for retained records.";
     private string _candidateCleanupResultSummary = string.Empty;
+    private string _finalAuthorReviewSummary = "Prepare final author review after metadata completion.";
     private string _metadataDuplicateFilterText = string.Empty;
     private MetadataDuplicateFilterMode _metadataDuplicateFilterMode;
     private MetadataReviewFilterMode _metadataReviewFilterMode = MetadataReviewFilterMode.NeedsReview;
+    private FinalAuthorReviewFilterMode _finalAuthorReviewFilterMode = FinalAuthorReviewFilterMode.NeedsReview;
     private bool _isBusy;
     private double _progressPercentage;
     private bool _isProgressIndeterminate;
@@ -86,6 +92,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
     private UnifiedCandidateGroupRowViewModel? _selectedUnifiedCandidateGroup;
     private UnifiedCandidateMemberRowViewModel? _selectedUnifiedCandidateMember;
     private MetadataReviewSubjectRowViewModel? _selectedMetadataReviewSubject;
+    private FinalAuthorReviewSubjectRowViewModel? _selectedFinalAuthorReviewSubject;
     private EpubAssessmentRowViewModel? _selectedEpubAssessment;
     private EpubFindingFilterMode _epubFindingFilterMode;
     private PdfAssessmentRowViewModel? _selectedPdfAssessment;
@@ -105,6 +112,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
     private bool _isCandidatePreparationActive;
     private bool _candidateCancellationRequested;
     private MetadataReviewWorkspace? _metadataReviewWorkspace;
+    private FinalAuthorReviewWorkspace? _finalAuthorReviewWorkspace;
 
     public MainWindowViewModel(
         ValidateLibraryUseCase validateLibrary,
@@ -125,6 +133,8 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         IOnlineMetadataSettingsDialogService? onlineMetadataSettingsDialog = null,
         PrepareMetadataReviewUseCase? prepareMetadataReview = null,
         IMetadataMutationConfirmationService? metadataMutationConfirmation = null,
+        InspectEmbeddedAuthorMetadataUseCase? inspectEmbeddedAuthorMetadata = null,
+        InspectFrontMatterAuthorsUseCase? inspectFrontMatterAuthors = null,
         ILogger<MainWindowViewModel>? logger = null)
     {
         _validateLibrary = validateLibrary;
@@ -143,6 +153,8 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         _metadataMutationConfirmation = metadataMutationConfirmation;
         _onlineMetadataSettingsDialog = onlineMetadataSettingsDialog;
         _prepareMetadataReview = prepareMetadataReview;
+        _inspectEmbeddedAuthorMetadata = inspectEmbeddedAuthorMetadata;
+        _inspectFrontMatterAuthors = inspectFrontMatterAuthors;
         _operationCoordinator = operationCoordinator ?? new();
         _logger = logger ?? NullLogger<MainWindowViewModel>.Instance;
         _uiContext = SynchronizationContext.Current;
@@ -161,6 +173,8 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
             _unifiedCandidateGroups);
         MetadataReviewSubjects = new ReadOnlyObservableCollection<MetadataReviewSubjectRowViewModel>(
             _metadataReviewSubjects);
+        FinalAuthorReviewSubjects = new ReadOnlyObservableCollection<FinalAuthorReviewSubjectRowViewModel>(
+            _finalAuthorReviewSubjects);
         EpubAssessments = new ReadOnlyObservableCollection<EpubAssessmentRowViewModel>(_epubAssessments);
         EpubFindings = new ReadOnlyObservableCollection<EpubAssessmentFindingRowViewModel>(_epubFindings);
         PdfAssessments = new ReadOnlyObservableCollection<PdfAssessmentRowViewModel>(_pdfAssessments);
@@ -222,6 +236,12 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         UncheckSelectedMetadataApplyCommand = new AsyncRelayCommand(
             () => SetSelectedMetadataApplyAsync(false),
             () => CanSetSelectedMetadataApply(false));
+        ClearAllFinalAuthorApplyCommand = new RelayCommand(
+            () => SetAllFinalAuthorApply(false),
+            () => !IsBusy && _finalAuthorReviewWorkspace?.Subjects.Any(value => value.Apply) == true);
+        CheckAllFinalAuthorApplyCommand = new RelayCommand(
+            () => SetAllFinalAuthorApply(true),
+            () => !IsBusy && _finalAuthorReviewWorkspace?.Subjects.Any(value => value.CanApply && !value.Apply) == true);
         CandidateCleanupCommand = new AsyncRelayCommand(CandidateCleanupAsync, CanRunCandidateCleanup);
     }
 
@@ -338,6 +358,8 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
 
     public ReadOnlyObservableCollection<MetadataReviewSubjectRowViewModel> MetadataReviewSubjects { get; }
 
+    public ReadOnlyObservableCollection<FinalAuthorReviewSubjectRowViewModel> FinalAuthorReviewSubjects { get; }
+
     public ReadOnlyObservableCollection<EpubAssessmentRowViewModel> EpubAssessments { get; }
 
     public ReadOnlyObservableCollection<EpubAssessmentFindingRowViewModel> EpubFindings { get; }
@@ -357,6 +379,9 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
 
     public IReadOnlyList<MetadataReviewFilterMode> MetadataReviewFilterModes { get; } =
         Enum.GetValues<MetadataReviewFilterMode>();
+
+    public IReadOnlyList<FinalAuthorReviewFilterMode> FinalAuthorReviewFilterModes { get; } =
+        Enum.GetValues<FinalAuthorReviewFilterMode>();
 
     public string ExactDuplicateSummary
     {
@@ -410,6 +435,12 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         }
     }
 
+    public string FinalAuthorReviewSummary
+    {
+        get => _finalAuthorReviewSummary;
+        private set => SetProperty(ref _finalAuthorReviewSummary, value);
+    }
+
     public string CandidateCleanupAutomationName => CandidatePhase() switch
     {
         LibraryWorkflowPhase.CandidatePreparationReady => "Prepare Candidate review",
@@ -417,8 +448,10 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         LibraryWorkflowPhase.CandidateCleanupCompleted when _metadataReviewWorkspace is null =>
             "Prepare online metadata review",
         LibraryWorkflowPhase.CandidateCleanupCompleted => "Apply checked metadata",
-        LibraryWorkflowPhase.Completed when AuthorNormalizationCount() > 0 => "Normalize author names",
-        LibraryWorkflowPhase.Completed => "Author normalization complete",
+        LibraryWorkflowPhase.Completed when _finalAuthorReviewWorkspace is null => "Prepare final author review",
+        LibraryWorkflowPhase.Completed when _finalAuthorReviewWorkspace.Subjects.Any(value => value.Apply) =>
+            "Apply checked author corrections",
+        LibraryWorkflowPhase.Completed => "Final author review ready",
         _ => "Candidate cleanup unavailable",
     };
 
@@ -432,9 +465,11 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
             "Resolve online metadata only for records retained after Candidate cleanup",
         LibraryWorkflowPhase.CandidateCleanupCompleted =>
             "Apply checked online metadata proposals after backup confirmation",
-        LibraryWorkflowPhase.Completed when AuthorNormalizationCount() > 0 =>
-            "Convert conservative Lastname, Firstname author entries to Firstname Lastname while preserving exact Calibre sort values",
-        LibraryWorkflowPhase.Completed => "No conservative author normalization candidates remain",
+        LibraryWorkflowPhase.Completed when _finalAuthorReviewWorkspace is null =>
+            "Screen retained authors and selectively inspect unresolved EPUB/PDF evidence without mutation",
+        LibraryWorkflowPhase.Completed when _finalAuthorReviewWorkspace.Subjects.Any(value => value.Apply) =>
+            "Apply only checked final author corrections after backup confirmation",
+        LibraryWorkflowPhase.Completed => "Review unresolved rows or check author corrections to apply",
         _ => "Available after Exact cleanup completes for the current workflow generation",
     };
 
@@ -478,6 +513,21 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
     {
         get => _selectedMetadataReviewSubject;
         set => SetProperty(ref _selectedMetadataReviewSubject, value);
+    }
+
+    public FinalAuthorReviewFilterMode FinalAuthorReviewFilterMode
+    {
+        get => _finalAuthorReviewFilterMode;
+        set
+        {
+            if (SetProperty(ref _finalAuthorReviewFilterMode, value)) ApplyFinalAuthorReviewFilter();
+        }
+    }
+
+    public FinalAuthorReviewSubjectRowViewModel? SelectedFinalAuthorReviewSubject
+    {
+        get => _selectedFinalAuthorReviewSubject;
+        set => SetProperty(ref _selectedFinalAuthorReviewSubject, value);
     }
 
     public BookRowViewModel? SelectedBook
@@ -758,6 +808,10 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
 
     public IAsyncRelayCommand UncheckSelectedMetadataApplyCommand { get; }
 
+    public IRelayCommand ClearAllFinalAuthorApplyCommand { get; }
+
+    public IRelayCommand CheckAllFinalAuthorApplyCommand { get; }
+
     public IAsyncRelayCommand CandidateCleanupCommand { get; }
 
     public async Task InitializeAsync(CancellationToken cancellationToken = default)
@@ -858,6 +912,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         using IDisposable? operation = _operationCoordinator.TryBegin();
         if (operation is null) return;
         ClearMetadataReview();
+        ClearFinalAuthorReview();
         _scanCancellation?.Dispose();
         _scanCancellation = new CancellationTokenSource();
         IsBusy = true;
@@ -956,6 +1011,8 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
                     SnapshotPresentation projectedPresentation = await PreparePresentationAsync(
                         state.Snapshot, CancellationToken.None).ConfigureAwait(true);
                     SelectedLibraryPath = state.Snapshot.Identity.LibraryRoot;
+                    ClearMetadataReview();
+                    ClearFinalAuthorReview();
                     ApplySnapshot(state.Snapshot, projectedPresentation, state.IsAuthoritative);
                     StatusMessage = state.IsAuthoritative
                         ? $"Loaded authoritative projected state revision {state.Revision.Value} from baseline {state.Snapshot.ScannedAt:u}. External Calibre changes require Rescan."
@@ -1014,6 +1071,8 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
             SnapshotPresentation presentation = await PreparePresentationAsync(
                 snapshot, CancellationToken.None).ConfigureAwait(true);
             SelectedLibraryPath = snapshot.Identity.LibraryRoot;
+            ClearMetadataReview();
+            ClearFinalAuthorReview();
             ApplySnapshot(snapshot, presentation, isFreshScan: migratedState?.IsAuthoritative == true);
             StatusMessage = migratedState is null
                 ? $"Loaded persisted scan from {snapshot.ScannedAt:u}. Results may be stale; select Scan before cleanup or recovery work."
@@ -1388,9 +1447,11 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
             LibraryWorkflowPhase.CandidateCleanupCompleted => _metadataReviewWorkspace is null
                 ? _prepareMetadataReview is not null
                 : _executeUnifiedCandidateCleanup is not null && _metadataMutationConfirmation is not null,
+            LibraryWorkflowPhase.Completed when _finalAuthorReviewWorkspace is null =>
+                _inspectEmbeddedAuthorMetadata is not null && _inspectFrontMatterAuthors is not null,
             LibraryWorkflowPhase.Completed => _executeUnifiedCandidateCleanup is not null
                 && _metadataMutationConfirmation is not null
-                && AuthorNormalizationCount() > 0,
+                && _finalAuthorReviewWorkspace.Subjects.Any(value => value.Apply),
             _ => false,
         };
     }
@@ -1506,13 +1567,37 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         {
             if (startingPhase == LibraryWorkflowPhase.Completed)
             {
-                int bookCount = AuthorNormalizationCount(startingState.Snapshot);
+                if (_finalAuthorReviewWorkspace is null)
+                {
+                    FinalAuthorReviewWorkspace workspace = PrepareFinalAuthorReviewUseCase.Execute(startingState);
+                    Progress<EmbeddedAuthorMetadataProgress> metadataProgress = new(value =>
+                        UpdateOperationProgress(
+                            $"Inspecting embedded author metadata: {value.CacheHits:N0} cached, {value.Inspections:N0} inspected.",
+                            value.CompletedFormats,
+                            value.TotalFormats));
+                    workspace = await _inspectEmbeddedAuthorMetadata!.ExecuteAsync(
+                        startingState, workspace, metadataProgress, _scanCancellation.Token).ConfigureAwait(true);
+                    Progress<FrontMatterAuthorProgress> frontMatterProgress = new(value =>
+                        UpdateOperationProgress(
+                            $"Inspecting bounded front matter: {value.CacheHits:N0} cached, {value.Inspections:N0} inspected.",
+                            value.CompletedFormats,
+                            value.TotalFormats));
+                    workspace = await _inspectFrontMatterAuthors!.ExecuteAsync(
+                        startingState, workspace, frontMatterProgress, _scanCancellation.Token).ConfigureAwait(true);
+                    ApplyFinalAuthorReviewWorkspace(workspace);
+                    IsProgressIndeterminate = false;
+                    ProgressPercentage = 100;
+                    StatusMessage = $"Final author review ready for {workspace.Subjects.Count:N0} row(s); "
+                        + $"{workspace.Subjects.Count(value => value.Apply):N0} checked.";
+                    return;
+                }
+                int bookCount = _finalAuthorReviewWorkspace.Subjects.Count(value => value.Apply);
                 if (bookCount == 0 || _metadataMutationConfirmation is null
                     || !_metadataMutationConfirmation.ConfirmAuthorNormalization(bookCount))
                 {
                     StatusMessage = bookCount == 0
-                        ? "No conservative author normalization candidates remain."
-                        : "Author normalization canceled. Confirm a complete external backup before retrying.";
+                        ? "No final author corrections are checked."
+                        : "Final author correction canceled. Confirm a complete external backup before retrying.";
                     return;
                 }
                 IsProgressIndeterminate = false;
@@ -1525,8 +1610,9 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
                     [],
                     ExternalBackupConfirmed: true,
                     MetadataReview: null,
-                    NormalizeAuthors: true), normalizationProgress, _scanCancellation.Token).ConfigureAwait(true);
-                CandidateCleanupResultSummary = $"Normalized {normalizationResult.UpdatedMetadataFieldCount:N0} book author record(s); "
+                    NormalizeAuthors: true,
+                    FinalAuthorReview: _finalAuthorReviewWorkspace), normalizationProgress, _scanCancellation.Token).ConfigureAwait(true);
+                CandidateCleanupResultSummary = $"Updated {normalizationResult.UpdatedMetadataFieldCount:N0} book author record(s); "
                     + $"skipped {normalizationResult.SkippedMetadataFieldCount:N0} verified-unchanged record(s).";
                 LibraryState? normalizationFinal = _libraryStateSession.GetCurrent(SelectedLibraryPath);
                 if (normalizationFinal is not null)
@@ -1536,8 +1622,9 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
                     ApplySnapshot(normalizationFinal.Snapshot, presentation, normalizationFinal.IsAuthoritative);
                 }
                 StatusMessage = normalizationResult.IsCompleted
-                    ? "Author normalization completed."
+                    ? "Final author corrections completed."
                     : string.Join(" ", normalizationResult.Issues.Select(value => $"{value.Code}: {value.Explanation}"));
+                if (normalizationResult.IsCompleted) ClearFinalAuthorReview();
                 return;
             }
 
@@ -1872,6 +1959,8 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
     {
         SkipAllUnifiedCandidatesCommand.NotifyCanExecuteChanged();
         NotifyMetadataApplyCommands();
+        ClearAllFinalAuthorApplyCommand.NotifyCanExecuteChanged();
+        CheckAllFinalAuthorApplyCommand.NotifyCanExecuteChanged();
         CandidateCleanupCommand.NotifyCanExecuteChanged();
         OnPropertyChanged(nameof(CandidateCleanupAutomationName));
         OnPropertyChanged(nameof(CandidateCleanupToolTip));
@@ -2106,6 +2195,83 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         _metadataReviewSubjects.ReplaceAll([]);
         SelectedMetadataReviewSubject = null;
         MetadataReviewSummary = "Complete Candidate cleanup, then prepare online metadata proposals for retained records.";
+        NotifyCandidateCleanupStateChanged();
+    }
+
+    private void ApplyFinalAuthorReviewWorkspace(FinalAuthorReviewWorkspace workspace)
+    {
+        _finalAuthorReviewWorkspace = workspace;
+        _allFinalAuthorReviewSubjects = workspace.Subjects.Select(value =>
+            new FinalAuthorReviewSubjectRowViewModel(value, PersistFinalAuthorApplyAsync)).ToArray();
+        ApplyFinalAuthorReviewFilter();
+        NotifyCandidateCleanupStateChanged();
+    }
+
+    private Task PersistFinalAuthorApplyAsync(CalibreBookId bookId, bool apply)
+    {
+        if (_finalAuthorReviewWorkspace is null) return Task.CompletedTask;
+        using IDisposable? operation = _operationCoordinator.TryBegin();
+        if (operation is null)
+        {
+            RefreshFinalAuthorReviewRow(bookId);
+            return Task.CompletedTask;
+        }
+        _finalAuthorReviewWorkspace = PrepareFinalAuthorReviewUseCase.SetApply(
+            _finalAuthorReviewWorkspace, [bookId], apply);
+        RefreshFinalAuthorReviewRow(bookId);
+        ApplyFinalAuthorReviewFilter();
+        return Task.CompletedTask;
+    }
+
+    private void SetAllFinalAuthorApply(bool apply)
+    {
+        if (_finalAuthorReviewWorkspace is null) return;
+        _finalAuthorReviewWorkspace = PrepareFinalAuthorReviewUseCase.SetAllApply(
+            _finalAuthorReviewWorkspace, apply);
+        ApplyFinalAuthorReviewWorkspace(_finalAuthorReviewWorkspace);
+        StatusMessage = apply
+            ? "Checked all available final author corrections."
+            : "Cleared all final author Apply choices.";
+    }
+
+    private void RefreshFinalAuthorReviewRow(CalibreBookId bookId)
+    {
+        if (_finalAuthorReviewWorkspace is null) return;
+        FinalAuthorReviewSubject subject = _finalAuthorReviewWorkspace.Subjects.Single(value =>
+            value.BookId == bookId);
+        _allFinalAuthorReviewSubjects.FirstOrDefault(value => value.BookId == bookId)?.Update(subject);
+    }
+
+    private void ApplyFinalAuthorReviewFilter()
+    {
+        CalibreBookId? selectedId = SelectedFinalAuthorReviewSubject?.BookId;
+        FinalAuthorReviewSubjectRowViewModel[] visible = _allFinalAuthorReviewSubjects
+            .Where(value => value.MatchesFilter(FinalAuthorReviewFilterMode)).ToArray();
+        _finalAuthorReviewSubjects.ReplaceAll(visible);
+        SelectedFinalAuthorReviewSubject = selectedId is null
+            ? visible.FirstOrDefault()
+            : visible.FirstOrDefault(value => value.BookId == selectedId.Value) ?? visible.FirstOrDefault();
+        int checkedCount = _allFinalAuthorReviewSubjects.Count(value => value.Apply);
+        int review = _allFinalAuthorReviewSubjects.Count(value => value.NeedsReview);
+        int unresolved = _allFinalAuthorReviewSubjects.Count(value => value.IsUnresolved);
+        int conflicting = _allFinalAuthorReviewSubjects.Count(value => value.IsConflicting);
+        FinalAuthorReviewSummary = _allFinalAuthorReviewSubjects.Length == 0
+            ? "No suspect authors or conservative normalization candidates remain."
+            : $"{visible.Length:N0} of {_allFinalAuthorReviewSubjects.Length:N0} rows visible; "
+                + $"checked {checkedCount:N0}, needs review {review:N0}, unresolved {unresolved:N0}, "
+                + $"conflicting {conflicting:N0}.";
+        CheckAllFinalAuthorApplyCommand.NotifyCanExecuteChanged();
+        ClearAllFinalAuthorApplyCommand.NotifyCanExecuteChanged();
+        NotifyCandidateCleanupStateChanged();
+    }
+
+    private void ClearFinalAuthorReview()
+    {
+        _finalAuthorReviewWorkspace = null;
+        _allFinalAuthorReviewSubjects = [];
+        _finalAuthorReviewSubjects.ReplaceAll([]);
+        SelectedFinalAuthorReviewSubject = null;
+        FinalAuthorReviewSummary = "Prepare final author review after metadata completion.";
         NotifyCandidateCleanupStateChanged();
     }
 

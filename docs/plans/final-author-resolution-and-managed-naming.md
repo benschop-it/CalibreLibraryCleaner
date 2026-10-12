@@ -523,6 +523,20 @@ review pattern. Focused tests cover evidence display, content-derived review def
 filtering, and non-actionable unresolved rows. MainWindow collection/command/XAML
 ownership remains the next UI slice.
 
+MainWindow now owns the final-author workspace and a dedicated virtualized review tab.
+The first Completed-phase activation runs snapshot screening, cache-first embedded
+metadata, then bounded front matter with truthful progress and no confirmation or
+mutation worker. Rows expose Apply, status/source, current/proposed display names and
+sorts, coverage, reasons, and role/location detail with All/Checked/Needs review/
+Unresolved/Conflicting filters plus row, Check all, and Clear all choices. The second
+activation is enabled only when at least one correction is checked, requires the
+existing external-backup confirmation, and submits the exact reviewed workspace to
+the stale-validating executor. Successful persisted loads/scans clear session-bound
+review state. Focused tests prove preparation does not confirm or execute and the
+second activation carries the final-review payload; complete WPF tests passed 53/53
+and architecture tests passed 33/33. Efficient selected-row bulk choices remain to
+be added alongside final UI polish.
+
 ## Final outcome
 
 Implementation in progress. The first read-only policy/review slice and the minimal

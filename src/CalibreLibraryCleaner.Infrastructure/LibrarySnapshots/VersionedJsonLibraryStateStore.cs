@@ -3,6 +3,7 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using CalibreLibraryCleaner.Application.Abstractions;
+using CalibreLibraryCleaner.Domain.Executions;
 using CalibreLibraryCleaner.Domain.Libraries;
 using CalibreLibraryCleaner.Infrastructure.Execution;
 using Microsoft.Extensions.Logging;

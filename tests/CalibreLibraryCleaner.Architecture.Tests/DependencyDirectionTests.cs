@@ -215,6 +215,20 @@ public sealed class DependencyDirectionTests
     }
 
     [Fact]
+    public void FinalAuthorReviewUsesVirtualizedRowsAndReviewedApplyBindings()
+    {
+        string source = File.ReadAllText(Path.Combine(
+            RepositoryRoot, "src", WpfProject, "MainWindow.xaml"));
+
+        source.Should().Contain("ItemsSource=\"{Binding FinalAuthorReviewSubjects}\"");
+        source.Should().Contain("SelectedItem=\"{Binding SelectedFinalAuthorReviewSubject, Mode=TwoWay}\"");
+        source.Should().Contain("ItemsSource=\"{Binding FinalAuthorReviewFilterModes}\"");
+        source.Should().Contain("Command=\"{Binding CheckAllFinalAuthorApplyCommand}\"");
+        source.Should().Contain("Command=\"{Binding ClearAllFinalAuthorApplyCommand}\"");
+        source.Should().Contain("AutomationProperties.Name=\"Final author review subjects\"");
+    }
+
+    [Fact]
     public void ExactReviewKeepsGroupAndMemberGridsVisible()
     {
         XDocument window = XDocument.Load(Path.Combine(

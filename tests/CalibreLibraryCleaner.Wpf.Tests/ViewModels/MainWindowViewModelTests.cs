@@ -527,7 +527,7 @@ public sealed class MainWindowViewModelTests
     }
 
     [Fact]
-    public async Task CompletedWorkflowRunsAuthorNormalizationThroughBackupPrompt()
+    public async Task CompletedWorkflowPreparesThenAppliesFinalAuthorReviewThroughBackupPrompt()
     {
         const string libraryRoot = "C:\\Books";
         CalibreBook book = new(
@@ -559,25 +559,37 @@ public sealed class MainWindowViewModelTests
         A.CallTo(() => confirmation.ConfirmAuthorNormalization(1)).Returns(true);
         CapturingLogger<MainWindowViewModel> logger = new();
         MainWindowViewModel viewModel = CreateViewModel(
-            A.Fake<ILibraryFolderPicker>(), out _, out _, out _, new(store), session,
+            A.Fake<ILibraryFolderPicker>(), out ILibraryPathResolver pathResolver, out _, out _, new(store), session,
             workflowOptions: LibraryWorkflowOptions.Staged,
             candidateExecutor: executor,
             metadataConfirmation: confirmation,
+            enableFinalAuthorReview: true,
             logger: logger);
+        A.CallTo(() => pathResolver.ValidateAsync(libraryRoot, A<CancellationToken>._))
+            .Returns(LibraryValidationOutcome.Success(new(libraryRoot, $"{libraryRoot}\\metadata.db")));
         await viewModel.InitializeAsync();
         viewModel.SelectedPersistedLibraryPath = libraryRoot;
         await viewModel.LoadPersistedSnapshotCommand.ExecuteAsync(null);
 
-        viewModel.CandidateCleanupAutomationName.Should().Be("Normalize author names");
+        viewModel.CandidateCleanupAutomationName.Should().Be("Prepare final author review");
+        await viewModel.CandidateCleanupCommand.ExecuteAsync(null);
+
+        captured.Should().BeNull();
+        A.CallTo(() => confirmation.ConfirmAuthorNormalization(A<int>._)).MustNotHaveHappened();
+        viewModel.FinalAuthorReviewFilterMode = FinalAuthorReviewFilterMode.All;
+        viewModel.FinalAuthorReviewSubjects.Should().ContainSingle().Which.Apply.Should().BeTrue();
+        viewModel.CandidateCleanupAutomationName.Should().Be("Apply checked author corrections");
+
         await viewModel.CandidateCleanupCommand.ExecuteAsync(null);
 
         captured.Should().NotBeNull();
         captured!.NormalizeAuthors.Should().BeTrue();
+        captured.FinalAuthorReview.Should().NotBeNull();
         captured.MetadataReview.Should().BeNull();
         captured.GroupSelections.Should().BeEmpty();
         viewModel.CandidateCleanupResultSummary.Should().Be(
-            "Normalized 1 book author record(s); skipped 0 verified-unchanged record(s).");
-        viewModel.StatusMessage.Should().Be("Author normalization completed.");
+            "Updated 1 book author record(s); skipped 0 verified-unchanged record(s).");
+        viewModel.StatusMessage.Should().Be("Final author corrections completed.");
         logger.Entries.Should().Contain(value =>
             value.EventId.Name == "UserVisibleOperationResult"
             && value.Message == viewModel.CandidateCleanupResultSummary);
@@ -1310,12 +1322,27 @@ public sealed class MainWindowViewModelTests
         IOnlineMetadataSettingsDialogService? onlineMetadataSettingsDialog = null,
         PrepareMetadataReviewUseCase? prepareMetadataReview = null,
         IMetadataMutationConfirmationService? metadataConfirmation = null,
+        bool enableFinalAuthorReview = false,
         ILogger<MainWindowViewModel>? logger = null)
     {
         resolver = A.Fake<ILibraryPathResolver>();
         reader = A.Fake<ICalibreMetadataReader>();
         IClock clock = A.Fake<IClock>();
         hasher = A.Fake<IFormatFileHasher>();
+        InspectEmbeddedAuthorMetadataUseCase? embeddedAuthors = enableFinalAuthorReview
+            ? new(
+                resolver,
+                A.Fake<IEpubInspector>(),
+                A.Fake<IPdfAuthorMetadataInspector>(),
+                A.Fake<IEmbeddedAuthorMetadataCache>())
+            : null;
+        InspectFrontMatterAuthorsUseCase? frontMatterAuthors = enableFinalAuthorReview
+            ? new(
+                resolver,
+                A.Fake<IEpubFrontMatterAuthorInspector>(),
+                A.Fake<IPdfFrontMatterAuthorInspector>(),
+                A.Fake<IFrontMatterAuthorCache>())
+            : null;
         return new(
             new ValidateLibraryUseCase(resolver),
             new ScanLibraryUseCase(resolver, reader, hasher, clock, new()),
@@ -1331,6 +1358,8 @@ public sealed class MainWindowViewModelTests
             onlineMetadataSettingsDialog: onlineMetadataSettingsDialog,
             prepareMetadataReview: prepareMetadataReview,
             metadataMutationConfirmation: metadataConfirmation,
+            inspectEmbeddedAuthorMetadata: embeddedAuthors,
+            inspectFrontMatterAuthors: frontMatterAuthors,
             logger: logger);
     }
 
