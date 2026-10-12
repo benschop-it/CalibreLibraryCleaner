@@ -10,6 +10,7 @@ using CalibreLibraryCleaner.Application.Assessments.Pdf;
 using CalibreLibraryCleaner.Application.Metadata;
 using CalibreLibraryCleaner.Domain.Assessments;
 using CalibreLibraryCleaner.Domain.Libraries;
+using CalibreLibraryCleaner.Domain.Metadata;
 using UglyToad.PdfPig;
 using UglyToad.PdfPig.Content;
 using UglyToad.PdfPig.Core;
@@ -88,6 +89,128 @@ internal sealed partial class PdfPigPdfInspector : IPdfInspector
         EmbeddedAuthorMetadataObservation Unavailable(PdfInspectionProblemCode code) => new(
             key, EmbeddedAuthorMetadataStatus.Unavailable, null, [],
             $"PDF_AUTHOR_METADATA.{code.ToString().ToUpperInvariant()}");
+    }
+
+    internal static async Task<FrontMatterAuthorObservation> InspectFrontMatterAuthorsAsync(
+        PdfInspectionRequest request,
+        FrontMatterInspectionLimits limits,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        ArgumentNullException.ThrowIfNull(limits);
+        request.Limits.Validate();
+        if (!TryValidatePath(request, out PdfInspectionProblemCode pathProblem))
+            return Unavailable(pathProblem);
+        try
+        {
+            FileInfo initial = new(request.FullPath);
+            if (!initial.Exists || initial.Length == 0 || initial.Length > request.Limits.MaximumFileBytes
+                || !MatchesObservation(initial, request))
+                return Unavailable(PdfInspectionProblemCode.ChangedFile);
+            await using FileStream stream = OpenRead(request.FullPath);
+            RawPreflightFacts raw = await InspectRawFileAsync(stream, request, cancellationToken)
+                .ConfigureAwait(false);
+            if (raw.Problem is { } problem) return Unavailable(problem);
+            if (!CryptographicOperations.FixedTimeEquals(
+                    Convert.FromHexString(raw.Sha256),
+                    Convert.FromHexString(request.Fingerprint.Sha256.Value)))
+                return Unavailable(PdfInspectionProblemCode.ChangedFile);
+            stream.Position = 0;
+            QuotaFilterProvider filterProvider = new(request.Limits);
+            using PdfDocument document = PdfDocument.Open(stream, new ParsingOptions
+            {
+                UseLenientParsing = false,
+                SkipMissingFonts = false,
+                ClipPaths = false,
+                UseActualText = true,
+                MaxStackDepth = request.Limits.MaximumStackDepth,
+                Logger = SilentPdfPigLog.Instance,
+                FilterProvider = filterProvider,
+            });
+            if (document.Structure.CrossReferenceTable.ObjectOffsets.Count > request.Limits.MaximumObjects)
+                return Unavailable(PdfInspectionProblemCode.ObjectLimitExceeded);
+            int requested = Math.Min(document.NumberOfPages, limits.MaximumPdfPages);
+            if (requested <= 0) return Unavailable(PdfInspectionProblemCode.ZeroPages);
+            List<FrontMatterAuthorCandidate> candidates = [];
+            int completed = 0;
+            int retained = 0;
+            bool truncated = false;
+            for (int pageNumber = 1; pageNumber <= requested; pageNumber++)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                Page page = document.GetPage(pageNumber);
+                if (page.Operations.Count > request.Limits.MaximumOperationsPerPage)
+                    return Unavailable(PdfInspectionProblemCode.OperationLimitExceeded);
+                (string[] Lines, int UsefulCharacters, bool Truncated) pageLines = ReadBoundedPageLines(
+                    page, limits.MaximumUsefulCharactersPerUnit, cancellationToken);
+                retained = checked(retained + pageLines.UsefulCharacters);
+                truncated |= pageLines.Truncated;
+                completed++;
+                candidates.AddRange(AuthorBylinePolicy.Extract(pageLines.Lines).Select(value =>
+                    new FrontMatterAuthorCandidate(
+                        value.Role, value.Names, pageNumber, value.LineNumber, value.Marker)));
+            }
+            EnsureUnchanged(initial, request);
+            FrontMatterAuthorStatus status = candidates.Any(value => value.Role == AuthorCreditRole.Author)
+                ? FrontMatterAuthorStatus.Available
+                : FrontMatterAuthorStatus.Missing;
+            return new(
+                "PDF", request.Fingerprint, FrontMatterAuthorVersions.PdfExtractor,
+                FrontMatterAuthorVersions.Limits, status, candidates, requested, completed,
+                retained, truncated);
+        }
+        catch (OperationCanceledException) { throw; }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException
+                                           or SecurityException or InvalidDataException or ArgumentException
+                                           or NotSupportedException or PdfDocumentFormatException)
+        {
+            return Unavailable(PdfInspectionProblemCode.MalformedStructure);
+        }
+
+        FrontMatterAuthorObservation Unavailable(PdfInspectionProblemCode code) => new(
+            "PDF", request.Fingerprint, FrontMatterAuthorVersions.PdfExtractor,
+            FrontMatterAuthorVersions.Limits, FrontMatterAuthorStatus.Unavailable, [],
+            0, 0, 0, false, $"PDF_FRONT_MATTER.{code.ToString().ToUpperInvariant()}");
+    }
+
+    private static (string[] Lines, int UsefulCharacters, bool Truncated) ReadBoundedPageLines(
+        Page page,
+        int maximumUsefulCharacters,
+        CancellationToken cancellationToken)
+    {
+        Dictionary<double, StringBuilder> lines = [];
+        int useful = 0;
+        bool truncated = false;
+        int letterIndex = 0;
+        foreach (Letter letter in page.Letters)
+        {
+            if ((letterIndex++ & 0xfff) == 0) cancellationToken.ThrowIfCancellationRequested();
+            int letterUseful = letter.Value.Count(char.IsLetterOrDigit);
+            if (useful > maximumUsefulCharacters - letterUseful)
+            {
+                truncated = true;
+                break;
+            }
+            useful += letterUseful;
+            double baseline = Math.Round(letter.StartBaseLine.Y, 1, MidpointRounding.AwayFromZero);
+            if (!lines.TryGetValue(baseline, out StringBuilder? line))
+            {
+                if (lines.Count >= AuthorBylinePolicy.MaximumLines) continue;
+                line = new();
+                lines.Add(baseline, line);
+            }
+            foreach (char character in letter.Value)
+            {
+                if (!char.IsControl(character) && line.Length < AuthorBylinePolicy.MaximumLineCharacters)
+                    line.Append(character);
+            }
+        }
+        return (
+            lines.OrderByDescending(value => value.Key)
+                .Select(value => value.Value.ToString())
+                .ToArray(),
+            useful,
+            truncated);
     }
 
     public async Task<PdfInspectionResult> InspectAsync(

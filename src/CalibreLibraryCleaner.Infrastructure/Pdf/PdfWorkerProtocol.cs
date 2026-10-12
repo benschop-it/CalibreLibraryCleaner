@@ -4,6 +4,7 @@ using System.Text.Json.Serialization;
 using CalibreLibraryCleaner.Application.Assessments.Pdf;
 using CalibreLibraryCleaner.Application.Metadata;
 using CalibreLibraryCleaner.Domain.Libraries;
+using CalibreLibraryCleaner.Domain.Metadata;
 
 namespace CalibreLibraryCleaner.Infrastructure.Pdf;
 
@@ -168,7 +169,11 @@ internal sealed class PdfWorkerMessageBudget(int maximumBytes)
     }
 }
 
-internal sealed record PdfWorkerRequestMessage(string ProtocolVersion, string Kind, PdfInspectionRequest Request);
+internal sealed record PdfWorkerRequestMessage(
+    string ProtocolVersion,
+    string Kind,
+    PdfInspectionRequest Request,
+    FrontMatterInspectionLimits? FrontMatterLimits = null);
 
 internal sealed record PdfWorkerSelectionMessage(string ProtocolVersion, string Kind, IReadOnlyList<int> SelectedPages);
 
@@ -179,6 +184,7 @@ internal sealed record PdfWorkerOutputMessage(
     PdfInspectionProgress? Progress = null,
     PdfInspectionResult? Result = null,
     PdfWorkerAuthorMetadataMessage? AuthorMetadata = null,
+    PdfWorkerFrontMatterMessage? FrontMatter = null,
     PdfInspectionProblemCode? FailureCode = null);
 
 internal sealed record PdfWorkerAuthorMetadataMessage(
@@ -201,5 +207,46 @@ internal sealed record PdfWorkerAuthorMetadataMessage(
         value.Status,
         value.EmbeddedTitle,
         value.Authors,
+        value.ProblemCode);
+}
+
+internal sealed record PdfWorkerFrontMatterCandidateMessage(
+    AuthorCreditRole Role,
+    IReadOnlyList<string> Names,
+    int UnitNumber,
+    int LineNumber,
+    string Marker);
+
+internal sealed record PdfWorkerFrontMatterMessage(
+    string Format,
+    long SizeInBytes,
+    string Sha256,
+    string ExtractorVersion,
+    string LimitsVersion,
+    FrontMatterAuthorStatus Status,
+    IReadOnlyList<PdfWorkerFrontMatterCandidateMessage> Candidates,
+    int RequestedUnits,
+    int CompletedUnits,
+    int RetainedUsefulCharacters,
+    bool Truncated,
+    string? ProblemCode)
+{
+    public static PdfWorkerFrontMatterMessage From(FrontMatterAuthorObservation value) => new(
+        value.Format,
+        value.Fingerprint.SizeInBytes,
+        value.Fingerprint.Sha256.Value,
+        value.ExtractorVersion,
+        value.LimitsVersion,
+        value.Status,
+        value.Candidates.Select(candidate => new PdfWorkerFrontMatterCandidateMessage(
+            candidate.Role,
+            candidate.Names,
+            candidate.UnitNumber,
+            candidate.LineNumber,
+            candidate.Marker)).ToArray(),
+        value.RequestedUnits,
+        value.CompletedUnits,
+        value.RetainedUsefulCharacters,
+        value.Truncated,
         value.ProblemCode);
 }

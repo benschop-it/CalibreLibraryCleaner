@@ -128,6 +128,8 @@ public static class ServiceCollectionExtensions
             provider.GetRequiredService<IsolatedPdfInspector>());
         services.AddSingleton<IPdfAuthorMetadataInspector>(provider =>
             provider.GetRequiredService<IsolatedPdfInspector>());
+        services.AddSingleton<IPdfFrontMatterAuthorInspector>(provider =>
+            provider.GetRequiredService<IsolatedPdfInspector>());
         services.AddSingleton<IRecommendationExporter, VersionedJsonRecommendationExporter>();
         services.AddSingleton(new CalibreExecutionOptions());
         services.AddSingleton(new ExecutionStorageOptions());

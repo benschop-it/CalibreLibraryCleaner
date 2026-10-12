@@ -10,8 +10,138 @@ using CalibreLibraryCleaner.Domain.Assessments;
 
 namespace CalibreLibraryCleaner.Infrastructure.Pdf;
 
-public sealed class IsolatedPdfInspector(PdfWorkerOptions options) : IPdfInspector, IPdfAuthorMetadataInspector
+public sealed class IsolatedPdfInspector(PdfWorkerOptions options) :
+    IPdfInspector,
+    IPdfAuthorMetadataInspector,
+    IPdfFrontMatterAuthorInspector
 {
+    public async Task<FrontMatterAuthorObservation> InspectFrontMatterAuthorsAsync(
+        PdfInspectionRequest request,
+        FrontMatterInspectionLimits limits,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        ArgumentNullException.ThrowIfNull(limits);
+        request.Limits.Validate();
+        string executable = Path.GetFullPath(options.ExecutablePath);
+        if (!File.Exists(executable)) return Failed("PDF_FRONT_MATTER.WORKER_MISSING");
+        ProcessStartInfo startInfo = CreateStartInfo(executable, request.Limits);
+        using Process process = new() { StartInfo = startInfo };
+        try
+        {
+            if (!process.Start()) return Failed("PDF_FRONT_MATTER.WORKER_START_FAILED");
+        }
+        catch (Exception exception) when (exception is InvalidOperationException or IOException
+                                           or System.ComponentModel.Win32Exception)
+        {
+            return Failed("PDF_FRONT_MATTER.WORKER_START_FAILED");
+        }
+        IDisposable? assignedJob = null;
+        if (OperatingSystem.IsWindows())
+        {
+            try { assignedJob = options.JobObjectFactory(process, request.Limits.WorkingSetBytes); }
+            catch (Exception) { }
+            if (assignedJob is null)
+            {
+                await TryTerminateAsync(process).ConfigureAwait(false);
+                return Failed("PDF_FRONT_MATTER.WORKER_JOB_FAILED");
+            }
+        }
+        using IDisposable? job = assignedJob;
+        PdfWorkerMessageBudget responseBudget = new(request.Limits.MaximumWorkerMessageBytes);
+        Task discardError = DrainDiscardedErrorAsync(process.StandardError, CancellationToken.None);
+        using CancellationTokenSource wallTime = new(TimeSpan.FromSeconds(request.Limits.WallTimeSeconds));
+        using CancellationTokenSource linked = CancellationTokenSource.CreateLinkedTokenSource(
+            cancellationToken, wallTime.Token);
+        CancellationToken token = linked.Token;
+        try
+        {
+            await PdfWorkerProtocol.WriteAsync(
+                process.StandardInput,
+                new PdfWorkerRequestMessage(
+                    PdfWorkerProtocol.Version, "FrontMatterRequest", request, limits),
+                request.Limits.MaximumWorkerMessageBytes,
+                token).ConfigureAwait(false);
+            Task<PdfWorkerOutputMessage> read = PdfWorkerProtocol.ReadAsync<PdfWorkerOutputMessage>(
+                process.StandardOutput,
+                request.Limits.MaximumWorkerMessageBytes,
+                token,
+                budget: responseBudget);
+            while (!read.IsCompleted)
+            {
+                await Task.WhenAny(read, Task.Delay(100, token)).ConfigureAwait(false);
+                PdfInspectionProblemCode? resourceFailure = CheckResources(process, request.Limits);
+                if (resourceFailure is not null)
+                {
+                    await TryTerminateAsync(process).ConfigureAwait(false);
+                    return Failed($"PDF_FRONT_MATTER.{resourceFailure.Value.ToString().ToUpperInvariant()}");
+                }
+            }
+            PdfWorkerOutputMessage message = await read.ConfigureAwait(false);
+            PdfWorkerFrontMatterMessage? value = message.FrontMatter;
+            if (message.ProtocolVersion != PdfWorkerProtocol.Version
+                || message.Kind != "FrontMatterCompleted"
+                || value is null
+                || message.Header is not null
+                || message.Progress is not null
+                || message.Result is not null
+                || message.AuthorMetadata is not null
+                || message.FailureCode is not null
+                || value.Format != "PDF"
+                || value.SizeInBytes != request.Fingerprint.SizeInBytes
+                || value.Sha256 != request.Fingerprint.Sha256.Value
+                || value.ExtractorVersion != FrontMatterAuthorVersions.PdfExtractor
+                || value.LimitsVersion != FrontMatterAuthorVersions.Limits)
+            {
+                await TryTerminateAsync(process).ConfigureAwait(false);
+                return Failed("PDF_FRONT_MATTER.WORKER_PROTOCOL_INVALID");
+            }
+            process.StandardInput.Close();
+            await process.WaitForExitAsync(token).ConfigureAwait(false);
+            await discardError.ConfigureAwait(false);
+            if (process.ExitCode != 0 || !CurrentIdentityMatches(request))
+                return Failed("PDF_FRONT_MATTER.CHANGED_FILE");
+            return new(
+                value.Format,
+                request.Fingerprint,
+                value.ExtractorVersion,
+                value.LimitsVersion,
+                value.Status,
+                value.Candidates.Select(candidate => new FrontMatterAuthorCandidate(
+                    candidate.Role,
+                    candidate.Names,
+                    candidate.UnitNumber,
+                    candidate.LineNumber,
+                    candidate.Marker)),
+                value.RequestedUnits,
+                value.CompletedUnits,
+                value.RetainedUsefulCharacters,
+                value.Truncated,
+                value.ProblemCode);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            await TryTerminateAsync(process).ConfigureAwait(false);
+            throw;
+        }
+        catch (OperationCanceledException)
+        {
+            await TryTerminateAsync(process).ConfigureAwait(false);
+            return Failed("PDF_FRONT_MATTER.PARSER_TIMEOUT");
+        }
+        catch (Exception exception) when (exception is IOException or InvalidDataException
+                                           or EndOfStreamException or JsonException or ArgumentException)
+        {
+            await TryTerminateAsync(process).ConfigureAwait(false);
+            return Failed("PDF_FRONT_MATTER.WORKER_PROTOCOL_INVALID");
+        }
+
+        FrontMatterAuthorObservation Failed(string code) => new(
+            "PDF", request.Fingerprint, FrontMatterAuthorVersions.PdfExtractor,
+            FrontMatterAuthorVersions.Limits, FrontMatterAuthorStatus.Unavailable, [],
+            0, 0, 0, false, code);
+    }
+
     public async Task<EmbeddedAuthorMetadataObservation> InspectAuthorMetadataAsync(
         PdfInspectionRequest request,
         CancellationToken cancellationToken)

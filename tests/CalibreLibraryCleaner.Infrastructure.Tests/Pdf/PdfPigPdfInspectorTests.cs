@@ -1,6 +1,7 @@
 using CalibreLibraryCleaner.Application.Assessments.Pdf;
 using CalibreLibraryCleaner.Application.Metadata;
 using CalibreLibraryCleaner.Domain.Assessments;
+using CalibreLibraryCleaner.Domain.Metadata;
 using CalibreLibraryCleaner.Infrastructure.Pdf;
 using CalibreLibraryCleaner.Infrastructure.Tests.Execution;
 using FluentAssertions;
@@ -24,6 +25,44 @@ public sealed class PdfPigPdfInspectorTests
 
         result.Status.Should().Be(EmbeddedAuthorMetadataStatus.Available);
         result.Authors.Should().Equal("First Writer", "Second Writer");
+    }
+
+    [Fact]
+    public async Task FrontMatterInspectionRetainsBylineFactsWithoutProse()
+    {
+        const string sentinel = "PROSE_SENTINEL_MUST_NOT_ESCAPE";
+        using SyntheticPdfFixture fixture = SyntheticPdfFixture.CreateFrontMatter(
+            "By Reliable Writer", sentinel);
+
+        FrontMatterAuthorObservation result = await PdfPigPdfInspector
+            .InspectFrontMatterAuthorsAsync(
+                fixture.CreateRequest(), FrontMatterInspectionLimits.V1,
+                CancellationToken.None);
+
+        result.Status.Should().Be(FrontMatterAuthorStatus.Available);
+        result.Candidates.Should().ContainSingle(value =>
+            value.Role == AuthorCreditRole.Author
+            && value.Names.Count == 1
+            && value.Names[0] == "Reliable Writer"
+            && value.UnitNumber == 1);
+        System.Text.Json.JsonSerializer.Serialize(result).Should().NotContain(sentinel);
+    }
+
+    [Fact]
+    public async Task FrontMatterInspectionDoesNotReadSixthPage()
+    {
+        using SyntheticPdfFixture fixture = SyntheticPdfFixture.CreateFrontMatter(
+            "Title", "Copyright", "Dedication", "Contents", "Preface", "By Too Late");
+
+        FrontMatterAuthorObservation result = await PdfPigPdfInspector
+            .InspectFrontMatterAuthorsAsync(
+                fixture.CreateRequest(), FrontMatterInspectionLimits.V1,
+                CancellationToken.None);
+
+        result.Status.Should().Be(FrontMatterAuthorStatus.Missing);
+        result.RequestedUnits.Should().Be(5);
+        result.CompletedUnits.Should().Be(5);
+        result.Candidates.Should().BeEmpty();
     }
 
     [Fact]
@@ -599,6 +638,31 @@ public sealed class PdfPigPdfInspectorTests
 
         result.Status.Should().Be(EmbeddedAuthorMetadataStatus.Available);
         result.Authors.Should().Equal("Metadata Writer");
+    }
+
+    [Fact]
+    public async Task IsolatedInspectorReturnsFrontMatterFactsWithoutProse()
+    {
+        const string sentinel = "PDF_FRONT_MATTER_PROSE_MUST_NOT_ESCAPE";
+        using SyntheticPdfFixture fixture = SyntheticPdfFixture.CreateFrontMatter(
+            "By Isolated Writer", sentinel);
+        string worker = Path.Combine(
+            FindRepositoryRoot(),
+            "src",
+            "CalibreLibraryCleaner.PdfWorker",
+            "bin",
+            "Debug",
+            "net10.0",
+            OperatingSystem.IsWindows() ? "CalibreLibraryCleaner.PdfWorker.exe" : "CalibreLibraryCleaner.PdfWorker");
+        IsolatedPdfInspector isolated = new(new PdfWorkerOptions { ExecutablePath = worker });
+
+        FrontMatterAuthorObservation result = await isolated.InspectFrontMatterAuthorsAsync(
+            fixture.CreateRequest(), FrontMatterInspectionLimits.V1, CancellationToken.None);
+
+        result.Status.Should().Be(FrontMatterAuthorStatus.Available);
+        result.Candidates.Should().ContainSingle(value =>
+            value.Names.Count == 1 && value.Names[0] == "Isolated Writer");
+        System.Text.Json.JsonSerializer.Serialize(result).Should().NotContain(sentinel);
     }
 
     [Fact]

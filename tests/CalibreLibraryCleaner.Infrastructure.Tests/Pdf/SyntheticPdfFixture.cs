@@ -69,6 +69,22 @@ internal sealed class SyntheticPdfFixture : IDisposable
         return new(root, path);
     }
 
+    public static SyntheticPdfFixture CreateFrontMatter(params string[] pageLines)
+    {
+        if (pageLines.Length == 0) throw new ArgumentException("At least one page is required.", nameof(pageLines));
+        string root = CreateRoot();
+        string path = System.IO.Path.Combine(root, "front-matter.pdf");
+        using PdfDocumentBuilder builder = new();
+        PdfDocumentBuilder.AddedFont font = builder.AddStandard14Font(Standard14Font.Helvetica);
+        foreach (string line in pageLines)
+        {
+            PdfPageBuilder page = builder.AddPage(595, 842);
+            page.AddText(line, 12, new PdfPoint(36, 770), font);
+        }
+        File.WriteAllBytes(path, builder.Build());
+        return new(root, path);
+    }
+
     public static SyntheticPdfFixture CreateBytes(byte[] bytes)
     {
         string root = CreateRoot();

@@ -23,8 +23,9 @@ public static class PdfInspectionWorkerHost
                 PdfInspectionLimits.V1.MaximumWorkerMessageBytes,
                 cancellationToken).ConfigureAwait(false);
             if (!string.Equals(request.ProtocolVersion, PdfWorkerProtocol.Version, StringComparison.Ordinal)
-                || request.Kind is not ("Request" or "AuthorMetadataRequest")
-                || request.Request is null)
+                || request.Kind is not ("Request" or "AuthorMetadataRequest" or "FrontMatterRequest")
+                || request.Request is null
+                || (request.Kind == "FrontMatterRequest") != (request.FrontMatterLimits is not null))
             {
                 return 2;
             }
@@ -39,6 +40,24 @@ public static class PdfInspectionWorkerHost
         try
         {
             limits.Validate();
+            if (request.Kind == "FrontMatterRequest")
+            {
+                if (request.FrontMatterLimits is null) return 2;
+                FrontMatterAuthorObservation observation = await PdfPigPdfInspector
+                    .InspectFrontMatterAuthorsAsync(
+                        request.Request, request.FrontMatterLimits, cancellationToken)
+                    .ConfigureAwait(false);
+                await PdfWorkerProtocol.WriteAsync(
+                    writer,
+                    new PdfWorkerOutputMessage(
+                        PdfWorkerProtocol.Version,
+                        "FrontMatterCompleted",
+                        FrontMatter: PdfWorkerFrontMatterMessage.From(observation)),
+                    limits.MaximumWorkerMessageBytes,
+                    cancellationToken,
+                    outputBudget).ConfigureAwait(false);
+                return 0;
+            }
             if (request.Kind == "AuthorMetadataRequest")
             {
                 EmbeddedAuthorMetadataObservation observation = await PdfPigPdfInspector

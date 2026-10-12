@@ -463,6 +463,17 @@ four is not read. PDF front matter, front-matter cache/orchestration, and final 
 fusion remain pending, so the combined selective embedded/front-matter progress item
 is intentionally still unchecked.
 
+PDF front-matter extraction is now implemented only inside the isolated PdfWorker.
+The strict parser reconstructs at most 200 bounded lines per page from stable text
+baselines, examines no more than the first five pages and 32,768 useful characters
+per page, and immediately reduces lines through the shared byline policy. The worker
+protocol carries only primitive candidate/role/location/coverage facts; the parent
+rehydrates and validates the immutable observation after resource monitoring and a
+final physical file-identity check. Direct and isolated fixtures prove explicit
+bylines, no serialized prose sentinel, and that page six is not read. Front-matter
+cache/orchestration and final review fusion remain pending before this evidence stage
+is complete.
+
 ## Final outcome
 
 Implementation in progress. The first read-only policy/review slice and the minimal
