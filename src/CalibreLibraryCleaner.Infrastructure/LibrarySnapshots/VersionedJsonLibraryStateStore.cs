@@ -516,6 +516,15 @@ internal sealed class VersionedJsonLibraryStateStore(
         SkipMetadataLibraryStateDelta value => new("skip-metadata", value.ExpectedRevision.Value,
             value.OperationId, value.AppliedAtUtc, value.RecordId.Value, value.Field.ToString(),
             null, null, null, null, null, [value.ReasonCode]),
+        RefreshManagedNameLibraryStateDelta value => new(
+            "refresh-managed-name", value.ExpectedRevision.Value, value.OperationId,
+            value.AppliedAtUtc, value.RecordId.Value, null, null, null, null, null,
+            null, null, value.VerifiedManagedPath,
+            ManagedFormats: value.Formats.Select(format => new ManagedFormatPayload(
+                format.Format,
+                format.StoredFileName,
+                format.Fingerprint.SizeInBytes,
+                format.Fingerprint.Sha256.Value)).ToArray()),
         _ => throw new ArgumentOutOfRangeException(nameof(delta), delta.GetType().Name, "Unsupported persisted state delta."),
     };
 
@@ -550,6 +559,15 @@ internal sealed class VersionedJsonLibraryStateStore(
                 Enum.Parse<LibraryMetadataField>(value.Format ?? string.Empty, false),
                 value.ExtraValues?.Single()
                     ?? throw new InvalidDataException("Skipped metadata has no reason code.")),
+            "refresh-managed-name" => new RefreshManagedNameLibraryStateDelta(
+                generation, revision, value.OperationId, value.AppliedAtUtc, recordId,
+                value.VerifiedManagedPath
+                    ?? throw new InvalidDataException("Managed-name refresh has no path."),
+                value.ManagedFormats?.Select(format => new ManagedFormatReadBack(
+                    format.Format,
+                    format.StoredFileName,
+                    Fingerprint(format.SizeInBytes, format.Sha256)))
+                    ?? throw new InvalidDataException("Managed-name refresh has no formats.")),
             _ => throw new InvalidDataException("The persisted state delta kind is unsupported."),
         };
     }
@@ -960,5 +978,12 @@ internal sealed class VersionedJsonLibraryStateStore(
         string? AuthorProviderVersion = null,
         string? AuthorEditionId = null,
         string? AuthorProposalPolicyVersion = null,
-        string? AuthorValuesIdentity = null);
+        string? AuthorValuesIdentity = null,
+        ManagedFormatPayload[]? ManagedFormats = null);
+
+    private sealed record ManagedFormatPayload(
+        string Format,
+        string StoredFileName,
+        long SizeInBytes,
+        string Sha256);
 }

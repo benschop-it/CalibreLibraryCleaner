@@ -170,6 +170,53 @@ public sealed class VersionedJsonLibraryStateStoreTests
     }
 
     [Fact]
+    public async Task VerifiedManagedPathAndFormatBasenamesRoundTrip()
+    {
+        using TemporaryDirectory directory = new();
+        InfrastructureExecutionFixture fixture = InfrastructureExecutionTestData.Create(directory.Path);
+        string cacheRoot = Path.Combine(directory.Path, "state-cache");
+        VersionedJsonLibraryStateStore store = new(new() { StorageRoot = cacheRoot });
+        LibraryState baseline = LibraryState.FromScan(
+            fixture.Snapshot, new(Guid.Parse("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee")));
+        CalibreBook target = baseline.Snapshot.Books[0];
+        RefreshManagedNameLibraryStateDelta refresh = new(
+            baseline.GenerationId,
+            baseline.Revision,
+            "refresh-managed-name",
+            baseline.ProjectedAtUtc.AddSeconds(1),
+            target.Id,
+            $"Verified Author/Verified Title ({target.Id.Value})",
+            target.Formats.Select(format => new ManagedFormatReadBack(
+                format.Format,
+                $"Verified Title - Verified Author.{format.Format.ToLowerInvariant()}",
+                format.Fingerprint!)));
+        LibraryState projected = LibraryStateDeltaPolicy.Apply(baseline, refresh);
+        LibraryStateMutationIntent intent = new(
+            "refresh-intent", baseline.GenerationId, baseline.Revision, 1, refresh.AppliedAtUtc);
+        await store.WriteBaselineAsync(baseline, CancellationToken.None);
+        await store.WriteMutationIntentAsync(
+            baseline.Snapshot.Identity.LibraryRoot, intent, CancellationToken.None);
+        await store.AppendDeltaBatchAsync(
+            baseline.Snapshot.Identity.LibraryRoot,
+            [refresh],
+            projected,
+            false,
+            intent.IntentId,
+            true,
+            CancellationToken.None);
+
+        LibraryState loaded = (await new VersionedJsonLibraryStateStore(new() { StorageRoot = cacheRoot })
+            .ReadAsync(baseline.Snapshot.Identity.LibraryRoot, CancellationToken.None))!;
+
+        CalibreBook book = loaded.Snapshot.Books.Single(value => value.Id == target.Id);
+        book.RelativeDirectory.Should().Be($"Verified Author/Verified Title ({target.Id.Value})");
+        book.Formats.Should().OnlyContain(format =>
+            format.StoredFileName.StartsWith("Verified Title - Verified Author.", StringComparison.Ordinal));
+        book.Formats.Select(value => value.Fingerprint).Should()
+            .Equal(target.Formats.Select(value => value.Fingerprint));
+    }
+
+    [Fact]
     public async Task ListReadsManifestWithoutOpeningTheLargeBaseline()
     {
         using TemporaryDirectory directory = new();

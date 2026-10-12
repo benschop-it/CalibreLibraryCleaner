@@ -227,6 +227,65 @@ public sealed record SkipMetadataLibraryStateDelta : LibraryStateDelta
     public string ReasonCode { get; }
 }
 
+public sealed record ManagedFormatReadBack
+{
+    public ManagedFormatReadBack(
+        string format,
+        string storedFileName,
+        FormatFileFingerprint fingerprint)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(format);
+        ArgumentException.ThrowIfNullOrWhiteSpace(storedFileName);
+        ArgumentNullException.ThrowIfNull(fingerprint);
+        string canonical = format.Trim().ToUpperInvariant();
+        string fileName = storedFileName.Trim();
+        if (canonical.Length > 16 || !canonical.All(char.IsAsciiLetterOrDigit)
+            || fileName.Length > 512 || fileName.Any(char.IsControl)
+            || fileName.Contains('/') || fileName.Contains('\\')
+            || fileName is "." or "..")
+            throw new ArgumentException("Managed format read-back is invalid.");
+        Format = canonical;
+        StoredFileName = fileName;
+        Fingerprint = fingerprint;
+    }
+
+    public string Format { get; }
+    public string StoredFileName { get; }
+    public FormatFileFingerprint Fingerprint { get; }
+}
+
+public sealed record RefreshManagedNameLibraryStateDelta : LibraryStateDelta
+{
+    public RefreshManagedNameLibraryStateDelta(
+        LibraryStateGenerationId generationId,
+        LibraryStateRevision expectedRevision,
+        string operationId,
+        DateTimeOffset appliedAtUtc,
+        CalibreBookId recordId,
+        string verifiedManagedPath,
+        IEnumerable<ManagedFormatReadBack> formats)
+        : base(generationId, expectedRevision, operationId, appliedAtUtc)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(verifiedManagedPath);
+        ArgumentNullException.ThrowIfNull(formats);
+        string path = verifiedManagedPath.Replace('\\', '/').Trim('/');
+        string[] segments = path.Split('/');
+        ManagedFormatReadBack[] values = formats.OrderBy(value => value.Format, StringComparer.Ordinal).ToArray();
+        if (path.Length > 1_024 || path.Any(char.IsControl)
+            || segments.Length != 2 || segments.Any(string.IsNullOrWhiteSpace)
+            || !segments[1].EndsWith($" ({recordId.Value})", StringComparison.Ordinal)
+            || values.Select(value => value.Format).Distinct(StringComparer.Ordinal).Count() != values.Length)
+            throw new ArgumentException("Verified managed-name read-back is invalid.");
+        RecordId = recordId;
+        VerifiedManagedPath = path;
+        Formats = Array.AsReadOnly(values);
+    }
+
+    public CalibreBookId RecordId { get; }
+    public string VerifiedManagedPath { get; }
+    public IReadOnlyList<ManagedFormatReadBack> Formats { get; }
+}
+
 public static class LibraryStateDeltaPolicy
 {
     public static LibraryState Apply(LibraryState state, LibraryStateDelta delta)
@@ -245,6 +304,8 @@ public static class LibraryStateDeltaPolicy
             CreateRecordLibraryStateDelta createRecord => CreateRecord(state.Snapshot, createRecord),
             SetMetadataLibraryStateDelta setMetadata => SetMetadata(state.Snapshot, setMetadata),
             SkipMetadataLibraryStateDelta skipMetadata => SkipMetadata(state.Snapshot, skipMetadata),
+            RefreshManagedNameLibraryStateDelta refreshManagedName => RefreshManagedName(
+                state.Snapshot, refreshManagedName),
             _ => throw new ArgumentOutOfRangeException(nameof(delta), delta.GetType().Name, "Unsupported library-state delta."),
         };
         return new(state.GenerationId, state.Revision.Next(), LibraryStateStatus.Authoritative,
@@ -341,6 +402,40 @@ public static class LibraryStateDeltaPolicy
         if (!snapshot.Books.Any(value => value.Id == delta.RecordId))
             throw new InvalidOperationException("The skipped metadata target is not present.");
         return snapshot;
+    }
+
+    private static LibrarySnapshot RefreshManagedName(
+        LibrarySnapshot snapshot,
+        RefreshManagedNameLibraryStateDelta delta)
+    {
+        CalibreBook current = snapshot.Books.SingleOrDefault(value => value.Id == delta.RecordId)
+            ?? throw new InvalidOperationException("The managed-name target is not present.");
+        Dictionary<string, ManagedFormatReadBack> readBack = delta.Formats.ToDictionary(
+            value => value.Format, StringComparer.Ordinal);
+        if (!current.Formats.Select(value => value.Format).ToHashSet(StringComparer.Ordinal)
+                .SetEquals(readBack.Keys)
+            || current.Formats.Any(value => value.Fingerprint is null
+                || readBack[value.Format].Fingerprint != value.Fingerprint))
+            throw new InvalidOperationException("Managed-name refresh changed the registered format set or bytes.");
+        BookFormat[] formats = current.Formats.Select(value => new BookFormat(
+            value.Format,
+            readBack[value.Format].StoredFileName,
+            $"{delta.VerifiedManagedPath}/{readBack[value.Format].StoredFileName}",
+            value.FileStatus,
+            value.Fingerprint,
+            value.Observation)).ToArray();
+        CalibreBook replacement = new(
+            current.Id, current.Title, current.AuthorSort, current.Authors, current.Identifiers,
+            formats, delta.VerifiedManagedPath, current.PublicationMetadata,
+            current.AppliedAuthorProvenance);
+        return Project(
+            snapshot,
+            snapshot.Books.Select(value => value.Id == current.Id ? replacement : value),
+            snapshot.Findings,
+            snapshot.ExactBinaryDuplicateGroups,
+            snapshot.ExactMetadataDuplicateGroups,
+            snapshot.EpubAssessments,
+            snapshot.PdfAssessments);
     }
 
     private static void ApplyRemoveFormat(

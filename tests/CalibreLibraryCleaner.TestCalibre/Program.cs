@@ -10,13 +10,13 @@ if (values is ["-e", _, "--", _, string libraryUuid])
 {
     IReadOnlyList<string> capabilities = new List<string>
     {
-        "setMetadata", "transferFormat", "removeFormat", "removeRecord",
+        "setMetadata", "refreshManagedName", "transferFormat", "removeFormat", "removeRecord",
     };
     if (!string.IsNullOrWhiteSpace(control.LogPath))
         File.AppendAllText(control.LogPath, JsonSerializer.Serialize(values) + Environment.NewLine);
     WriteWorkerMessage(new
     {
-        protocolVersion = "calibre-mutation-worker-protocol/1.2",
+        protocolVersion = "calibre-mutation-worker-protocol/1.3",
         kind = "ready",
         libraryUuid,
         capabilities,
@@ -32,7 +32,7 @@ if (values is ["-e", _, "--", _, string libraryUuid])
         {
             WriteWorkerMessage(new
             {
-                protocolVersion = "calibre-mutation-worker-protocol/1.2",
+                protocolVersion = "calibre-mutation-worker-protocol/1.3",
                 kind = "stopped",
                 mutationStarted = false,
             });
@@ -41,7 +41,7 @@ if (values is ["-e", _, "--", _, string libraryUuid])
         JsonElement operations = root.GetProperty("operations");
         WriteWorkerMessage(new
         {
-            protocolVersion = "calibre-mutation-worker-protocol/1.2",
+            protocolVersion = "calibre-mutation-worker-protocol/1.3",
             kind = "chunkResult",
             chunkId = root.GetProperty("chunkId").GetString(),
             mutationStarted = true,
@@ -68,7 +68,9 @@ if (values is ["-e", _, "--", _, string libraryUuid])
                     && !operation.GetProperty("operationId").GetString()!.StartsWith(
                         "skip-unchanged", StringComparison.Ordinal)
                     ? "Verified/Managed/Path"
-                    : null,
+                    : operation.GetProperty("kind").GetString() == "refreshManagedName"
+                        ? $"Verified Author/Verified Title ({operation.GetProperty("recordId").GetInt64()})"
+                        : null,
                 verifiedAuthorSort = operation.GetProperty("kind").GetString() == "setMetadata"
                     && !operation.GetProperty("operationId").GetString()!.StartsWith(
                         "skip-unchanged", StringComparison.Ordinal)
@@ -78,6 +80,18 @@ if (values is ["-e", _, "--", _, string libraryUuid])
                     && operation.TryGetProperty("metadataAuthorSortValues", out JsonElement sorts)
                     && sorts.ValueKind == JsonValueKind.Array
                     ? sorts.EnumerateArray().Select(value => value.GetString()).ToArray()
+                    : null,
+                verifiedFormats = operation.GetProperty("kind").GetString() == "refreshManagedName"
+                    ? new[]
+                    {
+                        new
+                        {
+                            format = "EPUB",
+                            storedFileName = "Verified Title - Verified Author.epub",
+                            sizeInBytes = 10,
+                            sha256 = new string('a', 64),
+                        },
+                    }
                     : null,
             }).ToArray(),
         });

@@ -56,6 +56,7 @@ public sealed record CalibreMutationWorkerOpenResult(
 public enum CalibreMutationOperationKind
 {
     SetMetadata,
+    RefreshManagedName,
     TransferFormat,
     RemoveFormat,
     RemoveRecord,
@@ -171,6 +172,10 @@ public sealed record CalibreMutationOperation
             || kind == CalibreMutationOperationKind.SetMetadata
                 && (canonicalFormat is not null || targetRecordId is not null || expectedFingerprint is not null))
             throw new ArgumentException("The metadata operation is invalid.", nameof(metadata));
+        if (kind == CalibreMutationOperationKind.RefreshManagedName
+            && (canonicalFormat is not null || targetRecordId is not null
+                || expectedFingerprint is not null || metadata is not null))
+            throw new ArgumentException("The managed-name refresh operation is invalid.", nameof(kind));
 
         OperationId = operationId;
         Kind = kind;
@@ -204,6 +209,12 @@ public sealed record CalibreMutationOperation
         FormatFileFingerprint expectedFingerprint) => new(operationId,
         CalibreMutationOperationKind.TransferFormat, sourceRecordId, canonicalFormat,
         targetRecordId, expectedFingerprint ?? throw new ArgumentNullException(nameof(expectedFingerprint)), null);
+
+    public static CalibreMutationOperation RefreshManagedName(
+        string operationId,
+        CalibreBookId recordId) => new(
+        operationId, CalibreMutationOperationKind.RefreshManagedName, recordId,
+        null, null, null, null);
 
     public static CalibreMutationOperation RemoveFormat(
         string operationId,
@@ -248,6 +259,7 @@ public sealed record CalibreMutationOperationResult(
     string? VerifiedManagedPath = null,
     string? VerifiedAuthorSort = null,
     IReadOnlyList<string>? VerifiedAuthorSortValues = null,
+    IReadOnlyList<ManagedFormatReadBack>? VerifiedFormats = null,
     bool IsSkipped = false,
     string? SkipCode = null);
 

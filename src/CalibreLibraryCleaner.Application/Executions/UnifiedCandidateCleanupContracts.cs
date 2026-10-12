@@ -55,7 +55,8 @@ public sealed record UnifiedCandidateCleanupResult(
     int UpdatedMetadataFieldCount = 0,
     int SkippedMetadataFieldCount = 0,
     int OmittedMetadataCoverCount = 0,
-    int OmittedMetadataAuthorFieldCount = 0)
+    int OmittedMetadataAuthorFieldCount = 0,
+    int RefreshedManagedNameCount = 0)
 {
     public bool IsCompleted => State is UnifiedCandidateCleanupState.Completed
         or UnifiedCandidateCleanupState.NothingToDo;

@@ -458,7 +458,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         LibraryWorkflowPhase.Completed when _finalAuthorReviewWorkspace is null => "Prepare final author review",
         LibraryWorkflowPhase.Completed when _finalAuthorReviewWorkspace.Subjects.Any(value => value.Apply) =>
             "Apply checked author corrections",
-        LibraryWorkflowPhase.Completed => "Final author review ready",
+        LibraryWorkflowPhase.Completed => "Apply managed naming",
         _ => "Candidate cleanup unavailable",
     };
 
@@ -476,7 +476,8 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
             "Screen retained authors and selectively inspect unresolved EPUB/PDF evidence without mutation",
         LibraryWorkflowPhase.Completed when _finalAuthorReviewWorkspace.Subjects.Any(value => value.Apply) =>
             "Apply only checked final author corrections after backup confirmation",
-        LibraryWorkflowPhase.Completed => "Review unresolved rows or check author corrections to apply",
+        LibraryWorkflowPhase.Completed =>
+            "Refresh retained managed folders and registered format names through supported Calibre behavior",
         _ => "Available after Exact cleanup completes for the current workflow generation",
     };
 
@@ -1462,7 +1463,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
                 _inspectEmbeddedAuthorMetadata is not null && _inspectFrontMatterAuthors is not null,
             LibraryWorkflowPhase.Completed => _executeUnifiedCandidateCleanup is not null
                 && _metadataMutationConfirmation is not null
-                && _finalAuthorReviewWorkspace.Subjects.Any(value => value.Apply),
+                && _currentSnapshot?.Books.Any(value => value.Formats.Count > 0) == true,
             _ => false,
         };
     }
@@ -1632,12 +1633,13 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
                         + $"{workspace.Subjects.Count(value => value.Apply):N0} checked.";
                     return;
                 }
-                int bookCount = _finalAuthorReviewWorkspace.Subjects.Count(value => value.Apply);
+                int correctionCount = _finalAuthorReviewWorkspace.Subjects.Count(value => value.Apply);
+                int bookCount = startingState.Snapshot.Books.Count(value => value.Formats.Count > 0);
                 if (bookCount == 0 || _metadataMutationConfirmation is null
                     || !_metadataMutationConfirmation.ConfirmAuthorNormalization(bookCount))
                 {
                     StatusMessage = bookCount == 0
-                        ? "No final author corrections are checked."
+                        ? "No retained records with registered formats require managed naming."
                         : "Final author correction canceled. Confirm a complete external backup before retrying.";
                     return;
                 }
@@ -1653,7 +1655,8 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
                     MetadataReview: null,
                     NormalizeAuthors: true,
                     FinalAuthorReview: _finalAuthorReviewWorkspace), normalizationProgress, _scanCancellation.Token).ConfigureAwait(true);
-                CandidateCleanupResultSummary = $"Updated {normalizationResult.UpdatedMetadataFieldCount:N0} book author record(s); "
+                CandidateCleanupResultSummary = $"Updated {normalizationResult.UpdatedMetadataFieldCount:N0} of {correctionCount:N0} checked author correction(s); "
+                    + $"refreshed {normalizationResult.RefreshedManagedNameCount:N0} managed name(s); "
                     + $"skipped {normalizationResult.SkippedMetadataFieldCount:N0} verified-unchanged record(s).";
                 LibraryState? normalizationFinal = _libraryStateSession.GetCurrent(SelectedLibraryPath);
                 if (normalizationFinal is not null)

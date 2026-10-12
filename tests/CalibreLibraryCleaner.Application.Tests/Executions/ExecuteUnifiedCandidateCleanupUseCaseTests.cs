@@ -153,14 +153,21 @@ public sealed class ExecuteUnifiedCandidateCleanupUseCaseTests
             FinalWorkspace(current, apply: true));
 
         result.State.Should().Be(UnifiedCandidateCleanupState.Completed);
-        CalibreMutationOperation operation = harness.Chunks.SelectMany(value => value.Operations)
-            .Should().ContainSingle().Subject;
-        operation.Metadata!.Values.Should().Equal("Reliable Writer");
-        operation.Metadata.AuthorSortValues.Should().BeNull();
+        result.RefreshedManagedNameCount.Should().Be(1);
+        CalibreMutationOperation[] operations = harness.Chunks.SelectMany(value => value.Operations).ToArray();
+        operations.Should().HaveCount(2);
+        CalibreMetadataMutation metadata = operations[0].Metadata!;
+        metadata.Values.Should().Equal("Reliable Writer");
+        metadata.AuthorSortValues.Should().BeNull();
+        operations[1].Kind.Should().Be(CalibreMutationOperationKind.RefreshManagedName);
+        CalibreBook projected = harness.State.GetCurrent(harness.Snapshot.Identity.LibraryRoot)!
+            .Snapshot.Books.Single();
+        projected.RelativeDirectory.Should().Be("Verified Author/Verified Title (1)");
+        projected.Formats.Single().StoredFileName.Should().Be("Verified Title - Verified Author.epub");
     }
 
     [Fact]
-    public async Task UncheckedFinalAuthorReviewStartsNoWorker()
+    public async Task UncheckedFinalAuthorReviewRunsOnlyManagedNaming()
     {
         CalibreBook book = new(
             new(1), "Book", "Unknown", [new(new(1), "Unknown", "Unknown")], [],
@@ -172,8 +179,10 @@ public sealed class ExecuteUnifiedCandidateCleanupUseCaseTests
         UnifiedCandidateCleanupResult result = await harness.ExecuteFinalAuthorReviewAsync(
             FinalWorkspace(current, apply: false));
 
-        result.State.Should().Be(UnifiedCandidateCleanupState.NothingToDo);
-        harness.Chunks.Should().BeEmpty();
+        result.State.Should().Be(UnifiedCandidateCleanupState.Completed);
+        result.RefreshedManagedNameCount.Should().Be(1);
+        harness.Chunks.SelectMany(value => value.Operations).Should().ContainSingle()
+            .Which.Kind.Should().Be(CalibreMutationOperationKind.RefreshManagedName);
     }
 
     [Fact]
@@ -881,7 +890,19 @@ public sealed class ExecuteUnifiedCandidateCleanupUseCaseTests
                                 : value.Metadata.AuthorSortValues is null
                                     ? "Verified Calibre Author Sort"
                                     : string.Join(" & ", value.Metadata.AuthorSortValues),
-                            VerifiedAuthorSortValues: value.Metadata?.AuthorSortValues)).ToArray()));
+                            VerifiedAuthorSortValues: value.Metadata?.AuthorSortValues,
+                            VerifiedFormats: value.Kind == CalibreMutationOperationKind.RefreshManagedName
+                                ? snapshot.Books.Single(book => book.Id == value.RecordId).Formats.Select(format =>
+                                    new ManagedFormatReadBack(
+                                        format.Format,
+                                        $"Verified Title - Verified Author.{format.Format.ToLowerInvariant()}",
+                                        format.Fingerprint!)).ToArray()
+                                : null) with
+                        {
+                            VerifiedManagedPath = value.Kind == CalibreMutationOperationKind.RefreshManagedName
+                                ? $"Verified Author/Verified Title ({value.RecordId.Value})"
+                                : value.Metadata is null ? null : "Verified/Managed/Path",
+                        }).ToArray()));
                 });
             ICalibreMutationWorkerFactory workers = A.Fake<ICalibreMutationWorkerFactory>();
             A.CallTo(() => workers.TryOpenAsync(

@@ -47,6 +47,7 @@ public sealed partial class ExecuteUnifiedCandidateCleanupUseCase(
         int skippedMetadataFields = 0;
         int omittedMetadataCovers = 0;
         int omittedMetadataAuthorFields = 0;
+        int refreshedManagedNames = 0;
         Dictionary<string, int> metadataSkipReasons = new(StringComparer.Ordinal);
         if (!request.ExternalBackupConfirmed)
         {
@@ -156,7 +157,11 @@ public sealed partial class ExecuteUnifiedCandidateCleanupUseCase(
         }
         await using IEditionCoverStagingSession? coverSession = stagedCovers;
 
-        int totalOperations = checked(plan.TotalOperations + metadataTemplates.Length);
+        CalibreBookId[] managedNameTargets = authorNormalization && request.FinalAuthorReview is not null
+            ? initial.Snapshot.Books.Where(value => value.Formats.Count > 0)
+                .OrderBy(value => value.Id.Value).Select(value => value.Id).ToArray()
+            : [];
+        int totalOperations = checked(plan.TotalOperations + metadataTemplates.Length + managedNameTargets.Length);
         if (totalOperations == 0)
         {
             LibraryStateSessionOutcome completed = await AdvancePhaseAsync(
@@ -214,7 +219,8 @@ public sealed partial class ExecuteUnifiedCandidateCleanupUseCase(
 
             await using ICalibreMutationWorkerSession session = worker.Session!;
             using IDisposable statePublication = libraryState.DeferStateChanged(request.LibraryRoot);
-            WorkerPlannedOperation[] operations = BuildWorkerOperations(plan, metadataTemplates, coverSession);
+            WorkerPlannedOperation[] operations = BuildWorkerOperations(
+                plan, metadataTemplates, managedNameTargets, coverSession);
             string mutationRunId = executionId.ToString();
             LibraryState markerState = Current();
             LibraryStateSessionOutcome marker = await libraryState.BeginMutationBatchAsync(
@@ -325,6 +331,8 @@ public sealed partial class ExecuteUnifiedCandidateCleanupUseCase(
                     pair.First.Operation.Kind == CalibreMutationOperationKind.SetMetadata
                     && !pair.Second.IsSkipped);
                 skippedMetadataFields += workerResult.OperationResults.Count(value => value.IsSkipped);
+                refreshedManagedNames += chunk.Count(value =>
+                    value.Operation.Kind == CalibreMutationOperationKind.RefreshManagedName);
                 foreach (CalibreMutationOperationResult skipped in workerResult.OperationResults.Where(
                              value => value.IsSkipped))
                 {
@@ -452,7 +460,8 @@ public sealed partial class ExecuteUnifiedCandidateCleanupUseCase(
             updatedMetadataFields,
             skippedMetadataFields,
             omittedMetadataCovers,
-            omittedMetadataAuthorFields);
+            omittedMetadataAuthorFields,
+            refreshedManagedNames);
     }
 
     private static MetadataOperationTemplate[] BuildMetadataOperations(
@@ -635,6 +644,7 @@ public sealed partial class ExecuteUnifiedCandidateCleanupUseCase(
     private static WorkerPlannedOperation[] BuildWorkerOperations(
         UnifiedCandidateCleanupPlan plan,
         IReadOnlyList<MetadataOperationTemplate> metadata,
+        IReadOnlyList<CalibreBookId> managedNameTargets,
         IEditionCoverStagingSession? covers) =>
     [
         .. metadata.Select(value => new WorkerPlannedOperation(
@@ -648,6 +658,10 @@ public sealed partial class ExecuteUnifiedCandidateCleanupUseCase(
                     value.Cover is null ? null : covers?.Covers[value.StagingKey].FileName,
                     value.Cover is null ? null : covers?.Covers[value.StagingKey].Fingerprint,
                     value.AuthorSortValues)),
+            null)),
+        .. managedNameTargets.Select(recordId => new WorkerPlannedOperation(
+            CalibreMutationOperation.RefreshManagedName(
+                $"final-managed-name:{recordId.Value}", recordId),
             null)),
         .. plan.Transfers.Select(value => new WorkerPlannedOperation(
             CalibreMutationOperation.TransferFormat(
@@ -672,12 +686,17 @@ public sealed partial class ExecuteUnifiedCandidateCleanupUseCase(
         IReadOnlyList<WorkerPlannedOperation> operations)
     {
         foreach (WorkerPlannedOperation[] chunk in operations
-                     .Where(value => value.Operation.Metadata?.Field != LibraryMetadataField.Authors)
+                     .Where(value => value.Operation.Kind != CalibreMutationOperationKind.RefreshManagedName
+                         && value.Operation.Metadata?.Field != LibraryMetadataField.Authors)
                      .Chunk(CalibreMutationChunkRequest.MaximumOperationCount))
             yield return chunk;
         foreach (WorkerPlannedOperation author in operations.Where(
                      value => value.Operation.Metadata?.Field == LibraryMetadataField.Authors))
             yield return [author];
+        foreach (WorkerPlannedOperation[] chunk in operations
+                     .Where(value => value.Operation.Kind == CalibreMutationOperationKind.RefreshManagedName)
+                     .Chunk(CalibreMutationChunkRequest.MaximumOperationCount))
+            yield return chunk;
     }
 
     private static LibraryStateDelta CreateDelta(
@@ -704,6 +723,14 @@ public sealed partial class ExecuteUnifiedCandidateCleanupUseCase(
                 result.VerifiedAuthorSort,
                 result.VerifiedAuthorSortValues,
                 CreateAppliedAuthorProvenance(planned.Operation.Metadata!, result)),
+            CalibreMutationOperationKind.RefreshManagedName => new RefreshManagedNameLibraryStateDelta(
+                generation,
+                revision,
+                planned.Operation.OperationId,
+                appliedAt,
+                planned.Operation.RecordId,
+                result.VerifiedManagedPath!,
+                result.VerifiedFormats!),
             CalibreMutationOperationKind.TransferFormat => new AddOrReplaceFormatLibraryStateDelta(
                 generation,
                 revision,

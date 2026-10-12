@@ -382,7 +382,7 @@ authors stay visible/non-executable rather than being silently "solved."
 - [x] Implementation explicitly approved and rollback point staged where applicable.
 - [x] Suspicion/source-preservation policy and cache-first review implemented.
 - [ ] Selective embedded/front-matter evidence implemented and measured.
-- [ ] Final review and worker-only naming execution implemented.
+- [x] Final review and worker-only naming execution implemented.
 - [ ] Focused/standard checks and disposable-library acceptance completed.
 - [ ] Current documentation reconciled and plan archived.
 
@@ -544,6 +544,43 @@ Focused workflow and architecture tests cover uncheck/recheck before reviewed
 execution and all bindings. The previously noted selected-row bulk-choice gap is
 closed; remaining UI work is limited to acceptance/polish discovered during manual
 use.
+
+Managed naming now uses a distinct typed `RefreshManagedName` operation in fixed
+worker protocol 1.3; it does not rely on no-op `set_field` behavior. Final execution
+isolates checked author writes first, then refreshes every retained record with at
+least one registered format in bounded chunks, including naming-only runs with zero
+checked author corrections. The worker calls public `cache.update_path({book_id})`
+and verifies supported metadata, local fields, cover bytes, format set/count, streamed
+format size/SHA-256, a contained physical directory, exactly two managed path levels,
+the current `(record ID)` suffix, registered physical format availability, and actual
+format basenames. Any mismatch fails the chunk under existing stop-and-Rescan rules.
+
+Protocol responses use primitive bounded format facts and are validated before Domain
+rehydration. A typed state delta refuses wrong depth/ID suffix, changed format sets,
+or changed fingerprints, projects only worker-returned paths/basenames, and survives
+delta-journal reload. Reviewed author operations run before refresh; unchecked review
+still permits explicit managed naming, and progress/results count successful refreshes.
+Focused verification passed five Domain projection tests, three Application ordering/
+naming/staleness tests, seven worker-boundary tests, state-store round-trip, Python
+syntax compilation, and the two-stage WPF workflow test.
+
+Disposable fixed-worker acceptance subsequently passed against installed Calibre
+9.12.0 using synthetic metadata and TXT bytes. The protocol 1.3 worker changed
+`Initial Author/Initial Title (1)` and `Initial Title - Initial Author.txt` to
+`Final Author/Final Title (1)` and `Final Title - Final Author.txt`; record count and
+format count remained one, tags/comments survived, streamed bytes and SHA-256 were
+unchanged, the typed stopped handshake completed, and the temporary library/config
+were deleted. The reusable acceptance harness lives under `scripts/` and requires the
+explicit disposable marker.
+
+The full solution build passed. The full test run completed 930 of 931 tests before
+the known viewer-launch fixture intermittently retained its copied TestCalibre DLL
+during teardown; all managed-name tests passed, and the viewer test passed alone after
+its test child exited. Formatting and diff checks passed after scoped new-file newline
+correction.
+
+The package vulnerability audit completed against NuGet.org with no vulnerable
+direct or transitive packages reported for any production or test project.
 
 ## Final outcome
 

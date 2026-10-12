@@ -8,10 +8,11 @@ from datetime import datetime
 from decimal import Decimal, InvalidOperation
 
 
-PROTOCOL_VERSION = "calibre-mutation-worker-protocol/1.2"
+PROTOCOL_VERSION = "calibre-mutation-worker-protocol/1.3"
 MAXIMUM_MESSAGE_BYTES = 1048576
 MAXIMUM_OPERATIONS = 100
-CAPABILITIES = ["setMetadata", "transferFormat", "removeFormat", "removeRecord"]
+CAPABILITIES = ["setMetadata", "refreshManagedName", "transferFormat", "removeFormat", "removeRecord"]
+LIBRARY_ROOT = ""
 WORKER_TEMP_DIRECTORY = os.environ["CLC_WORKER_TEMP_DIRECTORY"]
 COVER_DIRECTORY = os.environ.get("CLC_WORKER_COVER_DIRECTORY", "")
 MAXIMUM_COVER_BYTES = 524288
@@ -50,7 +51,7 @@ def unique_object(pairs):
     return result
 
 
-def operation_result(operation, success, failure_code=None, metadata=None,
+def operation_result(operation, success, failure_code=None, metadata=None, managed_name=None,
                      skipped=False, skip_code=None):
     result = {
         "operationId": operation["operationId"],
@@ -66,6 +67,9 @@ def operation_result(operation, success, failure_code=None, metadata=None,
         result["verifiedAuthorSort"] = metadata["authorSort"]
         if metadata.get("authorSortValues") is not None:
             result["verifiedAuthorSortValues"] = metadata["authorSortValues"]
+    if managed_name is not None:
+        result["verifiedManagedPath"] = managed_name["managedPath"]
+        result["verifiedFormats"] = managed_name["formats"]
     if skip_code is not None:
         result["skipCode"] = skip_code
     return result
@@ -93,6 +97,13 @@ def validate_operation(operation):
                ("canonicalFormat", "targetRecordId", "expectedSizeInBytes", "expectedSha256")):
             raise ValueError("metadata_operation_invalid")
         validate_metadata(operation)
+        return
+    if kind == "refreshManagedName":
+        if any(operation[name] is not None for name in
+               ("canonicalFormat", "targetRecordId", "expectedSizeInBytes", "expectedSha256")):
+            raise ValueError("refresh_managed_name_invalid")
+        if any(operation[name] is not None for name in metadata_names):
+            raise ValueError("refresh_managed_name_invalid")
         return
     if any(operation[name] is not None for name in metadata_names):
         raise ValueError("metadata_operation_invalid")
@@ -181,7 +192,8 @@ def validate_chunk(message):
     operation_ids = [operation["operationId"] for operation in operations]
     if len(set(operation_ids)) != len(operation_ids):
         raise ValueError("operation_id_duplicate")
-    phases = {"setMetadata": 0, "transferFormat": 1, "removeFormat": 2, "removeRecord": 3}
+    phases = {"setMetadata": 0, "refreshManagedName": 1,
+              "transferFormat": 2, "removeFormat": 3, "removeRecord": 4}
     if [phases[operation["kind"]] for operation in operations] != sorted(
             phases[operation["kind"]] for operation in operations):
         raise ValueError("operation_order_invalid")
@@ -221,6 +233,82 @@ def local_values(cache, book_id):
         if metadata.get("datatype") != "composite":
             values[name] = cache.field_for(name, book_id)
     return values
+
+
+def hash_file(path):
+    digest = hashlib.sha256()
+    size = 0
+    with open(path, "rb") as stream:
+        while True:
+            content = stream.read(1024 * 1024)
+            if not content:
+                break
+            size += len(content)
+            digest.update(content)
+    return size, digest.hexdigest()
+
+
+def managed_format_state(cache, book_id):
+    result = []
+    for fmt in sorted(cache.formats(book_id, verify_formats=True) or ()):
+        canonical = fmt.upper()
+        path = os.path.realpath(cache.format_abspath(book_id, canonical))
+        if os.path.commonpath((LIBRARY_ROOT, path)) != LIBRARY_ROOT or not os.path.isfile(path):
+            raise ValueError("managed_format_unavailable")
+        size, digest = hash_file(path)
+        result.append({
+            "format": canonical,
+            "storedFileName": os.path.basename(path),
+            "sizeInBytes": size,
+            "sha256": digest,
+        })
+    return result
+
+
+def managed_record_state(cache, book_id):
+    if not cache.has_id(book_id):
+        raise ValueError("managed_name_target_missing")
+    fields = ("title", "authors", "author_sort", "identifiers", "publisher", "pubdate",
+              "languages", "series", "series_index")
+    return {
+        "metadata": {name: cache.field_for(name, book_id) for name in fields},
+        "local": local_values(cache, book_id),
+        "cover": cache.cover(book_id),
+        "formats": managed_format_state(cache, book_id),
+    }
+
+
+def refresh_managed_name(cache, operation):
+    book_id = operation["recordId"]
+    before = managed_record_state(cache, book_id)
+    cache.update_path({book_id})
+    cache.clear_caches(book_ids={book_id})
+    after = managed_record_state(cache, book_id)
+    before_formats = [(value["format"], value["sizeInBytes"], value["sha256"])
+                      for value in before["formats"]]
+    after_formats = [(value["format"], value["sizeInBytes"], value["sha256"])
+                     for value in after["formats"]]
+    if before["metadata"] != after["metadata"] or before["local"] != after["local"] \
+            or before["cover"] != after["cover"] or before_formats != after_formats:
+        raise ValueError("managed_name_record_changed")
+    managed_path = cache.field_for("path", book_id)
+    if not isinstance(managed_path, str) or len(managed_path) > 1024 \
+            or any(ord(character) < 32 for character in managed_path):
+        raise ValueError("managed_name_path_invalid")
+    normalized = managed_path.replace("\\", "/").strip("/")
+    segments = normalized.split("/")
+    if len(segments) != 2 or not all(segments) \
+            or not segments[1].endswith(" ({})".format(book_id)):
+        raise ValueError("managed_name_layout_invalid")
+    directory = os.path.realpath(os.path.join(LIBRARY_ROOT, *segments))
+    if os.path.commonpath((LIBRARY_ROOT, directory)) != LIBRARY_ROOT \
+            or not os.path.isdir(directory):
+        raise ValueError("managed_name_directory_unavailable")
+    formats = managed_format_state(cache, book_id)
+    for value in formats:
+        if os.path.dirname(os.path.realpath(os.path.join(directory, value["storedFileName"]))) != directory:
+            raise ValueError("managed_name_format_containment_failed")
+    return {"managedPath": normalized, "formats": formats}
 
 
 def clear_metadata_caches(cache, field, book_id):
@@ -433,6 +521,12 @@ def execute_chunk(cache, message):
             results.append(operation_result(operation, True, metadata=metadata))
             completed_ids.add(operation["operationId"])
 
+        for operation in (value for value in operations if value["kind"] == "refreshManagedName"):
+            mutation_started = True
+            managed_name = refresh_managed_name(cache, operation)
+            results.append(operation_result(operation, True, managed_name=managed_name))
+            completed_ids.add(operation["operationId"])
+
         for operation in (value for value in operations if value["kind"] == "transferFormat"):
             mutation_started = True
             transfer_format(cache, operation)
@@ -489,9 +583,11 @@ def execute_chunk(cache, message):
 
 
 def run():
+    global LIBRARY_ROOT
     if len(sys.argv) != 3:
         raise ValueError("worker_arguments_invalid")
     library_root = os.path.abspath(sys.argv[1])
+    LIBRARY_ROOT = os.path.realpath(library_root)
     expected_uuid = sys.argv[2]
     from calibre.library import db
     cache = db(library_root).new_api

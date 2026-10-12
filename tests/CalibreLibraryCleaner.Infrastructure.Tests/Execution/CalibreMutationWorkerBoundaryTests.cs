@@ -116,6 +116,36 @@ public sealed class CalibreMutationWorkerBoundaryTests
     }
 
     [Fact]
+    public async Task ManagedNameRefreshReturnsVerifiedPathBasenamesAndFingerprints()
+    {
+        using ControlledCalibreExecutable executable = new();
+        using TemporaryDirectory temporary = new();
+        using ServiceProvider provider = Provider(executable);
+        string library = Path.Combine(temporary.Path, "library");
+        Directory.CreateDirectory(library);
+        File.WriteAllBytes(Path.Combine(library, "metadata.db"), [0x00]);
+        CalibreToolDescriptor tool = (await provider.GetRequiredService<ICalibreToolDiscovery>()
+            .DiscoverAndProbeAsync(library, CancellationToken.None)).Tool!;
+        CalibreMutationWorkerOpenResult opened = await provider
+            .GetRequiredService<ICalibreMutationWorkerFactory>()
+            .TryOpenAsync(new(tool, library, "87f7ed1f-59a8-45a6-975a-7e06fd84780d"),
+                CancellationToken.None);
+        await using ICalibreMutationWorkerSession session = opened.Session!;
+
+        CalibreMutationChunkResult result = await session.ExecuteChunkAsync(new(
+            "managed-name",
+            [CalibreMutationOperation.RefreshManagedName("refresh:1", new(1))]),
+            CancellationToken.None);
+
+        result.IsSuccess.Should().BeTrue(result.FailureCode);
+        CalibreMutationOperationResult operation = result.OperationResults.Should().ContainSingle().Subject;
+        operation.VerifiedManagedPath.Should().Be("Verified Author/Verified Title (1)");
+        ManagedFormatReadBack format = operation.VerifiedFormats.Should().ContainSingle().Subject;
+        format.StoredFileName.Should().Be("Verified Title - Verified Author.epub");
+        format.Fingerprint.Should().Be(new FormatFileFingerprint(10, new(new string('a', 64))));
+    }
+
+    [Fact]
     public async Task VerifiedUnchangedMetadataReturnsTypedSkipWithoutVerifiedMutationValues()
     {
         using ControlledCalibreExecutable executable = new();

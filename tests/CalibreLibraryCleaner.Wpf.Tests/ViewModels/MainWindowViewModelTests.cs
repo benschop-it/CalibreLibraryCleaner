@@ -532,7 +532,13 @@ public sealed class MainWindowViewModelTests
         const string libraryRoot = "C:\\Books";
         CalibreBook book = new(
             new(1), "Book", "Woods, Stuart",
-            [new(new(1), "Woods, Stuart", "Woods, Stuart")], [], [], "Woods, Stuart/Book");
+            [new(new(1), "Woods, Stuart", "Woods, Stuart")], [],
+            [new(
+                "EPUB", "book.epub", "Woods, Stuart/Book (1)/book.epub",
+                FormatFileStatus.Present,
+                new(10, new(new string('a', 64))),
+                new(10, DateTimeOffset.UnixEpoch, DateTimeOffset.UnixEpoch, 0))],
+            "Woods, Stuart/Book (1)");
         LibrarySnapshot snapshot = new(
             new("87f7ed1f-59a8-45a6-975a-7e06fd84780d", 27, libraryRoot),
             new DateTimeOffset(2026, 8, 1, 12, 0, 0, TimeSpan.Zero), [book], []);
@@ -596,7 +602,7 @@ public sealed class MainWindowViewModelTests
         captured.MetadataReview.Should().BeNull();
         captured.GroupSelections.Should().BeEmpty();
         viewModel.CandidateCleanupResultSummary.Should().Be(
-            "Updated 1 book author record(s); skipped 0 verified-unchanged record(s).");
+            "Updated 1 of 1 checked author correction(s); refreshed 0 managed name(s); skipped 0 verified-unchanged record(s).");
         viewModel.StatusMessage.Should().Be("Final author corrections completed.");
         logger.Entries.Should().Contain(value =>
             value.EventId.Name == "UserVisibleOperationResult"

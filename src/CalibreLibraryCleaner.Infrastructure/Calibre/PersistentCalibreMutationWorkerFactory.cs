@@ -4,6 +4,7 @@ using System.Security.Cryptography;
 using System.Text.Json;
 using CalibreLibraryCleaner.Application.Abstractions;
 using CalibreLibraryCleaner.Application.Executions;
+using CalibreLibraryCleaner.Domain.Libraries;
 using CalibreLibraryCleaner.Infrastructure.Execution;
 
 namespace CalibreLibraryCleaner.Infrastructure.Calibre;
@@ -14,7 +15,7 @@ internal sealed class PersistentCalibreMutationWorkerFactory(CalibreExecutionOpt
     private const string WorkerResourceName =
         "CalibreLibraryCleaner.Infrastructure.Calibre.calibre_mutation_worker.py";
     private static readonly string[] RequiredCapabilities =
-        ["setMetadata", "transferFormat", "removeFormat", "removeRecord"];
+        ["setMetadata", "refreshManagedName", "transferFormat", "removeFormat", "removeRecord"];
 
     public async Task<CalibreMutationWorkerOpenResult> TryOpenAsync(
         OpenCalibreMutationWorkerRequest request,
@@ -286,6 +287,10 @@ internal sealed class PersistentCalibreMutationWorkerSession(
                         value.OperationId, value.Kind, value.IsSuccess, value.FailureCode,
                         value.VerifiedMetadataValues, value.VerifiedManagedPath,
                         value.VerifiedAuthorSort, value.VerifiedAuthorSortValues,
+                        value.VerifiedFormats?.Select(format => new ManagedFormatReadBack(
+                            format.Format,
+                            format.StoredFileName,
+                            new(format.SizeInBytes, new(format.Sha256)))).ToArray(),
                         value.IsSkipped, value.SkipCode)).ToArray(),
                     response.FailureCode);
             }
@@ -374,12 +379,19 @@ internal sealed class PersistentCalibreMutationWorkerSession(
         {
             bool metadataSuccess = result.IsSuccess && !result.IsSkipped
                 && operation.Kind == CalibreMutationOperationKind.SetMetadata;
+            bool refreshSuccess = result.IsSuccess && !result.IsSkipped
+                && operation.Kind == CalibreMutationOperationKind.RefreshManagedName;
             bool authorSortSuccess = metadataSuccess && operation.Metadata?.AuthorSortValues is not null;
             if (metadataSuccess != (result.VerifiedMetadataValues is not null
                     && !string.IsNullOrWhiteSpace(result.VerifiedManagedPath)
                     && !string.IsNullOrWhiteSpace(result.VerifiedAuthorSort))
                 || !metadataSuccess && (result.VerifiedMetadataValues is not null
-                    || result.VerifiedManagedPath is not null || result.VerifiedAuthorSort is not null)
+                    || result.VerifiedAuthorSort is not null)
+                || refreshSuccess != (result.VerifiedFormats is not null
+                    && !string.IsNullOrWhiteSpace(result.VerifiedManagedPath))
+                || !refreshSuccess && result.VerifiedFormats is not null
+                || result.VerifiedFormats is not null && !ValidManagedFormats(result.VerifiedFormats)
+                || !metadataSuccess && !refreshSuccess && result.VerifiedManagedPath is not null
                 || authorSortSuccess != (result.VerifiedAuthorSortValues is not null)
                 || result.VerifiedAuthorSortValues is not null
                     && (result.VerifiedAuthorSortValues.Count != operation.Metadata!.Values.Count
@@ -389,6 +401,20 @@ internal sealed class PersistentCalibreMutationWorkerSession(
         }
         return failureSeen == (response.FailureCode is not null);
     }
+
+    private static bool ValidManagedFormats(IReadOnlyList<CalibreManagedFormatReadBackMessage> formats) =>
+        formats.Select(value => value.Format).Distinct(StringComparer.Ordinal).Count() == formats.Count
+        && formats.All(value =>
+            !string.IsNullOrWhiteSpace(value.Format)
+            && value.Format.Length <= 16
+            && value.Format.All(char.IsAsciiLetterOrDigit)
+            && !string.IsNullOrWhiteSpace(value.StoredFileName)
+            && value.StoredFileName.Length <= 512
+            && !value.StoredFileName.Contains('/')
+            && !value.StoredFileName.Contains('\\')
+            && value.SizeInBytes >= 0
+            && value.Sha256.Length == 64
+            && value.Sha256.All(char.IsAsciiHexDigit));
 
     private static CalibreMutationChunkResult Failed(string chunkId, bool mutationStarted, string failureCode) =>
         new(chunkId, mutationStarted, [], failureCode);
