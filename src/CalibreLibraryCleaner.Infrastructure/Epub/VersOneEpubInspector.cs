@@ -2,6 +2,7 @@ using System.Buffers.Binary;
 using System.Diagnostics;
 using System.Globalization;
 using System.IO.Compression;
+using System.Net;
 using System.Security;
 using System.Security.Cryptography;
 using System.Text;
@@ -15,6 +16,7 @@ using CalibreLibraryCleaner.Application.Metadata;
 using CalibreLibraryCleaner.Domain.Assessments;
 using CalibreLibraryCleaner.Domain.Libraries;
 using CalibreLibraryCleaner.Domain.Matching;
+using CalibreLibraryCleaner.Domain.Metadata;
 using HtmlAgilityPack;
 using Microsoft.Extensions.Logging;
 using VersOne.Epub;
@@ -24,6 +26,7 @@ namespace CalibreLibraryCleaner.Infrastructure.Epub;
 
 internal sealed partial class VersOneEpubInspector(ILogger<VersOneEpubInspector> logger) :
     IEpubInspector,
+    IEpubFrontMatterAuthorInspector,
     IEpubContentSignatureInspector
 {
     private const int BufferSize = 128 * 1024;
@@ -73,6 +76,129 @@ internal sealed partial class VersOneEpubInspector(ILogger<VersOneEpubInspector>
 
         EmbeddedAuthorMetadataObservation Unavailable(string code) => new(
             key, EmbeddedAuthorMetadataStatus.Unavailable, null, [], code);
+    }
+
+    public async Task<FrontMatterAuthorObservation> InspectFrontMatterAuthorsAsync(
+        EpubInspectionRequest request,
+        FrontMatterInspectionLimits limits,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        ArgumentNullException.ThrowIfNull(limits);
+        try
+        {
+            EnsureCurrentFile(request);
+            if (request.Observation.Length == 0 || request.Observation.Length > request.Limits.MaximumFileBytes)
+                return Unavailable("EPUB_FRONT_MATTER.FILE_BOUNDS");
+            PreflightResult preflight = await PreflightAsync(request, cancellationToken).ConfigureAwait(false);
+            if (preflight.Problem is not null)
+                return Unavailable($"EPUB_FRONT_MATTER.{preflight.Problem.Code.ToString().ToUpperInvariant()}");
+            await using FileStream file = OpenRead(request.FullPath);
+            EnsureCurrentFile(request);
+            using CancellationCheckingStream guarded = new(file, cancellationToken);
+            using ZipArchive archive = new(guarded, ZipArchiveMode.Read, leaveOpen: true);
+            ReadBudget readBudget = new(request.Limits.MaximumDeclaredUncompressedBytes);
+            Dictionary<string, ZipArchiveEntry> entries = archive.Entries.ToDictionary(
+                entry => NormalizeRequired(entry.FullName), StringComparer.Ordinal);
+            XDocument container = await ReadXmlAsync(
+                entries["META-INF/container.xml"], request.Limits.MaximumXmlBytes, readBudget,
+                cancellationToken).ConfigureAwait(false);
+            string? packageReference = container.Descendants()
+                .FirstOrDefault(element => element.Name.LocalName == "rootfile")
+                ?.Attribute("full-path")?.Value;
+            if (!EpubArchivePathResolver.TryNormalizeEntryName(packageReference, out string packagePath)
+                || !entries.TryGetValue(packagePath, out ZipArchiveEntry? packageEntry))
+                throw new InvalidDataException("Package path is invalid.");
+            XDocument package = await ReadXmlAsync(
+                packageEntry, request.Limits.MaximumXmlBytes, readBudget, cancellationToken)
+                .ConfigureAwait(false);
+            Dictionary<string, string> manifest = package.Descendants()
+                .Where(element => element.Name.LocalName == "item")
+                .Select(element => (
+                    Id: element.Attribute("id")?.Value,
+                    Href: element.Attribute("href")?.Value,
+                    MediaType: element.Attribute("media-type")?.Value))
+                .Where(value => !string.IsNullOrWhiteSpace(value.Id)
+                    && !string.IsNullOrWhiteSpace(value.Href)
+                    && value.MediaType?.Contains("html", StringComparison.OrdinalIgnoreCase) == true
+                    && EpubArchivePathResolver.TryResolve(packagePath, value.Href!, out _))
+                .ToDictionary(
+                    value => value.Id!,
+                    value =>
+                    {
+                        EpubArchivePathResolver.TryResolve(packagePath, value.Href!, out string resolved);
+                        return resolved;
+                    },
+                    StringComparer.Ordinal);
+            string[] spinePaths = package.Descendants()
+                .Where(element => element.Name.LocalName == "itemref")
+                .Select(element => element.Attribute("idref")?.Value)
+                .Where(value => !string.IsNullOrWhiteSpace(value) && manifest.ContainsKey(value))
+                .Select(value => manifest[value!])
+                .Take(limits.MaximumEpubDocuments)
+                .ToArray();
+            List<FrontMatterAuthorCandidate> candidates = [];
+            int completed = 0;
+            int retained = 0;
+            bool truncated = false;
+            for (int index = 0; index < spinePaths.Length; index++)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                if (!entries.TryGetValue(spinePaths[index], out ZipArchiveEntry? chapter)) continue;
+                if (chapter.Length > request.Limits.MaximumChapterBytes)
+                    return Unavailable("EPUB_FRONT_MATTER.CHAPTER_LIMIT");
+                string html = await ReadTextAsync(
+                    chapter, request.Limits.MaximumChapterBytes, readBudget, cancellationToken)
+                    .ConfigureAwait(false);
+                HtmlDocument document = LoadBoundedHtml(html, request.Limits, cancellationToken);
+                List<string> lines = [];
+                int useful = 0;
+                foreach (HtmlNode node in document.DocumentNode.SelectNodes(
+                             "//h1|//h2|//h3|//p|//div[not(.//p or .//div or .//section)]|//section[not(.//p or .//div or .//section)]")
+                         ?? Enumerable.Empty<HtmlNode>())
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    string line = WebUtility.HtmlDecode(node.InnerText);
+                    int lineUseful = line.Count(char.IsLetterOrDigit);
+                    if (lineUseful == 0) continue;
+                    if (useful + lineUseful > limits.MaximumUsefulCharactersPerUnit)
+                    {
+                        truncated = true;
+                        break;
+                    }
+                    useful += lineUseful;
+                    lines.Add(line);
+                }
+                retained = checked(retained + useful);
+                completed++;
+                candidates.AddRange(AuthorBylinePolicy.Extract(lines).Select(value => new FrontMatterAuthorCandidate(
+                    value.Role, value.Names, index + 1, value.LineNumber, value.Marker)));
+            }
+            EnsureCurrentFile(request);
+            FrontMatterAuthorStatus status = candidates.Any(value => value.Role == AuthorCreditRole.Author)
+                ? FrontMatterAuthorStatus.Available
+                : FrontMatterAuthorStatus.Missing;
+            return new(
+                "EPUB", request.Fingerprint, FrontMatterAuthorVersions.EpubExtractor,
+                FrontMatterAuthorVersions.Limits, status, candidates, spinePaths.Length,
+                completed, retained, truncated);
+        }
+        catch (OperationCanceledException) { throw; }
+        catch (FileChangedException)
+        {
+            return Unavailable("EPUB_FRONT_MATTER.CHANGED_FILE");
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException
+                                           or SecurityException or InvalidDataException or XmlException
+                                           or InspectionLimitException or OverflowException)
+        {
+            return Unavailable("EPUB_FRONT_MATTER.UNAVAILABLE");
+        }
+
+        FrontMatterAuthorObservation Unavailable(string code) => new(
+            "EPUB", request.Fingerprint, FrontMatterAuthorVersions.EpubExtractor,
+            FrontMatterAuthorVersions.Limits, FrontMatterAuthorStatus.Unavailable, [],
+            0, 0, 0, false, code);
     }
 
     public async Task<EpubInspectionResult> InspectAsync(

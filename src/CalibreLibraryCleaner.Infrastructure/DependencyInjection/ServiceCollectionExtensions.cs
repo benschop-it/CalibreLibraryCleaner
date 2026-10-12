@@ -44,6 +44,8 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<ILibraryStateStore, VersionedJsonLibraryStateStore>();
         services.AddSingleton<VersOneEpubInspector>();
         services.AddSingleton<IEpubInspector>(provider => provider.GetRequiredService<VersOneEpubInspector>());
+        services.AddSingleton<IEpubFrontMatterAuthorInspector>(provider =>
+            provider.GetRequiredService<VersOneEpubInspector>());
         services.AddSingleton<IEpubContentSignatureInspector>(provider => provider.GetRequiredService<VersOneEpubInspector>());
         services.AddSingleton(new EpubContentSignatureCacheOptions());
         services.AddSingleton<IEpubContentSignatureCache, FileEpubContentSignatureCache>();

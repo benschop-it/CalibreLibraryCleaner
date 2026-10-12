@@ -445,6 +445,24 @@ complete Infrastructure suite (283/283), focused missing-spine/cache/XMP/isolate
 worker tests, and a full solution build. Formatting required only scoped CRLF final-
 newline correction on new files; standard completed-plan gates remain pending.
 
+Front-matter work has begun with a deterministic Domain policy that accepts only
+explicit line-start `By`, `Written by`, or `Author:` credits as author candidates and
+retains `Editor`/`Translated by` roles separately. Conservative name-shape checks
+cover initials, particles, mononyms, corporate and non-Latin names while rejecting
+incidental prose, digits, mixed roles, and ambiguous separators. Provider-neutral
+observations freeze the proposed ceilings at three EPUB documents, five PDF pages,
+and 32,768 useful characters per unit, retaining only candidates, role, unit/line
+location, coverage, truncation, fingerprint, versions, and technical problem code.
+
+The EPUB front-matter adapter is implemented behind the existing guarded inspector.
+After archive/XML preflight it reads at most the first three HTML spine documents,
+extracts bounded block-level lines, immediately reduces them through the byline
+policy, and returns no prose. Focused fixtures prove an explicit byline is retained,
+a prose sentinel is absent from serialized output, and a byline in spine document
+four is not read. PDF front matter, front-matter cache/orchestration, and final review
+fusion remain pending, so the combined selective embedded/front-matter progress item
+is intentionally still unchecked.
+
 ## Final outcome
 
 Implementation in progress. The first read-only policy/review slice and the minimal

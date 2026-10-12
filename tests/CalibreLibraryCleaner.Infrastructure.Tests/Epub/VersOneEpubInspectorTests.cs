@@ -11,6 +11,7 @@ using CalibreLibraryCleaner.Application.Libraries;
 using CalibreLibraryCleaner.Application.Metadata;
 using CalibreLibraryCleaner.Domain.Assessments;
 using CalibreLibraryCleaner.Domain.Libraries;
+using CalibreLibraryCleaner.Domain.Metadata;
 using CalibreLibraryCleaner.Infrastructure.Epub;
 using CalibreLibraryCleaner.Infrastructure.Tests.Fixtures;
 using FluentAssertions;
@@ -42,6 +43,60 @@ public sealed class VersOneEpubInspectorTests
         result.EmbeddedTitle.Should().Be("Synthetic");
         result.Authors.Should().Equal("Author");
         result.Key.Fingerprint.Should().Be(request.Fingerprint);
+    }
+
+    [Fact]
+    public async Task FrontMatterInspectionRetainsBylineFactsWithoutProse()
+    {
+        const string sentinel = "PROSE_SENTINEL_MUST_NOT_ESCAPE";
+        using TemporaryDirectory directory = new();
+        string path = Path.Combine(directory.Path, "FrontMatter.epub");
+        SyntheticEpubBuilder.CreateFromEntries(path, StandardEntries(
+            chapter: $"<html><body><h1>The Book</h1><p>By Reliable Writer</p><p>{sentinel}</p></body></html>"));
+        EpubInspectionRequest request = await CreateRequestAsync(path);
+        using ServiceProvider provider = TestServices.CreateProvider();
+
+        FrontMatterAuthorObservation result = await provider
+            .GetRequiredService<IEpubFrontMatterAuthorInspector>()
+            .InspectFrontMatterAuthorsAsync(
+                request, FrontMatterInspectionLimits.V1, CancellationToken.None);
+
+        result.Status.Should().Be(FrontMatterAuthorStatus.Available);
+        result.Candidates.Should().ContainSingle(value =>
+            value.Role == AuthorCreditRole.Author
+            && value.Names.Count == 1
+            && value.Names[0] == "Reliable Writer");
+        System.Text.Json.JsonSerializer.Serialize(result).Should().NotContain(sentinel);
+    }
+
+    [Fact]
+    public async Task FrontMatterInspectionDoesNotReadFourthSpineDocument()
+    {
+        using TemporaryDirectory directory = new();
+        string path = Path.Combine(directory.Path, "BoundedFrontMatter.epub");
+        List<(string Name, string Content, CompressionLevel Compression)> entries =
+        [
+            ("mimetype", "application/epub+zip", CompressionLevel.NoCompression),
+            ("META-INF/container.xml", "<container xmlns=\"urn:oasis:names:tc:opendocument:xmlns:container\"><rootfiles><rootfile full-path=\"content.opf\"/></rootfiles></container>", CompressionLevel.Optimal),
+            ("content.opf", "<package xmlns=\"http://www.idpf.org/2007/opf\"><metadata/><manifest><item id=\"c1\" href=\"c1.xhtml\" media-type=\"application/xhtml+xml\"/><item id=\"c2\" href=\"c2.xhtml\" media-type=\"application/xhtml+xml\"/><item id=\"c3\" href=\"c3.xhtml\" media-type=\"application/xhtml+xml\"/><item id=\"c4\" href=\"c4.xhtml\" media-type=\"application/xhtml+xml\"/></manifest><spine><itemref idref=\"c1\"/><itemref idref=\"c2\"/><itemref idref=\"c3\"/><itemref idref=\"c4\"/></spine></package>", CompressionLevel.Optimal),
+            ("c1.xhtml", "<html><body><p>Title page</p></body></html>", CompressionLevel.Optimal),
+            ("c2.xhtml", "<html><body><p>Copyright page</p></body></html>", CompressionLevel.Optimal),
+            ("c3.xhtml", "<html><body><p>Dedication</p></body></html>", CompressionLevel.Optimal),
+            ("c4.xhtml", "<html><body><p>By Too Late</p></body></html>", CompressionLevel.Optimal),
+        ];
+        SyntheticEpubBuilder.CreateFromEntries(path, entries);
+        EpubInspectionRequest request = await CreateRequestAsync(path);
+        using ServiceProvider provider = TestServices.CreateProvider();
+
+        FrontMatterAuthorObservation result = await provider
+            .GetRequiredService<IEpubFrontMatterAuthorInspector>()
+            .InspectFrontMatterAuthorsAsync(
+                request, FrontMatterInspectionLimits.V1, CancellationToken.None);
+
+        result.Status.Should().Be(FrontMatterAuthorStatus.Missing);
+        result.RequestedUnits.Should().Be(3);
+        result.CompletedUnits.Should().Be(3);
+        result.Candidates.Should().BeEmpty();
     }
 
     [Fact]
