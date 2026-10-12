@@ -248,6 +248,9 @@ bounded, HTTPS-only, outside the library, and removed after the run.
   requests immediately.
 - When a provider request limit is reached, stop at the actual processed query count,
   report the uncached deferred count, and never count unrequested queries as completed.
+  The default is 200 requests per provider per explicit preparation, so paced Google
+  Books work completes in roughly ten minutes rather than hours; reruns continue from
+  immediately persisted cache entries.
 - Execute every non-author mutation before author metadata writes, checkpoint those
   completed operations, and isolate each author write in a one-operation worker chunk.
 - Choose one coherent best edition using validated ISBN, title/author/language,

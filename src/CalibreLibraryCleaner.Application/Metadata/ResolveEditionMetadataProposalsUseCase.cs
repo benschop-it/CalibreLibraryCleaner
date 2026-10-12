@@ -70,7 +70,7 @@ public sealed record EditionMetadataEnrichmentOptions
 {
     public EditionMetadataEnrichmentOptions(
         bool enabled = true,
-        int maximumProviderRequestsPerRun = 10_000,
+        int maximumProviderRequestsPerRun = 200,
         TimeSpan? maximumCacheAge = null,
         TimeSpan? unavailableCacheAge = null)
     {

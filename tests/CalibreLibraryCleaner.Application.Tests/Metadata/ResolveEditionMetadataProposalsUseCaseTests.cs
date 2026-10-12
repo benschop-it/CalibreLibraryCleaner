@@ -20,6 +20,7 @@ public sealed class ResolveEditionMetadataProposalsUseCaseTests
         EditionMetadataEnrichmentOptions options = new();
 
         options.MaximumCacheAge.Should().Be(TimeSpan.FromDays(365));
+        options.MaximumProviderRequestsPerRun.Should().Be(200);
     }
 
     [Fact]
