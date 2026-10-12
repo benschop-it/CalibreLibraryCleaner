@@ -26,8 +26,9 @@ decision.
 
 ## Current work
 
-Active execution plans live under [plans/](plans/). There are currently no active
-plans; the completed one-time cleanup plan is under [archive/plans](archive/plans/).
+Active execution plans are listed in the [plans index](plans/README.md), including
+the [final author resolution and managed naming plan](plans/final-author-resolution-and-managed-naming.md).
+The completed one-time cleanup plan is under [archive/plans](archive/plans/).
 
 ## Workflows and evidence
 

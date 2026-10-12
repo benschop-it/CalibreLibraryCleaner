@@ -124,6 +124,13 @@ public sealed class VersionedJsonLibraryStateStoreTests
         LibraryState baseline = LibraryState.FromScan(
             fixture.Snapshot, new(Guid.Parse("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee")));
         CalibreBook target = baseline.Snapshot.Books[0];
+        string[] authorValues = ["Frederik Pohl", "Jack Williamson"];
+        AppliedAuthorProvenance provenance = new(
+            "provider",
+            "provider/1.0.0",
+            "edition",
+            "proposal/1.0.0",
+            AppliedAuthorProvenance.CreateValuesIdentity(authorValues));
         SetMetadataLibraryStateDelta authors = new(
             baseline.GenerationId,
             baseline.Revision,
@@ -131,10 +138,11 @@ public sealed class VersionedJsonLibraryStateStoreTests
             baseline.ProjectedAtUtc.AddSeconds(1),
             target.Id,
             LibraryMetadataField.Authors,
-            ["Frederik Pohl", "Jack Williamson"],
+            authorValues,
             "Pohl, Frederik/Book",
             "Pohl, Frederik & Williamson, Jack",
-            ["Pohl, Frederik", "Williamson, Jack"]);
+            ["Pohl, Frederik", "Williamson, Jack"],
+            provenance);
         LibraryState projected = LibraryStateDeltaPolicy.Apply(baseline, authors);
         LibraryStateMutationIntent intent = new(
             "normalize-intent", baseline.GenerationId, baseline.Revision, 1, authors.AppliedAtUtc);
@@ -157,6 +165,7 @@ public sealed class VersionedJsonLibraryStateStoreTests
         book.Authors.Select(value => value.Name).Should().Equal("Frederik Pohl", "Jack Williamson");
         book.Authors.Select(value => value.SortName).Should().Equal("Pohl, Frederik", "Williamson, Jack");
         book.AuthorSort.Should().Be("Pohl, Frederik & Williamson, Jack");
+        book.AppliedAuthorProvenance.Should().Be(provenance);
     }
 
     [Fact]

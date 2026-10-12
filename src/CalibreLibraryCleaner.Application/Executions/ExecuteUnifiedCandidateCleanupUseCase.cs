@@ -651,7 +651,8 @@ public sealed partial class ExecuteUnifiedCandidateCleanupUseCase(
                 result.VerifiedMetadataValues!,
                 result.VerifiedManagedPath,
                 result.VerifiedAuthorSort,
-                result.VerifiedAuthorSortValues),
+                result.VerifiedAuthorSortValues,
+                CreateAppliedAuthorProvenance(planned.Operation.Metadata!, result)),
             CalibreMutationOperationKind.TransferFormat => new AddOrReplaceFormatLibraryStateDelta(
                 generation,
                 revision,
@@ -677,6 +678,22 @@ public sealed partial class ExecuteUnifiedCandidateCleanupUseCase(
                 planned.Operation.RecordId),
             _ => throw new InvalidOperationException("The worker returned an unsupported Candidate operation."),
         };
+
+    private static AppliedAuthorProvenance? CreateAppliedAuthorProvenance(
+        CalibreMetadataMutation metadata,
+        CalibreMutationOperationResult result)
+    {
+        if (metadata.Field != LibraryMetadataField.Authors
+            || metadata.Source.ProviderId.StartsWith("calibre-", StringComparison.Ordinal)
+            || result.VerifiedMetadataValues is not { Count: > 0 } values)
+            return null;
+        return new(
+            metadata.Source.ProviderId,
+            metadata.Source.ProviderVersion,
+            metadata.Source.EditionId,
+            metadata.Source.ProposalPolicyVersion,
+            AppliedAuthorProvenance.CreateValuesIdentity(values));
+    }
 
     private static bool PathsEqual(string left, string right) => string.Equals(
         Path.TrimEndingDirectorySeparator(Path.GetFullPath(left)),

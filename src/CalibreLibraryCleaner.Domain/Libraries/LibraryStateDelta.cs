@@ -160,7 +160,8 @@ public sealed record SetMetadataLibraryStateDelta : LibraryStateDelta
         IEnumerable<string> values,
         string? verifiedManagedPath = null,
         string? verifiedAuthorSort = null,
-        IEnumerable<string>? verifiedAuthorSortValues = null)
+        IEnumerable<string>? verifiedAuthorSortValues = null,
+        AppliedAuthorProvenance? appliedAuthorProvenance = null)
         : base(generationId, expectedRevision, operationId, appliedAtUtc)
     {
         ArgumentNullException.ThrowIfNull(values);
@@ -184,6 +185,11 @@ public sealed record SetMetadataLibraryStateDelta : LibraryStateDelta
                 || VerifiedAuthorSortValues.Count != Values.Count
                 || VerifiedAuthorSortValues.Any(value => string.IsNullOrWhiteSpace(value) || value.Length > 512)))
             throw new ArgumentException("Verified author sorts are invalid.", nameof(verifiedAuthorSortValues));
+        if (appliedAuthorProvenance is not null
+            && (field != LibraryMetadataField.Authors
+                || !appliedAuthorProvenance.Matches(Values)))
+            throw new ArgumentException("Applied author provenance does not match the metadata delta.", nameof(appliedAuthorProvenance));
+        AppliedAuthorProvenance = appliedAuthorProvenance;
     }
 
     public CalibreBookId RecordId { get; }
@@ -192,6 +198,7 @@ public sealed record SetMetadataLibraryStateDelta : LibraryStateDelta
     public string? VerifiedManagedPath { get; }
     public string? VerifiedAuthorSort { get; }
     public IReadOnlyList<string>? VerifiedAuthorSortValues { get; }
+    public AppliedAuthorProvenance? AppliedAuthorProvenance { get; }
 }
 
 public sealed record SkipMetadataLibraryStateDelta : LibraryStateDelta
@@ -532,8 +539,11 @@ public static class LibraryStateDeltaPolicy
                 publication = UpdatePublication(publication, delta);
                 break;
         }
+        AppliedAuthorProvenance? provenance = delta.Field == LibraryMetadataField.Authors
+            ? delta.AppliedAuthorProvenance
+            : source.AppliedAuthorProvenance;
         return new(source.Id, title, authorSort, authors, identifiers, source.Formats,
-            delta.VerifiedManagedPath ?? source.RelativeDirectory, publication);
+            delta.VerifiedManagedPath ?? source.RelativeDirectory, publication, provenance);
     }
 
     private static BookPublicationMetadata UpdatePublication(
@@ -598,7 +608,7 @@ public static class LibraryStateDeltaPolicy
 
     private static CalibreBook CopyBook(CalibreBook source, IEnumerable<BookFormat> formats) => new(
         source.Id, source.Title, source.AuthorSort, source.Authors, source.Identifiers, formats,
-        source.RelativeDirectory, source.PublicationMetadata);
+        source.RelativeDirectory, source.PublicationMetadata, source.AppliedAuthorProvenance);
 
     private static ExactBinaryDuplicateGroup[] FilterBinaryGroups(
         IEnumerable<ExactBinaryDuplicateGroup> groups,

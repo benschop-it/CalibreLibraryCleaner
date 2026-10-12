@@ -506,7 +506,12 @@ internal sealed class VersionedJsonLibraryStateStore(
             value.OperationId, value.AppliedAtUtc, value.RecordId.Value, value.Field.ToString(),
             null, null, null, null, value.Values.ToArray(), null,
             value.VerifiedManagedPath, value.VerifiedAuthorSort,
-            value.VerifiedAuthorSortValues?.ToArray()),
+            value.VerifiedAuthorSortValues?.ToArray(),
+            value.AppliedAuthorProvenance?.ProviderId,
+            value.AppliedAuthorProvenance?.ProviderVersion,
+            value.AppliedAuthorProvenance?.EditionId,
+            value.AppliedAuthorProvenance?.ProposalPolicyVersion,
+            value.AppliedAuthorProvenance?.ValuesIdentity),
         SkipMetadataLibraryStateDelta value => new("skip-metadata", value.ExpectedRevision.Value,
             value.OperationId, value.AppliedAtUtc, value.RecordId.Value, value.Field.ToString(),
             null, null, null, null, null, [value.ReasonCode]),
@@ -538,7 +543,7 @@ internal sealed class VersionedJsonLibraryStateStore(
                 value.OperationId, value.AppliedAtUtc, recordId,
                 Enum.Parse<LibraryMetadataField>(value.Format ?? string.Empty, false),
                 value.Values ?? [], value.VerifiedManagedPath, value.VerifiedAuthorSort,
-                value.VerifiedAuthorSortValues),
+                value.VerifiedAuthorSortValues, AppliedAuthorProvenance(value)),
             "skip-metadata" => new SkipMetadataLibraryStateDelta(generation, revision,
                 value.OperationId, value.AppliedAtUtc, recordId,
                 Enum.Parse<LibraryMetadataField>(value.Format ?? string.Empty, false),
@@ -546,6 +551,22 @@ internal sealed class VersionedJsonLibraryStateStore(
                     ?? throw new InvalidDataException("Skipped metadata has no reason code.")),
             _ => throw new InvalidDataException("The persisted state delta kind is unsupported."),
         };
+    }
+
+    private static AppliedAuthorProvenance? AppliedAuthorProvenance(DeltaPayload value)
+    {
+        string?[] fields =
+        [
+            value.AuthorProviderId,
+            value.AuthorProviderVersion,
+            value.AuthorEditionId,
+            value.AuthorProposalPolicyVersion,
+            value.AuthorValuesIdentity,
+        ];
+        if (fields.All(field => field is null)) return null;
+        if (fields.Any(string.IsNullOrWhiteSpace))
+            throw new InvalidDataException("Persisted applied author provenance is incomplete.");
+        return new(fields[0]!, fields[1]!, fields[2]!, fields[3]!, fields[4]!);
     }
 
     private static LibraryState CreatePreExactState(
@@ -933,5 +954,10 @@ internal sealed class VersionedJsonLibraryStateStore(
         string[]? ExtraValues,
         string? VerifiedManagedPath = null,
         string? VerifiedAuthorSort = null,
-        string[]? VerifiedAuthorSortValues = null);
+        string[]? VerifiedAuthorSortValues = null,
+        string? AuthorProviderId = null,
+        string? AuthorProviderVersion = null,
+        string? AuthorEditionId = null,
+        string? AuthorProposalPolicyVersion = null,
+        string? AuthorValuesIdentity = null);
 }
