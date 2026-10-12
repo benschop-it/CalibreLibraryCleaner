@@ -102,7 +102,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
     private LibrarySnapshot? _currentSnapshot;
     private bool _isCurrentSnapshotFresh;
     private CandidatePreparationProgress? _latestCandidateProgress;
-    private CancellationTokenSource? _candidateHeartbeatCancellation;
+    private PeriodicTimer? _candidateHeartbeatTimer;
     private Task? _candidateHeartbeatTask;
     private DateTimeOffset _candidateOperationStartedUtc;
     private int _candidateHeartbeatVersion;
@@ -836,7 +836,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         _scanCancellation?.Cancel();
         _scanCancellation?.Dispose();
         Interlocked.Increment(ref _candidateHeartbeatVersion);
-        _candidateHeartbeatCancellation?.Cancel();
+        _candidateHeartbeatTimer?.Dispose();
         if (_libraryStateSession is not null)
             _libraryStateSession.StateChanged -= OnLibraryStateChanged;
         _operationCoordinator.StateChanged -= OnOperationStateChanged;
@@ -1893,55 +1893,47 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         _lastCandidateProgressAppliedUtc = DateTimeOffset.MinValue;
         _lastCandidateProgressPhase = null;
         _lastCandidateProgressDetail = string.Empty;
-        _candidateHeartbeatCancellation?.Dispose();
-        _candidateHeartbeatCancellation = new();
-        _candidateHeartbeatTask = RunCandidateHeartbeatAsync(version, _candidateHeartbeatCancellation.Token);
+        _candidateHeartbeatTimer?.Dispose();
+        _candidateHeartbeatTimer = new(TimeSpan.FromSeconds(1));
+        _candidateHeartbeatTask = RunCandidateHeartbeatAsync(version, _candidateHeartbeatTimer);
     }
 
-    private async Task RunCandidateHeartbeatAsync(int version, CancellationToken cancellationToken)
+    private async Task RunCandidateHeartbeatAsync(int version, PeriodicTimer timer)
     {
-        try
+        while (await timer.WaitForNextTickAsync().ConfigureAwait(false))
         {
-            using PeriodicTimer timer = new(TimeSpan.FromSeconds(1));
-            while (await timer.WaitForNextTickAsync(cancellationToken).ConfigureAwait(false))
+            CandidatePreparationProgress? progress;
+            long sequence;
+            lock (_candidateProgressGate)
             {
-                CandidatePreparationProgress? progress;
-                long sequence;
+                progress = _latestCandidateProgress;
+                sequence = _candidateProgressSequence;
+            }
+            if (progress is null) continue;
+            PostToUi(() =>
+            {
                 lock (_candidateProgressGate)
                 {
-                    progress = _latestCandidateProgress;
-                    sequence = _candidateProgressSequence;
+                    if (!_candidateCancellationRequested
+                        && version == Volatile.Read(ref _candidateHeartbeatVersion)
+                        && sequence == _candidateProgressSequence)
+                        ApplyCandidateProgress(
+                            progress,
+                            CandidateElapsed());
                 }
-                if (progress is null) continue;
-                PostToUi(() =>
-                {
-                    lock (_candidateProgressGate)
-                    {
-                        if (!_candidateCancellationRequested
-                            && version == Volatile.Read(ref _candidateHeartbeatVersion)
-                            && sequence == _candidateProgressSequence)
-                            ApplyCandidateProgress(
-                                progress,
-                                CandidateElapsed());
-                    }
-                });
-            }
-        }
-        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-        {
+            });
         }
     }
 
     private async Task StopCandidateHeartbeatAsync()
     {
-        CancellationTokenSource? cancellation = _candidateHeartbeatCancellation;
+        PeriodicTimer? timer = _candidateHeartbeatTimer;
         Task? task = _candidateHeartbeatTask;
         Interlocked.Increment(ref _candidateHeartbeatVersion);
-        _candidateHeartbeatCancellation = null;
+        _candidateHeartbeatTimer = null;
         _candidateHeartbeatTask = null;
-        cancellation?.Cancel();
+        timer?.Dispose();
         if (task is not null) await task.ConfigureAwait(true);
-        cancellation?.Dispose();
         lock (_candidateProgressGate)
         {
             _latestCandidateProgress = null;
