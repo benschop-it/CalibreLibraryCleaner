@@ -514,6 +514,15 @@ review starts no worker, and stale title identity fails preflight before worker
 startup. The legacy direct normalization request remains temporarily compatible until
 the WPF command is switched to mandatory preparation/review.
 
+A dedicated WPF row model now presents record ID, current/proposed author displays
+and sorts, resolution status/source/protection, stable reasons, evidence coverage,
+front-matter author/editor/translator roles with format/unit/line locations, Apply
+eligibility/default, and All/Checked/Needs review/Unresolved/Conflicting filters.
+Apply persistence is delegated to the workspace owner, matching the existing metadata
+review pattern. Focused tests cover evidence display, content-derived review defaults,
+filtering, and non-actionable unresolved rows. MainWindow collection/command/XAML
+ownership remains the next UI slice.
+
 ## Final outcome
 
 Implementation in progress. The first read-only policy/review slice and the minimal
