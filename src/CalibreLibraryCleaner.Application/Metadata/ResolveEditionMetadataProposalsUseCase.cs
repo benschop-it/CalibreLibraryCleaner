@@ -70,12 +70,15 @@ public sealed record EditionMetadataEnrichmentOptions
 {
     public EditionMetadataEnrichmentOptions(
         bool enabled = true,
-        int maximumProviderRequestsPerRun = 200,
+        int maximumProviderRequestsPerRun = 10_000,
+        int maximumGoogleBooksRequestsPerRun = 200,
         TimeSpan? maximumCacheAge = null,
         TimeSpan? unavailableCacheAge = null)
     {
         ArgumentOutOfRangeException.ThrowIfLessThan(maximumProviderRequestsPerRun, 1);
         ArgumentOutOfRangeException.ThrowIfGreaterThan(maximumProviderRequestsPerRun, 50_000);
+        ArgumentOutOfRangeException.ThrowIfLessThan(maximumGoogleBooksRequestsPerRun, 1);
+        ArgumentOutOfRangeException.ThrowIfGreaterThan(maximumGoogleBooksRequestsPerRun, 50_000);
         TimeSpan age = maximumCacheAge ?? TimeSpan.FromDays(365);
         if (age < TimeSpan.FromHours(1) || age > TimeSpan.FromDays(365))
             throw new ArgumentOutOfRangeException(nameof(maximumCacheAge));
@@ -84,14 +87,24 @@ public sealed record EditionMetadataEnrichmentOptions
             throw new ArgumentOutOfRangeException(nameof(unavailableCacheAge));
         Enabled = enabled;
         MaximumProviderRequestsPerRun = maximumProviderRequestsPerRun;
+        MaximumGoogleBooksRequestsPerRun = maximumGoogleBooksRequestsPerRun;
         MaximumCacheAge = age;
         UnavailableCacheAge = unavailableAge;
     }
 
     public bool Enabled { get; }
     public int MaximumProviderRequestsPerRun { get; }
+    public int MaximumGoogleBooksRequestsPerRun { get; }
     public TimeSpan MaximumCacheAge { get; }
     public TimeSpan UnavailableCacheAge { get; }
+
+    public int MaximumRequestsFor(EditionMetadataProviderIdentity provider)
+    {
+        ArgumentNullException.ThrowIfNull(provider);
+        return provider.Id == "google-books"
+            ? MaximumGoogleBooksRequestsPerRun
+            : MaximumProviderRequestsPerRun;
+    }
 }
 
 public sealed record EditionMetadataEnrichmentProgress(
@@ -199,6 +212,7 @@ public sealed class ResolveEditionMetadataProposalsUseCase
         int requests = 0;
         int failures = 0;
         bool limitReached = false;
+        int maximumProviderRequests = _options.MaximumRequestsFor(provider.Identity);
         DateTimeOffset minimumRetrievedAt = _clock.GetUtcNow().ToUniversalTime() - _options.MaximumCacheAge;
         DateTimeOffset minimumUnavailableRetrievedAt = _clock.GetUtcNow().ToUniversalTime()
             - _options.UnavailableCacheAge;
@@ -227,7 +241,7 @@ public sealed class ResolveEditionMetadataProposalsUseCase
                     cacheHits++;
                     proposal = variantProposal;
                 }
-                else if (requests >= _options.MaximumProviderRequestsPerRun)
+                else if (requests >= maximumProviderRequests)
                 {
                     limitReached = true;
                     deferred = proposal is null;
@@ -247,7 +261,7 @@ public sealed class ResolveEditionMetadataProposalsUseCase
                     EditionMetadataSearchExecution execution = await SearchAsync(
                         provider,
                         variant,
-                        _options.MaximumProviderRequestsPerRun - requests,
+                        maximumProviderRequests - requests,
                         cancellationToken).ConfigureAwait(false);
                     requests += execution.ProviderRequests;
                     EditionMetadataLookupQuery validation = variant.Identifier is null

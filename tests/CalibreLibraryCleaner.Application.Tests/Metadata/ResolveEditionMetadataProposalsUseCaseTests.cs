@@ -20,7 +20,9 @@ public sealed class ResolveEditionMetadataProposalsUseCaseTests
         EditionMetadataEnrichmentOptions options = new();
 
         options.MaximumCacheAge.Should().Be(TimeSpan.FromDays(365));
-        options.MaximumProviderRequestsPerRun.Should().Be(200);
+        options.MaximumProviderRequestsPerRun.Should().Be(10_000);
+        options.MaximumRequestsFor(new("open-library", "version")).Should().Be(10_000);
+        options.MaximumRequestsFor(new("google-books", "version")).Should().Be(200);
     }
 
     [Fact]

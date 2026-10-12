@@ -192,8 +192,9 @@ protected API key is configured; it requests title/subtitle, authors, publisher,
 published date, industry identifiers, and language, but no cover fields in this
 slice. Requests are serialized and paced at no more than one start every three seconds by
 default to avoid burst rate limits. Each explicit preparation spends at most 200
-requests per provider by default and reports uncached deferred query groups; reruns
-continue from immediate cache writes. A separate reduced cache stores normalized
+Google Books requests by default, while Open Library retains its 10,000-request
+high-coverage budget. Uncached deferred query groups are reported and reruns continue
+from immediate cache writes. A separate reduced cache stores normalized
 proposal fields and provenance
 under opaque provider-specific query hashes and never receives the key. This cache is
 global to the current Windows user, retains normal entries for 365 days, and prunes
