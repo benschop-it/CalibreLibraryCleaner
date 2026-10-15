@@ -3,6 +3,7 @@ using CalibreLibraryCleaner.Application.Executions;
 using CalibreLibraryCleaner.Application.Libraries;
 using CalibreLibraryCleaner.Application.Metadata;
 using CalibreLibraryCleaner.Domain.Executions;
+using CalibreLibraryCleaner.Domain.Findings;
 using CalibreLibraryCleaner.Domain.Libraries;
 using CalibreLibraryCleaner.Domain.Matching;
 using CalibreLibraryCleaner.Domain.Metadata;
@@ -183,6 +184,57 @@ public sealed class ExecuteUnifiedCandidateCleanupUseCaseTests
         result.RefreshedManagedNameCount.Should().Be(1);
         harness.Chunks.SelectMany(value => value.Operations).Should().ContainSingle()
             .Which.Kind.Should().Be(CalibreMutationOperationKind.RefreshManagedName);
+    }
+
+    [Fact]
+    public async Task FinalAuthorReviewSkipsManagedNamesWithoutTrustedFingerprints()
+    {
+        CalibreBook valid = Book(1, Format(1, "EPUB", 'a'));
+        CalibreBook invalid = Book(2, new BookFormat(
+            "EPUB", string.Empty, string.Empty, FormatFileStatus.InvalidPath));
+        Harness harness = await Harness.CreateAsync([valid, invalid]);
+        await harness.AdvanceToCompletedAsync();
+        LibraryState current = harness.State.GetCurrent(harness.Snapshot.Identity.LibraryRoot)!;
+
+        UnifiedCandidateCleanupResult result = await harness.ExecuteFinalAuthorReviewAsync(
+            FinalWorkspace(current, apply: false));
+
+        result.State.Should().Be(UnifiedCandidateCleanupState.Completed);
+        result.RefreshedManagedNameCount.Should().Be(1);
+        result.Issues.Should().ContainSingle(value =>
+            value.Code == "CANDIDATE.MANAGED_NAMES_SKIPPED_UNSAFE"
+            && value.Severity == ExecutionIssueSeverity.Warning);
+        harness.Chunks.SelectMany(value => value.Operations).Should().ContainSingle()
+            .Which.RecordId.Should().Be(valid.Id);
+    }
+
+    [Theory]
+    [InlineData("LIBRARY.UNREGISTERED_FORMAT_FILE")]
+    [InlineData("LIBRARY.DUPLICATE_RECORD_DIRECTORY")]
+    [InlineData("LIBRARY.MANAGED_LAYOUT_INSPECTION_UNAVAILABLE")]
+    public async Task FinalAuthorReviewSkipsUnsafeManagedLayoutFinding(string findingCode)
+    {
+        CalibreBook valid = Book(1, Format(1, "EPUB", 'a'));
+        CalibreBook unsafeLayout = Book(2, Format(2, "EPUB", 'b'));
+        LibraryFinding finding = new(
+            findingCode,
+            FindingSeverity.Warning,
+            "Managed layout is unsafe.",
+            "Review the record separately.",
+            unsafeLayout.Id);
+        Harness harness = await Harness.CreateAsync([valid, unsafeLayout], [finding]);
+        await harness.AdvanceToCompletedAsync();
+        LibraryState current = harness.State.GetCurrent(harness.Snapshot.Identity.LibraryRoot)!;
+
+        UnifiedCandidateCleanupResult result = await harness.ExecuteFinalAuthorReviewAsync(
+            FinalWorkspace(current, apply: false));
+
+        result.State.Should().Be(UnifiedCandidateCleanupState.Completed);
+        result.RefreshedManagedNameCount.Should().Be(1);
+        result.Issues.Should().ContainSingle(value =>
+            value.Code == "CANDIDATE.MANAGED_NAMES_SKIPPED_UNSAFE");
+        harness.Chunks.SelectMany(value => value.Operations).Should().ContainSingle()
+            .Which.RecordId.Should().Be(valid.Id);
     }
 
     [Fact]
@@ -681,7 +733,9 @@ public sealed class ExecuteUnifiedCandidateCleanupUseCaseTests
         UnifiedCandidateCleanupResult result = await harness.ExecuteAsync();
 
         result.State.Should().Be(UnifiedCandidateCleanupState.PartiallyCompleted);
-        result.Issues.Should().Contain(value => value.Code == "CANDIDATE.DELTA_COMMIT_FAILED");
+        result.Issues.Should().Contain(value =>
+            value.Code == "CANDIDATE.DELTA_COMMIT_FAILED"
+            && value.Explanation.Contains("controlled delta failure", StringComparison.Ordinal));
         harness.State.GetCurrent(harness.Snapshot.Identity.LibraryRoot)!.Status
             .Should().Be(LibraryStateStatus.Uncertain);
         A.CallTo(() => harness.Worker.ExecuteChunkAsync(
@@ -736,7 +790,7 @@ public sealed class ExecuteUnifiedCandidateCleanupUseCaseTests
 
     private static FinalAuthorReviewWorkspace FinalWorkspace(LibraryState state, bool apply)
     {
-        CalibreBook book = state.Snapshot.Books.Single();
+        CalibreBook book = state.Snapshot.Books[0];
         AuthorResolution resolution = new(
             AuthorResolutionStatus.Suspect,
             CurrentAuthorProtection.Unverified,
@@ -810,7 +864,9 @@ public sealed class ExecuteUnifiedCandidateCleanupUseCaseTests
         public List<string> Trace { get; }
         public List<CalibreMutationChunkRequest> Chunks { get; }
 
-        public static async Task<Harness> CreateAsync(CalibreBook[] books)
+        public static async Task<Harness> CreateAsync(
+            CalibreBook[] books,
+            IReadOnlyList<LibraryFinding>? findings = null)
         {
             UnifiedCandidateGroup[] unified = books.Length == 1
                 ? []
@@ -825,7 +881,7 @@ public sealed class ExecuteUnifiedCandidateCleanupUseCaseTests
                 new("87f7ed1f-59a8-45a6-975a-7e06fd84780d", 27, "C:\\library"),
                 Now,
                 books,
-                [],
+                findings ?? [],
                 unifiedCandidateGroups: unified);
             ILibraryStateStore store = A.Fake<ILibraryStateStore>();
             LibraryStateSession state = new(store);

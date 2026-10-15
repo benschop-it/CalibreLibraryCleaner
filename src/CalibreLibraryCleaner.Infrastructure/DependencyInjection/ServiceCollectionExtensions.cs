@@ -39,6 +39,7 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<IFormatHashCache, FileFormatHashCache>();
         services.AddSingleton<IFormatFileHasher, StreamingSha256FormatFileHasher>();
         services.AddSingleton<IFormatFileProbe, PhysicalFormatFileProbe>();
+        services.AddSingleton<IManagedBookLayoutInspector, PhysicalManagedBookLayoutInspector>();
         services.AddSingleton(new LibrarySnapshotStorageOptions());
         services.AddSingleton<ILibrarySnapshotStore, VersionedJsonLibrarySnapshotStore>();
         services.AddSingleton<ILibraryStateStore, VersionedJsonLibraryStateStore>();

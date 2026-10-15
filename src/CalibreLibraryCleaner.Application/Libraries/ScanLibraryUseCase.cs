@@ -26,7 +26,8 @@ public sealed partial class ScanLibraryUseCase(
     AssessPdfFormatsUseCase? assessPdfFormats = null,
     DiscoverWorkLanguageCandidatesUseCase? discoverWorkLanguageCandidates = null,
     ILibraryStateSession? libraryStateSession = null,
-    ILogger<ScanLibraryUseCase>? logger = null)
+    ILogger<ScanLibraryUseCase>? logger = null,
+    IManagedBookLayoutInspector? managedBookLayoutInspector = null)
 {
     private readonly ILogger<ScanLibraryUseCase> _logger = logger
         ?? NullLogger<ScanLibraryUseCase>.Instance;
@@ -137,6 +138,32 @@ public sealed partial class ScanLibraryUseCase(
             }
 
             preparedBooks.Add(new(bookRecord, formats));
+        }
+        if (managedBookLayoutInspector is not null)
+        {
+            IReadOnlyList<ManagedBookLayoutIssue> layoutIssues;
+            try
+            {
+                layoutIssues = await managedBookLayoutInspector.InspectAsync(
+                    validatedLocation,
+                    preparedBooks.Select(book => new ManagedBookLayoutInspectionTarget(
+                        new(book.Record.Id),
+                        book.Record.RelativeDirectory,
+                        book.Formats.Where(format => format.RelativePath.Length > 0)
+                            .Select(format => format.RelativePath)
+                            .ToArray())).ToArray(),
+                    cancellationToken).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException) { throw; }
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException
+                                               or InvalidDataException or ArgumentException)
+            {
+                return LibraryScanOutcome.Failure(new(
+                    LibraryErrorCode.UnexpectedReadFailure,
+                    "Managed book layouts could not be inspected safely.",
+                    "Retry the scan. If the problem continues, inspect the application log."));
+            }
+            findings.AddRange(layoutIssues.Select(MapManagedLayoutIssue));
         }
         long resolutionCompleted = Stopwatch.GetTimestamp();
 
@@ -587,6 +614,29 @@ public sealed partial class ScanLibraryUseCase(
         new CalibreBookId(issue.BookId),
         issue.Format,
         issue.RelativePath);
+
+    private static LibraryFinding MapManagedLayoutIssue(ManagedBookLayoutIssue issue) => issue.Problem switch
+    {
+        ManagedBookLayoutProblem.UnregisteredFormatFile => new(
+            ManagedBookLayoutFindingCodes.UnregisteredFormatFile,
+            FindingSeverity.Warning,
+            "The managed book directory contains an unregistered ebook-format file.",
+            "Review the record separately in Calibre before managed-name refresh.",
+            issue.BookId),
+        ManagedBookLayoutProblem.DuplicateRecordDirectory => new(
+            ManagedBookLayoutFindingCodes.DuplicateRecordDirectory,
+            FindingSeverity.Warning,
+            "More than one managed-style directory uses this Calibre record ID.",
+            "Review the duplicate directories separately before managed-name refresh.",
+            issue.BookId),
+        ManagedBookLayoutProblem.InspectionUnavailable => new(
+            ManagedBookLayoutFindingCodes.InspectionUnavailable,
+            FindingSeverity.Warning,
+            "The managed book directory could not be inspected completely.",
+            "Restore readable physical access before managed-name refresh.",
+            issue.BookId),
+        _ => throw new ArgumentOutOfRangeException(nameof(issue)),
+    };
 
     private static LibraryFinding CreateInvalidPathFinding(
         CalibreBookId bookId,

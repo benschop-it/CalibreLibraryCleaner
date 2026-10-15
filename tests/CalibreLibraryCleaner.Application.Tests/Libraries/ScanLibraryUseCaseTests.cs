@@ -15,6 +15,50 @@ namespace CalibreLibraryCleaner.Application.Tests.Libraries;
 public sealed class ScanLibraryUseCaseTests
 {
     [Fact]
+    public async Task ExactOnlyPublishesUnsafeManagedLayoutFindings()
+    {
+        TestContext context = CreateContext(bookCount: 2);
+        A.CallTo(() => context.Hasher.HashAsync(
+                A<IReadOnlyList<FormatHashRequest>>._,
+                A<int>._,
+                A<IProgress<FormatHashProgress>?>._,
+                A<CancellationToken>._))
+            .ReturnsLazily(call => Task.FromResult<IReadOnlyList<FormatHashResult>>(
+                call.GetArgument<IReadOnlyList<FormatHashRequest>>(0)!
+                    .Select(request => Successful(
+                        request.Sequence,
+                        new(4, new(new string((char)('a' + request.Sequence), 64)))))
+                    .ToArray()));
+        IManagedBookLayoutInspector inspector = A.Fake<IManagedBookLayoutInspector>();
+        A.CallTo(() => inspector.InspectAsync(
+                A<ValidatedLibraryLocation>._,
+                A<IReadOnlyList<ManagedBookLayoutInspectionTarget>>._,
+                A<CancellationToken>._))
+            .Returns([
+                new(new(1), ManagedBookLayoutProblem.UnregisteredFormatFile),
+                new(new(2), ManagedBookLayoutProblem.DuplicateRecordDirectory),
+            ]);
+        ScanLibraryUseCase useCase = new(
+            context.Resolver,
+            context.Reader,
+            context.Hasher,
+            context.Clock,
+            new(),
+            managedBookLayoutInspector: inspector);
+
+        LibraryScanOutcome outcome = await useCase.ExecuteAsync(
+            "C:/Library", null, CancellationToken.None, mode: LibraryAnalysisMode.ExactOnly);
+
+        outcome.IsSuccess.Should().BeTrue();
+        outcome.Snapshot!.Findings.Should().ContainSingle(value =>
+            value.BookId == new CalibreBookId(1)
+            && value.Code == "LIBRARY.UNREGISTERED_FORMAT_FILE");
+        outcome.Snapshot.Findings.Should().ContainSingle(value =>
+            value.BookId == new CalibreBookId(2)
+            && value.Code == "LIBRARY.DUPLICATE_RECORD_DIRECTORY");
+    }
+
+    [Fact]
     public async Task ExactOnlyHashesEveryFormatAndBypassesCandidateServices()
     {
         CalibreCatalogRecord catalog = CreateCatalog(bookCount: 2, sameMetadata: true);

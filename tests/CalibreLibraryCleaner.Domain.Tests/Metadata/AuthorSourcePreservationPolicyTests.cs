@@ -67,6 +67,37 @@ public sealed class AuthorSourcePreservationPolicyTests
     }
 
     [Fact]
+    public void PunctuationOnlyEmbeddedVariantDoesNotConfirmSuspectCurrentMetadata()
+    {
+        AuthorResolution resolution = AuthorSourcePreservationPolicy.Resolve(
+            "Chelsea Handler",
+            [Author("Are You There| Vodka| It's Me Chelsea (html)")],
+            verifiedAppliedOnlineAuthors: false,
+            [Evidence(
+                AuthorEvidenceSource.EpubPackageMetadata,
+                "Are You There, Vodka, It's Me Chelsea (html)")]);
+
+        resolution.Status.Should().Be(AuthorResolutionStatus.Suspect);
+        resolution.ProposalSource.Should().Be(AuthorProposalSource.None);
+        resolution.ProposedDisplayNames.Should().BeEmpty();
+    }
+
+    [Fact]
+    public void StrictCommaFormEmbeddedEvidenceProducesDisplayAndSortProposal()
+    {
+        AuthorResolution resolution = AuthorSourcePreservationPolicy.Resolve(
+            "The Book",
+            [Author("Unknown")],
+            verifiedAppliedOnlineAuthors: false,
+            [Evidence(AuthorEvidenceSource.EpubPackageMetadata, "Writer, Reliable")]);
+
+        resolution.ProposalSource.Should().Be(AuthorProposalSource.CachedEmbeddedMetadata);
+        resolution.ProposedDisplayNames.Should().Equal("Reliable Writer");
+        resolution.ProposedSortNames.Should().Equal("Writer, Reliable");
+        resolution.SelectedByDefault.Should().BeFalse();
+    }
+
+    [Fact]
     public void DisagreeingCachedEvidenceRemainsConflicting()
     {
         AuthorResolution resolution = AuthorSourcePreservationPolicy.Resolve(

@@ -157,10 +157,28 @@ public sealed partial class ExecuteUnifiedCandidateCleanupUseCase(
         }
         await using IEditionCoverStagingSession? coverSession = stagedCovers;
 
-        CalibreBookId[] managedNameTargets = authorNormalization && request.FinalAuthorReview is not null
-            ? initial.Snapshot.Books.Where(value => value.Formats.Count > 0)
-                .OrderBy(value => value.Id.Value).Select(value => value.Id).ToArray()
+        CalibreBook[] managedNameCandidates = authorNormalization && request.FinalAuthorReview is not null
+            ? initial.Snapshot.Books.Where(value => value.Formats.Count > 0).ToArray()
             : [];
+        HashSet<CalibreBookId> unsafeManagedNameTargets = initial.Snapshot.Findings
+            .Where(value => value.BookId is not null
+                && ManagedBookLayoutFindingCodes.BlocksManagedNameRefresh(value.Code))
+            .Select(value => value.BookId!.Value)
+            .ToHashSet();
+        CalibreBookId[] managedNameTargets = managedNameCandidates
+            .Where(value => CanRefreshManagedName(value)
+                && !unsafeManagedNameTargets.Contains(value.Id))
+            .OrderBy(value => value.Id.Value)
+            .Select(value => value.Id)
+            .ToArray();
+        int skippedManagedNameTargets = managedNameCandidates.Length - managedNameTargets.Length;
+        if (skippedManagedNameTargets > 0)
+        {
+            issues.Add(new(
+                "CANDIDATE.MANAGED_NAMES_SKIPPED_UNSAFE",
+                ExecutionIssueSeverity.Warning,
+                $"Skipped managed-name refresh for {skippedManagedNameTargets:N0} retained record(s) because formats lacked trusted present fingerprints or scan found an unsafe managed layout."));
+        }
         int totalOperations = checked(plan.TotalOperations + metadataTemplates.Length + managedNameTargets.Length);
         if (totalOperations == 0)
         {
@@ -320,7 +338,9 @@ public sealed partial class ExecuteUnifiedCandidateCleanupUseCase(
                 {
                     issues.Add(Block(
                         "CANDIDATE.DELTA_COMMIT_FAILED",
-                        "A Candidate cleanup worker chunk could not be committed to projected state."));
+                        "A Candidate cleanup worker chunk could not be committed to projected state"
+                        + $" ({applied.ErrorCode ?? "LIBRARY_STATE.UNKNOWN"}: "
+                        + $"{applied.Explanation ?? "No state error detail was returned."})."));
                     return Result(UnifiedCandidateCleanupState.PartiallyCompleted,
                         transferred, removedFormats, removedRecords, plan.SkippedGroupCount);
                 }
@@ -681,6 +701,10 @@ public sealed partial class ExecuteUnifiedCandidateCleanupUseCase(
             CalibreMutationOperation.RemoveRecord($"candidate-remove-record:{value.Value}", value),
             null)),
     ];
+
+    private static bool CanRefreshManagedName(CalibreBook book) => book.Formats.Count > 0
+        && book.Formats.All(value => value.Fingerprint is not null
+            && value.FileStatus is FormatFileStatus.Present or FormatFileStatus.ProjectedPresent);
 
     private static IEnumerable<WorkerPlannedOperation[]> ExecutionChunks(
         IReadOnlyList<WorkerPlannedOperation> operations)

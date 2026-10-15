@@ -1,4 +1,6 @@
 using System.Collections.ObjectModel;
+using System.Globalization;
+using System.Text;
 using CalibreLibraryCleaner.Domain.Duplicates;
 using CalibreLibraryCleaner.Domain.Libraries;
 
@@ -111,7 +113,7 @@ public sealed record AuthorResolution
 
 public static class AuthorSourcePreservationPolicy
 {
-    public const string PolicyVersion = "author-source-preservation/1.0.0";
+    public const string PolicyVersion = "author-source-preservation/1.1.0";
 
     public static AuthorResolution Resolve(
         string title,
@@ -172,9 +174,11 @@ public static class AuthorSourcePreservationPolicy
             .OrderBy(value => value.Source)
             .ThenBy(value => value.Identity, StringComparer.Ordinal)
             .First();
-        string? currentKey = NormalizedKey(currentAuthors.Select(value => value.Name));
+        string? currentKey = ComparableKey(currentAuthors.Select(value => value.Name));
         if (string.Equals(currentKey, alternatives[0].Key, StringComparison.Ordinal))
             return Current(current.Status);
+        (IReadOnlyList<string> proposedDisplays, IReadOnlyList<string> proposedSorts) =
+            PrepareProposalNames(selected.Authors);
         return new(
             AuthorResolutionStatus.Suspect,
             protection,
@@ -184,7 +188,8 @@ public static class AuthorSourcePreservationPolicy
                 or AuthorEvidenceSource.PdfFrontMatter
                 ? AuthorProposalSource.ContentDerivedFrontMatter
                 : AuthorProposalSource.CachedEmbeddedMetadata,
-            selected.Authors,
+            proposedDisplays,
+            proposedSorts,
             selectedByDefault: false);
 
         AuthorResolution Current(AuthorResolutionStatus status) => new(
@@ -194,16 +199,59 @@ public static class AuthorSourcePreservationPolicy
             observations);
     }
 
-    private static string? NormalizedKey(IEnumerable<string> authors)
+    private static string? NormalizedKey(IEnumerable<string> authors) => ComparableKey(authors);
+
+    private static string? ComparableKey(IEnumerable<string> authors)
     {
         List<string> values = [];
         foreach (string author in authors)
         {
-            if (!MetadataTextNormalizer.TryNormalizeAuthorName(
-                    author, out NormalizedAuthorName? normalized))
-                return null;
-            values.Add(normalized!.Value);
+            string? value = ComparableName(author);
+            if (value is null) return null;
+            values.Add(value);
         }
         return values.Count == 0 ? null : string.Join('\u001F', values);
+    }
+
+    private static string? ComparableName(string author)
+    {
+        try
+        {
+            StringBuilder value = new();
+            bool pendingSeparator = false;
+            foreach (Rune rune in author.Normalize(NormalizationForm.FormC).EnumerateRunes())
+            {
+                if (Rune.IsLetterOrDigit(rune))
+                {
+                    if (pendingSeparator && value.Length > 0) value.Append(' ');
+                    value.Append(rune.ToString().ToUpperInvariant());
+                    pendingSeparator = false;
+                }
+                else if (Rune.GetUnicodeCategory(rune) != UnicodeCategory.Format)
+                {
+                    pendingSeparator = value.Length > 0;
+                }
+            }
+            return value.Length == 0 ? null : value.ToString();
+        }
+        catch (ArgumentException)
+        {
+            return null;
+        }
+    }
+
+    private static (IReadOnlyList<string> Displays, IReadOnlyList<string> Sorts) PrepareProposalNames(
+        IReadOnlyList<string> authors)
+    {
+        PipeAuthorNameNormalization?[] normalized = authors.Select(value =>
+        {
+            PipeAuthorNameNormalizationPolicy.TryNormalizeSortForm(
+                value, out PipeAuthorNameNormalization? normalization);
+            return normalization;
+        }).ToArray();
+        return normalized.All(value => value is not null)
+            ? (normalized.Select(value => value!.DisplayName).ToArray(),
+                normalized.Select(value => value!.SortName).ToArray())
+            : (authors, []);
     }
 }
