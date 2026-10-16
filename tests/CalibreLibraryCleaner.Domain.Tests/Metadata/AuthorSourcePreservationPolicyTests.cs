@@ -128,6 +128,23 @@ public sealed class AuthorSourcePreservationPolicyTests
     }
 
     [Fact]
+    public void DeterministicTypographyProducesCheckedProposalForVerifiedAuthor()
+    {
+        AuthorResolution resolution = AuthorSourcePreservationPolicy.Resolve(
+            "The Book",
+            [new(new(1), "J.K. Rowling", "Rowling, J.K.")],
+            verifiedAppliedOnlineAuthors: true,
+            []);
+
+        resolution.CurrentProtection.Should().Be(CurrentAuthorProtection.VerifiedAppliedOnlineMetadata);
+        resolution.ProposalSource.Should().Be(AuthorProposalSource.DeterministicTypography);
+        resolution.ProposedDisplayNames.Should().Equal("J. K. Rowling");
+        resolution.ProposedSortNames.Should().Equal("Rowling, J. K.");
+        resolution.SelectedByDefault.Should().BeTrue();
+        resolution.ReasonCodes.Should().Contain(AuthorSuspicionReasonCodes.DisplayTypography);
+    }
+
+    [Fact]
     public void FrontMatterAuthorProducesAnUncheckedContentDerivedProposal()
     {
         AuthorResolution resolution = AuthorSourcePreservationPolicy.Resolve(

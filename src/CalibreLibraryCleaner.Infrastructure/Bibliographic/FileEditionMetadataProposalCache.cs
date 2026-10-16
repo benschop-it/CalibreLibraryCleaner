@@ -12,7 +12,7 @@ internal sealed class FileEditionMetadataProposalCache(EditionMetadataProposalCa
     IEditionMetadataProposalCache, IEditionMetadataProposalCacheMaintenance
 {
     private const string SchemaVersion = "edition-metadata-proposal-cache/1.0";
-    private const string IdentifierAliasPolicyVersion = "edition-metadata-cache-isbn-alias/1.0";
+    private const string IdentifierAliasPolicyVersion = "edition-metadata-cache-isbn-alias/1.1";
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
         PropertyNameCaseInsensitive = false,
@@ -34,13 +34,19 @@ internal sealed class FileEditionMetadataProposalCache(EditionMetadataProposalCa
                 ?
                 [
                     (EditionMetadataLookupQuery.PolicyVersion, query.Provider.Version),
+                    ("edition-metadata-query/1.4.0", query.Provider.Version),
                     (EditionMetadataLookupQuery.PolicyVersion, "open-library-edition-search/1.1.0"),
+                    ("edition-metadata-query/1.4.0", "open-library-edition-search/1.1.0"),
                     ("edition-metadata-query/1.3.0", "open-library-edition-search/1.1.0"),
                     ("edition-metadata-query/1.2.0", "open-library-edition-search/1.1.0"),
                     ("edition-metadata-query/1.1.0", "open-library-edition-search/1.1.0"),
                     ("edition-metadata-query/1.0.0", "open-library-edition-search/1.0.0"),
                 ]
-                : [(EditionMetadataLookupQuery.PolicyVersion, query.Provider.Version)];
+                :
+                [
+                    (EditionMetadataLookupQuery.PolicyVersion, query.Provider.Version),
+                    ("edition-metadata-query/1.4.0", query.Provider.Version),
+                ];
             foreach ((string queryPolicy, string providerVersion) in identities.Distinct())
             {
                 string identity = CreateIdentity(query, queryPolicy, providerVersion);
@@ -69,13 +75,22 @@ internal sealed class FileEditionMetadataProposalCache(EditionMetadataProposalCa
                 if (legacy && (document.ProblemCode == "OPEN_LIBRARY.NO_COMPATIBLE_EDITIONS"
                     || query.Identifier is null && document.Status == EditionMetadataProposalStatus.NotFound))
                     continue;
+                EditionMetadataCandidate? candidate = Rehydrate(document.Candidate);
+                if (legacy && document.Status == EditionMetadataProposalStatus.Proposed)
+                {
+                    if (candidate is null) continue;
+                    EditionMetadataProposal revalidated = EditionMetadataProposalPolicy.Resolve(query, new(
+                        query.Provider, EditionMetadataSearchStatus.Success, document.RetrievedAtUtc, [candidate]));
+                    if (revalidated.Status != EditionMetadataProposalStatus.Proposed) continue;
+                    return revalidated;
+                }
                 return new(
                     query.BookId,
                     query.Provider,
                     document.QueryFields,
                     document.RetrievedAtUtc,
                     document.Status,
-                    Rehydrate(document.Candidate),
+                    candidate,
                     document.MatchScore,
                     document.ReasonCodes,
                     document.ProblemCode);
@@ -203,6 +218,7 @@ internal sealed class FileEditionMetadataProposalCache(EditionMetadataProposalCa
                     || document.ProviderId != provider.Id
                     || document.ProviderVersion != provider.Version
                     || document.QueryPolicyVersion != EditionMetadataLookupQuery.PolicyVersion
+                        && document.QueryPolicyVersion != "edition-metadata-query/1.4.0"
                     || document.ProposalPolicyVersion != EditionMetadataProposal.PolicyVersion
                     || document.Status != EditionMetadataProposalStatus.Proposed
                     || document.RetrievedAtUtc < minimumRetrievedAtUtc
@@ -216,6 +232,9 @@ internal sealed class FileEditionMetadataProposalCache(EditionMetadataProposalCa
                 foreach (EditionMetadataLookupQuery alias in EditionMetadataLookupQuery.CreateIdentifierAliases(
                              new(1), provider, candidate))
                 {
+                    EditionMetadataProposal? existing = await TryReadAsync(
+                        alias, minimumRetrievedAtUtc, cancellationToken).ConfigureAwait(false);
+                    if (existing is not null && existing.RetrievedAtUtc >= document.RetrievedAtUtc) continue;
                     EditionMetadataProposal proposal = EditionMetadataProposalPolicy.Resolve(alias, search);
                     await WriteAsync(alias, proposal, cancellationToken).ConfigureAwait(false);
                 }

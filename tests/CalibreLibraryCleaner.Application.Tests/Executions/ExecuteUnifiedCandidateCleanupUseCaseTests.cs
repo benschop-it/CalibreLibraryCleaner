@@ -168,6 +168,33 @@ public sealed class ExecuteUnifiedCandidateCleanupUseCaseTests
     }
 
     [Fact]
+    public async Task CompletedWorkflowAppliesCheckedTypographyDisplayAndSort()
+    {
+        CalibreBook book = new(
+            new(1),
+            "The Book",
+            "Rowling, J.K.",
+            [new(new(1), "J.K. Rowling", "Rowling, J.K.")],
+            [],
+            [Format(1, "EPUB", 'a')],
+            "J.K. Rowling/Book (1)");
+        Harness harness = await Harness.CreateAsync([book]);
+        await harness.AdvanceToCompletedAsync();
+        LibraryState current = harness.State.GetCurrent(harness.Snapshot.Identity.LibraryRoot)!;
+        FinalAuthorReviewWorkspace workspace = PrepareFinalAuthorReviewUseCase.Execute(current);
+
+        UnifiedCandidateCleanupResult result = await harness.ExecuteFinalAuthorReviewAsync(workspace);
+
+        result.State.Should().Be(UnifiedCandidateCleanupState.Completed);
+        CalibreMutationOperation metadata = harness.Chunks.SelectMany(value => value.Operations)
+            .Single(value => value.Metadata is not null);
+        metadata.Metadata!.Values.Should().Equal("J. K. Rowling");
+        metadata.Metadata.AuthorSortValues.Should().Equal("Rowling, J. K.");
+        harness.Chunks.SelectMany(value => value.Operations)
+            .Should().ContainSingle(value => value.Kind == CalibreMutationOperationKind.RefreshManagedName);
+    }
+
+    [Fact]
     public async Task UncheckedFinalAuthorReviewRunsOnlyManagedNaming()
     {
         CalibreBook book = new(
@@ -235,6 +262,36 @@ public sealed class ExecuteUnifiedCandidateCleanupUseCaseTests
             value.Code == "CANDIDATE.MANAGED_NAMES_SKIPPED_UNSAFE");
         harness.Chunks.SelectMany(value => value.Operations).Should().ContainSingle()
             .Which.RecordId.Should().Be(valid.Id);
+    }
+
+    [Fact]
+    public async Task FinalAuthorReviewPreflightSkipsLiveUnsafeManagedLayout()
+    {
+        CalibreBook valid = Book(1, Format(1, "EPUB", 'a'));
+        CalibreBook unsafeLayout = Book(2, Format(2, "EPUB", 'b'));
+        IManagedBookLayoutInspector inspector = A.Fake<IManagedBookLayoutInspector>();
+        A.CallTo(() => inspector.InspectAsync(
+                A<ValidatedLibraryLocation>._,
+                A<IReadOnlyList<ManagedBookLayoutInspectionTarget>>._,
+                A<CancellationToken>._))
+            .Returns([new(unsafeLayout.Id, ManagedBookLayoutProblem.UnregisteredFormatFile)]);
+        Harness harness = await Harness.CreateAsync([valid, unsafeLayout], layoutInspector: inspector);
+        await harness.AdvanceToCompletedAsync();
+        LibraryState current = harness.State.GetCurrent(harness.Snapshot.Identity.LibraryRoot)!;
+
+        UnifiedCandidateCleanupResult result = await harness.ExecuteFinalAuthorReviewAsync(
+            FinalWorkspace(current, apply: false));
+
+        result.State.Should().Be(UnifiedCandidateCleanupState.Completed);
+        result.RefreshedManagedNameCount.Should().Be(1);
+        harness.Chunks.SelectMany(value => value.Operations).Should().ContainSingle()
+            .Which.RecordId.Should().Be(valid.Id);
+        A.CallTo(() => inspector.InspectAsync(
+                A<ValidatedLibraryLocation>._,
+                A<IReadOnlyList<ManagedBookLayoutInspectionTarget>>.That.Matches(values =>
+                    values.Count == 2),
+                A<CancellationToken>._))
+            .MustHaveHappenedOnceExactly();
     }
 
     [Fact]
@@ -866,7 +923,8 @@ public sealed class ExecuteUnifiedCandidateCleanupUseCaseTests
 
         public static async Task<Harness> CreateAsync(
             CalibreBook[] books,
-            IReadOnlyList<LibraryFinding>? findings = null)
+            IReadOnlyList<LibraryFinding>? findings = null,
+            IManagedBookLayoutInspector? layoutInspector = null)
         {
             UnifiedCandidateGroup[] unified = books.Length == 1
                 ? []
@@ -1002,7 +1060,7 @@ public sealed class ExecuteUnifiedCandidateCleanupUseCaseTests
                 });
             CapturingLogger<ExecuteUnifiedCandidateCleanupUseCase> logger = new();
             ExecuteUnifiedCandidateCleanupUseCase useCase = new(
-                state, tools, workers, lease, ids, coverStager, clock, logger);
+                state, tools, workers, lease, ids, coverStager, clock, logger, layoutInspector);
             return new(snapshot, analyzed, state, store, tools, workers, worker, coverStager,
                 useCase, logger, trace, chunks);
         }

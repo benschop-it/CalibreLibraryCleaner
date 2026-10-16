@@ -146,6 +146,7 @@
           <GroupBox Grid.Row="0" Header="Books">
             <DataGrid ItemsSource="{Binding Books}"
                       SelectedItem="{Binding SelectedBook}"
+                      MouseDoubleClick="BookRowsGrid_MouseDoubleClick"
                       AutoGenerateColumns="False"
                       IsReadOnly="True"
                       SelectionMode="Single"
@@ -161,6 +162,7 @@
           </GroupBox>
           <GroupBox Grid.Row="1" Margin="0,8,0,0" Header="Formats for selected book">
             <DataGrid ItemsSource="{Binding SelectedFormats}"
+                      MouseDoubleClick="BookRowsGrid_MouseDoubleClick"
                       AutoGenerateColumns="False"
                       IsReadOnly="True"
                       AutomationProperties.Name="Formats for selected book">
@@ -218,7 +220,7 @@
           <GroupBox Grid.Row="2" Margin="0,8,0,0" Header="Select the copy to keep; double-click a row to open its book">
             <DataGrid ItemsSource="{Binding SelectedExactDuplicateMembers}"
                       SelectedItem="{Binding SelectedExactDuplicateMember}"
-                      MouseDoubleClick="ExactDuplicateMembersGrid_MouseDoubleClick"
+                      MouseDoubleClick="BookRowsGrid_MouseDoubleClick"
                       AutoGenerateColumns="False"
                       IsReadOnly="True"
                       SelectionMode="Single"
@@ -277,7 +279,7 @@
           <GroupBox Grid.Row="2" Margin="0,8,0,0" Header="Generated keeper evidence; double-click a row to open its book">
             <DataGrid ItemsSource="{Binding SelectedMetadataDuplicateMembers}"
                       SelectedItem="{Binding SelectedMetadataDuplicateMember}"
-                      MouseDoubleClick="MetadataCandidateMembersGrid_MouseDoubleClick"
+                      MouseDoubleClick="BookRowsGrid_MouseDoubleClick"
                       AutoGenerateColumns="False"
                       IsReadOnly="True"
                       SelectionMode="Single"
@@ -361,7 +363,7 @@
           <GroupBox Grid.Row="2" Margin="0,8,0,0" Header="Select the record to keep; double-click a row to open its book">
             <DataGrid ItemsSource="{Binding SelectedUnifiedCandidateMembers}"
                       SelectedItem="{Binding SelectedUnifiedCandidateMember}"
-                      MouseDoubleClick="UnifiedCandidateMembersGrid_MouseDoubleClick"
+                      MouseDoubleClick="BookRowsGrid_MouseDoubleClick"
                       AutoGenerateColumns="False"
                       IsReadOnly="True"
                       SelectionMode="Single"
@@ -440,6 +442,7 @@
                     ItemsSource="{Binding MetadataReviewSubjects}"
                     SelectedItem="{Binding SelectedMetadataReviewSubject, Mode=TwoWay}"
                     SelectionChanged="MetadataReviewSubjectsGrid_SelectionChanged"
+                    MouseDoubleClick="BookRowsGrid_MouseDoubleClick"
                     AutoGenerateColumns="False"
                     IsReadOnly="True"
                     SelectionMode="Extended"
@@ -586,6 +589,7 @@
                     ItemsSource="{Binding FinalAuthorReviewSubjects}"
                     SelectedItem="{Binding SelectedFinalAuthorReviewSubject, Mode=TwoWay}"
                     SelectionChanged="FinalAuthorReviewSubjectsGrid_SelectionChanged"
+                    MouseDoubleClick="BookRowsGrid_MouseDoubleClick"
                     AutoGenerateColumns="False"
                     IsReadOnly="True"
                     SelectionMode="Extended"
@@ -678,7 +682,7 @@
           <GroupBox Grid.Row="2" Margin="0,8,0,0" Header="Generated keeper evidence; double-click a row to open its book">
             <DataGrid ItemsSource="{Binding SelectedExpandedCandidateMembers}"
                       SelectedItem="{Binding SelectedExpandedCandidateMember}"
-                      MouseDoubleClick="ExpandedCandidateMembersGrid_MouseDoubleClick"
+                      MouseDoubleClick="BookRowsGrid_MouseDoubleClick"
                       AutoGenerateColumns="False"
                       IsReadOnly="True"
                       SelectionMode="Single"
@@ -712,6 +716,7 @@
           <DataGrid Grid.Row="0"
                     ItemsSource="{Binding EpubAssessments}"
                     SelectedItem="{Binding SelectedEpubAssessment}"
+                    MouseDoubleClick="BookRowsGrid_MouseDoubleClick"
                     AutoGenerateColumns="False"
                     IsReadOnly="True"
                     SelectionMode="Single"
@@ -762,6 +767,7 @@
             <RowDefinition Height="*" />
           </Grid.RowDefinitions>
           <DataGrid Grid.Row="0" ItemsSource="{Binding PdfAssessments}" SelectedItem="{Binding SelectedPdfAssessment}"
+                    MouseDoubleClick="BookRowsGrid_MouseDoubleClick"
                     AutoGenerateColumns="False" IsReadOnly="True" SelectionMode="Single"
                     AutomationProperties.Name="PDF assessment summary">
             <DataGrid.Columns>

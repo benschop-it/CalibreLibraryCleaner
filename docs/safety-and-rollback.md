@@ -34,6 +34,13 @@ Analysis must not:
 Untrusted EPUB/PDF input remains bounded by documented file, archive, XML/HTML,
 object, stream, page, memory, CPU, and wall-time limits.
 
+Registered format filename stems are preserved verbatim when appending their
+validated extension. A space or dot immediately before that extension is valid
+and must not cause a false InvalidPath classification or an analysis-time rename.
+Directory components ending in spaces/dots, reserved device names (including a
+space before the extension), traversal, invalid characters, and linked paths
+remain rejected.
+
 ## Single-writer assumption
 
 Calibre, calibre-server, ebook editors, synchronization tools, and unrelated library
@@ -85,9 +92,24 @@ Calibre behavior only.
 Final author preparation is read-only and opens only exact-identity EPUB/PDF demand.
 Verified online/current authors outrank embedded/front-matter evidence; unavailable,
 limited, encrypted, conflicting, and role-ambiguous evidence remains non-executable.
-Conservative one-separator normalization retains exact per-author sorts; all other
-corrections require an explicit checked review bound to current generation, revision,
-title, ordered authors/sorts, formats, fingerprints, and policy versions.
+Conservative family/given separator normalization retains exact per-author sorts and
+may remove only an independently agreeing empty or strict life-date suffix.
+Deterministic display typography may also default checked when it changes only NFC
+representation, apostrophe style, or a bounded leading-initial block and returns exact
+display/sort values without reordering, expansion, aliasing, or other qualifier
+removal. Reviewed final-author writes may replace the old display-derived sort
+precondition, but exact post-write display, per-author sort, and book-sort read-back
+remains mandatory. All other corrections require an explicit checked review bound to
+current generation, revision, title, ordered authors/sorts, formats, fingerprints, and
+policy versions.
+
+Pseudonym annotation removal is opt-in in Final authors, including for annotated
+verified/current names. It preserves the published pen name, does not infer aliases
+from the referenced real name, and does not derive identities from truncated folders.
+Matching may ignore the same explicit annotation read-only before consolidation,
+but original metadata remains available for review. Ambiguous or malformed markers
+are flagged without automatically replacing the author. Only the existing confirmed
+final-author worker action may persist a checked removal and refresh managed names.
 
 The confirmed final mutation writes checked authors through the fixed worker, then
 uses typed `update_path` for retained formatted records. Worker read-back must prove

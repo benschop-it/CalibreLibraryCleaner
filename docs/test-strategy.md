@@ -44,7 +44,7 @@ equality gates. External corpora are opt-in through `CALIBRE_MATCHING_CORPUS_PAT
 and `CALIBRE_RUN_EXTERNAL_MATCHING_EVALUATION=1`; they report only aggregates and
 opaque IDs.
 
-The accepted `exact-metadata/1.1.0` and `work-language-matching/1.4.0` gates require
+The accepted `exact-metadata/1.2.0` and `work-language-matching/1.5.0` gates require
 zero corpus false positives, overmerged groups, cross-language merges, and unknown
 pipeline gaps, with 95.6897% pair recall and 100% candidate-route recall overall and
 in each frozen split. Exact policy tests additionally cover language aliases, missing values,
@@ -52,6 +52,14 @@ validated identifier overlap, unique consensus/outliers, tied conflicts,
 determinism, and stale workflow-policy invalidation. Candidate tests cover edition-
 neutral title similarity, marker-only rejection, unchanged thresholds/caps, and stale
 Candidate analysis invalidation.
+
+Supplementary labeled pseudonym scenarios run independently in calibration and
+holdout. They require annotated/clean author pairs to match with zero false
+positives and no merges with the referenced real person or another pen name.
+Parser tests cover bounded input, explicit bracketed and plain markers, unrelated
+roles, malformed annotations, multi-author preservation, idempotence, and unchanged
+source metadata. Application and WPF tests require unchecked final-review defaults
+and supported worker author updates only after explicit Apply.
 
 Open Library tests use fake HTTP handlers and recorded work-resolution oracles only.
 They cover exact transmitted fields/User-Agent, rate/response/request bounds,

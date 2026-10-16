@@ -65,6 +65,8 @@ The first Candidate action is read-only. It:
 - preserves unchanged invalid paths as non-executable findings;
 - reuses compatible EPUB/PDF assessments and cached EPUB signatures;
 - detects exact normalized metadata candidates;
+- ignores explicit pseudonym annotations in matching author identities while
+  preserving the published pen name and original catalog metadata;
 - runs bounded Expanded matching;
 - merges evidence into disjoint same-work/language Candidate groups; and
 - publishes `CandidateAnalysisReady` without starting a mutation worker.
@@ -81,8 +83,18 @@ The review UI shows evidence, contradictions, formats, assessment facts, generat
 keeper, advisory classification, keeper override, Skip, and safe viewer opening.
 Metadata and Expanded tabs remain read-only evidence views; Unified Candidate groups
 are the executable surface. The evidence tabs may filter, navigate, select, and open
-present formats in Calibre's viewer, but they do not own keeper/Skip choices or a
-mutation command.
+present EPUB/PDF formats, but they do not own keeper/Skip choices or a mutation
+command.
+
+Double-clicking a book row opens its present EPUB, or its present PDF if no EPUB
+is available. This applies to Library, Exact/Metadata/Expanded/Unified member
+grids, Metadata review, and Final authors. Library format rows and EPUB/PDF
+assessment rows open their specific file. EPUB opens in Calibre's ebook viewer;
+PDF opens in the Windows default PDF application without requiring Calibre's
+viewer. Opening validates library containment and regular-file safety first.
+Group summaries and assessment findings are not book rows. Headers, empty grid
+space, and embedded controls do not launch files. Opening does not change review
+decisions beyond the existing single-click selection behavior.
 
 All published groups start included. `Cleanup eligible` and `To be reviewed` are
 advisory; a group is processed unless the user selects Skip. Candidate cleanup:
@@ -186,6 +198,26 @@ publisher, publication date, and language; cover fields are not requested in thi
 step. One provider failure does not block the other. A separate opaque-key cache
 stores only normalized proposal fields and provenance, never raw responses, local
 queries, or the Google key.
+
+Edition proposal cache reads probe recognized previous query-policy identities for
+the same complete query/provider inputs. Saved positive candidates are revalidated
+under current provider-edition rules without renewing their retrieval time. Provider
+edition author comparison is independent of local pseudonym-aware matching. Recognized
+annotations are removed from actual outgoing author query values, giving affected
+queries different complete input identities without mutating catalog metadata.
+Policy-1.4 misses from the unchanged provider version remain reusable because its
+edition-comparison/extraction behavior is preserved. Uncertain policy-1.5 text misses
+and older-provider extraction failures refresh. Compatible previous-query candidates can seed current ISBN aliases after
+metadata changes; this bounded local backfill preserves newer cached evidence and
+uses a versioned completion marker. Cache compatibility never disables policy,
+expiry, corruption, or physical-path checks.
+
+Each provider reads every query group's strict-to-broader cached prefix before any
+network request. Fully cached groups publish first. Groups whose first missing
+variant still requires online work remain in deterministic order for the online
+pass, preserving fallback semantics and hard request accounting. Cache-first
+reordering does not suppress stronger ISBN lookups or claim the remaining uncached
+groups are fast.
 
 The WPF Online metadata settings dialog discloses that providers receive ISBN only,
 or title, author names, and optional language. It accepts masked Save/Replace/Clear
@@ -306,8 +338,18 @@ bounded, HTTPS-only, outside the library, and removed after the run.
   screen deterministic placeholder/number/title/separator signals; reuse exact-key
   EPUB/PDF metadata; and inspect bounded front matter only for unresolved demand.
   Keep editor/translator roles visible without promoting them to authors. Only
-  conservative pipe/comma normalization defaults checked; embedded/content-derived
-  corrections require explicit Apply and unresolved/conflicting rows remain unchecked.
+  conservative pipe/comma normalization and deterministic display typography default
+  checked. Pipe normalization may discard only an empty or strict `YYYY-YYYY`/`YYYY-`
+  life-date suffix when the independent sort value agrees. Typography normalization
+  uses NFC, straight apostrophes, canonical leading initial periods/spaces, and
+  repeated-period repair while excluding title-like, qualified/parenthetical,
+  ambiguous, reordered, expanded, or alias-based names.
+  Embedded/content-derived corrections require explicit Apply and unresolved/conflicting
+  rows remain unchecked.
+  Recognized pseudonym annotations also produce unchecked removal proposals using
+  full catalog names; unrelated qualifiers and malformed annotations are not
+  guessed away. These proposals preserve pen names, never substitute real names,
+  and do not trigger an early metadata mutation or a new workflow stage.
 - A separately confirmed final mutation applies only checked stale-validated author
   corrections, then refreshes every retained formatted record through the fixed
   worker's typed Calibre `update_path` operation. Verify and project actual two-level

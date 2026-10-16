@@ -1,6 +1,7 @@
 using System.Globalization;
 using System.Security.Cryptography;
 using System.Text;
+using System.Text.Json.Nodes;
 using CalibreLibraryCleaner.Domain.Libraries;
 using CalibreLibraryCleaner.Domain.Metadata;
 using CalibreLibraryCleaner.Infrastructure.Bibliographic;
@@ -78,7 +79,7 @@ public sealed class FileEditionMetadataProposalCacheTests
         using TemporaryDirectory directory = new();
         FileEditionMetadataProposalCache cache = new(new(directory.Path));
         EditionMetadataLookupQuery query = Query(provider: CurrentProvider);
-        await cache.WriteAsync(query, Proposal(query), CancellationToken.None);
+        await cache.WriteAsync(query, CompatibleProposal(query), CancellationToken.None);
         await MoveCurrentEntryToLegacyIdentityAsync(directory.Path, query);
 
         EditionMetadataProposal? loaded = await cache.TryReadAsync(
@@ -129,6 +130,117 @@ public sealed class FileEditionMetadataProposalCacheTests
         loaded.ReasonCodes.Should().Contain("METADATA.EDITION.ISBN_EXACT");
     }
 
+    [Theory]
+    [InlineData("open-library", "open-library-edition-search/1.2.0")]
+    [InlineData("open-library", "open-library-edition-search/1.1.0")]
+    [InlineData("google-books", "google-books-search/1.0.0")]
+    public async Task PreviousQueryPolicyReusesCompatibleProposalWithCurrentValidation(string providerId, string providerVersion)
+    {
+        using TemporaryDirectory directory = new();
+        FileEditionMetadataProposalCache cache = new(new(directory.Path));
+        EditionMetadataLookupQuery query = Query(provider: new(providerId, providerVersion));
+        await cache.WriteAsync(query, CompatibleProposal(query), CancellationToken.None);
+        await MoveCurrentEntryToLegacyIdentityAsync(directory.Path, query, "edition-metadata-query/1.4.0", providerVersion);
+
+        EditionMetadataProposal? cold = await cache.TryReadAsync(query, RetrievedAt.AddDays(-1), CancellationToken.None);
+        EditionMetadataProposal? warm = await cache.TryReadAsync(query, RetrievedAt.AddDays(-1), CancellationToken.None);
+
+        cold.Should().NotBeNull();
+        warm.Should().BeEquivalentTo(cold);
+        cold!.Status.Should().Be(EditionMetadataProposalStatus.Proposed);
+        cold.Provider.Should().Be(query.Provider);
+        cold.RetrievedAtUtc.Should().Be(RetrievedAt);
+        cold.ReasonCodes.Should().Contain("METADATA.EDITION.AUTHOR_EXACT");
+        cold.MatchScore.Should().NotBe(4_208);
+    }
+
+    [Fact]
+    public async Task PreviousQueryPolicyDoesNotReuseCandidateRejectedByCurrentPenNameRules()
+    {
+        using TemporaryDirectory directory = new();
+        FileEditionMetadataProposalCache cache = new(new(directory.Path));
+        EditionMetadataLookupQuery query = new(new(1), CurrentProvider,
+            EditionMetadataQueryFields.Title | EditionMetadataQueryFields.Authors, null,
+            "The Book", ["Morgan Vale (pseud. van Alex Writer)"], null);
+        EditionMetadataProposal obsolete = new(query.BookId, query.Provider, query.Fields, RetrievedAt,
+            EditionMetadataProposalStatus.Proposed,
+            new("work", "edition", "The Book", ["Alex Writer"]), 4_208, ["METADATA.EDITION.AUTHOR_COMPATIBLE"]);
+        await cache.WriteAsync(query, obsolete, CancellationToken.None);
+        await MoveCurrentEntryToLegacyIdentityAsync(directory.Path, query, "edition-metadata-query/1.4.0", CurrentProvider.Version);
+
+        (await cache.TryReadAsync(query, RetrievedAt.AddDays(-1), CancellationToken.None)).Should().BeNull();
+    }
+
+    [Fact]
+    public async Task PreviousTextMissRefreshesWhilePreviousIdentifierMissRemainsReusable()
+    {
+        using TemporaryDirectory directory = new();
+        FileEditionMetadataProposalCache cache = new(new(directory.Path));
+        EditionMetadataLookupQuery textQuery = Query(provider: CurrentProvider);
+        await cache.WriteAsync(textQuery, new(textQuery.BookId, textQuery.Provider, textQuery.Fields,
+            RetrievedAt, EditionMetadataProposalStatus.NotFound), CancellationToken.None);
+        await MoveCurrentEntryToLegacyIdentityAsync(directory.Path, textQuery, "edition-metadata-query/1.4.0", CurrentProvider.Version);
+        (await cache.TryReadAsync(textQuery, RetrievedAt.AddDays(-1), CancellationToken.None)).Should().BeNull();
+
+        using TemporaryDirectory identifierDirectory = new();
+        FileEditionMetadataProposalCache identifierCache = new(new(identifierDirectory.Path));
+        EditionMetadataLookupQuery identifierQuery = new(new(1), CurrentProvider,
+            EditionMetadataQueryFields.Identifier, "ISBN:9780141439518", null, null, null);
+        await identifierCache.WriteAsync(identifierQuery, new(identifierQuery.BookId, identifierQuery.Provider,
+            identifierQuery.Fields, RetrievedAt, EditionMetadataProposalStatus.NotFound), CancellationToken.None);
+        await MoveCurrentEntryToLegacyIdentityAsync(identifierDirectory.Path, identifierQuery,
+            "edition-metadata-query/1.4.0", CurrentProvider.Version);
+        (await identifierCache.TryReadAsync(identifierQuery, RetrievedAt.AddDays(-1), CancellationToken.None))!
+            .Status.Should().Be(EditionMetadataProposalStatus.NotFound);
+    }
+
+    [Fact]
+    public async Task PreviousProposalBackfillsCurrentIdentifierAliasesWithoutRenewingItsAge()
+    {
+        using TemporaryDirectory directory = new();
+        FileEditionMetadataProposalCache cache = new(new(directory.Path));
+        EditionMetadataLookupQuery query = Query(provider: CurrentProvider);
+        await cache.WriteAsync(query, Proposal(query), CancellationToken.None);
+        await MoveCurrentEntryToLegacyIdentityAsync(directory.Path, query, "edition-metadata-query/1.4.0", CurrentProvider.Version);
+
+        await cache.PrepareIdentifierAliasesAsync(CurrentProvider, RetrievedAt.AddDays(-1), CancellationToken.None);
+        EditionMetadataLookupQuery identifier = new(new(99), CurrentProvider,
+            EditionMetadataQueryFields.Identifier, "ISBN:9780141439518", null, null, null);
+        EditionMetadataProposal? loaded = await cache.TryReadAsync(identifier, RetrievedAt.AddDays(-1), CancellationToken.None);
+
+        loaded.Should().NotBeNull();
+        loaded!.ReasonCodes.Should().Contain("METADATA.EDITION.ISBN_EXACT");
+        loaded.RetrievedAtUtc.Should().Be(RetrievedAt);
+        (await cache.TryReadAsync(identifier, RetrievedAt.AddSeconds(1), CancellationToken.None)).Should().BeNull();
+    }
+
+    [Fact]
+    public async Task PreviousProposalAliasBackfillDoesNotOverwriteNewerCachedIdentifierEvidence()
+    {
+        using TemporaryDirectory directory = new();
+        FileEditionMetadataProposalCache cache = new(new(directory.Path));
+        EditionMetadataLookupQuery textQuery = Query(provider: CurrentProvider);
+        await cache.WriteAsync(textQuery, Proposal(textQuery), CancellationToken.None);
+        await MoveCurrentEntryToLegacyIdentityAsync(directory.Path, textQuery,
+            "edition-metadata-query/1.4.0", CurrentProvider.Version);
+        EditionMetadataLookupQuery identifier = new(new(99), CurrentProvider,
+            EditionMetadataQueryFields.Identifier, "ISBN:9780141439518", null, null, null);
+        EditionMetadataProposal newer = new(identifier.BookId, identifier.Provider, identifier.Fields,
+            RetrievedAt.AddHours(1), EditionMetadataProposalStatus.Proposed,
+            Proposal(identifier).Candidate, 9_999, ["METADATA.EDITION.ISBN_EXACT"]);
+        await cache.WriteAsync(identifier, newer, CancellationToken.None);
+
+        await cache.PrepareIdentifierAliasesAsync(CurrentProvider, RetrievedAt.AddDays(-1), CancellationToken.None);
+
+        (await cache.TryReadAsync(identifier, RetrievedAt.AddDays(-1), CancellationToken.None))
+            .Should().BeEquivalentTo(newer);
+    }
+
+    private static EditionMetadataProposal CompatibleProposal(EditionMetadataLookupQuery query) => new(
+        query.BookId, query.Provider, query.Fields, RetrievedAt, EditionMetadataProposalStatus.Proposed,
+        new("work", "edition", query.Title!, query.Authors, languages: ["en"]), 4_208,
+        ["METADATA.EDITION.AUTHOR_COMPATIBLE", "METADATA.EDITION.TITLE_EXACT"]);
+
     private static EditionMetadataLookupQuery Query(
         CalibreBookId? bookId = null,
         EditionMetadataProviderIdentity? provider = null) => new(
@@ -163,17 +275,17 @@ public sealed class FileEditionMetadataProposalCacheTests
 
     private static async Task MoveCurrentEntryToLegacyIdentityAsync(
         string root,
-        EditionMetadataLookupQuery query)
+        EditionMetadataLookupQuery query,
+        string queryPolicyVersion = "edition-metadata-query/1.0.0",
+        string providerVersion = "open-library-edition-search/1.0.0")
     {
         string currentPath = Directory.GetFiles(root, "*.json").Single();
-        string legacyIdentity = Identity(
-            query, "edition-metadata-query/1.0.0", "open-library-edition-search/1.0.0");
-        string json = await File.ReadAllTextAsync(currentPath);
-        string currentIdentity = Path.GetFileNameWithoutExtension(currentPath);
-        json = json.Replace(query.Provider.Version, "open-library-edition-search/1.0.0", StringComparison.Ordinal)
-            .Replace(EditionMetadataLookupQuery.PolicyVersion, "edition-metadata-query/1.0.0", StringComparison.Ordinal)
-            .Replace(currentIdentity, legacyIdentity, StringComparison.Ordinal);
-        await File.WriteAllTextAsync(Path.Combine(root, legacyIdentity + ".json"), json);
+        string legacyIdentity = Identity(query, queryPolicyVersion, providerVersion);
+        JsonNode document = JsonNode.Parse(await File.ReadAllTextAsync(currentPath))!;
+        document["ProviderVersion"] = providerVersion;
+        document["QueryPolicyVersion"] = queryPolicyVersion;
+        document["QueryIdentity"] = legacyIdentity;
+        await File.WriteAllTextAsync(Path.Combine(root, legacyIdentity + ".json"), document.ToJsonString());
         File.Delete(currentPath);
     }
 

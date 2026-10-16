@@ -2,6 +2,7 @@ using System.Collections.ObjectModel;
 using System.Globalization;
 using System.Text;
 using CalibreLibraryCleaner.Domain.Libraries;
+using CalibreLibraryCleaner.Domain.Metadata;
 
 namespace CalibreLibraryCleaner.Domain.Matching;
 
@@ -124,7 +125,7 @@ public static class CandidateMetadataNormalizer
     public static string[] AuthorTokens(IEnumerable<string> authors)
     {
         ArgumentNullException.ThrowIfNull(authors);
-        return authors.SelectMany(Tokenize)
+        return authors.Select(AuthorPseudonymAnnotationPolicy.ForMatching).SelectMany(Tokenize)
             .Where(value => !UnknownAuthorTokens.Contains(value))
             .Distinct(StringComparer.Ordinal)
             .Order(StringComparer.Ordinal)
@@ -135,8 +136,9 @@ public static class CandidateMetadataNormalizer
     {
         ArgumentNullException.ThrowIfNull(authors);
         HashSet<string> keys = new(StringComparer.Ordinal);
-        foreach (string author in authors)
+        foreach (string rawAuthor in authors)
         {
+            string author = AuthorPseudonymAnnotationPolicy.ForMatching(rawAuthor);
             int comma = author.IndexOf(',', StringComparison.Ordinal);
             string[] familyTokens;
             string[] givenTokens;

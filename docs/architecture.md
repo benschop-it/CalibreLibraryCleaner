@@ -204,6 +204,20 @@ that new ISBN into an avoidable online lookup. Existing successful entries are
 backfilled once per provider/query/alias policy. The settings dialog displays only
 configured status and masked Save/Replace/Clear input.
 
+Application performs one global cache prepass per provider before starting any HTTP
+request. A group is completed in this pass only when its strict-to-broader variant
+sequence is terminal or wholly cached; the first missing variant and any preceding
+NotFound result are retained for the later online pass. This changes processing
+order, not evidence precedence, provider budgets, results, or eventual online work.
+Progress therefore exposes compatible cache reuse before cache-poor ISBN groups.
+
+Provider-edition comparison uses literal author keys independently of local Candidate
+pseudonym normalization. Explicit annotations are cleaned in outgoing query values,
+so only affected input identities change. The 1.6 edition-query policy can reuse 1.4
+negative results for identical inputs and the unchanged provider version; it does
+not reuse older-provider extraction failures or uncertain 1.5 text misses. This
+keeps ordinary cached misses warm without guessing across changed validation rules.
+
 Domain fusion now chooses one deterministic primary edition using validated ISBN,
 title/author/language compatibility, provider support, publisher/date/series
 compatibility, provider match score, and completeness. Cross-provider missing fields

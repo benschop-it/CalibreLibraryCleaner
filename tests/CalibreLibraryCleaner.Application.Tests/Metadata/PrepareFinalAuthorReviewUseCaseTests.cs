@@ -123,7 +123,7 @@ public sealed class PrepareFinalAuthorReviewUseCaseTests
     }
 
     [Fact]
-    public void ConservativeNameOrderRemainsTheOnlyDefaultSelectedProposal()
+    public void ConservativeNameOrderRemainsDefaultSelected()
     {
         CalibreBook book = new(
             new(1),
@@ -139,6 +139,50 @@ public sealed class PrepareFinalAuthorReviewUseCaseTests
 
         subject.Resolution.ProposalSource.Should().Be(AuthorProposalSource.ConservativeNameOrder);
         subject.Resolution.SelectedByDefault.Should().BeTrue();
+        subject.NeedsInspection.Should().BeFalse();
+    }
+
+    [Fact]
+    public void PipeLifeDatesProduceCheckedCanonicalAuthor()
+    {
+        CalibreBook book = new(
+            new(1),
+            "The Book",
+            "Kipling, Rudyard, 1865-1936",
+            [new(new(1), "Kipling| Rudyard| 1865-1936", "Kipling, Rudyard, 1865-1936")],
+            [],
+            [],
+            "Kipling/Book (1)");
+
+        FinalAuthorReviewSubject subject = PrepareFinalAuthorReviewUseCase.Execute(State([book]))
+            .Subjects.Should().ContainSingle().Subject;
+
+        subject.Resolution.ProposalSource.Should().Be(AuthorProposalSource.ConservativeNameOrder);
+        subject.Resolution.ProposedDisplayNames.Should().Equal("Rudyard Kipling");
+        subject.Resolution.ProposedSortNames.Should().Equal("Kipling, Rudyard");
+        subject.Apply.Should().BeTrue();
+        subject.NeedsInspection.Should().BeFalse();
+    }
+
+    [Fact]
+    public void DeterministicTypographyIsCheckedWithoutEvidenceInspection()
+    {
+        CalibreBook book = new(
+            new(1),
+            "The Book",
+            "Rowling, J.K.",
+            [new(new(1), "J.K. Rowling", "Rowling, J.K.")],
+            [],
+            [],
+            "J.K. Rowling/Book (1)");
+
+        FinalAuthorReviewSubject subject = PrepareFinalAuthorReviewUseCase.Execute(State([book]))
+            .Subjects.Should().ContainSingle().Subject;
+
+        subject.Resolution.ProposalSource.Should().Be(AuthorProposalSource.DeterministicTypography);
+        subject.Resolution.ProposedDisplayNames.Should().Equal("J. K. Rowling");
+        subject.Resolution.ProposedSortNames.Should().Equal("Rowling, J. K.");
+        subject.Apply.Should().BeTrue();
         subject.NeedsInspection.Should().BeFalse();
     }
 

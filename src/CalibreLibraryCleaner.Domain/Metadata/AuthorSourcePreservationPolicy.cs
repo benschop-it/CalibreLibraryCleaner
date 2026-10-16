@@ -18,6 +18,7 @@ public enum AuthorProposalSource
 {
     None,
     ConservativeNameOrder,
+    DeterministicTypography,
     CachedEmbeddedMetadata,
     ContentDerivedFrontMatter,
 }
@@ -86,7 +87,8 @@ public sealed record AuthorResolution
         bool hasProposal = proposalSource != AuthorProposalSource.None;
         if (hasProposal != (displays.Length > 0)
             || sorts.Length != 0 && sorts.Length != displays.Length
-            || selectedByDefault && proposalSource != AuthorProposalSource.ConservativeNameOrder
+            || selectedByDefault && proposalSource is not AuthorProposalSource.ConservativeNameOrder
+                and not AuthorProposalSource.DeterministicTypography
             || reasons.Any(value => string.IsNullOrWhiteSpace(value) || value.Length > 128)
             || displays.Any(value => string.IsNullOrWhiteSpace(value) || value.Length > 512)
             || sorts.Any(value => string.IsNullOrWhiteSpace(value) || value.Length > 512))
@@ -113,7 +115,7 @@ public sealed record AuthorResolution
 
 public static class AuthorSourcePreservationPolicy
 {
-    public const string PolicyVersion = "author-source-preservation/1.1.0";
+    public const string PolicyVersion = "author-source-preservation/1.3.0";
 
     public static AuthorResolution Resolve(
         string title,
@@ -132,6 +134,23 @@ public static class AuthorSourcePreservationPolicy
             : current.Status == AuthorResolutionStatus.Known
                 ? CurrentAuthorProtection.CredibleCurrentMetadata
                 : CurrentAuthorProtection.Unverified;
+
+        if (current.Status == AuthorResolutionStatus.Known
+            && AuthorDisplayNameHarmonizationPolicy.TryHarmonizeBook(
+                currentAuthors,
+                out IReadOnlyList<string> harmonizedDisplays,
+                out IReadOnlyList<string> harmonizedSorts))
+        {
+            return new(
+                AuthorResolutionStatus.Suspect,
+                protection,
+                current.ReasonCodes.Append(AuthorSuspicionReasonCodes.DisplayTypography),
+                observations,
+                AuthorProposalSource.DeterministicTypography,
+                harmonizedDisplays,
+                harmonizedSorts,
+                selectedByDefault: true);
+        }
 
         if (verifiedAppliedOnlineAuthors && current.Status != AuthorResolutionStatus.Unresolved)
             return Current(AuthorResolutionStatus.Known);

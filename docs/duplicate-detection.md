@@ -25,8 +25,17 @@ Normalization uses Unicode NFC and invariant casing, removes format controls,
 normalizes whitespace around retained punctuation, and excludes incomplete/empty
 author identities. It does not silently discard subtitles or infer aliases.
 
+Both exact-metadata and Expanded author identities ignore explicit balanced
+`pseud.`, `pseudoniem`, or `pseudonym` annotations and recognized terminal
+`pseud. van ...`/`is pseud` suffixes. Normalization uses full catalog author names,
+never truncated managed directory names, and retains the published pen name rather
+than substituting the real name inside an annotation. Other brackets, roles,
+malformed annotations, coauthors, and original catalog evidence remain intact.
+Matching does not write metadata or rename files. Permanent removal is a separate
+unchecked Final authors proposal after consolidation.
+
 Before publishing an executable Exact Metadata group, policy
-`exact-metadata/1.1.0` checks catalog languages and validated ISBN/DOI/ASIN/OCLC
+`exact-metadata/1.2.0` checks catalog languages and validated ISBN/DOI/ASIN/OCLC
 values. Missing/invalid values remain neutral. Disjoint known values exclude an
 outlier only when one repeated consensus exists; an ambiguous or tied conflict
 suppresses the identity bucket. This preserves one deterministic identity-based

@@ -37,7 +37,7 @@ public sealed record EditionMetadataProviderIdentity
 
 public sealed record EditionMetadataLookupQuery
 {
-    public const string PolicyVersion = "edition-metadata-query/1.4.0";
+    public const string PolicyVersion = "edition-metadata-query/1.5.0";
     private const EditionMetadataQueryFields AllFields = EditionMetadataQueryFields.Identifier
         | EditionMetadataQueryFields.Title | EditionMetadataQueryFields.Authors
         | EditionMetadataQueryFields.Language;

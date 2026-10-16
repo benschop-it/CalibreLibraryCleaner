@@ -92,7 +92,7 @@ public sealed class EditionMetadataProposalTests
             .And.HaveFlag(EditionMetadataQueryFields.Language);
         validation.Fields.Should().NotHaveFlag(EditionMetadataQueryFields.Identifier);
         validation.Title.Should().Be("Book Title: A Subtitle");
-        EditionMetadataLookupQuery.PolicyVersion.Should().Be("edition-metadata-query/1.4.0");
+        EditionMetadataLookupQuery.PolicyVersion.Should().Be("edition-metadata-query/1.5.0");
     }
 
     [Fact]

@@ -216,7 +216,9 @@ public static class PrepareFinalAuthorReviewUseCase
             AuthorSuspicionAssessment suspicion = AuthorSuspicionPolicy.Assess(
                 book.Title, book.Authors.Select(value => value.Name));
             bool normalizationCandidate = PipeAuthorNameNormalizationPolicy.TryNormalizeBook(
-                book.Authors, out _, out _);
+                    book.Authors, out _, out _)
+                || AuthorDisplayNameHarmonizationPolicy.TryHarmonizeBook(
+                    book.Authors, out _, out _);
             if (suspicion.Status == AuthorResolutionStatus.Known && !normalizationCandidate)
             {
                 knownCount++;

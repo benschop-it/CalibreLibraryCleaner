@@ -23,6 +23,7 @@ public static class AuthorSuspicionReasonCodes
     public const string ResemblesTitle = "AUTHOR.RESEMBLES_TITLE";
     public const string MalformedSeparator = "AUTHOR.MALFORMED_SEPARATOR";
     public const string ConservativeNameOrder = "AUTHOR.CONSERVATIVE_NAME_ORDER";
+    public const string DisplayTypography = "AUTHOR.DISPLAY_TYPOGRAPHY";
 }
 
 public sealed record AuthorSuspicionAssessment
