@@ -55,7 +55,7 @@ public sealed class DiscoverWorkLanguageCandidatesBibliographicTests
             value.Code == BibliographicPairEvidencePolicy.EvidenceCode
             && value.Provenance == new CandidateEvidenceProvenance(
                 "open-library", "open-library-search-1.0.0", "/works/OL138052W"));
-        group.PolicyVersion.Should().Be(MatchingPolicyVersion.V5);
+        group.PolicyVersion.Should().Be(MatchingPolicyVersion.V6);
         result.Summary.BibliographicQueries.Should().Be(2);
         result.Summary.BibliographicProviderRequests.Should().Be(2);
         result.Summary.BibliographicMatchedRecords.Should().Be(2);

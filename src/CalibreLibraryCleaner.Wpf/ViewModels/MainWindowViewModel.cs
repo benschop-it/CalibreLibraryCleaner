@@ -191,6 +191,14 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         CancelCommand = new RelayCommand(
             CancelScan,
             () => IsBusy && _scanCancellation is { IsCancellationRequested: false });
+        OpenBookRowCommand = new AsyncRelayCommand<object>(
+            OpenBookRowAsync,
+            row => !IsBusy && !IsOperationActive && _ebookViewer is not null
+                && row is BookRowViewModel or FormatRowViewModel
+                    or ExactDuplicateMemberRowViewModel or MetadataDuplicateMemberRowViewModel
+                    or ExpandedCandidateMemberRowViewModel or UnifiedCandidateMemberRowViewModel
+                    or MetadataReviewSubjectRowViewModel or FinalAuthorReviewSubjectRowViewModel
+                    or EpubAssessmentRowViewModel or PdfAssessmentRowViewModel);
         OpenSelectedExactDuplicateCommand = new AsyncRelayCommand(
             OpenSelectedExactDuplicateAsync,
             () => !IsBusy && _ebookViewer is not null && SelectedExactDuplicateMember is not null);
@@ -329,6 +337,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
                 OpenSelectedMetadataCandidateCommand.NotifyCanExecuteChanged();
                 OpenSelectedExpandedCandidateCommand.NotifyCanExecuteChanged();
                 OpenSelectedUnifiedCandidateCommand.NotifyCanExecuteChanged();
+                OpenBookRowCommand.NotifyCanExecuteChanged();
                 NextMetadataDuplicateGroupCommand.NotifyCanExecuteChanged();
                 PreviousMetadataDuplicateGroupCommand.NotifyCanExecuteChanged();
                 ToggleMetadataDuplicateDeferredCommand.NotifyCanExecuteChanged();
@@ -778,6 +787,8 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
 
     public IRelayCommand CancelCommand { get; }
 
+    public IAsyncRelayCommand<object> OpenBookRowCommand { get; }
+
     public IAsyncRelayCommand OpenSelectedExactDuplicateCommand { get; }
 
     public IAsyncRelayCommand OpenSelectedMetadataCandidateCommand { get; }
@@ -846,6 +857,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
     private void OnOperationStateChanged(object? sender, EventArgs eventArgs)
     {
         OnPropertyChanged(nameof(IsOperationActive));
+        OpenBookRowCommand.NotifyCanExecuteChanged();
         SelectLibraryCommand.NotifyCanExecuteChanged();
         ScanCommand.NotifyCanExecuteChanged();
         LoadPersistedSnapshotCommand.NotifyCanExecuteChanged();
@@ -1115,70 +1127,77 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
             : "Scan canceled. Waiting for the current read to stop...";
     }
 
-    private Task OpenSelectedExactDuplicateAsync()
-    {
-        ExactDuplicateMemberRowViewModel? member = SelectedExactDuplicateMember;
-        return member is null
-            ? Task.CompletedTask
-            : OpenBookFormatAsync(member.ExpectedRelativePath, member.Format);
-    }
+    private Task OpenSelectedExactDuplicateAsync() => OpenBookRowAsync(SelectedExactDuplicateMember);
 
-    private Task OpenSelectedMetadataCandidateAsync()
-    {
-        MetadataDuplicateMemberRowViewModel? member = SelectedMetadataDuplicateMember;
-        if (member is null) return Task.CompletedTask;
-        if (member.LaunchRelativePath is null || member.LaunchFormat is null)
-        {
-            ErrorMessage = "The selected record has no present book format to open.";
-            ErrorAction = "Choose another record or rescan after restoring its format files.";
-            return Task.CompletedTask;
-        }
-        return OpenBookFormatAsync(member.LaunchRelativePath, member.LaunchFormat);
-    }
+    private Task OpenSelectedMetadataCandidateAsync() => OpenBookRowAsync(SelectedMetadataDuplicateMember);
 
-    private Task OpenSelectedExpandedCandidateAsync()
-    {
-        ExpandedCandidateMemberRowViewModel? member = SelectedExpandedCandidateMember;
-        if (member is null) return Task.CompletedTask;
-        if (member.LaunchRelativePath is null || member.LaunchFormat is null)
-        {
-            ErrorMessage = "The selected expanded candidate has no present book format to open.";
-            ErrorAction = "Choose another record or rescan after restoring its format files.";
-            return Task.CompletedTask;
-        }
-        return OpenBookFormatAsync(member.LaunchRelativePath, member.LaunchFormat);
-    }
+    private Task OpenSelectedExpandedCandidateAsync() => OpenBookRowAsync(SelectedExpandedCandidateMember);
 
-    private Task OpenSelectedUnifiedCandidateAsync()
+    private Task OpenSelectedUnifiedCandidateAsync() => OpenBookRowAsync(SelectedUnifiedCandidateMember);
+
+    private Task OpenBookRowAsync(object? row)
     {
-        UnifiedCandidateMemberRowViewModel? member = SelectedUnifiedCandidateMember;
-        if (member is null) return Task.CompletedTask;
-        if (member.LaunchRelativePath is null || member.LaunchFormat is null)
+        switch (row)
         {
-            ErrorMessage = "The selected unified candidate has no present book format to open.";
-            ErrorAction = "Choose another record or run a new exact analysis after restoring its format files.";
-            return Task.CompletedTask;
+            case FormatRowViewModel format:
+                return OpenBookFormatAsync(format.ExpectedRelativePath, format.Format);
+            case ExactDuplicateMemberRowViewModel member:
+                return OpenBookFormatAsync(member.ExpectedRelativePath, member.Format);
+            case EpubAssessmentRowViewModel assessment:
+                return OpenBookFormatAsync(assessment.ExpectedRelativePath, "EPUB");
+            case PdfAssessmentRowViewModel assessment:
+                return OpenBookFormatAsync(assessment.ExpectedRelativePath, "PDF");
         }
-        return OpenBookFormatAsync(member.LaunchRelativePath, member.LaunchFormat);
+
+        long? bookId = row switch
+        {
+            BookRowViewModel book => book.Id,
+            MetadataDuplicateMemberRowViewModel member => member.BookId,
+            ExpandedCandidateMemberRowViewModel member => member.BookId,
+            UnifiedCandidateMemberRowViewModel member => member.BookId,
+            MetadataReviewSubjectRowViewModel subject => subject.TargetBookId,
+            FinalAuthorReviewSubjectRowViewModel subject => subject.RecordId,
+            _ => null,
+        };
+        if (bookId is null) return Task.CompletedTask;
+
+        BookFormat? preferredFormat = _currentSnapshot?.Books
+            .FirstOrDefault(book => book.Id.Value == bookId)?.Formats
+            .Where(format => format.FileStatus == FormatFileStatus.Present
+                && (string.Equals(format.Format, "EPUB", StringComparison.OrdinalIgnoreCase)
+                    || string.Equals(format.Format, "PDF", StringComparison.OrdinalIgnoreCase)))
+            .OrderBy(format => string.Equals(format.Format, "EPUB", StringComparison.OrdinalIgnoreCase) ? 0 : 1)
+            .ThenBy(format => format.ExpectedRelativePath, StringComparer.Ordinal)
+            .FirstOrDefault();
+        if (preferredFormat is not null)
+            return OpenBookFormatAsync(preferredFormat.ExpectedRelativePath, preferredFormat.Format);
+
+        ErrorMessage = "The selected record has no present EPUB or PDF format to open.";
+        ErrorAction = "Choose another record or rescan after restoring its format files.";
+        return Task.CompletedTask;
     }
 
     private async Task OpenBookFormatAsync(string expectedRelativePath, string format)
     {
         if (_ebookViewer is null || string.IsNullOrWhiteSpace(SelectedLibraryPath)) return;
         ClearError();
+        bool isPdf = string.Equals(format, "PDF", StringComparison.OrdinalIgnoreCase);
+        string viewerName = isPdf ? "the default PDF viewer" : "Calibre ebook viewer";
         try
         {
             EbookViewerLaunchResult result = await _ebookViewer.LaunchAsync(
                 new(SelectedLibraryPath, expectedRelativePath), CancellationToken.None).ConfigureAwait(true);
             if (result.IsSuccess)
             {
-                StatusMessage = $"Opened selected {format} in Calibre ebook viewer.";
+                StatusMessage = $"Opened selected {format} in {viewerName}.";
                 return;
             }
 
-            ErrorMessage = result.ErrorMessage ?? "The selected book could not be opened in Calibre ebook viewer.";
+            ErrorMessage = result.ErrorMessage ?? $"The selected book could not be opened in {viewerName}.";
             ErrorAction = result.ErrorCode == "EBOOK_VIEWER_NOT_FOUND"
                 ? "Install Calibre with ebook-viewer in the configured Calibre folder."
+                : isPdf && result.ErrorCode == "EBOOK_VIEWER_START_FAILED"
+                    ? "Install a PDF viewer and set it as the Windows default application for PDF files."
                 : "Verify that the selected format still exists, then rescan if necessary.";
         }
         catch (OperationCanceledException)
@@ -2210,6 +2229,8 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         int low = _allMetadataReviewSubjects.Count(value => value.Confidence == "Low");
         int unavailable = _allMetadataReviewSubjects.Count(value => value.IsUnavailable);
         int alreadyApplied = _allMetadataReviewSubjects.Count(value => value.IsAlreadyApplied);
+        int appliedAutomatically = _allMetadataReviewSubjects.Count(value => value.IsAppliedAutomatically);
+        int needsReview = _allMetadataReviewSubjects.Count(value => value.NeedsReview);
         string persistence = _metadataReviewWorkspace?.PersistenceAvailable == false
             ? " Apply overrides are session-only because durable review storage is unavailable."
             : string.Empty;
@@ -2219,7 +2240,8 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         MetadataReviewSummary = _allMetadataReviewSubjects.Length == 0
             ? "No metadata review subjects are available."
             : $"{visible.Length:N0} of {_allMetadataReviewSubjects.Length:N0} subjects visible; "
-                + $"High {high:N0}, Medium {medium:N0}, Low {low:N0}, Unavailable {unavailable:N0}.{persistence}";
+                + $"High {high:N0}, Medium {medium:N0}, Low {low:N0}, Unavailable {unavailable:N0}; "
+                + $"applied automatically {appliedAutomatically:N0}, needs review {needsReview:N0}.{persistence}";
         if (alreadyApplied > 0) MetadataReviewSummary += $" Already applied {alreadyApplied:N0}.";
         if (deferred.Length > 0) MetadataReviewSummary += deferred;
         NotifyMetadataApplyCommands();

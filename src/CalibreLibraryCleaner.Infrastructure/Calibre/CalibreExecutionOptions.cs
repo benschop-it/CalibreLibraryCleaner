@@ -26,6 +26,13 @@ public sealed record CalibreExecutionOptions
         "CalibreLibraryCleaner",
         "calibre-config",
         "9.x");
+    public string ViewerStagingRoot { get; init; } = Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+        "CalibreLibraryCleaner",
+        "viewer-staging");
+    public long ViewerMaximumStagingBytes { get; init; } = 1024L * 1024 * 1024;
+    public int ViewerMaximumStaleDirectoriesToInspect { get; init; } = 256;
+    public TimeSpan ViewerStaleAge { get; init; } = TimeSpan.FromDays(1);
 }
 
 public sealed record ExecutionStorageOptions

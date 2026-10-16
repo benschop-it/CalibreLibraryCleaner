@@ -24,8 +24,36 @@ public sealed class MetadataReviewSubjectRowViewModelTests
         row.ProposedLanguages.Should().Be("en");
         row.ProposedSeries.Should().Be("Series #2");
         row.ProposedCover.Should().Be("Available (cover-1)");
+        row.FinalTitle.Should().Be("Proposed Title");
+        row.FinalIdentifiers.Should().Contain("google:preserved").And.Contain("isbn:9780306406157");
+        row.FinalCover.Should().Be("Available");
         row.Provenance.Should().Contain("open-library").And.Contain("edition-1");
         row.Apply.Should().BeTrue();
+
+        row.Apply = false;
+        row.FinalTitle.Should().Be("Current Title");
+        row.FinalAuthors.Should().Be("Current Author");
+        row.FinalPublisher.Should().Be("Current Publisher");
+        row.FinalCover.Should().Be("Available");
+    }
+
+    [Fact]
+    public void RiskyMediumProposalIsUncheckedAndFilterableAsNeedsReview()
+    {
+        MetadataReviewSubjectRowViewModel row = Row(
+            1, FusedEditionMetadataConfidence.Medium, requiresReview: true);
+
+        row.Apply.Should().BeFalse();
+        row.NeedsReview.Should().BeTrue();
+        row.MatchesFilter(MetadataReviewFilterMode.NeedsReview).Should().BeTrue();
+        row.MatchesFilter(MetadataReviewFilterMode.AppliedAutomatically).Should().BeFalse();
+        row.FinalTitle.Should().Be("Current Title");
+
+        row.Apply = true;
+        row.NeedsReview.Should().BeTrue();
+        row.MatchesFilter(MetadataReviewFilterMode.NeedsReview).Should().BeTrue();
+        row.MatchesFilter(MetadataReviewFilterMode.AppliedAutomatically).Should().BeFalse();
+        row.FinalTitle.Should().Be("Proposed Title");
     }
 
     [Fact]
@@ -83,7 +111,8 @@ public sealed class MetadataReviewSubjectRowViewModelTests
     private static MetadataReviewSubjectRowViewModel Row(
         int id,
         FusedEditionMetadataConfidence confidence,
-        bool alreadyApplied = false)
+        bool alreadyApplied = false,
+        bool requiresReview = false)
     {
         EditionMetadataProviderIdentity provider = new("open-library", "provider/1.0.0");
         EditionMetadataCandidate candidate = new(
@@ -137,16 +166,17 @@ public sealed class MetadataReviewSubjectRowViewModelTests
             proposal);
         ReviewedMetadataSubject reviewed = new(
             subject,
-            alreadyApplied ? false : proposal.IsSelectedByDefault,
+            alreadyApplied || requiresReview ? false : proposal.IsSelectedByDefault,
             false,
             null,
-            alreadyApplied);
+            alreadyApplied,
+            requiresReview);
         CalibreBook current = new(
             new(id),
             "Current Title",
             "Author, Current",
             [new(new(id), "Current Author", "Author, Current")],
-            [new("isbn", "9780140328721")],
+            [new("isbn", "9780140328721"), new("google", "preserved")],
             [],
             $"Author/Book ({id})",
             new(

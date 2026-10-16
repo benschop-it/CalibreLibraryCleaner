@@ -339,8 +339,10 @@ internal sealed class OpenLibraryBibliographicProvider(
     {
         if (!IsUsableWork(work)) return false;
         if (query.Identifier is not null) return true;
-        string[] queryAuthors = CandidateMetadataNormalizer.AuthorKeys(query.Authors);
-        string[] workAuthors = CandidateMetadataNormalizer.AuthorKeys(work.AuthorName!);
+        string[] queryAuthors = CandidateMetadataNormalizer.AuthorKeys(
+            query.Authors, normalizePseudonymAnnotations: false);
+        string[] workAuthors = CandidateMetadataNormalizer.AuthorKeys(
+            work.AuthorName!, normalizePseudonymAnnotations: false);
         if (!CandidateMetadataNormalizer.HaveCompatibleAuthorIdentity(queryAuthors, workAuthors)) return false;
         string[] queryTitleKeys = CandidateMetadataNormalizer.TitleKeys(query.Title!);
         string[] workTitleKeys = CandidateMetadataNormalizer.TitleKeys(work.Title!);

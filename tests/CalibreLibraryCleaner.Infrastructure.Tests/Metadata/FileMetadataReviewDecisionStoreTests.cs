@@ -26,7 +26,7 @@ public sealed class FileMetadataReviewDecisionStoreTests
         Path.GetFileNameWithoutExtension(path).Should().MatchRegex("^[0-9a-f]{64}$");
         string json = await File.ReadAllTextAsync(path);
         json.Should().Contain("subject/1");
-        json.Should().Contain("edition-metadata-fusion/1.0.0");
+        json.Should().Contain("edition-metadata-fusion/1.1.0");
         json.Should().Contain("edition-1");
         json.Should().NotContain(libraryRoot);
         json.Should().NotContain("Book Title");

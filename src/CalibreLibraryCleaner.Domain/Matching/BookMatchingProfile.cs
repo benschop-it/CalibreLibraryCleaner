@@ -132,13 +132,17 @@ public static class CandidateMetadataNormalizer
             .ToArray();
     }
 
-    public static string[] AuthorKeys(IEnumerable<string> authors)
+    public static string[] AuthorKeys(IEnumerable<string> authors) => AuthorKeys(authors, normalizePseudonymAnnotations: true);
+
+    public static string[] AuthorKeys(IEnumerable<string> authors, bool normalizePseudonymAnnotations)
     {
         ArgumentNullException.ThrowIfNull(authors);
         HashSet<string> keys = new(StringComparer.Ordinal);
         foreach (string rawAuthor in authors)
         {
-            string author = AuthorPseudonymAnnotationPolicy.ForMatching(rawAuthor);
+            string author = normalizePseudonymAnnotations
+                ? AuthorPseudonymAnnotationPolicy.ForMatching(rawAuthor)
+                : rawAuthor;
             int comma = author.IndexOf(',', StringComparison.Ordinal);
             string[] familyTokens;
             string[] givenTokens;

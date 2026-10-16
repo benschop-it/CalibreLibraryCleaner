@@ -463,7 +463,7 @@ public sealed class DependencyDirectionTests
     }
 
     [Fact]
-    public void ExternalWorkersUseDedicatedDirectNoShellProcessBoundaries()
+    public void ExternalWorkersUseDirectBoundariesAndOnlyPdfViewingUsesFileAssociation()
     {
         string infrastructureRoot = Path.Combine(RepositoryRoot, "src", InfrastructureProject);
         string[] processSources = Directory.EnumerateFiles(infrastructureRoot, "*.cs", SearchOption.AllDirectories)
@@ -485,9 +485,14 @@ public sealed class DependencyDirectionTests
             .And.Contain("mayTerminateOnCancellation");
         string viewer = File.ReadAllText(Path.Combine(
             infrastructureRoot, "Calibre", "CalibreEbookViewerLauncher.cs"));
-        viewer.Should().Contain("UseShellExecute = false")
-            .And.Contain("ArgumentList.Add(formatPath!)")
+        viewer.Should().Contain("UseShellExecute = isPdf")
+            .And.Contain("bool isPdf = string.Equals(Path.GetExtension(formatPath), \".pdf\", StringComparison.OrdinalIgnoreCase)")
+            .And.Contain("startInfo.ArgumentList.Add(\"--new-instance\")")
+            .And.Contain("startInfo.ArgumentList.Add(launchPath)")
+            .And.Contain("StageEpubAsync")
             .And.Contain("TryValidateContainedRegularFile")
+            .And.Contain("EBOOK_FORMAT_UNSUPPORTED")
+            .And.NotContain("ArgumentList.Add(formatPath!)")
             .And.NotContain("UseShellExecute = true");
         string calibreWorker = File.ReadAllText(Path.Combine(
             infrastructureRoot, "Calibre", "PersistentCalibreMutationWorkerFactory.cs"));

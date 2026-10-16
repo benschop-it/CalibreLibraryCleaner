@@ -48,7 +48,7 @@ public sealed record EditionMetadataFieldSource
 
 public sealed record FusedEditionMetadataProposal
 {
-    public const string CurrentPolicyVersion = "edition-metadata-fusion/1.0.0";
+    public const string CurrentPolicyVersion = "edition-metadata-fusion/1.1.0";
 
     public FusedEditionMetadataProposal(
         FusedEditionMetadataConfidence confidence,
@@ -153,6 +153,10 @@ public sealed record MetadataReviewSubject
 
 public static class EditionMetadataFusionPolicy
 {
+    private static int EffectiveScore(ProviderSelection value) => value.Proposal.MatchScore
+        - (EditionMetadataApplicationPolicy.IsAllCaps(value.Candidate.Title) ? 100 : 0)
+        - value.Candidate.Authors.Count(EditionMetadataApplicationPolicy.IsAllCaps) * 25;
+
     public static FusedEditionMetadataProposal Fuse(IEnumerable<EditionMetadataProposal> values)
     {
         ArgumentNullException.ThrowIfNull(values);
@@ -166,7 +170,7 @@ public static class EditionMetadataFusionPolicy
             .ToArray();
         ProviderSelection[] selections = allSelections
             .GroupBy(value => value.Proposal.Provider)
-            .Select(group => group.OrderByDescending(value => value.Proposal.MatchScore)
+            .Select(group => group.OrderByDescending(EffectiveScore)
                 .ThenByDescending(value => value.Candidate.Completeness)
                 .ThenBy(value => value.Candidate.EditionId, StringComparer.Ordinal)
                 .ThenBy(value => value.Proposal.BookId.Value).First())
@@ -192,13 +196,13 @@ public static class EditionMetadataFusionPolicy
             .ThenByDescending(value => selections.Count(other => other != value
                 && CoreCompatible(value.Candidate, other.Candidate)
                 && !EditionFactsConflict(value.Candidate, other.Candidate)))
-            .ThenByDescending(value => value.Proposal.MatchScore)
+            .ThenByDescending(EffectiveScore)
             .ThenByDescending(value => value.Candidate.Completeness)
             .ThenBy(value => value.Proposal.Provider.Id, StringComparer.Ordinal)
             .ThenBy(value => value.Proposal.Provider.Version, StringComparer.Ordinal)
             .ThenBy(value => value.Candidate.EditionId, StringComparer.Ordinal).First();
         ProviderSelection[] orderedSecondaries = selections.Where(value => value != primary)
-            .OrderByDescending(value => value.Proposal.MatchScore)
+            .OrderByDescending(EffectiveScore)
             .ThenByDescending(value => value.Candidate.Completeness)
             .ThenBy(value => value.Proposal.Provider.Id, StringComparer.Ordinal)
             .ThenBy(value => value.Candidate.EditionId, StringComparer.Ordinal).ToArray();
@@ -241,7 +245,7 @@ public static class EditionMetadataFusionPolicy
             MergeSameEditionFields(
                 primary,
                 allSelections.Where(value => value.Proposal != primary.Proposal)
-                    .OrderByDescending(value => value.Proposal.MatchScore)
+                    .OrderByDescending(EffectiveScore)
                     .ThenByDescending(value => value.Candidate.Completeness)
                     .ThenBy(value => value.Proposal.Provider.Id, StringComparer.Ordinal)
                     .ThenBy(value => value.Candidate.EditionId, StringComparer.Ordinal).ToArray());

@@ -230,7 +230,7 @@ public enum BibliographicResolutionStatus
 
 public sealed record BibliographicWorkResolution
 {
-    public const string PolicyVersion = "bibliographic-resolution/1.0.0";
+    public const string PolicyVersion = "bibliographic-resolution/1.1.0";
     private const BibliographicQueryFields AllFields = BibliographicQueryFields.Identifier
         | BibliographicQueryFields.Title | BibliographicQueryFields.Authors | BibliographicQueryFields.Language;
 

@@ -4,6 +4,7 @@ using CalibreLibraryCleaner.Domain.Libraries;
 using CalibreLibraryCleaner.Infrastructure.Tests.Fixtures;
 using CalibreLibraryCleaner.Infrastructure.Tests.Pdf;
 using FluentAssertions;
+using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.DependencyInjection;
 using Xunit;
 
@@ -11,6 +12,45 @@ namespace CalibreLibraryCleaner.Infrastructure.Tests.Safety;
 
 public sealed class ReadOnlyLibraryScanSafetyTests
 {
+    [Theory]
+    [InlineData("Book ")]
+    [InlineData("Book.")]
+    public async Task ValidStemSuffixIsHashedForDuplicateAnalysisWithoutChangingLibrary(string storedName)
+    {
+        using SyntheticCalibreLibrary library = new();
+        string original = library.AddMetadataBook(1, "Book", ["Author"], ["Author"], [1, 2, 3]);
+        library.AddMetadataBook(2, "Book", ["Author"], ["Author"], [3, 2, 1]);
+        string expected = Path.Combine(Path.GetDirectoryName(original)!, $"{storedName}.epub");
+        File.Move(original, expected);
+        using (SqliteConnection connection = new(new SqliteConnectionStringBuilder
+        {
+            DataSource = library.DatabasePath,
+            Pooling = false,
+        }.ToString()))
+        {
+            await connection.OpenAsync();
+            using SqliteCommand command = connection.CreateCommand();
+            command.CommandText = "UPDATE data SET name = $name WHERE book = 1;";
+            command.Parameters.AddWithValue("$name", storedName);
+            await command.ExecuteNonQueryAsync();
+        }
+        IReadOnlyList<LibraryEntryState> before = LibraryStateCapture.Capture(library.RootPath);
+        using ServiceProvider provider = TestServices.CreateProvider();
+
+        LibraryScanOutcome outcome = await TestServices.CreateScanUseCase(provider)
+            .ExecuteAsync(library.RootPath, null, CancellationToken.None);
+
+        outcome.IsSuccess.Should().BeTrue();
+        outcome.Snapshot!.Books.SelectMany(book => book.Formats).Should().HaveCount(2)
+            .And.OnlyContain(format => format.FileStatus == FormatFileStatus.Present
+                && format.Fingerprint != null && format.Observation != null);
+        outcome.Snapshot.Books.Single(book => book.Id.Value == 1).Formats.Single()
+            .ExpectedRelativePath.Should().Be(Path.GetRelativePath(library.RootPath, expected));
+        outcome.Snapshot.ExactMetadataDuplicateGroups.Should().ContainSingle();
+        LibraryStateCapture.Capture(library.RootPath)
+            .Should().BeEquivalentTo(before, options => options.WithStrictOrdering());
+    }
+
     [Fact]
     public async Task ValidEpubAssessmentDoesNotChangeSyntheticLibrary()
     {

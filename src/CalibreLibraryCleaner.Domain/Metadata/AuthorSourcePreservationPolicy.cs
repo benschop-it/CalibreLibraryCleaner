@@ -21,6 +21,7 @@ public enum AuthorProposalSource
     DeterministicTypography,
     CachedEmbeddedMetadata,
     ContentDerivedFrontMatter,
+    PseudonymAnnotationRemoval,
 }
 
 public enum CurrentAuthorProtection
@@ -115,7 +116,7 @@ public sealed record AuthorResolution
 
 public static class AuthorSourcePreservationPolicy
 {
-    public const string PolicyVersion = "author-source-preservation/1.3.0";
+    public const string PolicyVersion = "author-source-preservation/1.4.0";
 
     public static AuthorResolution Resolve(
         string title,
@@ -134,6 +135,18 @@ public static class AuthorSourcePreservationPolicy
             : current.Status == AuthorResolutionStatus.Known
                 ? CurrentAuthorProtection.CredibleCurrentMetadata
                 : CurrentAuthorProtection.Unverified;
+
+        if (AuthorPseudonymAnnotationPolicy.TryNormalizeBook(currentAuthors, out IReadOnlyList<string> penNames))
+        {
+            return new(
+            AuthorResolutionStatus.Suspect,
+            protection,
+            current.ReasonCodes.Append(AuthorSuspicionReasonCodes.PseudonymAnnotation),
+            observations,
+            AuthorProposalSource.PseudonymAnnotationRemoval,
+            penNames,
+            selectedByDefault: false);
+        }
 
         if (current.Status == AuthorResolutionStatus.Known
             && AuthorDisplayNameHarmonizationPolicy.TryHarmonizeBook(

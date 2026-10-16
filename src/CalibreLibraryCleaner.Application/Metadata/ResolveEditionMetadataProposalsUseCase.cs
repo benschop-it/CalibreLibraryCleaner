@@ -203,9 +203,11 @@ public sealed class ResolveEditionMetadataProposalsUseCase
             .Select(book => TryCreateQueryPlan(provider, book))
             .Where(value => value is not null).Select(value => value!).ToArray();
         int unqueryable = books.Count - queries.Length;
-        IGrouping<QueryPlanKey, QueryPlan>[] groups = queries
+        QueryPlanGroup[] groups = queries
             .GroupBy(QueryPlanKey.Create)
-            .OrderBy(value => value.Key.SortKey, StringComparer.Ordinal).ToArray();
+            .OrderBy(value => value.Key.SortKey, StringComparer.Ordinal)
+            .Select(value => new QueryPlanGroup(value.Key, value.ToArray()))
+            .ToArray();
         Dictionary<CalibreBookId, EditionMetadataProposal> proposals = [];
         int completed = 0;
         int cacheHits = 0;
@@ -220,19 +222,67 @@ public sealed class ResolveEditionMetadataProposalsUseCase
             "Preparing reusable global edition metadata cache entries."));
         await TryPrepareIdentifierAliasesAsync(
             provider.Identity, minimumRetrievedAt, cancellationToken).ConfigureAwait(false);
-        progress?.Report(new(provider.Identity, 0, groups.Length, 0, 0, 0, 0,
-            "Online edition metadata lookup enabled; transmitting ISBN or title, author, and optional language fields."));
 
-        foreach (IGrouping<QueryPlanKey, QueryPlan> group in groups)
+        List<PendingQueryPlanGroup> pending = [];
+        foreach (QueryPlanGroup group in groups)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            QueryPlan representative = group.First();
+            QueryPlan representative = group.Plans[0];
             EditionMetadataProposal? proposal = null;
-            bool deferred = false;
-            foreach (EditionMetadataLookupQuery variant in representative.Variants)
+            int nextVariant = 0;
+            for (; nextVariant < representative.Variants.Count; nextVariant++)
             {
+                EditionMetadataLookupQuery variant = representative.Variants[nextVariant];
                 EditionMetadataProposal? variantProposal = await TryReadCacheAsync(
                     variant, minimumRetrievedAt, cancellationToken).ConfigureAwait(false);
+                if (variantProposal?.Status == EditionMetadataProposalStatus.Unavailable
+                    && variantProposal.RetrievedAtUtc < minimumUnavailableRetrievedAt)
+                    variantProposal = null;
+                if (variantProposal is null) break;
+                cacheHits++;
+                proposal = variantProposal;
+                if (proposal.Status != EditionMetadataProposalStatus.NotFound) break;
+            }
+            bool cacheComplete = proposal is not null
+                && (proposal.Status != EditionMetadataProposalStatus.NotFound
+                    || nextVariant == representative.Variants.Count);
+            if (!cacheComplete)
+            {
+                pending.Add(new(group, proposal, nextVariant));
+                continue;
+            }
+
+            Publish(group, proposal);
+            completed++;
+            progress?.Report(new(
+                provider.Identity,
+                completed,
+                groups.Length,
+                cacheHits,
+                requests,
+                proposals.Values.Count(value => value.Status == EditionMetadataProposalStatus.Proposed),
+                failures,
+                "Reusing compatible edition metadata cache entries."));
+        }
+
+        progress?.Report(new(provider.Identity, completed, groups.Length, cacheHits, 0,
+            proposals.Values.Count(value => value.Status == EditionMetadataProposalStatus.Proposed), 0,
+            pending.Count == 0
+                ? "All edition metadata queries were resolved from cache."
+                : "Online edition metadata lookup enabled; transmitting ISBN or title, author, and optional language fields."));
+
+        foreach (PendingQueryPlanGroup item in pending)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            QueryPlan representative = item.Group.Plans[0];
+            EditionMetadataProposal? proposal = item.Proposal;
+            bool deferred = false;
+            for (int index = item.NextVariant; index < representative.Variants.Count; index++)
+            {
+                EditionMetadataLookupQuery variant = representative.Variants[index];
+                EditionMetadataProposal? variantProposal = index == item.NextVariant
+                    ? null
+                    : await TryReadCacheAsync(variant, minimumRetrievedAt, cancellationToken).ConfigureAwait(false);
                 if (variantProposal?.Status == EditionMetadataProposalStatus.Unavailable
                     && variantProposal.RetrievedAtUtc < minimumUnavailableRetrievedAt)
                     variantProposal = null;
@@ -278,11 +328,7 @@ public sealed class ResolveEditionMetadataProposalsUseCase
             }
             if (deferred) break;
 
-            if (proposal is not null)
-            {
-                foreach (QueryPlan query in group)
-                    proposals[query.BookId] = ForBook(proposal, query.BookId);
-            }
+            Publish(item.Group, proposal);
             completed++;
             progress?.Report(new(
                 provider.Identity,
@@ -311,6 +357,13 @@ public sealed class ResolveEditionMetadataProposalsUseCase
             failures,
             limitReached,
             true);
+
+        void Publish(QueryPlanGroup group, EditionMetadataProposal? proposalValue)
+        {
+            if (proposalValue is null) return;
+            foreach (QueryPlan query in group.Plans)
+                proposals[query.BookId] = ForBook(proposalValue, query.BookId);
+        }
     }
 
     private static QueryPlan? TryCreateQueryPlan(
@@ -464,6 +517,13 @@ public sealed class ResolveEditionMetadataProposalsUseCase
         CalibreBookId BookId,
         EditionMetadataLookupQuery Validation,
         IReadOnlyList<EditionMetadataLookupQuery> Variants);
+
+    private sealed record QueryPlanGroup(QueryPlanKey Key, QueryPlan[] Plans);
+
+    private sealed record PendingQueryPlanGroup(
+        QueryPlanGroup Group,
+        EditionMetadataProposal? Proposal,
+        int NextVariant);
 
     private sealed record QueryPlanKey(string SortKey)
     {

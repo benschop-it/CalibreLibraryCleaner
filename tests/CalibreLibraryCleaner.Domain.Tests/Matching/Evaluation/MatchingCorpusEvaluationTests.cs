@@ -7,6 +7,23 @@ namespace CalibreLibraryCleaner.Domain.Tests.Matching.Evaluation;
 public sealed class MatchingCorpusEvaluationTests
 {
     [Fact]
+    public void PseudonymAnnotationsRecoverMatchesInBothSplitsWithoutRealNameOrPenNameOvermerges()
+    {
+        MatchingCorpus calibration = PseudonymCorpus(MatchingCorpusSplit.Calibration, "pseudo-cal", "work-pseudo-cal");
+        MatchingCorpus holdout = PseudonymCorpus(MatchingCorpusSplit.Holdout, "pseudo-hold", "work-pseudo-hold");
+
+        MatchingEvaluationReport report = MatchingCorpusEvaluator.Evaluate(calibration, holdout);
+
+        report.FalsePositives.Should().BeEmpty();
+        report.FalseNegatives.Should().BeEmpty();
+        report.Overall.Precision.Percentage.Should().Be(100m);
+        report.Overall.Recall.Percentage.Should().Be(100m);
+        report.Overall.CrossLanguageMerges.Should().Be(0);
+        report.Splits.Should().OnlyContain(split => split.Precision.Percentage == 100m && split.Recall.Percentage == 100m);
+        calibration.Scenarios[0].Records[0].Authors[0].Name.Should().Contain("pseud.");
+    }
+
+    [Fact]
     public void StrictLoaderRejectsUnknownFieldsWithoutEchoingMetadata()
     {
         const string secret = "private-book-title";
@@ -152,6 +169,28 @@ public sealed class MatchingCorpusEvaluationTests
         report.FalseNegatives.Should().BeEmpty();
         report.FalsePositives.Should().BeEmpty();
         report.KeeperErrors.Should().BeEmpty();
+    }
+
+    private static MatchingCorpus PseudonymCorpus(MatchingCorpusSplit split, string prefix, string workKey)
+    {
+        MatchingCorpus corpus = Corpus(split, prefix, workKey);
+        MatchingScenario scenario = corpus.Scenarios[0];
+        MatchingRecordFixture first = scenario.Records[0] with
+        {
+            Authors = [new("Alice Example (pseud. van Rowan Author)", "Example, Alice")],
+        };
+        MatchingRecordFixture realName = Record($"{prefix}-real", first.CalibreId + 2, workKey + "-real") with
+        {
+            Authors = [new("Rowan Author", "Author, Rowan")],
+        };
+        MatchingRecordFixture otherPenName = Record($"{prefix}-other", first.CalibreId + 3, workKey + "-other") with
+        {
+            Authors = [new("Different Pen (pseud. van Rowan Author)", "Pen, Different")],
+        };
+        return corpus with
+        {
+            Scenarios = [scenario with { Records = [first, scenario.Records[1], realName, otherPenName] }],
+        };
     }
 
     private static MatchingCorpus Corpus(MatchingCorpusSplit split, string prefix, string workKey)

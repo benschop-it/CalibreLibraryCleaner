@@ -41,6 +41,14 @@ Directory components ending in spaces/dots, reserved device names (including a
 space before the extension), traversal, invalid characters, and linked paths
 remain rejected.
 
+Interactive EPUB viewing never passes a Calibre-managed file to ebook-viewer.
+Infrastructure copies the validated regular file to an opaque, size-bounded,
+physical per-user staging directory outside the library, launches a dedicated viewer
+instance, and deletes the copy when the viewer exits. Later launches prune a bounded
+set of stale copies from abnormal termination. Staging paths and book bytes are not
+logged. PDF viewing continues through the default Windows association after the same
+contained-regular-file validation.
+
 ## Single-writer assumption
 
 Calibre, calibre-server, ebook editors, synchronization tools, and unrelated library
@@ -88,6 +96,14 @@ read-back after Candidate source records are already deleted. Title/author updat
 paths; verified live paths are projected without direct filesystem mutation. Final
 managed-name normalization remains a separate, explicit action and may use supported
 Calibre behavior only.
+
+Confidence alone does not authorize automatic metadata replacement. Automatic Apply
+is limited to additive fields and bounded all-caps-to-mixed-case corrections.
+Dropping current authors or replacing populated edition facts/same-type identifiers
+requires explicit Apply. Empty or unavailable proposal fields do not clear current
+values. Identifier updates merge by type and preserve unmentioned identifiers such
+as Google IDs; an existing cover is never replaced. WPF's Final merged metadata
+preview uses the same Domain field policy as execution.
 
 Final author preparation is read-only and opens only exact-identity EPUB/PDF demand.
 Verified online/current authors outrank embedded/front-matter evidence; unavailable,

@@ -8,6 +8,93 @@ namespace CalibreLibraryCleaner.Domain.Tests.Metadata;
 public sealed class AuthorSourcePreservationPolicyTests
 {
     [Fact]
+    public void MalformedPseudonymAnnotationIsFlaggedWithoutGuessingAReplacement()
+    {
+        AuthorResolution resolution = AuthorSourcePreservationPolicy.Resolve("The Book",
+            [new(new(1), "Morgan Vale (pseud. van Alex Writer", "Vale, Morgan")], false, []);
+
+        resolution.Status.Should().Be(AuthorResolutionStatus.Suspect);
+        resolution.ReasonCodes.Should().Contain(AuthorSuspicionReasonCodes.PseudonymAnnotation);
+        resolution.ProposalSource.Should().Be(AuthorProposalSource.None);
+        resolution.ProposedDisplayNames.Should().BeEmpty();
+    }
+
+    [Fact]
+    public void PseudonymAnnotationParserRejectsOversizedAndMalformedUtf16Values()
+    {
+        string oversized = new string('a', 513) + " (pseud.)";
+        AuthorPseudonymAnnotationPolicy.TryRemove(oversized, out _).Should().BeFalse();
+        AuthorPseudonymAnnotationPolicy.TryRemove("\ud800 (pseud.)", out _).Should().BeFalse();
+    }
+
+    [Fact]
+    public void PseudonymReviewPreservesOtherAuthorsAndRejectsCollapsedDuplicateAuthors()
+    {
+        BookAuthor[] authors =
+        [
+            new(new(1), "Morgan Vale (pseud. van Alex Writer)", "Vale, Morgan"),
+            new(new(2), "Reliable Writer", "Writer, Reliable"),
+        ];
+        AuthorPseudonymAnnotationPolicy.TryNormalizeBook(authors, out IReadOnlyList<string> names).Should().BeTrue();
+        names.Should().Equal("Morgan Vale", "Reliable Writer");
+        AuthorPseudonymAnnotationPolicy.TryNormalizeBook(
+            [authors[0], new(new(3), "Morgan Vale", "Vale, Morgan")], out _).Should().BeFalse();
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void PseudonymRemovalIsAnUncheckedProposalEvenForProtectedAuthors(bool verified)
+    {
+        BookAuthor author = new(new(1), "Vale, Morgan pseud. van Alex Writer", "Vale, Morgan");
+
+        AuthorResolution resolution = AuthorSourcePreservationPolicy.Resolve("The Book", [author], verified, []);
+
+        resolution.ProposalSource.Should().Be(AuthorProposalSource.PseudonymAnnotationRemoval);
+        resolution.ProposedDisplayNames.Should().Equal("Morgan Vale");
+        resolution.ProposedSortNames.Should().BeEmpty();
+        resolution.SelectedByDefault.Should().BeFalse();
+        resolution.ReasonCodes.Should().Contain(AuthorSuspicionReasonCodes.PseudonymAnnotation);
+        author.Name.Should().Be("Vale, Morgan pseud. van Alex Writer");
+        author.SortName.Should().Be("Vale, Morgan");
+    }
+
+    [Theory]
+    [InlineData("Morgan Vale (pseud. van Alex Writer)", "Morgan Vale")]
+    [InlineData("Morgan Vale (PSEUDONIEM van Alex Writer)", "Morgan Vale")]
+    [InlineData("Morgan Vale (is Pseud.)", "Morgan Vale")]
+    [InlineData("[pseud.] Morgan Vale", "Morgan Vale")]
+    [InlineData("Morgan [pseud. ] Vale", "Morgan Vale")]
+    [InlineData("Morgan (Pseud. Alex Writer) Vale", "Morgan Vale")]
+    [InlineData("Vale, Morgan pseud. van Alex Writer", "Vale, Morgan")]
+    [InlineData("Vale, Morgan is pseud", "Vale, Morgan")]
+    [InlineData("Morgan Vale pseudoniem van Alex Writer", "Morgan Vale")]
+    public void PseudonymAnnotationRemovalPreservesPublishedName(string value, string expected)
+    {
+        AuthorPseudonymAnnotationPolicy.TryRemove(value, out string? cleaned).Should().BeTrue();
+        cleaned.Should().Be(expected);
+        AuthorPseudonymAnnotationPolicy.ForMatching(cleaned!).Should().Be(expected);
+        AuthorPseudonymAnnotationPolicy.TryRemove(cleaned, out _).Should().BeFalse();
+    }
+
+    [Theory]
+    [InlineData("Morgan Vale")]
+    [InlineData("Morgan Vale (editor)")]
+    [InlineData("Morgan Vale (born 1970)")]
+    [InlineData("Morgan Vale (pseud. van Alex Writer")]
+    [InlineData("Morgan Vale [pseud. van Alex Writer)")]
+    [InlineData("Morgan Vale (pseud. van Alex (Other) Writer)")]
+    [InlineData("Pseudonymous Stories")]
+    [InlineData("Morgan pseudoscience Vale")]
+    [InlineData("[pseud.]")]
+    [InlineData("(pseud. van Alex Writer)")]
+    public void PseudonymAnnotationRemovalLeavesUnmarkedOrAmbiguousValuesUnchanged(string value)
+    {
+        AuthorPseudonymAnnotationPolicy.TryRemove(value, out _).Should().BeFalse();
+        AuthorPseudonymAnnotationPolicy.ForMatching(value).Should().Be(value);
+    }
+
+    [Fact]
     public void CredibleCurrentAuthorWinsOverEmbeddedUnknownAndDisagreement()
     {
         AuthorResolution resolution = AuthorSourcePreservationPolicy.Resolve(

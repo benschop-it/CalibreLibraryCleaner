@@ -501,6 +501,8 @@
                     <ColumnDefinition Width="*" />
                     <ColumnDefinition Width="16" />
                     <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="16" />
+                    <ColumnDefinition Width="*" />
                   </Grid.ColumnDefinitions>
                   <StackPanel Grid.Column="0">
                     <TextBlock FontWeight="Bold" Text="Current metadata" />
@@ -523,6 +525,17 @@
                     <TextBlock Margin="0,3,0,0" Text="{Binding ProposedLanguages, StringFormat=Languages: {0}}" TextWrapping="Wrap" />
                     <TextBlock Margin="0,3,0,0" Text="{Binding ProposedSeries, StringFormat=Series: {0}}" TextWrapping="Wrap" />
                     <TextBlock Margin="0,3,0,0" Text="{Binding ProposedCover, StringFormat=Cover: {0}}" />
+                  </StackPanel>
+                  <StackPanel Grid.Column="4">
+                    <TextBlock FontWeight="Bold" Text="Final merged metadata" />
+                    <TextBlock Margin="0,4,0,0" Text="{Binding FinalTitle, StringFormat=Title: {0}}" TextWrapping="Wrap" />
+                    <TextBlock Margin="0,3,0,0" Text="{Binding FinalAuthors, StringFormat=Authors: {0}}" TextWrapping="Wrap" />
+                    <TextBlock Margin="0,3,0,0" Text="{Binding FinalIdentifiers, StringFormat=Identifiers: {0}}" TextWrapping="Wrap" />
+                    <TextBlock Margin="0,3,0,0" Text="{Binding FinalPublisher, StringFormat=Publisher: {0}}" TextWrapping="Wrap" />
+                    <TextBlock Margin="0,3,0,0" Text="{Binding FinalPublicationDate, StringFormat=Date: {0}}" />
+                    <TextBlock Margin="0,3,0,0" Text="{Binding FinalLanguages, StringFormat=Languages: {0}}" TextWrapping="Wrap" />
+                    <TextBlock Margin="0,3,0,0" Text="{Binding FinalSeries, StringFormat=Series: {0}}" TextWrapping="Wrap" />
+                    <TextBlock Margin="0,3,0,0" Text="{Binding FinalCover, StringFormat=Cover: {0}}" />
                   </StackPanel>
                 </Grid>
                 <TextBlock Margin="0,10,0,0" FontWeight="Bold" Text="Provider outcomes" />

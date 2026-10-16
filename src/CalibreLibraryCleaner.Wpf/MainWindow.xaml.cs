@@ -1,7 +1,9 @@
 using System.ComponentModel;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Controls.Primitives;
 using System.Windows.Input;
+using System.Windows.Media;
 using CalibreLibraryCleaner.Wpf.ViewModels;
 
 namespace CalibreLibraryCleaner.Wpf;
@@ -13,18 +15,6 @@ public partial class MainWindow : System.Windows.Window
         InitializeComponent();
         DataContext = viewModel;
     }
-
-    private void ExactDuplicateMembersGrid_MouseDoubleClick(object sender, MouseButtonEventArgs e) =>
-        RouteRowDoubleClick(sender, e, viewModel => viewModel.OpenSelectedExactDuplicateCommand);
-
-    private void MetadataCandidateMembersGrid_MouseDoubleClick(object sender, MouseButtonEventArgs e) =>
-        RouteRowDoubleClick(sender, e, viewModel => viewModel.OpenSelectedMetadataCandidateCommand);
-
-    private void ExpandedCandidateMembersGrid_MouseDoubleClick(object sender, MouseButtonEventArgs e) =>
-        RouteRowDoubleClick(sender, e, viewModel => viewModel.OpenSelectedExpandedCandidateCommand);
-
-    private void UnifiedCandidateMembersGrid_MouseDoubleClick(object sender, MouseButtonEventArgs e) =>
-        RouteRowDoubleClick(sender, e, viewModel => viewModel.OpenSelectedUnifiedCandidateCommand);
 
     private void MetadataReviewSubjectsGrid_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
@@ -40,23 +30,26 @@ public partial class MainWindow : System.Windows.Window
                 grid.SelectedItems.OfType<FinalAuthorReviewSubjectRowViewModel>());
     }
 
-    private void RouteRowDoubleClick(
-        object sender,
-        MouseButtonEventArgs e,
-        Func<MainWindowViewModel, ICommand> commandSelector)
+    private void BookRowsGrid_MouseDoubleClick(object sender, MouseButtonEventArgs e)
     {
         if (e.ChangedButton != MouseButton.Left
             || sender is not DataGrid grid
             || e.OriginalSource is not DependencyObject source
-            || ItemsControl.ContainerFromElement(grid, source) is not DataGridRow
+            || ItemsControl.ContainerFromElement(grid, source) is not DataGridRow row
             || DataContext is not MainWindowViewModel viewModel)
         {
             return;
         }
 
-        ICommand command = commandSelector(viewModel);
-        if (!command.CanExecute(null)) return;
-        command.Execute(null);
+        for (DependencyObject? current = source; current is not null && current != row;
+             current = current is FrameworkContentElement content ? content.Parent : VisualTreeHelper.GetParent(current))
+        {
+            if (current is ButtonBase or TextBoxBase or ComboBox) return;
+        }
+
+        ICommand command = viewModel.OpenBookRowCommand;
+        if (!command.CanExecute(row.Item)) return;
+        command.Execute(row.Item);
         e.Handled = true;
     }
 

@@ -16,7 +16,8 @@ public sealed record ExactMetadataPolicyVersion
 
     public static ExactMetadataPolicyVersion V1 { get; } = new("exact-metadata/1.0.0");
     public static ExactMetadataPolicyVersion V2 { get; } = new("exact-metadata/1.1.0");
-    public static ExactMetadataPolicyVersion Current => V2;
+    public static ExactMetadataPolicyVersion V3 { get; } = new("exact-metadata/1.2.0");
+    public static ExactMetadataPolicyVersion Current => V3;
 
     public string Value { get; }
 }

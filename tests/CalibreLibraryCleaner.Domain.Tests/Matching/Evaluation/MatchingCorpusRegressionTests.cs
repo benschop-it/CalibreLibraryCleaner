@@ -78,7 +78,7 @@ public sealed class MatchingCorpusRegressionTests
         MatchingEvaluationReport report = MatchingCorpusEvaluator.Evaluate(calibration, holdout);
 
         report.FalsePositives.Should().BeEmpty();
-        report.Policies.Matching.Should().Be("work-language-matching/1.4.0");
+        report.Policies.Matching.Should().Be("work-language-matching/1.5.0");
         report.Overall.Precision.Should().Be(new MatchingRatio(222, 222, 100m));
         report.Overall.Recall.Should().Be(new MatchingRatio(222, 232, 95.6897m));
         report.Overall.CandidateRouteRecall.Should().Be(new MatchingRatio(232, 232, 100m));

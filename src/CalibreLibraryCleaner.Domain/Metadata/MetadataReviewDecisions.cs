@@ -69,7 +69,8 @@ public sealed record ReviewedMetadataSubject
         bool apply,
         bool isOverride,
         MetadataReviewDecisionKey? decisionKey,
-        bool isAlreadyApplied = false)
+        bool isAlreadyApplied = false,
+        bool requiresReview = false)
     {
         ArgumentNullException.ThrowIfNull(subject);
         if (subject.Proposal.Confidence == FusedEditionMetadataConfidence.Unavailable
@@ -77,13 +78,15 @@ public sealed record ReviewedMetadataSubject
             || isOverride != (decisionKey is not null)
             || decisionKey is not null && decisionKey.SubjectId != subject.Id
             || isAlreadyApplied && (subject.Proposal.Candidate is null
-                || apply || isOverride || decisionKey is not null))
+                || apply || isOverride || decisionKey is not null || requiresReview)
+            || requiresReview && subject.Proposal.Candidate is null)
             throw new ArgumentException("Reviewed metadata subject is invalid.");
         Subject = subject;
         Apply = apply;
         IsOverride = isOverride;
         DecisionKey = decisionKey;
         IsAlreadyApplied = isAlreadyApplied;
+        RequiresReview = requiresReview;
     }
 
     public MetadataReviewSubject Subject { get; }
@@ -91,6 +94,7 @@ public sealed record ReviewedMetadataSubject
     public bool IsOverride { get; }
     public MetadataReviewDecisionKey? DecisionKey { get; }
     public bool IsAlreadyApplied { get; }
+    public bool RequiresReview { get; }
 }
 
 public static class MetadataReviewDecisionPolicy
@@ -117,12 +121,20 @@ public static class MetadataReviewDecisionPolicy
         MetadataReviewSubject subject,
         LibraryStateGenerationId generationId,
         LibraryStateRevision revision,
-        bool apply)
+        bool apply) => CreateOverride(
+        subject, generationId, revision, apply, subject.Proposal.IsSelectedByDefault);
+
+    public static MetadataReviewDecision? CreateOverride(
+        MetadataReviewSubject subject,
+        LibraryStateGenerationId generationId,
+        LibraryStateRevision revision,
+        bool apply,
+        bool defaultApply)
     {
         ArgumentNullException.ThrowIfNull(subject);
         ArgumentNullException.ThrowIfNull(generationId);
         if (subject.Proposal.Candidate is null || subject.Proposal.PrimaryProvider is null
-            || apply == subject.Proposal.IsSelectedByDefault)
+            || apply == defaultApply)
             return null;
         return new(CreateKey(subject, generationId, revision), apply);
     }

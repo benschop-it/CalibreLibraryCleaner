@@ -168,12 +168,46 @@ public sealed class PrepareMetadataReviewUseCaseTests
             .MustHaveHappened();
     }
 
+    [Fact]
+    public async Task RiskyMediumProposalDefaultsToNeedsReviewAndExplicitApplyPersists()
+    {
+        Harness harness = Harness.Create(riskyProposal: true);
+
+        MetadataReviewWorkspace workspace = await harness.UseCase.ExecuteAsync(
+            harness.State, [], null, CancellationToken.None);
+
+        ReviewedMetadataSubject reviewed = workspace.Subjects.Single();
+        reviewed.Subject.Proposal.Confidence.Should().Be(FusedEditionMetadataConfidence.Medium);
+        reviewed.Apply.Should().BeFalse();
+        reviewed.RequiresReview.Should().BeTrue();
+        reviewed.IsOverride.Should().BeFalse();
+
+        MetadataReviewWorkspace applied = await harness.UseCase.SetApplyAsync(
+            workspace, reviewed.Subject.Id, true, CancellationToken.None);
+        ReviewedMetadataSubject explicitApply = applied.Subjects.Single();
+        explicitApply.Apply.Should().BeTrue();
+        explicitApply.IsOverride.Should().BeTrue();
+        explicitApply.RequiresReview.Should().BeTrue();
+        A.CallTo(() => harness.Store.WriteAsync(
+                applied.LibraryRoot,
+                A<IReadOnlyList<MetadataReviewDecision>>.That.Matches(value =>
+                    value.Count == 1 && value[0].Apply),
+                A<CancellationToken>._))
+            .MustHaveHappened();
+
+        MetadataReviewWorkspace reset = await harness.UseCase.SetApplyAsync(
+            applied, reviewed.Subject.Id, false, CancellationToken.None);
+        reset.Subjects.Single().Apply.Should().BeFalse();
+        reset.Subjects.Single().RequiresReview.Should().BeTrue();
+        reset.Subjects.Single().IsOverride.Should().BeFalse();
+    }
+
     private sealed record Harness(
         PrepareMetadataReviewUseCase UseCase,
         IMetadataReviewDecisionStore Store,
         LibraryState State)
     {
-        public static Harness Create(bool alreadyApplied = false)
+        public static Harness Create(bool alreadyApplied = false, bool riskyProposal = false)
         {
             EditionMetadataProviderIdentity providerIdentity = new("provider", "provider/1.0.0");
             IEditionMetadataProvider provider = A.Fake<IEditionMetadataProvider>();
@@ -186,10 +220,15 @@ public sealed class PrepareMetadataReviewUseCaseTests
                         providerIdentity,
                         EditionMetadataSearchStatus.Success,
                         DateTimeOffset.UnixEpoch,
-                        [new(
-                            "work", "edition", "Title", ["Author"],
-                            [new EditionMetadataIdentifier("isbn", "9780306406157")],
-                            "Provider Publisher") ]));
+                        [riskyProposal
+                            ? new(
+                                "work", "edition", "TITLE", ["Author"],
+                                [new EditionMetadataIdentifier("isbn", "9780306406157")],
+                                "Different Publisher", new(1994))
+                            : new(
+                                "work", "edition", "Title", ["Author"],
+                                [new EditionMetadataIdentifier("isbn", "9780306406157")],
+                                "Provider Publisher") ]));
                 });
             IEditionMetadataProposalCache cache = A.Fake<IEditionMetadataProposalCache>();
             IClock clock = A.Fake<IClock>();
@@ -202,7 +241,11 @@ public sealed class PrepareMetadataReviewUseCaseTests
             CalibreBook book = new(
                 new(1), "Title", "Author", [new(new(1), "Author", "Author")],
                 [new("isbn", "9780306406157")], [], "Author/Title (1)",
-                new(publisher: alreadyApplied ? "Provider Publisher" : null));
+                new(
+                    publisher: riskyProposal ? "Current Publisher" : alreadyApplied ? "Provider Publisher" : null,
+                    publicationDate: riskyProposal
+                        ? new DateTimeOffset(2005, 1, 1, 0, 0, 0, TimeSpan.Zero)
+                        : null));
             LibrarySnapshot snapshot = new(
                 new("library", 27, "C:\\library"), DateTimeOffset.UnixEpoch, [book], []);
             LibraryStateGenerationId generation = new(

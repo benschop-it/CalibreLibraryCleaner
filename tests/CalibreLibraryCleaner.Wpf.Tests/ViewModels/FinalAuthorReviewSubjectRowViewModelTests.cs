@@ -10,6 +10,20 @@ namespace CalibreLibraryCleaner.Wpf.Tests.ViewModels;
 public sealed class FinalAuthorReviewSubjectRowViewModelTests
 {
     [Fact]
+    public void PseudonymRemovalAppearsAsUncheckedNeedsReviewInExistingGrid()
+    {
+        FinalAuthorReviewSubjectRowViewModel row = new(
+            Subject(AuthorProposalSource.PseudonymAnnotationRemoval, apply: false),
+            (_, _) => Task.CompletedTask);
+
+        row.Source.Should().Be("PseudonymAnnotationRemoval");
+        row.Apply.Should().BeFalse();
+        row.CanApply.Should().BeTrue();
+        row.NeedsReview.Should().BeTrue();
+        row.MatchesFilter(FinalAuthorReviewFilterMode.NeedsReview).Should().BeTrue();
+    }
+
+    [Fact]
     public async Task RowDisplaysEvidenceAndPersistsApply()
     {
         List<(CalibreBookId Id, bool Apply)> persisted = [];

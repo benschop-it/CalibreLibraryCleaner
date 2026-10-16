@@ -2,6 +2,7 @@ using System.Reflection;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using CalibreLibraryCleaner.Domain.Libraries;
+using CalibreLibraryCleaner.Domain.Matching;
 using CalibreLibraryCleaner.Domain.Metadata;
 using FluentAssertions;
 using Xunit;
@@ -92,7 +93,48 @@ public sealed class EditionMetadataProposalTests
             .And.HaveFlag(EditionMetadataQueryFields.Language);
         validation.Fields.Should().NotHaveFlag(EditionMetadataQueryFields.Identifier);
         validation.Title.Should().Be("Book Title: A Subtitle");
-        EditionMetadataLookupQuery.PolicyVersion.Should().Be("edition-metadata-query/1.5.0");
+        EditionMetadataLookupQuery.PolicyVersion.Should().Be("edition-metadata-query/1.6.0");
+    }
+
+    [Fact]
+    public void PseudonymCleanupChangesOnlyAffectedOutgoingQueriesAndPreservesCatalogNames()
+    {
+        const string annotatedName = "Morgan Vale (pseud. van Alex Writer)";
+        CalibreBook annotated = new(new(1), "The Book", "Vale, Morgan",
+            [new(new(1), annotatedName, "Vale, Morgan")], [], [], "Author/Book (1)");
+        CalibreBook clean = new(new(2), "The Book", "Vale, Morgan",
+            [new(new(2), "Morgan Vale", "Vale, Morgan")], [], [], "Author/Book (2)");
+
+        IReadOnlyList<EditionMetadataLookupQuery> annotatedQueries = EditionMetadataLookupQuery.CreateVariants(annotated, Provider);
+        IReadOnlyList<EditionMetadataLookupQuery> cleanQueries = EditionMetadataLookupQuery.CreateVariants(clean, Provider);
+
+        annotatedQueries.Should().HaveCount(cleanQueries.Count);
+        for (int index = 0; index < cleanQueries.Count; index++)
+        {
+            annotatedQueries[index].Authors.Should().Equal(cleanQueries[index].Authors);
+            annotatedQueries[index].Title.Should().Be(cleanQueries[index].Title);
+            annotatedQueries[index].Fields.Should().Be(cleanQueries[index].Fields);
+        }
+        EditionMetadataLookupQuery.CreateValidation(annotated, Provider).Authors.Should().Equal("Morgan Vale");
+        annotated.Authors[0].Name.Should().Be(annotatedName);
+    }
+
+    [Fact]
+    public void ProviderEditionValidationDoesNotInheritLocalPseudonymComparisonChanges()
+    {
+        const string annotatedName = "Morgan Vale (pseud. van Alex Writer)";
+        EditionMetadataLookupQuery query = new(new(1), Provider,
+            EditionMetadataQueryFields.Title | EditionMetadataQueryFields.Authors,
+            null, "The Book", ["Morgan Vale"], null);
+        EditionMetadataCandidate candidate = new("work", "edition", "The Book", [annotatedName]);
+
+        EditionMetadataProposal proposal = EditionMetadataProposalPolicy.Resolve(query,
+            new(Provider, EditionMetadataSearchStatus.Success, RetrievedAt, [candidate]));
+
+        proposal.Status.Should().Be(EditionMetadataProposalStatus.NotFound);
+        CandidateMetadataNormalizer.HaveCompatibleAuthorIdentity(
+            CandidateMetadataNormalizer.AuthorKeys(query.Authors),
+            CandidateMetadataNormalizer.AuthorKeys(candidate.Authors)).Should().BeTrue();
     }
 
     [Fact]

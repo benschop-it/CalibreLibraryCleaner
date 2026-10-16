@@ -1,5 +1,7 @@
 using System.Globalization;
 using CalibreLibraryCleaner.Domain.Duplicates;
+using CalibreLibraryCleaner.Domain.Libraries;
+using CalibreLibraryCleaner.Domain.Matching;
 using FluentAssertions;
 using Xunit;
 
@@ -7,6 +9,55 @@ namespace CalibreLibraryCleaner.Domain.Tests.Duplicates;
 
 public sealed class MetadataTextNormalizerTests
 {
+    [Theory]
+    [InlineData("Morgan Vale (pseud. van Alex Writer)", "Morgan Vale")]
+    [InlineData("Morgan [pseud.] Vale", "Morgan Vale")]
+    [InlineData("Vale, Morgan pseud. van Alex Writer", "Vale, Morgan")]
+    [InlineData("Morgan Vale is pseud", "Morgan Vale")]
+    public void PseudonymAnnotationsMatchCleanAuthorsInBothIdentityPaths(string annotated, string clean)
+    {
+        MetadataTextNormalizer.TryCreateAuthorSet([annotated, "Second Writer"], out NormalizedAuthorSet? first);
+        MetadataTextNormalizer.TryCreateAuthorSet([clean, "Second Writer"], out NormalizedAuthorSet? second);
+        MetadataTextNormalizer.TryCreateAuthorSet([clean], out NormalizedAuthorSet? missingCoauthor);
+
+        first.Should().Be(second).And.NotBe(missingCoauthor);
+        CandidateMetadataNormalizer.AuthorKeys([annotated]).Should()
+            .Equal(CandidateMetadataNormalizer.AuthorKeys([clean]));
+        CandidateMetadataNormalizer.AuthorTokens([annotated]).Should()
+            .Equal(CandidateMetadataNormalizer.AuthorTokens([clean]));
+    }
+
+    [Theory]
+    [InlineData("Morgan Vale (pseud. van Alex Writer)", "Alex Writer")]
+    [InlineData("Morgan Vale (pseud. van Alex Writer)", "Taylor Reed (pseud. van Alex Writer)")]
+    [InlineData("Morgan Vale (editor)", "Morgan Vale")]
+    public void PseudonymNormalizationDoesNotMergeRealNamesOtherPenNamesOrUnrelatedRoles(string firstValue, string secondValue)
+    {
+        MetadataTextNormalizer.TryCreateAuthorSet([firstValue], out NormalizedAuthorSet? first);
+        MetadataTextNormalizer.TryCreateAuthorSet([secondValue], out NormalizedAuthorSet? second);
+
+        first.Should().NotBe(second);
+        CandidateMetadataNormalizer.HaveCompatibleAuthorIdentity(
+            CandidateMetadataNormalizer.AuthorKeys([firstValue]),
+            CandidateMetadataNormalizer.AuthorKeys([secondValue])).Should().BeFalse();
+    }
+
+    [Fact]
+    public void PseudonymNormalizationFindsMetadataGroupWithoutChangingOriginalAuthorsOrTitles()
+    {
+        const string annotated = "Morgan Vale (pseud. van Alex Writer)";
+        CalibreBook first = new(new(1), "The Book", "Vale, Morgan",
+            [new(new(1), annotated, "Vale, Morgan")], [], [], "Author/Book (1)");
+        CalibreBook second = new(new(2), "The Book", "Vale, Morgan",
+            [new(new(2), "Morgan Vale", "Vale, Morgan")], [], [], "Author/Book (2)");
+
+        ExactMetadataDuplicateDetector.Detect([first, second]).Should().ContainSingle();
+        first.Authors.Single().Name.Should().Be(annotated);
+        MetadataTextNormalizer.TryNormalizeTitle(annotated, out NormalizedTitle? title);
+        MetadataTextNormalizer.TryNormalizeTitle("Morgan Vale", out NormalizedTitle? cleanTitle);
+        title.Should().NotBe(cleanTitle);
+    }
+
     [Fact]
     public void TitleNormalizationUsesNfcInvariantCaseWhitespaceAndPunctuationSpacing()
     {

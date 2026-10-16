@@ -20,7 +20,8 @@ public sealed partial class ExecuteUnifiedCandidateCleanupUseCase(
     ICleanupExecutionIdGenerator executionIds,
     IEditionCoverStager coverStager,
     IClock clock,
-    ILogger<ExecuteUnifiedCandidateCleanupUseCase>? logger = null) : IUnifiedCandidateCleanupExecutor
+    ILogger<ExecuteUnifiedCandidateCleanupUseCase>? logger = null,
+    IManagedBookLayoutInspector? managedBookLayoutInspector = null) : IUnifiedCandidateCleanupExecutor
 {
     private static readonly HashSet<string> WritableLanguages = CultureInfo
         .GetCultures(CultureTypes.NeutralCultures)
@@ -165,6 +166,33 @@ public sealed partial class ExecuteUnifiedCandidateCleanupUseCase(
                 && ManagedBookLayoutFindingCodes.BlocksManagedNameRefresh(value.Code))
             .Select(value => value.BookId!.Value)
             .ToHashSet();
+        if (managedBookLayoutInspector is not null && managedNameCandidates.Length > 0)
+        {
+            IReadOnlyList<ManagedBookLayoutIssue> layoutIssues;
+            try
+            {
+                layoutIssues = await managedBookLayoutInspector.InspectAsync(
+                    new(request.LibraryRoot, Path.Combine(request.LibraryRoot, "metadata.db")),
+                    managedNameCandidates.Select(value => new ManagedBookLayoutInspectionTarget(
+                        value.Id,
+                        value.RelativeDirectory,
+                        value.Formats.Where(format => format.ExpectedRelativePath.Length > 0)
+                            .Select(format => format.ExpectedRelativePath)
+                            .ToArray())).ToArray(),
+                    cancellationToken).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException) { throw; }
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException
+                                               or InvalidDataException or ArgumentException)
+            {
+                issues.Add(Block(
+                    "CANDIDATE.MANAGED_LAYOUT_PREFLIGHT_FAILED",
+                    "Managed book layouts could not be inspected safely before mutation."));
+                return Result(UnifiedCandidateCleanupState.PreflightFailed,
+                    0, 0, 0, plan.SkippedGroupCount);
+            }
+            unsafeManagedNameTargets.UnionWith(layoutIssues.Select(value => value.BookId));
+        }
         CalibreBookId[] managedNameTargets = managedNameCandidates
             .Where(value => CanRefreshManagedName(value)
                 && !unsafeManagedNameTargets.Contains(value.Id))

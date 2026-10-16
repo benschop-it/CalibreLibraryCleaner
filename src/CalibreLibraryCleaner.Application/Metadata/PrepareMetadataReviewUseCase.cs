@@ -146,10 +146,10 @@ public sealed class PrepareMetadataReviewUseCase(
             || current.IsAlreadyApplied)
             return workspace;
         MetadataReviewDecision? decision = MetadataReviewDecisionPolicy.CreateOverride(
-            current.Subject, workspace.GenerationId, workspace.Revision, apply);
+            current.Subject, workspace.GenerationId, workspace.Revision, apply, DefaultApply(current));
         ReviewedMetadataSubject updated = decision is null
-            ? new(current.Subject, current.Subject.Proposal.IsSelectedByDefault, false, null)
-            : new(current.Subject, decision.Apply, true, decision.Key);
+            ? new(current.Subject, DefaultApply(current), false, null, requiresReview: current.RequiresReview)
+            : new(current.Subject, decision.Apply, true, decision.Key, requiresReview: current.RequiresReview);
         ReviewedMetadataSubject[] reviewed = workspace.Subjects.ToArray();
         reviewed[index] = updated;
         MetadataReviewWorkspace next = new(
@@ -217,11 +217,12 @@ public sealed class PrepareMetadataReviewUseCase(
                 || current.IsAlreadyApplied)
                 return current;
             MetadataReviewDecision? decision = MetadataReviewDecisionPolicy.CreateOverride(
-                current.Subject, workspace.GenerationId, workspace.Revision, apply);
+                current.Subject, workspace.GenerationId, workspace.Revision, apply, DefaultApply(current));
             return decision is null
                 ? new ReviewedMetadataSubject(
-                    current.Subject, current.Subject.Proposal.IsSelectedByDefault, false, null)
-                : new ReviewedMetadataSubject(current.Subject, decision.Apply, true, decision.Key);
+                    current.Subject, DefaultApply(current), false, null, requiresReview: current.RequiresReview)
+                : new ReviewedMetadataSubject(
+                    current.Subject, decision.Apply, true, decision.Key, requiresReview: current.RequiresReview);
         }).ToArray();
         MetadataReviewWorkspace next = new(
             workspace.LibraryRoot,
@@ -256,13 +257,25 @@ public sealed class PrepareMetadataReviewUseCase(
         IReadOnlyList<ReviewedMetadataSubject> reviewed)
     {
         Dictionary<CalibreBookId, CalibreBook> books = snapshot.Books.ToDictionary(value => value.Id);
-        return reviewed.Select(value => value.Subject.Proposal.Candidate is { } candidate
-                && EditionMetadataApplicationPolicy.ApplicableFields(
-                    books[value.Subject.TargetBookId], candidate).Count == 0
-                ? new ReviewedMetadataSubject(value.Subject, false, false, null, isAlreadyApplied: true)
-                : value)
+        return reviewed.Select(value =>
+        {
+            if (value.Subject.Proposal.Candidate is not { } candidate) return value;
+            CalibreBook book = books[value.Subject.TargetBookId];
+            if (EditionMetadataApplicationPolicy.ApplicableFields(book, candidate).Count == 0)
+                return new ReviewedMetadataSubject(value.Subject, false, false, null, isAlreadyApplied: true);
+            if (value.Subject.Proposal.IsSelectedByDefault
+                && !EditionMetadataApplicationPolicy.CanApplyAutomatically(book, candidate))
+                return value.IsOverride
+                    ? new ReviewedMetadataSubject(
+                        value.Subject, value.Apply, true, value.DecisionKey, requiresReview: true)
+                    : new ReviewedMetadataSubject(value.Subject, false, false, null, requiresReview: true);
+            return value;
+        })
             .ToArray();
     }
+
+    private static bool DefaultApply(ReviewedMetadataSubject subject) =>
+        subject.Subject.Proposal.IsSelectedByDefault && !subject.RequiresReview;
 
     public static MetadataReviewWorkspace Retarget(
         MetadataReviewWorkspace workspace,

@@ -50,10 +50,11 @@ public static class PipeAuthorNameNormalizationPolicy
     {
         normalization = null;
         if (string.IsNullOrWhiteSpace(value)) return false;
-        int separator = value.IndexOf(',', StringComparison.Ordinal);
-        if (separator <= 0 || separator != value.LastIndexOf(',') || separator == value.Length - 1)
-            return false;
-        return Create(value[..separator], value[(separator + 1)..], out normalization);
+        string[] parts = value.Split(',', StringSplitOptions.None);
+        return parts.Length == 2
+            ? Create(parts[0], parts[1], out normalization)
+            : parts.Length == 3 && IsOptionalLifeDates(parts[2])
+                && Create(parts[0], parts[1], out normalization);
     }
 
     public static bool TryNormalize(
@@ -62,10 +63,11 @@ public static class PipeAuthorNameNormalizationPolicy
     {
         normalization = null;
         if (string.IsNullOrWhiteSpace(value)) return false;
-        int separator = value.IndexOf('|', StringComparison.Ordinal);
-        if (separator <= 0 || separator != value.LastIndexOf('|') || separator == value.Length - 1)
-            return false;
-        return Create(value[..separator], value[(separator + 1)..], out normalization);
+        string[] parts = value.Split('|', StringSplitOptions.None);
+        return parts.Length == 2
+            ? Create(parts[0], parts[1], out normalization)
+            : parts.Length == 3 && IsOptionalLifeDates(parts[2])
+                && Create(parts[0], parts[1], out normalization);
     }
 
     private static bool Create(
@@ -88,4 +90,17 @@ public static class PipeAuthorNameNormalizationPolicy
         value.Normalize(NormalizationForm.FormC).Split(
             (char[]?)null,
             StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries));
+
+    private static bool IsOptionalLifeDates(string value)
+    {
+        string normalized = value.Trim();
+        return normalized.Length == 0
+            || normalized.Length == 5
+                && normalized[..4].All(char.IsAsciiDigit)
+                && normalized[4] == '-'
+            || normalized.Length == 9
+                && normalized[..4].All(char.IsAsciiDigit)
+                && normalized[4] == '-'
+                && normalized[5..].All(char.IsAsciiDigit);
+    }
 }

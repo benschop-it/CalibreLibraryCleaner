@@ -16,6 +16,36 @@ namespace CalibreLibraryCleaner.Application.Tests.Executions;
 
 public sealed class ExecuteUnifiedCandidateCleanupUseCaseTests
 {
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task PseudonymRemovalUsesExistingAuthorWorkerOnlyWhenExplicitlyChecked(bool apply)
+    {
+        CalibreBook original = Book(1, Format(1, "EPUB", 'a'));
+        CalibreBook annotated = new(original.Id, original.Title, "Vale, Morgan",
+            [new(new(1), "Morgan Vale (pseud. van Alex Writer)", "Vale, Morgan")],
+            original.Identifiers, original.Formats, original.RelativeDirectory);
+        Harness harness = await Harness.CreateAsync([annotated]);
+        await harness.AdvanceToCompletedAsync();
+        LibraryState current = harness.State.GetCurrent(harness.Snapshot.Identity.LibraryRoot)!;
+        FinalAuthorReviewWorkspace workspace = PrepareFinalAuthorReviewUseCase.Execute(current);
+        workspace.Subjects.Should().ContainSingle().Which.Apply.Should().BeFalse();
+        if (apply) workspace = PrepareFinalAuthorReviewUseCase.SetAllApply(workspace, true);
+
+        UnifiedCandidateCleanupResult result = await harness.ExecuteFinalAuthorReviewAsync(workspace);
+
+        result.State.Should().Be(UnifiedCandidateCleanupState.Completed);
+        CalibreMutationOperation[] authorWrites = harness.Chunks.SelectMany(chunk => chunk.Operations)
+            .Where(operation => operation.Metadata?.Field == LibraryMetadataField.Authors).ToArray();
+        authorWrites.Should().HaveCount(apply ? 1 : 0);
+        if (apply)
+        {
+            authorWrites[0].Metadata!.Values.Should().Equal("Morgan Vale");
+            authorWrites[0].Metadata!.Source.ProviderId.Should().Be("calibre-final-author-review");
+        }
+        harness.Snapshot.Books[0].Authors[0].Name.Should().Be("Morgan Vale (pseud. van Alex Writer)");
+    }
+
     private static readonly DateTimeOffset Now = new(2026, 8, 10, 12, 0, 0, TimeSpan.Zero);
 
     [Fact]

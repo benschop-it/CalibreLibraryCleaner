@@ -37,7 +37,7 @@ public sealed record EditionMetadataProviderIdentity
 
 public sealed record EditionMetadataLookupQuery
 {
-    public const string PolicyVersion = "edition-metadata-query/1.5.0";
+    public const string PolicyVersion = "edition-metadata-query/1.6.0";
     private const EditionMetadataQueryFields AllFields = EditionMetadataQueryFields.Identifier
         | EditionMetadataQueryFields.Title | EditionMetadataQueryFields.Authors
         | EditionMetadataQueryFields.Language;
@@ -100,7 +100,7 @@ public sealed record EditionMetadataLookupQuery
         string? isbn = book.Identifiers.Select(value =>
                 CandidateMetadataNormalizer.NormalizeStrongIdentifier(value.Type, value.Value))
             .FirstOrDefault(value => value?.StartsWith("ISBN:", StringComparison.Ordinal) == true);
-        string[] authors = book.Authors.Select(value => value.Name).ToArray();
+        string[] authors = book.Authors.Select(value => AuthorPseudonymAnnotationPolicy.ForMatching(value.Name)).ToArray();
         string[] languages = book.PublicationMetadata.Languages
             .Select(CandidateMetadataNormalizer.NormalizeLanguage)
             .Where(value => value is not null).Distinct(StringComparer.Ordinal)
@@ -502,8 +502,10 @@ public static class EditionMetadataProposalPolicy
         }
         else
         {
-            string[] queryAuthorKeys = CandidateMetadataNormalizer.AuthorKeys(query.Authors);
-            string[] candidateAuthorKeys = CandidateMetadataNormalizer.AuthorKeys(candidate.Authors);
+            string[] queryAuthorKeys = CandidateMetadataNormalizer.AuthorKeys(
+                query.Authors, normalizePseudonymAnnotations: false);
+            string[] candidateAuthorKeys = CandidateMetadataNormalizer.AuthorKeys(
+                candidate.Authors, normalizePseudonymAnnotations: false);
             if (!CandidateMetadataNormalizer.HaveCompatibleAuthorIdentity(queryAuthorKeys, candidateAuthorKeys))
                 return null;
             bool exactAuthor = CandidateMetadataNormalizer.HaveExactAuthorIdentity(

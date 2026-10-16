@@ -433,12 +433,15 @@ def set_metadata(cache, operation):
         elif field == "authors" and requested_author_sorts is not None:
             current_names = list(cache.field_for("authors", book_id) or [])
             current_ids = tuple(cache.field_ids_for("authors", book_id) or ())
-            current_data = cache.author_data(current_ids)
-            current_sorts = [current_data[author_id]["sort"] for author_id in current_ids]
-            if len(current_ids) != len(requested_author_sorts) \
-                    or [canonical_author_sort(value) for value in current_names] != requested_author_sorts \
-                    or [canonical_author_sort(value) for value in current_sorts] != requested_author_sorts:
+            final_review = operation["metadataSource"]["providerId"] == "calibre-final-author-review"
+            if len(current_ids) != len(requested_author_sorts) or len(current_names) != len(values):
                 raise ValueError("metadata_author_normalization_precondition_failed")
+            if not final_review:
+                current_data = cache.author_data(current_ids)
+                current_sorts = [current_data[author_id]["sort"] for author_id in current_ids]
+                if [canonical_author_sort(value) for value in current_names] != requested_author_sorts \
+                        or [canonical_author_sort(value) for value in current_sorts] != requested_author_sorts:
+                    raise ValueError("metadata_author_normalization_precondition_failed")
         cache.set_field(calibre_field, {book_id: value}, do_path_update=True)
         clear_metadata_caches(cache, field, book_id)
         if field == "authors" and requested_author_sorts is not None:

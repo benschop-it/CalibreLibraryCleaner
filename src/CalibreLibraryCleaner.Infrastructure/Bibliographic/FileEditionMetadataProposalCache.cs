@@ -34,8 +34,10 @@ internal sealed class FileEditionMetadataProposalCache(EditionMetadataProposalCa
                 ?
                 [
                     (EditionMetadataLookupQuery.PolicyVersion, query.Provider.Version),
+                    ("edition-metadata-query/1.5.0", query.Provider.Version),
                     ("edition-metadata-query/1.4.0", query.Provider.Version),
                     (EditionMetadataLookupQuery.PolicyVersion, "open-library-edition-search/1.1.0"),
+                    ("edition-metadata-query/1.5.0", "open-library-edition-search/1.1.0"),
                     ("edition-metadata-query/1.4.0", "open-library-edition-search/1.1.0"),
                     ("edition-metadata-query/1.3.0", "open-library-edition-search/1.1.0"),
                     ("edition-metadata-query/1.2.0", "open-library-edition-search/1.1.0"),
@@ -45,6 +47,7 @@ internal sealed class FileEditionMetadataProposalCache(EditionMetadataProposalCa
                 :
                 [
                     (EditionMetadataLookupQuery.PolicyVersion, query.Provider.Version),
+                    ("edition-metadata-query/1.5.0", query.Provider.Version),
                     ("edition-metadata-query/1.4.0", query.Provider.Version),
                 ];
             foreach ((string queryPolicy, string providerVersion) in identities.Distinct())
@@ -72,7 +75,9 @@ internal sealed class FileEditionMetadataProposalCache(EditionMetadataProposalCa
                     || document.RetrievedAtUtc < minimumRetrievedAtUtc)
                     continue;
                 bool legacy = queryPolicy != EditionMetadataLookupQuery.PolicyVersion;
-                if (legacy && (document.ProblemCode == "OPEN_LIBRARY.NO_COMPATIBLE_EDITIONS"
+                bool compatibleNegative = queryPolicy == "edition-metadata-query/1.4.0"
+                    && providerVersion == query.Provider.Version;
+                if (legacy && !compatibleNegative && (document.ProblemCode == "OPEN_LIBRARY.NO_COMPATIBLE_EDITIONS"
                     || query.Identifier is null && document.Status == EditionMetadataProposalStatus.NotFound))
                     continue;
                 EditionMetadataCandidate? candidate = Rehydrate(document.Candidate);
@@ -218,6 +223,7 @@ internal sealed class FileEditionMetadataProposalCache(EditionMetadataProposalCa
                     || document.ProviderId != provider.Id
                     || document.ProviderVersion != provider.Version
                     || document.QueryPolicyVersion != EditionMetadataLookupQuery.PolicyVersion
+                        && document.QueryPolicyVersion != "edition-metadata-query/1.5.0"
                         && document.QueryPolicyVersion != "edition-metadata-query/1.4.0"
                     || document.ProposalPolicyVersion != EditionMetadataProposal.PolicyVersion
                     || document.Status != EditionMetadataProposalStatus.Proposed

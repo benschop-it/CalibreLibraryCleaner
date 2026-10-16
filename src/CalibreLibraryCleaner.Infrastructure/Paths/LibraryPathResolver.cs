@@ -209,8 +209,6 @@ internal sealed class LibraryPathResolver : ILibraryPathResolver
     private static bool IsSafeFileStem(string value) =>
         !string.IsNullOrWhiteSpace(value)
         && value is not "." and not ".."
-        && !value.EndsWith(' ')
-        && !value.EndsWith('.')
         && !IsWindowsReservedName(value)
         && value.IndexOfAny(DirectorySeparators) < 0
         && value.IndexOfAny(InvalidFileNameCharacters) < 0;
@@ -229,7 +227,7 @@ internal sealed class LibraryPathResolver : ILibraryPathResolver
     {
         int dotIndex = value.IndexOf('.');
         string stem = dotIndex < 0 ? value : value[..dotIndex];
-        return WindowsReservedNames.Contains(stem);
+        return WindowsReservedNames.Contains(stem.TrimEnd(' '));
     }
 
     private static LibraryValidationOutcome Failure(

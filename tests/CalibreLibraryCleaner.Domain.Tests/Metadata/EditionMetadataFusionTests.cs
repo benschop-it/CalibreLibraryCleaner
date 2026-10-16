@@ -9,6 +9,32 @@ namespace CalibreLibraryCleaner.Domain.Tests.Metadata;
 
 public sealed class EditionMetadataFusionTests
 {
+    [Fact]
+    public void MixedCaseCandidateOutranksSlightlyHigherScoredAllCapsCandidate()
+    {
+        EditionMetadataProposal allCaps = Proposal(new(
+            "open-library", 1, "all-caps", "MET GEVOELENS VAN SYMPATHIE", ["FRANÇOISE SAGAN"],
+            null, null, null, 4_050, ["METADATA.EDITION.TITLE_EXACT", "METADATA.EDITION.AUTHOR_EXACT"]));
+        EditionMetadataProposal mixedCase = Proposal(new(
+            "google-books", 1, "mixed-case", "Met gevoelens van sympathie", ["Françoise Sagan"],
+            null, null, null, 4_000, ["METADATA.EDITION.TITLE_EXACT", "METADATA.EDITION.AUTHOR_EXACT"]));
+
+        FusedEditionMetadataProposal result = EditionMetadataFusionPolicy.Fuse([allCaps, mixedCase]);
+
+        result.Candidate!.EditionId.Should().Be("mixed-case");
+        result.PolicyVersion.Should().Be("edition-metadata-fusion/1.1.0");
+    }
+
+    [Fact]
+    public void SoleAllCapsCandidateRemainsAvailable()
+    {
+        EditionMetadataProposal allCaps = Proposal(new(
+            "open-library", 1, "all-caps", "MET GEVOELENS VAN SYMPATHIE", ["FRANÇOISE SAGAN"],
+            null, null, null, 4_000, ["METADATA.EDITION.TITLE_EXACT", "METADATA.EDITION.AUTHOR_EXACT"]));
+
+        EditionMetadataFusionPolicy.Fuse([allCaps]).Candidate.Should().NotBeNull();
+    }
+
     private static readonly JsonSerializerOptions FixtureJsonOptions = new()
     {
         PropertyNameCaseInsensitive = true,

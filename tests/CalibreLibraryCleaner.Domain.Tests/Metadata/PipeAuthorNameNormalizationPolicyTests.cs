@@ -11,6 +11,9 @@ public sealed class PipeAuthorNameNormalizationPolicyTests
     [InlineData("Woods| Stuart", "Stuart Woods", "Woods, Stuart")]
     [InlineData("Jong| Lou de", "Lou de Jong", "Jong, Lou de")]
     [InlineData("Adama van Scheltema| Carel Steven", "Carel Steven Adama van Scheltema", "Adama van Scheltema, Carel Steven")]
+    [InlineData("Kipling| Rudyard| 1865-1936", "Rudyard Kipling", "Kipling, Rudyard")]
+    [InlineData("Erickson| Carolly| 1943-", "Carolly Erickson", "Erickson, Carolly")]
+    [InlineData("Kipling| Rudyard|", "Rudyard Kipling", "Kipling, Rudyard")]
     public void OnePipePreservesExplicitFamilyAndGivenParts(
         string value,
         string displayName,
@@ -26,6 +29,9 @@ public sealed class PipeAuthorNameNormalizationPolicyTests
     [InlineData("(1940) One| Two| Buckle My Shoe")]
     [InlineData("Family|")]
     [InlineData("| Given")]
+    [InlineData("Davis| Richard| Jr.")]
+    [InlineData("Tolstoy| Leo| graf| 1828-1910")]
+    [InlineData("Family| Given| 19-20")]
     [InlineData("Firstname Lastname")]
     public void AmbiguousOrNonPipeNamesRemainUnchanged(string value)
     {
@@ -83,6 +89,28 @@ public sealed class PipeAuthorNameNormalizationPolicyTests
 
         displays.Should().Equal(expectedDisplay);
         sorts.Should().Equal(expectedSort);
+    }
+
+    [Theory]
+    [InlineData("Kipling| Rudyard| 1865-1936", "Kipling, Rudyard, 1865-1936")]
+    [InlineData("Erickson| Carolly| 1943-", "Erickson, Carolly, 1943-")]
+    [InlineData("Kipling| Rudyard|", "Kipling, Rudyard,")]
+    public void PipeDateSuffixRequiresEquivalentSort(
+        string name,
+        string sort)
+    {
+        PipeAuthorNameNormalizationPolicy.TryNormalizeBook(
+                [new(new(1), name, sort)],
+                out IReadOnlyList<string> displays,
+                out IReadOnlyList<string> sorts)
+            .Should().BeTrue();
+
+        displays.Should().Equal(name.StartsWith("Kipling", StringComparison.Ordinal)
+            ? "Rudyard Kipling"
+            : "Carolly Erickson");
+        sorts.Should().Equal(name.StartsWith("Kipling", StringComparison.Ordinal)
+            ? "Kipling, Rudyard"
+            : "Erickson, Carolly");
     }
 
     [Fact]

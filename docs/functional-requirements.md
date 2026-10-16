@@ -92,6 +92,10 @@ grids, Metadata review, and Final authors. Library format rows and EPUB/PDF
 assessment rows open their specific file. EPUB opens in Calibre's ebook viewer;
 PDF opens in the Windows default PDF application without requiring Calibre's
 viewer. Opening validates library containment and regular-file safety first.
+EPUB viewing uses an opaque bounded temporary copy outside the library and a
+dedicated viewer instance, so bookmarks/annotations cannot alter scanned managed
+bytes; the copy is deleted on viewer exit with bounded stale cleanup after abnormal
+termination.
 Group summaries and assessment findings are not book rows. Headers, empty grid
 space, and embedded controls do not launch files. Opening does not change review
 decisions beyond the existing single-click selection behavior.
@@ -227,8 +231,12 @@ repository and library. Plaintext is never reloaded for display.
 Deterministic provider fusion produces High confidence only for cross-provider shared
 ISBN agreement without conflicts; Medium for one exact ISBN or exact title+author
 without conflicts; Low for weaker or conflicting evidence; and Unavailable when no
-provider proposes an edition. High/Medium default selected and Low/Unavailable default
-unselected. Cross-provider missing fields require a shared validated ISBN; identical
+provider proposes an edition. High/Medium default selected only when the concrete
+merge is additive or a bounded all-caps-to-mixed-case improvement. Proposals that
+drop current authors, replace a same-type identifier, or replace populated title,
+publisher, date, language, or series facts default unchecked under Needs review.
+Low/Unavailable remain unchecked. Explicit Apply overrides this conservative default.
+Cross-provider missing fields require a shared validated ISBN; identical
 same-provider edition IDs may also complete a missing field. Provenance is retained
 per provider and per resulting field.
 
@@ -236,8 +244,11 @@ After Candidate cleanup, subject construction creates one proposal target for ev
 retained record. Candidate preparation, Unified review, persisted load, and projected
 state updates do not invoke edition providers. An explicit post-cleanup action runs
 provider resolution/fusion and prepares review subjects. The WPF review
-surface shows compact current metadata and a visually distinct proposed row with
-Apply, confidence, reasons, provenance, all supported fields, and cover availability.
+surface shows compact current metadata, proposed metadata, and Final merged metadata
+with Apply, confidence, reasons, provenance, all supported fields, and cover availability.
+The final column follows Apply and the exact execution field policy: identifiers merge
+by type, unmentioned identifiers remain, an existing cover wins, and unavailable
+optional proposal fields do not clear populated current values.
 Filters are All, Applied automatically, Needs review, and Unavailable.
 The review grid supports extended full-row selection for contiguous Shift ranges and
 disjoint Ctrl selections. Check selected, Uncheck selected, Check all, and Clear all
@@ -287,19 +298,21 @@ bounded, HTTPS-only, outside the library, and removed after the run.
 - Execute every non-author mutation before author metadata writes, checkpoint those
   completed operations, and isolate each author write in a one-operation worker chunk.
 - Choose one coherent best edition using validated ISBN, title/author/language,
-  edition compatibility, provider agreement, completeness, and cover availability.
+  edition compatibility, provider agreement, completeness, cover availability, and
+  a bounded preference for mixed-case over all-caps title/author display text.
 - Fill a missing field from another provider only when edition identity is proven.
 - Propose supported title, authors, ISBN/identifiers, publisher, publication date,
   language, series/index, and cover without replacing local-only fields.
-- Default High/Medium confidence proposals checked and Low proposals unchecked.
+- Default High/Medium proposals checked only for additive/casing-improvement merges;
+  require review for replacements of populated edition facts. Keep Low unchecked.
 - Compare proposals with current retained metadata before review and execution. Mark
   fully equal proposals Already applied, keep them unchecked/non-actionable, and
   schedule only fields whose resulting supported value differs.
 
 ### Review and coordination
 
-- Show current retained metadata and one visually distinct proposed row with Apply,
-  confidence/reasons, provenance, supported fields, and cover indication/preview.
+- Show current, proposed, and final merged metadata with Apply, confidence/reasons,
+  provenance, supported fields, and cover indication/preview.
 - Filter proposals by All, Applied automatically, Needs review, and Unavailable.
 - Keep Metadata and Expanded tabs read-only; Unified review remains the only
   duplicate-cleanup selection surface.

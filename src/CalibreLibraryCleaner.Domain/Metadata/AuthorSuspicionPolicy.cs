@@ -24,6 +24,7 @@ public static class AuthorSuspicionReasonCodes
     public const string MalformedSeparator = "AUTHOR.MALFORMED_SEPARATOR";
     public const string ConservativeNameOrder = "AUTHOR.CONSERVATIVE_NAME_ORDER";
     public const string DisplayTypography = "AUTHOR.DISPLAY_TYPOGRAPHY";
+    public const string PseudonymAnnotation = "AUTHOR.PSEUDONYM_ANNOTATION";
 }
 
 public sealed record AuthorSuspicionAssessment
@@ -53,7 +54,7 @@ public sealed record AuthorSuspicionAssessment
 
 public static class AuthorSuspicionPolicy
 {
-    public const string PolicyVersion = "author-suspicion/1.0.0";
+    public const string PolicyVersion = "author-suspicion/1.1.0";
 
     private static readonly HashSet<string> Placeholders = new(StringComparer.Ordinal)
     {
@@ -99,6 +100,8 @@ public static class AuthorSuspicionPolicy
                 reasons.Add(AuthorSuspicionReasonCodes.ParenthesizedNumber);
             if (HasMalformedSeparator(author))
                 reasons.Add(AuthorSuspicionReasonCodes.MalformedSeparator);
+            if (AuthorPseudonymAnnotationPolicy.ContainsMarker(author))
+                reasons.Add(AuthorSuspicionReasonCodes.PseudonymAnnotation);
 
             if (MetadataTextNormalizer.TryNormalizeTitle(title, out NormalizedTitle? normalizedTitle)
                 && MetadataTextNormalizer.TryNormalizeAuthorName(author, out NormalizedAuthorName? normalizedAuthor)

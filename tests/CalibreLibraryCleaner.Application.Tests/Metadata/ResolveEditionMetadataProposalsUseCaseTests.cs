@@ -155,6 +155,37 @@ public sealed class ResolveEditionMetadataProposalsUseCaseTests
     }
 
     [Fact]
+    public async Task FullyCachedGroupsCompleteBeforeAnyProviderRequestWithoutChangingResults()
+    {
+        IEditionMetadataProvider provider = A.Fake<IEditionMetadataProvider>();
+        A.CallTo(() => provider.Identity).Returns(ProviderIdentity);
+        List<EditionMetadataEnrichmentProgress> progress = [];
+        A.CallTo(() => provider.SearchAsync(A<EditionMetadataLookupQuery>._, A<CancellationToken>._))
+            .Invokes(() => progress.Should().Contain(value =>
+                value.CompletedQueries == 1 && value.CacheHits == 1 && value.ProviderRequests == 0))
+            .ReturnsLazily(call => Task.FromResult(Search(call.GetArgument<EditionMetadataLookupQuery>(0)!)));
+        IEditionMetadataProposalCache cache = A.Fake<IEditionMetadataProposalCache>();
+        A.CallTo(() => cache.TryReadAsync(
+                A<EditionMetadataLookupQuery>.That.Matches(value => value.Title == "Zulu Cached"),
+                A<DateTimeOffset>._,
+                A<CancellationToken>._))
+            .ReturnsLazily(call => Task.FromResult<EditionMetadataProposal?>(Proposal(
+                call.GetArgument<EditionMetadataLookupQuery>(0)!)));
+        ResolveEditionMetadataProposalsUseCase useCase = Create(provider, cache);
+
+        EditionMetadataProposalBatchResult result = (await useCase.ExecuteAsync(
+            [BookWithoutIdentifier(1, "Alpha Online"), BookWithoutIdentifier(2, "Zulu Cached")],
+            new InlineProgress(progress.Add), CancellationToken.None)).Providers.Single();
+
+        result.CompletedQueryCount.Should().Be(2);
+        result.CacheHits.Should().Be(1);
+        result.ProviderRequests.Should().Be(1);
+        result.Proposals.Keys.Should().BeEquivalentTo([new CalibreBookId(1), new CalibreBookId(2)]);
+        progress.Should().Contain(value => value.Detail == "Reusing compatible edition metadata cache entries."
+            && value.CompletedQueries == 1 && value.ProviderRequests == 0);
+    }
+
+    [Fact]
     public async Task RequestLimitStopsAtTrueProcessedCountInsteadOfJumpingToTotal()
     {
         IEditionMetadataProvider provider = A.Fake<IEditionMetadataProvider>();
@@ -337,6 +368,15 @@ public sealed class ResolveEditionMetadataProposalsUseCaseTests
         "Austen, Jane",
         [new(new(id), "Jane Austen", "Austen, Jane")],
         [new("isbn", isbn)],
+        [],
+        $"Author/Book ({id})");
+
+    private static CalibreBook BookWithoutIdentifier(long id, string title) => new(
+        new(id),
+        title,
+        "Austen, Jane",
+        [new(new(id), "Jane Austen", "Austen, Jane")],
+        [],
         [],
         $"Author/Book ({id})");
 

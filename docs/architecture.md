@@ -218,13 +218,15 @@ negative results for identical inputs and the unchanged provider version; it doe
 not reuse older-provider extraction failures or uncertain 1.5 text misses. This
 keeps ordinary cached misses warm without guessing across changed validation rules.
 
-Domain fusion now chooses one deterministic primary edition using validated ISBN,
+Domain fusion policy `edition-metadata-fusion/1.1.0` chooses one deterministic primary edition using validated ISBN,
 title/author/language compatibility, provider support, publisher/date/series
-compatibility, provider match score, and completeness. Cross-provider missing fields
+compatibility, provider match score, completeness, and a bounded all-caps display
+penalty. It prefers mixed-case candidates but never invents capitalization or removes
+a sole valid all-caps candidate. Cross-provider missing fields
 are filled only for a shared validated ISBN; same-provider completion additionally
 accepts the identical edition ID. Conflicting provider facts lower confidence. Every
 fused result retains provider identities/versions, retrieval times, proposals, field
-sources, reasons, and `edition-metadata-fusion/1.0.0` policy identity.
+sources, reasons, and the fusion policy identity.
 
 Mutation orchestration places author metadata writes after every non-author operation
 and sends each author write as a one-operation worker chunk. This preserves fail-closed
@@ -238,11 +240,17 @@ providers. The user explicitly starts post-cleanup provider resolution; compatib
 Apply overrides restore only for matching subject, policy, provider/version/edition,
 generation, and revision identities.
 
+Application reconciles confidence defaults against the current retained book. Only
+additive or bounded casing-improvement merges remain automatic; destructive field
+differences become unchecked Needs review rows. Explicit Apply is persisted relative
+to that book-aware default. Domain owns one merge preview used by WPF and the same
+applicable-field policy consumed by execution.
+
 Infrastructure persists only bounded Apply overrides in an atomic path-private file;
 no proposal fields, local metadata, provider payloads, API keys, or library paths are
-stored. WPF presents one recycling/virtualized subject grid with compact current
-metadata and a distinct proposed row, confidence/reasons/provenance, Apply, four
-filters, and current/proposed cover availability/reference text.
+stored. WPF presents one recycling/virtualized subject grid with current, proposed,
+and final merged details, confidence/reasons/provenance, Apply, review filters, and
+cover availability/reference text.
 
 Candidate cleanup first transfers/removes reviewed duplicate records and advances to
 a post-cleanup checkpoint. A separate confirmed metadata-only worker run accepts the

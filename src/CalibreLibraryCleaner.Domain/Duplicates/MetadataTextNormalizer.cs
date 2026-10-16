@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Text;
+using CalibreLibraryCleaner.Domain.Metadata;
 
 namespace CalibreLibraryCleaner.Domain.Duplicates;
 
@@ -14,7 +15,7 @@ public static class MetadataTextNormalizer
 
     public static bool TryNormalizeAuthorName(string? value, out NormalizedAuthorName? normalizedAuthorName)
     {
-        string? normalized = Normalize(value);
+        string? normalized = Normalize(value is null ? null : AuthorPseudonymAnnotationPolicy.ForMatching(value));
         normalizedAuthorName = normalized is null ? null : new NormalizedAuthorName(normalized);
         return normalizedAuthorName is not null;
     }

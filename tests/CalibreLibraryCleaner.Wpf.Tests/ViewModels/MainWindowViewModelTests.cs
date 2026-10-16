@@ -3,9 +3,12 @@ using System.Collections.Specialized;
 using System.IO;
 using CalibreLibraryCleaner.Application.Abstractions;
 using CalibreLibraryCleaner.Application.Assessments;
+using CalibreLibraryCleaner.Application.Assessments.Pdf;
 using CalibreLibraryCleaner.Application.Executions;
 using CalibreLibraryCleaner.Application.Libraries;
 using CalibreLibraryCleaner.Application.Metadata;
+using CalibreLibraryCleaner.Domain.Assessments;
+using CalibreLibraryCleaner.Domain.Findings;
 using CalibreLibraryCleaner.Domain.Libraries;
 using CalibreLibraryCleaner.Domain.Matching;
 using CalibreLibraryCleaner.Domain.Metadata;
@@ -24,6 +27,124 @@ namespace CalibreLibraryCleaner.Wpf.Tests.ViewModels;
 
 public sealed class MainWindowViewModelTests
 {
+    [Theory]
+    [InlineData("Library", true)]
+    [InlineData("Library", false)]
+    [InlineData("Metadata", true)]
+    [InlineData("Metadata", false)]
+    [InlineData("FinalAuthors", true)]
+    [InlineData("FinalAuthors", false)]
+    public async Task BookRowsPreferPresentEpubThenPdf(string rowKind, bool epubPresent)
+    {
+        BookFormat[] formats =
+        [
+            ViewerFormat("MOBI"),
+            ViewerFormat("PDF"),
+            ViewerFormat("EPUB", epubPresent ? FormatFileStatus.Present : FormatFileStatus.Missing),
+        ];
+        (MainWindowViewModel viewModel, IEbookViewerLauncher viewer) = await LoadViewerSnapshotAsync(formats);
+        using (viewModel)
+        {
+            object row = rowKind switch
+            {
+                "Metadata" => new MetadataReviewSubjectRowViewModel(
+                    new(new(new("metadata-review/book/1"), null, [new(1)], new(1),
+                        new(FusedEditionMetadataConfidence.Unavailable, null, null, [], [],
+                            ["METADATA.FUSION.CONFIDENCE_UNAVAILABLE"])),
+                        false, false, null, false),
+                    new(new(1), "Book", "Author", [], [], formats, "Author"), (_, _) => Task.CompletedTask),
+                "FinalAuthors" => new FinalAuthorReviewSubjectRowViewModel(
+                    new(new(1), "Book", [], [],
+                        new(AuthorResolutionStatus.Unresolved, CurrentAuthorProtection.Unverified,
+                            [], [], AuthorProposalSource.None, [], selectedByDefault: false),
+                        FinalAuthorEvidenceCoverage.None, false, [], false),
+                    (_, _) => Task.CompletedTask),
+                _ => viewModel.Books[0],
+            };
+            string expectedFormat = epubPresent ? "EPUB" : "PDF";
+            viewModel.OpenBookRowCommand.CanExecute(row).Should().BeTrue();
+
+            await viewModel.OpenBookRowCommand.ExecuteAsync(row);
+
+            A.CallTo(() => viewer.LaunchAsync(
+                A<EbookViewerLaunchRequest>.That.Matches(request => request.LibraryRoot == "C:\\Books"
+                    && request.ExpectedRelativePath == $"Author/Book.{expectedFormat.ToLowerInvariant()}"),
+                A<CancellationToken>._)).MustHaveHappenedOnceExactly();
+            viewModel.StatusMessage.Should().Contain(epubPresent ? "Calibre ebook viewer" : "default PDF viewer");
+            if (row is MetadataReviewSubjectRowViewModel metadata) metadata.Apply.Should().BeFalse();
+            if (row is FinalAuthorReviewSubjectRowViewModel authors) authors.Apply.Should().BeFalse();
+        }
+    }
+
+    [Fact]
+    public async Task BookWithoutPresentEpubOrPdfReportsUnavailableWithoutLaunching()
+    {
+        (MainWindowViewModel viewModel, IEbookViewerLauncher viewer) = await LoadViewerSnapshotAsync(
+        [
+            ViewerFormat("MOBI"),
+            ViewerFormat("EPUB", FormatFileStatus.Missing),
+            ViewerFormat("PDF", FormatFileStatus.Inaccessible),
+        ]);
+        using (viewModel)
+        {
+            await viewModel.OpenBookRowCommand.ExecuteAsync(viewModel.Books[0]);
+
+            viewModel.ErrorMessage.Should().Contain("no present EPUB or PDF");
+            A.CallTo(() => viewer.LaunchAsync(A<EbookViewerLaunchRequest>._, A<CancellationToken>._))
+                .MustNotHaveHappened();
+        }
+    }
+
+    [Fact]
+    public async Task ExactFormatAndAssessmentRowsOpenTheirOwnPathRatherThanPreferredBookFormat()
+    {
+        (MainWindowViewModel viewModel, IEbookViewerLauncher viewer) = await LoadViewerSnapshotAsync(
+            [ViewerFormat("EPUB")]);
+        using (viewModel)
+        {
+            FormatRowViewModel format = new(ViewerFormat("PDF", relativePath: "Author/Other.pdf"));
+            EpubAssessmentRowViewModel epub = new(new(
+                new(1), "EPUB", "Author/Assessed.epub", null, AssessmentStatus.Unassessed, null,
+                new("epub-inspector/1.0.0"), new("epub-quality/1.0.0"), new(false, false),
+                [new("EPUB.PACKAGE", FindingSeverity.Warning, 0, "Package unavailable.")]), null);
+            PdfAssessmentRowViewModel pdf = new(
+                new PdfAssessmentEngine(new PdfClassificationPolicy()).Assess(
+                    new(1), "Author/Assessed.pdf", null,
+                    PdfInspectionResult.Failed(new(1), "Author/Assessed.pdf", PdfInspectionProblemCode.PasswordRequired,
+                        PdfOpenStatus.Unreadable, PdfEncryptionStatus.PasswordRequired)), null);
+
+            foreach (object row in new object[] { format, epub, pdf })
+            {
+                viewModel.OpenBookRowCommand.CanExecute(row).Should().BeTrue();
+                await viewModel.OpenBookRowCommand.ExecuteAsync(row);
+            }
+
+            Fake.GetCalls(viewer).Select(call => ((EbookViewerLaunchRequest)call.Arguments[0]!).ExpectedRelativePath)
+                .Should().Equal("Author/Other.pdf", "Author/Assessed.epub", "Author/Assessed.pdf");
+            viewModel.StatusMessage.Should().Contain("default PDF viewer");
+        }
+    }
+
+    [Fact]
+    public void OpenBookRowIsDisabledDuringSharedOperationsAndForNonBookRows()
+    {
+        LibraryOperationCoordinator coordinator = new();
+        using MainWindowViewModel viewModel = CreateViewModel(
+            A.Fake<ILibraryFolderPicker>(), out _, out _, out _,
+            ebookViewer: A.Fake<IEbookViewerLauncher>(), operationCoordinator: coordinator);
+        FormatRowViewModel row = new(ViewerFormat("PDF"));
+        int notifications = 0;
+        viewModel.OpenBookRowCommand.CanExecuteChanged += (_, _) => notifications++;
+
+        viewModel.OpenBookRowCommand.CanExecute(row).Should().BeTrue();
+        viewModel.OpenBookRowCommand.CanExecute(null).Should().BeFalse();
+        viewModel.OpenBookRowCommand.CanExecute(new object()).Should().BeFalse();
+        using (coordinator.TryBegin())
+            viewModel.OpenBookRowCommand.CanExecute(row).Should().BeFalse();
+        viewModel.OpenBookRowCommand.CanExecute(row).Should().BeTrue();
+        notifications.Should().Be(2);
+    }
+
     [Fact]
     public void OperationProgressIncludesCompletedAndTotalCounts()
     {
@@ -1375,6 +1496,36 @@ public sealed class MainWindowViewModelTests
             inspectEmbeddedAuthorMetadata: embeddedAuthors,
             inspectFrontMatterAuthors: frontMatterAuthors,
             logger: logger);
+    }
+
+    private static BookFormat ViewerFormat(
+        string format,
+        FormatFileStatus status = FormatFileStatus.Present,
+        string? relativePath = null) => new(
+        format, "Book", relativePath ?? $"Author/Book.{format.ToLowerInvariant()}", status,
+        status == FormatFileStatus.Present ? new(100, new(new string('a', 64))) : null,
+        status == FormatFileStatus.Present ? new(100, DateTimeOffset.UnixEpoch, DateTimeOffset.UnixEpoch, 0) : null);
+
+    private static async Task<(MainWindowViewModel ViewModel, IEbookViewerLauncher Viewer)> LoadViewerSnapshotAsync(
+        IReadOnlyList<BookFormat> formats)
+    {
+        const string libraryRoot = "C:\\Books";
+        ILibrarySnapshotStore store = A.Fake<ILibrarySnapshotStore>();
+        IEbookViewerLauncher viewer = A.Fake<IEbookViewerLauncher>();
+        LibrarySnapshot baseline = Snapshot(libraryRoot);
+        LibrarySnapshot snapshot = new(baseline.Identity, baseline.ScannedAt,
+            [new(new(1), "Book", "Author", [], [], formats, "Author")], []);
+        A.CallTo(() => store.ListAsync(A<CancellationToken>._)).Returns([new(libraryRoot, snapshot.ScannedAt)]);
+        A.CallTo(() => store.ReadAsync(libraryRoot, A<CancellationToken>._)).Returns(snapshot);
+        A.CallTo(() => viewer.LaunchAsync(A<EbookViewerLaunchRequest>._, A<CancellationToken>._))
+            .Returns(EbookViewerLaunchResult.Success());
+        MainWindowViewModel viewModel = CreateViewModel(
+            A.Fake<ILibraryFolderPicker>(), out _, out _, out _, new(store), ebookViewer: viewer);
+        await viewModel.InitializeAsync();
+        viewModel.SelectedPersistedLibraryPath = libraryRoot;
+        await viewModel.LoadPersistedSnapshotCommand.ExecuteAsync(null);
+        viewModel.ErrorMessage.Should().BeEmpty();
+        return (viewModel, viewer);
     }
 
     private static PrepareMetadataReviewUseCase CreateMetadataReviewUseCase(

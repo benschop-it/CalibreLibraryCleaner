@@ -17,6 +17,25 @@ public sealed class PrepareFinalAuthorReviewUseCaseTests
     private static readonly FormatFileFingerprint PdfFingerprint = Fingerprint('b', 20);
 
     [Fact]
+    public void PseudonymAnnotationsAppearInExistingFinalReviewWithoutInspectionOrDefaultApply()
+    {
+        CalibreBook annotated = Book(1, "Morgan Vale (pseud. van Alex Writer)");
+        CalibreBook ordinary = Book(2, "Reliable Writer");
+
+        FinalAuthorReviewWorkspace workspace = PrepareFinalAuthorReviewUseCase.Execute(State([annotated, ordinary]));
+
+        FinalAuthorReviewSubject subject = workspace.Subjects.Should().ContainSingle().Subject;
+        subject.Resolution.ProposalSource.Should().Be(AuthorProposalSource.PseudonymAnnotationRemoval);
+        subject.Resolution.ProposedDisplayNames.Should().Equal("Morgan Vale");
+        subject.Apply.Should().BeFalse();
+        subject.CanApply.Should().BeTrue();
+        subject.NeedsInspection.Should().BeFalse();
+        workspace.InspectionDemandCount.Should().Be(0);
+        workspace.KnownCount.Should().Be(1);
+        annotated.Authors.Single().Name.Should().Be("Morgan Vale (pseud. van Alex Writer)");
+    }
+
+    [Fact]
     public void SuspectReviewDoesNotRequireLegacyNormalizationCandidates()
     {
         LibraryState state = State(

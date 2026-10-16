@@ -48,8 +48,10 @@ public sealed class MetadataReviewSubjectRowViewModel : ObservableObject
         : _reviewed.Subject.Proposal.Confidence.ToString();
     public bool IsAutomaticConfidence => _reviewed.Subject.Proposal.Confidence
         is FusedEditionMetadataConfidence.High or FusedEditionMetadataConfidence.Medium;
-    public bool NeedsReview => !IsAlreadyApplied
-        && _reviewed.Subject.Proposal.Confidence == FusedEditionMetadataConfidence.Low;
+    public bool IsAppliedAutomatically => IsAutomaticConfidence && Apply
+        && !IsOverride && !_reviewed.RequiresReview;
+    public bool NeedsReview => !IsAlreadyApplied && (_reviewed.RequiresReview
+        || _reviewed.Subject.Proposal.Confidence == FusedEditionMetadataConfidence.Low);
     public bool IsUnavailable => _reviewed.Subject.Proposal.Confidence == FusedEditionMetadataConfidence.Unavailable;
     public bool IsAlreadyApplied => _reviewed.IsAlreadyApplied;
     public bool CanApply => !IsUnavailable && !IsAlreadyApplied;
@@ -61,7 +63,20 @@ public sealed class MetadataReviewSubjectRowViewModel : ObservableObject
     public bool Apply
     {
         get => _apply;
-        set => SetProperty(ref _apply, value);
+        set
+        {
+            if (!SetProperty(ref _apply, value)) return;
+            OnPropertyChanged(nameof(IsAppliedAutomatically));
+            OnPropertyChanged(nameof(NeedsReview));
+            OnPropertyChanged(nameof(FinalTitle));
+            OnPropertyChanged(nameof(FinalAuthors));
+            OnPropertyChanged(nameof(FinalIdentifiers));
+            OnPropertyChanged(nameof(FinalPublisher));
+            OnPropertyChanged(nameof(FinalPublicationDate));
+            OnPropertyChanged(nameof(FinalLanguages));
+            OnPropertyChanged(nameof(FinalSeries));
+            OnPropertyChanged(nameof(FinalCover));
+        }
     }
 
     public IAsyncRelayCommand PersistApplyCommand { get; }
@@ -69,7 +84,7 @@ public sealed class MetadataReviewSubjectRowViewModel : ObservableObject
     public bool MatchesFilter(MetadataReviewFilterMode mode) => mode switch
     {
         MetadataReviewFilterMode.All => true,
-        MetadataReviewFilterMode.AppliedAutomatically => IsAutomaticConfidence && Apply,
+        MetadataReviewFilterMode.AppliedAutomatically => IsAppliedAutomatically,
         MetadataReviewFilterMode.NeedsReview => NeedsReview,
         MetadataReviewFilterMode.Unavailable => IsUnavailable,
         MetadataReviewFilterMode.AlreadyApplied => IsAlreadyApplied,
@@ -99,7 +114,19 @@ public sealed class MetadataReviewSubjectRowViewModel : ObservableObject
         ? "None"
         : $"Available ({Candidate.Cover.SourceId})";
 
+    public string FinalTitle => MergePreview.Title;
+    public string FinalAuthors => Join(MergePreview.Authors);
+    public string FinalIdentifiers => Join(MergePreview.Identifiers);
+    public string FinalPublisher => Value(MergePreview.Publisher);
+    public string FinalPublicationDate => MergePreview.PublicationDate?.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)
+        ?? "Unknown";
+    public string FinalLanguages => Join(MergePreview.Languages);
+    public string FinalSeries => Series(MergePreview.Series, MergePreview.SeriesIndex);
+    public string FinalCover => MergePreview.HasCover ? "Available" : "None";
+
     private EditionMetadataCandidate? Candidate => _reviewed.Subject.Proposal.Candidate;
+    private EditionMetadataMergePreview MergePreview => EditionMetadataApplicationPolicy.Preview(
+        _currentBook, Candidate, Apply);
 
     public void Update(ReviewedMetadataSubject reviewed, CalibreBook currentBook)
     {

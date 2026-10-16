@@ -218,7 +218,8 @@ public static class PrepareFinalAuthorReviewUseCase
             bool normalizationCandidate = PipeAuthorNameNormalizationPolicy.TryNormalizeBook(
                     book.Authors, out _, out _)
                 || AuthorDisplayNameHarmonizationPolicy.TryHarmonizeBook(
-                    book.Authors, out _, out _);
+                    book.Authors, out _, out _)
+                || AuthorPseudonymAnnotationPolicy.TryNormalizeBook(book.Authors, out _);
             if (suspicion.Status == AuthorResolutionStatus.Known && !normalizationCandidate)
             {
                 knownCount++;

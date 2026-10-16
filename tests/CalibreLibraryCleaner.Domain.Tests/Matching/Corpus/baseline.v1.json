@@ -4,8 +4,8 @@
   "calibrationDigest": "b405b8ad9d2f917041baa49003954b0f090c7ff2dae814a94c06e1f4e4c8ceb7",
   "holdoutDigest": "c99b3f6eb9914b1ae824f8019ea94cba5f360b1669ec8ce6abc8060f1e409315",
   "policies": {
-    "exactMetadata": "exact-metadata/1.1.0",
-    "matching": "work-language-matching/1.4.0",
+    "exactMetadata": "exact-metadata/1.2.0",
+    "matching": "work-language-matching/1.5.0",
     "unified": "unified-candidates/1.0.0",
     "keeper": "expanded-candidate-keeper/1.0.0"
   },
