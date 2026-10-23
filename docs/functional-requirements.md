@@ -369,6 +369,20 @@ bounded, HTTPS-only, outside the library, and removed after the run.
   `(record ID)` paths, registered basenames, format availability/count, unchanged
   fingerprints/bytes, and preserved metadata/local fields. No-op metadata tricks,
   direct renames, retries, or fallback engines are permitted.
+- After final author and managed-name cleanup succeeds, prepare a final reviewed
+  `Unresolvable` disposition. Default unresolved, conflicting, exhausted strong-
+  suspect, and exact `Unknown`/`Unkown`/`User` label records checked regardless of
+  label provenance; permit explicit add-by-record-ID and user unchecking.
+- Derive the destination as the fixed physical sibling
+  `<source name> - Unresolvable`. Create it through the supported Calibre API when
+  absent or bind/reuse its exact UUID when present. Never reinitialize, merge, or
+  overwrite existing records. Missing or incompatible custom-column schemas in an
+  existing destination are blocking.
+- The fixed worker copies all checked records with duplicate creation enabled,
+  verifies ordinary/local/custom metadata, derived composites, per-author sorts,
+  covers, extra files, formats, sizes, and SHA-256 values, and only then deletes
+  verified source records. Any failed or ambiguous copy/delete stops and requires
+  Rescan; no fallback, retry, rollback, or inferred successful prefix is allowed.
 
 ## Explicit non-goals
 

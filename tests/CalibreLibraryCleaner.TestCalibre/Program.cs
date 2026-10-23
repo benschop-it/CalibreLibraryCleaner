@@ -6,20 +6,29 @@ Control control = File.Exists(controlPath)
     ? JsonSerializer.Deserialize<Control>(File.ReadAllText(controlPath)) ?? new()
     : new();
 string version = control.Version;
-if (values is ["-e", _, "--", _, string libraryUuid])
+if (values is ["-e", _, "--", _, string libraryUuid, string quarantineRoot, string expectedQuarantineUuid])
 {
     IReadOnlyList<string> capabilities = new List<string>
     {
         "setMetadata", "refreshManagedName", "transferFormat", "removeFormat", "removeRecord",
+        "copyRecordToQuarantine", "removeRecordWithContent",
     };
     if (!string.IsNullOrWhiteSpace(control.LogPath))
         File.AppendAllText(control.LogPath, JsonSerializer.Serialize(values) + Environment.NewLine);
     WriteWorkerMessage(new
     {
-        protocolVersion = "calibre-mutation-worker-protocol/1.3",
+        protocolVersion = "calibre-mutation-worker-protocol/1.4",
         kind = "ready",
         libraryUuid,
         capabilities,
+        quarantineLibraryUuid = string.IsNullOrEmpty(quarantineRoot)
+            ? null
+            : string.IsNullOrEmpty(expectedQuarantineUuid)
+                ? "test-quarantine-uuid"
+                : expectedQuarantineUuid,
+        quarantineLibraryExisted = string.IsNullOrEmpty(quarantineRoot)
+            ? (bool?)null
+            : Directory.Exists(quarantineRoot),
     });
     string[] verifiedCoverValues = ["true"];
     string? line;
@@ -32,7 +41,7 @@ if (values is ["-e", _, "--", _, string libraryUuid])
         {
             WriteWorkerMessage(new
             {
-                protocolVersion = "calibre-mutation-worker-protocol/1.3",
+                protocolVersion = "calibre-mutation-worker-protocol/1.4",
                 kind = "stopped",
                 mutationStarted = false,
             });
@@ -41,7 +50,7 @@ if (values is ["-e", _, "--", _, string libraryUuid])
         JsonElement operations = root.GetProperty("operations");
         WriteWorkerMessage(new
         {
-            protocolVersion = "calibre-mutation-worker-protocol/1.3",
+            protocolVersion = "calibre-mutation-worker-protocol/1.4",
             kind = "chunkResult",
             chunkId = root.GetProperty("chunkId").GetString(),
             mutationStarted = true,
@@ -70,7 +79,9 @@ if (values is ["-e", _, "--", _, string libraryUuid])
                     ? "Verified/Managed/Path"
                     : operation.GetProperty("kind").GetString() == "refreshManagedName"
                         ? $"Verified Author/Verified Title ({operation.GetProperty("recordId").GetInt64()})"
-                        : null,
+                        : operation.GetProperty("kind").GetString() == "copyRecordToQuarantine"
+                            ? $"Copied Author/Copied Title ({operation.GetProperty("recordId").GetInt64() + 1000})"
+                            : null,
                 verifiedAuthorSort = operation.GetProperty("kind").GetString() == "setMetadata"
                     && !operation.GetProperty("operationId").GetString()!.StartsWith(
                         "skip-unchanged", StringComparison.Ordinal)
@@ -88,11 +99,23 @@ if (values is ["-e", _, "--", _, string libraryUuid])
                         {
                             format = "EPUB",
                             storedFileName = "Verified Title - Verified Author.epub",
-                            sizeInBytes = 10,
+                            sizeInBytes = 10L,
                             sha256 = new string('a', 64),
                         },
                     }
-                    : null,
+                    : operation.GetProperty("kind").GetString() == "copyRecordToQuarantine"
+                        ? operation.GetProperty("quarantineFormats").EnumerateArray().Select(format => new
+                        {
+                            format = format.GetProperty("format").GetString()!,
+                            storedFileName = Path.GetFileName(
+                                format.GetProperty("expectedRelativePath").GetString()!)!,
+                            sizeInBytes = format.GetProperty("expectedSizeInBytes").GetInt64(),
+                            sha256 = format.GetProperty("expectedSha256").GetString()!,
+                        }).ToArray()
+                        : null,
+                quarantineRecordId = operation.GetProperty("kind").GetString() == "copyRecordToQuarantine"
+                    ? operation.GetProperty("recordId").GetInt64() + 1000
+                    : (long?)null,
             }).ToArray(),
         });
     }

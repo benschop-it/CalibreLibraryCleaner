@@ -134,6 +134,21 @@ bytes, format/record counts, and preserved metadata/local fields. Any mismatch i
 ambiguous mutation: stop immediately and require Rescan. Internal storage and
 unregistered files are neither adopted nor moved.
 
+Final quarantine is available only after that author/managed-name mutation succeeds.
+Its destination is the fixed same-parent sibling `<source name> - Unresolvable` and
+must stay within Calibre's supported path bound. An existing destination is inspected
+read-only, bound by UUID, backed up externally, and never reinitialized. Its existing
+records and schema are preserved; equivalent metadata creates a separate duplicate
+record. Missing or incompatible custom columns stop before source deletion.
+
+The worker copies and exactly verifies all selected records before deleting any
+source. Verification covers ordinary and local metadata, writable custom values,
+derived composites, per-author sorts, covers, extra files, and exact format hashes.
+Source deletion is then one record per worker chunk and projects only a verified
+`RemoveRecordWithContentLibraryStateDelta`. A copy failure leaves every source record
+untouched. A later delete failure may leave a verified deleted prefix and marks state
+uncertain; explicit Rescan remains mandatory.
+
 ## Failure handling
 
 Preflight or worker-start failure stops before mutation.

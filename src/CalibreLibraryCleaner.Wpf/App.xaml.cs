@@ -97,6 +97,9 @@ public partial class App : System.Windows.Application
         builder.Services.AddSingleton<ExecuteUnifiedCandidateCleanupUseCase>();
         builder.Services.AddSingleton<IUnifiedCandidateCleanupExecutor>(serviceProvider =>
             serviceProvider.GetRequiredService<ExecuteUnifiedCandidateCleanupUseCase>());
+        builder.Services.AddSingleton<ExecuteQuarantineCleanupUseCase>();
+        builder.Services.AddSingleton<IQuarantineCleanupExecutor>(serviceProvider =>
+            serviceProvider.GetRequiredService<ExecuteQuarantineCleanupUseCase>());
         builder.Services.AddSingleton(new LibraryAnalysisOptions());
         builder.Services.AddSingleton<ILibraryFolderPicker, OpenFolderDialogLibraryFolderPicker>();
         builder.Services.AddSingleton<IRecommendationExportFilePicker, SaveFileDialogRecommendationExportFilePicker>();
@@ -106,6 +109,8 @@ public partial class App : System.Windows.Application
             MessageBoxUnifiedCandidateCleanupConfirmationService>();
         builder.Services.AddSingleton<IMetadataMutationConfirmationService,
             MessageBoxMetadataMutationConfirmationService>();
+        builder.Services.AddSingleton<IQuarantineCleanupConfirmationService,
+            MessageBoxQuarantineCleanupConfirmationService>();
         builder.Services.AddSingleton<LibraryOperationCoordinator>();
         builder.Services.AddTransient<OnlineMetadataSettingsViewModel>();
         builder.Services.AddTransient<OnlineMetadataSettingsWindow>();

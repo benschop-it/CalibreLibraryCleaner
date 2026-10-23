@@ -8,11 +8,14 @@ from datetime import datetime
 from decimal import Decimal, InvalidOperation
 
 
-PROTOCOL_VERSION = "calibre-mutation-worker-protocol/1.3"
+PROTOCOL_VERSION = "calibre-mutation-worker-protocol/1.4"
 MAXIMUM_MESSAGE_BYTES = 1048576
 MAXIMUM_OPERATIONS = 100
-CAPABILITIES = ["setMetadata", "refreshManagedName", "transferFormat", "removeFormat", "removeRecord"]
+CAPABILITIES = ["setMetadata", "refreshManagedName", "transferFormat", "removeFormat", "removeRecord",
+                "copyRecordToQuarantine", "removeRecordWithContent"]
 LIBRARY_ROOT = ""
+QUARANTINE_ROOT = ""
+COPIED_TO_QUARANTINE = {}
 WORKER_TEMP_DIRECTORY = os.environ["CLC_WORKER_TEMP_DIRECTORY"]
 COVER_DIRECTORY = os.environ.get("CLC_WORKER_COVER_DIRECTORY", "")
 MAXIMUM_COVER_BYTES = 524288
@@ -52,7 +55,7 @@ def unique_object(pairs):
 
 
 def operation_result(operation, success, failure_code=None, metadata=None, managed_name=None,
-                     skipped=False, skip_code=None):
+                     skipped=False, skip_code=None, quarantine_record_id=None):
     result = {
         "operationId": operation["operationId"],
         "kind": operation["kind"],
@@ -70,6 +73,8 @@ def operation_result(operation, success, failure_code=None, metadata=None, manag
     if managed_name is not None:
         result["verifiedManagedPath"] = managed_name["managedPath"]
         result["verifiedFormats"] = managed_name["formats"]
+    if quarantine_record_id is not None:
+        result["quarantineRecordId"] = quarantine_record_id
     if skip_code is not None:
         result["skipCode"] = skip_code
     return result
@@ -79,7 +84,8 @@ def validate_operation(operation):
     required = {"operationId", "kind", "recordId", "canonicalFormat", "targetRecordId",
                 "expectedSizeInBytes", "expectedSha256", "metadataField", "metadataValues",
                 "metadataAuthorSortValues", "metadataSource", "stagedCoverFileName", "stagedCoverSizeInBytes",
-                "stagedCoverSha256"}
+                "stagedCoverSha256", "quarantineTitle", "quarantineAuthors",
+                "quarantineAuthorSorts", "quarantineFormats"}
     if not isinstance(operation, dict) or set(operation) != required:
         raise ValueError("operation_invalid")
     if not isinstance(operation["operationId"], str) or not operation["operationId"] \
@@ -92,6 +98,8 @@ def validate_operation(operation):
         raise ValueError("record_id_invalid")
     metadata_names = ("metadataField", "metadataValues", "metadataAuthorSortValues", "metadataSource",
                       "stagedCoverFileName", "stagedCoverSizeInBytes", "stagedCoverSha256")
+    quarantine_names = ("quarantineTitle", "quarantineAuthors", "quarantineAuthorSorts",
+                        "quarantineFormats")
     if kind == "setMetadata":
         if any(operation[name] is not None for name in
                ("canonicalFormat", "targetRecordId", "expectedSizeInBytes", "expectedSha256")):
@@ -104,7 +112,18 @@ def validate_operation(operation):
             raise ValueError("refresh_managed_name_invalid")
         if any(operation[name] is not None for name in metadata_names):
             raise ValueError("refresh_managed_name_invalid")
+        if any(operation[name] is not None for name in quarantine_names):
+            raise ValueError("refresh_managed_name_invalid")
         return
+    if kind in {"copyRecordToQuarantine", "removeRecordWithContent"}:
+        if any(operation[name] is not None for name in
+               ("canonicalFormat", "targetRecordId", "expectedSizeInBytes", "expectedSha256")) \
+                or any(operation[name] is not None for name in metadata_names):
+            raise ValueError("quarantine_operation_invalid")
+        validate_quarantine_expectation(operation)
+        return
+    if any(operation[name] is not None for name in quarantine_names):
+        raise ValueError("quarantine_operation_invalid")
     if any(operation[name] is not None for name in metadata_names):
         raise ValueError("metadata_operation_invalid")
     if kind == "removeRecord":
@@ -129,6 +148,39 @@ def validate_operation(operation):
     elif any(operation[name] is not None for name in
              ("targetRecordId", "expectedSizeInBytes", "expectedSha256")):
         raise ValueError("remove_format_invalid")
+
+
+def validate_quarantine_expectation(operation):
+    title = operation["quarantineTitle"]
+    authors = operation["quarantineAuthors"]
+    author_sorts = operation["quarantineAuthorSorts"]
+    formats = operation["quarantineFormats"]
+    if not isinstance(title, str) or not title or len(title) > 2048 \
+            or any(ord(character) < 32 for character in title) \
+            or not isinstance(authors, list) or not 1 <= len(authors) <= 32 \
+            or not isinstance(author_sorts, list) or len(author_sorts) != len(authors) \
+            or any(not isinstance(value, str) or not value or len(value) > 512
+                   or any(ord(character) < 32 for character in value)
+                   for value in authors + author_sorts) \
+            or not isinstance(formats, list) or len(formats) > 32:
+        raise ValueError("quarantine_expectation_invalid")
+    seen = set()
+    for value in formats:
+        if not isinstance(value, dict) or set(value) != {
+                "format", "expectedRelativePath", "expectedSizeInBytes", "expectedSha256"}:
+            raise ValueError("quarantine_format_invalid")
+        fmt = value["format"]
+        path = value["expectedRelativePath"]
+        size = value["expectedSizeInBytes"]
+        digest = value["expectedSha256"]
+        if not isinstance(fmt, str) or not fmt or len(fmt) > 16 or not fmt.isascii() \
+                or not fmt.isalnum() or fmt in seen or not isinstance(path, str) or not path \
+                or len(path) > 1024 or any(ord(character) < 32 for character in path) \
+                or not isinstance(size, int) or size < 0 or not isinstance(digest, str) \
+                or len(digest) != 64 \
+                or any(character not in "0123456789abcdef" for character in digest):
+            raise ValueError("quarantine_format_invalid")
+        seen.add(fmt)
 
 
 def validate_metadata(operation):
@@ -193,7 +245,8 @@ def validate_chunk(message):
     if len(set(operation_ids)) != len(operation_ids):
         raise ValueError("operation_id_duplicate")
     phases = {"setMetadata": 0, "refreshManagedName": 1,
-              "transferFormat": 2, "removeFormat": 3, "removeRecord": 4}
+              "transferFormat": 2, "copyRecordToQuarantine": 2,
+              "removeFormat": 3, "removeRecord": 4, "removeRecordWithContent": 5}
     if [phases[operation["kind"]] for operation in operations] != sorted(
             phases[operation["kind"]] for operation in operations):
         raise ValueError("operation_order_invalid")
@@ -248,33 +301,53 @@ def hash_file(path):
     return size, digest.hexdigest()
 
 
-def managed_format_state(cache, book_id):
+def managed_format_state(cache, book_id, library_root=None):
+    library_root = LIBRARY_ROOT if library_root is None else library_root
     result = []
     for fmt in sorted(cache.formats(book_id, verify_formats=True) or ()):
         canonical = fmt.upper()
         path = os.path.realpath(cache.format_abspath(book_id, canonical))
-        if os.path.commonpath((LIBRARY_ROOT, path)) != LIBRARY_ROOT or not os.path.isfile(path):
+        if os.path.commonpath((library_root, path)) != library_root or not os.path.isfile(path):
             raise ValueError("managed_format_unavailable")
         size, digest = hash_file(path)
         result.append({
             "format": canonical,
             "storedFileName": os.path.basename(path),
+            "relativePath": os.path.relpath(path, library_root).replace("\\", "/"),
             "sizeInBytes": size,
             "sha256": digest,
         })
     return result
 
 
-def managed_record_state(cache, book_id):
+def managed_record_state(cache, book_id, library_root=None):
+    library_root = LIBRARY_ROOT if library_root is None else library_root
     if not cache.has_id(book_id):
         raise ValueError("managed_name_target_missing")
     fields = ("title", "authors", "author_sort", "identifiers", "publisher", "pubdate",
               "languages", "series", "series_index")
+    author_ids = tuple(cache.field_ids_for("authors", book_id) or ())
+    author_data = cache.author_data(author_ids)
+    extra_files = []
+    for value in cache.list_extra_files(book_id):
+        path = os.path.realpath(value.file_path)
+        if os.path.commonpath((library_root, path)) != library_root or not os.path.isfile(path):
+            raise ValueError("managed_extra_file_unavailable")
+        size, digest = hash_file(path)
+        extra_files.append((value.relpath, size, digest))
+    composites = {
+        name: cache.field_for(name, book_id)
+        for name, metadata in cache.field_metadata.custom_field_metadata().items()
+        if metadata.get("datatype") == "composite"
+    }
     return {
         "metadata": {name: cache.field_for(name, book_id) for name in fields},
         "local": local_values(cache, book_id),
         "cover": cache.cover(book_id),
-        "formats": managed_format_state(cache, book_id),
+        "formats": managed_format_state(cache, book_id, library_root),
+        "authorSortValues": [author_data[author_id]["sort"] for author_id in author_ids],
+        "extraFiles": sorted(extra_files),
+        "composites": composites,
     }
 
 
@@ -304,11 +377,128 @@ def refresh_managed_name(cache, operation):
     if os.path.commonpath((LIBRARY_ROOT, directory)) != LIBRARY_ROOT \
             or not os.path.isdir(directory):
         raise ValueError("managed_name_directory_unavailable")
-    formats = managed_format_state(cache, book_id)
+    formats = managed_format_state(cache, book_id, LIBRARY_ROOT)
     for value in formats:
         if os.path.dirname(os.path.realpath(os.path.join(directory, value["storedFileName"]))) != directory:
             raise ValueError("managed_name_format_containment_failed")
-    return {"managedPath": normalized, "formats": formats}
+    return {"managedPath": normalized, "formats": protocol_format_state(formats)}
+
+
+def protocol_format_state(formats):
+    return [{
+        "format": value["format"],
+        "storedFileName": value["storedFileName"],
+        "sizeInBytes": value["sizeInBytes"],
+        "sha256": value["sha256"],
+    } for value in formats]
+
+
+def custom_column_schema(cache):
+    result = {}
+    metadata = cache.field_metadata.custom_field_metadata()
+    if len(metadata) > 256:
+        raise ValueError("quarantine_custom_column_count_exceeded")
+    for key, value in metadata.items():
+        result[key] = {
+            "label": value.get("label"),
+            "name": value.get("name"),
+            "datatype": value.get("datatype"),
+            "is_multiple": bool(value.get("is_multiple")),
+            "is_editable": bool(value.get("is_editable", True)),
+            "display": value.get("display") or {},
+        }
+    return result
+
+
+def reconcile_custom_columns(source_cache, destination_cache, allow_create):
+    source_schema = custom_column_schema(source_cache)
+    destination_schema = custom_column_schema(destination_cache)
+    created = False
+    for key in sorted(source_schema, key=lambda value: (
+            source_schema[value]["datatype"] == "composite", value)):
+        expected = source_schema[key]
+        actual = destination_schema.get(key)
+        if actual is not None:
+            if actual != expected:
+                raise ValueError("quarantine_custom_column_incompatible")
+            continue
+        if not allow_create:
+            raise ValueError("quarantine_custom_column_missing")
+        destination_cache.create_custom_column(
+            expected["label"], expected["name"], expected["datatype"],
+            expected["is_multiple"], expected["is_editable"], expected["display"])
+        created = True
+    return created
+
+
+def validate_quarantine_source(cache, operation):
+    book_id = operation["recordId"]
+    if not cache.has_id(book_id) \
+            or cache.field_for("title", book_id) != operation["quarantineTitle"] \
+            or list(cache.field_for("authors", book_id) or ()) != operation["quarantineAuthors"]:
+        raise ValueError("quarantine_source_metadata_changed")
+    state = managed_record_state(cache, book_id, LIBRARY_ROOT)
+    if state["authorSortValues"] != operation["quarantineAuthorSorts"]:
+        raise ValueError("quarantine_source_metadata_changed")
+    actual_formats = [(value["format"], value["relativePath"], value["sizeInBytes"], value["sha256"])
+                      for value in state["formats"]]
+    expected_formats = [(value["format"], value["expectedRelativePath"].replace("\\", "/"),
+                         value["expectedSizeInBytes"], value["expectedSha256"])
+                        for value in operation["quarantineFormats"]]
+    if actual_formats != expected_formats:
+        raise ValueError("quarantine_source_format_changed")
+    return state
+
+
+def comparable_record_state(state):
+    return {
+        "metadata": state["metadata"],
+        "local": state["local"],
+        "cover": state["cover"],
+        "formats": [(value["format"], value["sizeInBytes"], value["sha256"])
+                    for value in state["formats"]],
+        "authorSortValues": state["authorSortValues"],
+        "extraFiles": state["extraFiles"],
+        "composites": state["composites"],
+    }
+
+
+def copy_record_to_quarantine(source_cache, source_legacy, destination_cache,
+                              destination_legacy, operation):
+    if destination_cache is None or operation["recordId"] in COPIED_TO_QUARANTINE:
+        raise ValueError("quarantine_copy_precondition_failed")
+    before = validate_quarantine_source(source_cache, operation)
+    from calibre.db.copy_to_library import copy_one_book
+    copied = copy_one_book(
+        operation["recordId"], source_legacy, destination_legacy,
+        duplicate_action="add", preserve_date=True, preserve_uuid=True)
+    destination_id = copied.get("new_book_id")
+    if copied.get("action") != "add" or not isinstance(destination_id, int) \
+            or destination_id <= 0 or not destination_cache.has_id(destination_id):
+        raise ValueError("quarantine_duplicate_create_failed")
+    after_source = validate_quarantine_source(source_cache, operation)
+    after_destination = managed_record_state(destination_cache, destination_id, QUARANTINE_ROOT)
+    if comparable_record_state(before) != comparable_record_state(after_source) \
+            or comparable_record_state(before) != comparable_record_state(after_destination):
+        raise ValueError("quarantine_copy_readback_failed")
+    COPIED_TO_QUARANTINE[operation["recordId"]] = destination_id
+    managed_path = destination_cache.field_for("path", destination_id)
+    if not isinstance(managed_path, str) or not managed_path or len(managed_path) > 1024:
+        raise ValueError("quarantine_destination_path_invalid")
+    return destination_id, {
+        "managedPath": managed_path,
+        "formats": protocol_format_state(after_destination["formats"]),
+    }
+
+
+def remove_record_with_content(cache, operation):
+    book_id = operation["recordId"]
+    if book_id not in COPIED_TO_QUARANTINE:
+        raise ValueError("quarantine_source_delete_without_verified_copy")
+    validate_quarantine_source(cache, operation)
+    cache.remove_books([book_id], permanent=False)
+    if cache.has_id(book_id):
+        raise ValueError("quarantine_source_delete_failed")
 
 
 def clear_metadata_caches(cache, field, book_id):
@@ -500,7 +690,7 @@ def set_metadata(cache, operation):
             and requested_author_sorts is not None else None}
 
 
-def execute_chunk(cache, message):
+def execute_chunk(cache, source_legacy, destination_cache, destination_legacy, message):
     operations = validate_chunk(message)
     results = []
     mutation_started = False
@@ -536,6 +726,14 @@ def execute_chunk(cache, message):
             results.append(operation_result(operation, True))
             completed_ids.add(operation["operationId"])
 
+        for operation in (value for value in operations if value["kind"] == "copyRecordToQuarantine"):
+            mutation_started = True
+            destination_id, readback = copy_record_to_quarantine(
+                cache, source_legacy, destination_cache, destination_legacy, operation)
+            results.append(operation_result(
+                operation, True, managed_name=readback, quarantine_record_id=destination_id))
+            completed_ids.add(operation["operationId"])
+
         format_operations = [value for value in operations if value["kind"] == "removeFormat"]
         if format_operations:
             formats_map = {}
@@ -551,6 +749,12 @@ def execute_chunk(cache, message):
                     raise ValueError("remove_format_postcondition_failed")
                 results.append(operation_result(operation, True))
                 completed_ids.add(operation["operationId"])
+
+        for operation in (value for value in operations if value["kind"] == "removeRecordWithContent"):
+            mutation_started = True
+            remove_record_with_content(cache, operation)
+            results.append(operation_result(operation, True))
+            completed_ids.add(operation["operationId"])
 
         record_operations = [value for value in operations if value["kind"] == "removeRecord"]
         if record_operations:
@@ -586,15 +790,20 @@ def execute_chunk(cache, message):
 
 
 def run():
-    global LIBRARY_ROOT
-    if len(sys.argv) != 3:
+    global LIBRARY_ROOT, QUARANTINE_ROOT
+    if len(sys.argv) != 5:
         raise ValueError("worker_arguments_invalid")
     library_root = os.path.abspath(sys.argv[1])
     LIBRARY_ROOT = os.path.realpath(library_root)
     expected_uuid = sys.argv[2]
+    quarantine_root = sys.argv[3]
+    expected_quarantine_uuid = sys.argv[4]
     from calibre.library import db
-    cache = db(library_root).new_api
+    source_legacy = db(library_root)
+    cache = source_legacy.new_api
     cache.init()
+    destination_legacy = None
+    destination_cache = None
     try:
         library_uuid = str(cache.library_id)
         if library_uuid != expected_uuid:
@@ -606,11 +815,37 @@ def run():
                 "failureCode": "library_identity_mismatch",
             })
             return
+        quarantine_uuid = None
+        quarantine_existed = None
+        if quarantine_root:
+            QUARANTINE_ROOT = os.path.realpath(quarantine_root)
+            expected_root = os.path.join(
+                os.path.dirname(LIBRARY_ROOT), os.path.basename(LIBRARY_ROOT) + " - Unresolvable")
+            if os.path.normcase(QUARANTINE_ROOT) != os.path.normcase(os.path.realpath(expected_root)) \
+                    or len(QUARANTINE_ROOT) >= 75:
+                raise ValueError("quarantine_destination_invalid")
+            quarantine_existed = os.path.isfile(os.path.join(QUARANTINE_ROOT, "metadata.db"))
+            if os.path.exists(QUARANTINE_ROOT) and not quarantine_existed:
+                raise ValueError("quarantine_destination_invalid")
+            destination_legacy = db(QUARANTINE_ROOT)
+            destination_cache = destination_legacy.new_api
+            destination_cache.init()
+            if reconcile_custom_columns(cache, destination_cache, not quarantine_existed):
+                destination_cache.close()
+                destination_legacy.close()
+                destination_legacy = db(QUARANTINE_ROOT)
+                destination_cache = destination_legacy.new_api
+                destination_cache.init()
+            quarantine_uuid = str(destination_cache.library_id)
+            if expected_quarantine_uuid and quarantine_uuid != expected_quarantine_uuid:
+                raise ValueError("quarantine_identity_mismatch")
         write_message({
             "protocolVersion": PROTOCOL_VERSION,
             "kind": "ready",
             "libraryUuid": library_uuid,
             "capabilities": CAPABILITIES,
+            "quarantineLibraryUuid": quarantine_uuid,
+            "quarantineLibraryExisted": quarantine_existed,
         })
         while True:
             message = read_message()
@@ -621,9 +856,15 @@ def run():
                 write_message({"protocolVersion": PROTOCOL_VERSION, "kind": "stopped",
                                "mutationStarted": False})
                 return
-            write_message(execute_chunk(cache, message))
+            write_message(execute_chunk(
+                cache, source_legacy, destination_cache, destination_legacy, message))
     finally:
+        if destination_cache is not None:
+            destination_cache.close()
+        if destination_legacy is not None:
+            destination_legacy.close()
         cache.close()
+        source_legacy.close()
 
 
 if __name__ == "__main__":

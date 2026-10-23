@@ -29,7 +29,7 @@ public sealed class MainWindowTests
                 [
                     "Books", "SelectedFormats", "SelectedExactDuplicateMembers",
                     "SelectedMetadataDuplicateMembers", "SelectedUnifiedCandidateMembers",
-                    "MetadataReviewSubjects", "FinalAuthorReviewSubjects",
+                    "MetadataReviewSubjects", "FinalAuthorReviewSubjects", "QuarantineReviewSubjects",
                     "SelectedExpandedCandidateMembers", "EpubAssessments", "PdfAssessments",
                 ];
                 HashSet<string> visited = [];
@@ -151,6 +151,17 @@ public sealed class MainWindowTests
                     A.Fake<ILibraryFolderPicker>());
                 MainWindow window = new(viewModel);
                 window.Show();
+                TabControl tabs = Descendants<TabControl>(window).Single();
+                tabs.SelectedItem = tabs.Items.OfType<TabItem>().Single(item =>
+                    string.Equals(item.Header?.ToString(), "_Unresolvable", StringComparison.Ordinal));
+                window.UpdateLayout();
+                DataGridCheckBoxColumn manualColumn = Descendants<DataGrid>(window)
+                    .SelectMany(grid => grid.Columns)
+                    .OfType<DataGridCheckBoxColumn>()
+                    .Single(column => string.Equals(column.Header?.ToString(), "Manual", StringComparison.Ordinal));
+                Binding manualBinding = manualColumn.Binding.Should().BeOfType<Binding>().Subject;
+                manualBinding.Path.Path.Should().Be(nameof(QuarantineReviewSubjectRowViewModel.IsManual));
+                manualBinding.Mode.Should().Be(BindingMode.OneWay);
                 window.Close();
             }
             catch (Exception exception)

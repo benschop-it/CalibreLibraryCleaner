@@ -2,6 +2,87 @@ namespace CalibreLibraryCleaner.Infrastructure.Execution;
 
 internal static class ExecutionPathGuard
 {
+    private const int CalibreLibraryRootMaximumExclusiveLength = 75;
+
+    public static bool TryValidateQuarantineDestination(
+        string libraryRoot,
+        string candidate,
+        out string? canonical,
+        out bool exists,
+        out string? reason)
+    {
+        canonical = null;
+        exists = false;
+        reason = null;
+        if (string.IsNullOrWhiteSpace(libraryRoot) || string.IsNullOrWhiteSpace(candidate))
+        {
+            reason = "The source library and quarantine destination are required.";
+            return false;
+        }
+
+        string library;
+        string destination;
+        string expected;
+        try
+        {
+            library = Path.TrimEndingDirectorySeparator(Path.GetFullPath(libraryRoot));
+            destination = Path.TrimEndingDirectorySeparator(Path.GetFullPath(candidate));
+            string? parent = Path.GetDirectoryName(library);
+            string name = Path.GetFileName(library);
+            if (string.IsNullOrWhiteSpace(parent) || string.IsNullOrWhiteSpace(name))
+            {
+                reason = "The source library cannot have a sibling quarantine library.";
+                return false;
+            }
+            expected = Path.Combine(parent, name + " - Unresolvable");
+        }
+        catch (Exception exception) when (exception is ArgumentException or NotSupportedException or PathTooLongException)
+        {
+            reason = "The quarantine destination path cannot be canonicalized.";
+            return false;
+        }
+
+        if (!Directory.Exists(library)
+            || !File.Exists(Path.Combine(library, "metadata.db")))
+        {
+            reason = "The source Calibre library does not exist.";
+            return false;
+        }
+        if (!string.Equals(destination, expected, StringComparison.OrdinalIgnoreCase))
+        {
+            reason = "The quarantine destination must be the fixed sibling beside the source library.";
+            return false;
+        }
+        if (destination.Length >= CalibreLibraryRootMaximumExclusiveLength)
+        {
+            reason = "The quarantine destination exceeds Calibre's library path limit.";
+            return false;
+        }
+        if (File.Exists(destination))
+        {
+            reason = "The quarantine destination is not a directory.";
+            return false;
+        }
+
+        exists = Directory.Exists(destination);
+        if (!TryRejectReparsePoints(library, true, out reason)
+            || !TryRejectReparsePoints(destination, exists, out reason))
+            return false;
+        if (exists)
+        {
+            string metadataPath = Path.Combine(destination, "metadata.db");
+            if (!File.Exists(metadataPath)
+                || !TryRejectReparsePointLeaf(metadataPath, true, out reason))
+            {
+                reason ??= "The existing quarantine destination is not a physical Calibre library.";
+                return false;
+            }
+        }
+
+        canonical = destination;
+        return true;
+    }
+
     public static bool TryValidateExternalDirectory(
         string libraryRoot,
         string candidate,

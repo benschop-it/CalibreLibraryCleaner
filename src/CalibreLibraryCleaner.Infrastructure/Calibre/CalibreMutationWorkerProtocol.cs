@@ -8,7 +8,7 @@ namespace CalibreLibraryCleaner.Infrastructure.Calibre;
 
 internal static class CalibreMutationWorkerProtocol
 {
-    public const string Version = "calibre-mutation-worker-protocol/1.3";
+    public const string Version = "calibre-mutation-worker-protocol/1.4";
     public const string ReadyKind = "ready";
     public const string ExecuteChunkKind = "executeChunk";
     public const string ChunkResultKind = "chunkResult";
@@ -102,7 +102,9 @@ internal sealed record CalibreMutationWorkerReadyMessage(
     string Kind,
     string LibraryUuid,
     IReadOnlyList<string> Capabilities,
-    string? FailureCode = null);
+    string? FailureCode = null,
+    string? QuarantineLibraryUuid = null,
+    bool? QuarantineLibraryExisted = null);
 
 internal sealed record CalibreMutationWorkerRequestMessage(
     string ProtocolVersion,
@@ -124,7 +126,17 @@ internal sealed record CalibreMutationWorkerOperationMessage(
     CalibreMetadataSourceIdentity? MetadataSource,
     string? StagedCoverFileName,
     long? StagedCoverSizeInBytes,
-    string? StagedCoverSha256);
+    string? StagedCoverSha256,
+    string? QuarantineTitle,
+    IReadOnlyList<string>? QuarantineAuthors,
+    IReadOnlyList<string>? QuarantineAuthorSorts,
+    IReadOnlyList<CalibreQuarantineFormatExpectationMessage>? QuarantineFormats);
+
+internal sealed record CalibreQuarantineFormatExpectationMessage(
+    string Format,
+    string ExpectedRelativePath,
+    long ExpectedSizeInBytes,
+    string ExpectedSha256);
 
 internal sealed record CalibreMutationWorkerResultMessage(
     string ProtocolVersion,
@@ -145,7 +157,8 @@ internal sealed record CalibreMutationWorkerOperationResultMessage(
     IReadOnlyList<string>? VerifiedAuthorSortValues = null,
     IReadOnlyList<CalibreManagedFormatReadBackMessage>? VerifiedFormats = null,
     bool IsSkipped = false,
-    string? SkipCode = null);
+    string? SkipCode = null,
+    long? QuarantineRecordId = null);
 
 internal sealed record CalibreManagedFormatReadBackMessage(
     string Format,

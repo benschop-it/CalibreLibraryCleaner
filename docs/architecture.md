@@ -141,10 +141,19 @@ giving the worker mutation authority over Calibre.
 
 ### Implemented
 
-Application builds deterministic transfer, format-removal, and empty-record-removal
-operations. Infrastructure opens one trusted persistent `calibre-debug` worker using
-a fixed script and strict typed JSON-lines protocol. Chunks contain at most 100
-operations. Transfers precede dependent removals; record removals are last.
+Application builds deterministic transfer, format-removal, empty-record-removal, and
+final quarantine copy/delete operations. Infrastructure opens one trusted persistent
+`calibre-debug` worker using a fixed script and strict typed JSON-lines protocol.
+Chunks contain at most 100 operations. Same-library transfers and cross-library
+quarantine copies precede dependent removals; quarantine source deletions run as
+one-record chunks only after every destination record has exact read-back.
+
+The quarantine destination is the fixed physical sibling of the source. Infrastructure
+inspects an existing destination read-only and binds its UUID to the review. The same
+worker opens or creates it through Calibre APIs, creates missing custom columns only
+for a new destination, uses duplicate record creation rather than merge/overwrite,
+and reopens the destination cache after schema changes. Destination state is not a
+second application-managed library state or synchronization boundary.
 
 Current persistence uses authoritative generations/revisions, workflow checkpoints,
 a mutation marker, hash-chained typed delta journal, complete-chunk projection, and

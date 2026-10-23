@@ -44,11 +44,15 @@ public sealed record OpenCalibreMutationWorkerRequest(
     CalibreToolDescriptor Tool,
     string LibraryRoot,
     string ExpectedLibraryUuid,
-    string? MetadataCoverStagingRoot = null);
+    string? MetadataCoverStagingRoot = null,
+    string? QuarantineDestinationRoot = null,
+    string? ExpectedQuarantineLibraryUuid = null);
 
 public sealed record CalibreMutationWorkerOpenResult(
     ICalibreMutationWorkerSession? Session,
-    string? FailureCode)
+    string? FailureCode,
+    string? QuarantineLibraryUuid = null,
+    bool? QuarantineLibraryExisted = null)
 {
     public bool IsSuccess => Session is not null && FailureCode is null;
 }
@@ -60,6 +64,69 @@ public enum CalibreMutationOperationKind
     TransferFormat,
     RemoveFormat,
     RemoveRecord,
+    CopyRecordToQuarantine,
+    RemoveRecordWithContent,
+}
+
+public sealed record CalibreQuarantineFormatExpectation
+{
+    public CalibreQuarantineFormatExpectation(
+        string format,
+        string expectedRelativePath,
+        FormatFileFingerprint fingerprint)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(format);
+        ArgumentException.ThrowIfNullOrWhiteSpace(expectedRelativePath);
+        if (format.Length > 16 || !format.All(char.IsAsciiLetterOrDigit)
+            || expectedRelativePath.Length > 1_024
+            || expectedRelativePath.Any(char.IsControl))
+            throw new ArgumentException("The quarantine format expectation is invalid.");
+        Format = format.ToUpperInvariant();
+        ExpectedRelativePath = expectedRelativePath;
+        Fingerprint = fingerprint ?? throw new ArgumentNullException(nameof(fingerprint));
+    }
+
+    public string Format { get; }
+    public string ExpectedRelativePath { get; }
+    public FormatFileFingerprint Fingerprint { get; }
+}
+
+public sealed record CalibreQuarantineRecordExpectation
+{
+    public CalibreQuarantineRecordExpectation(
+        string title,
+        IEnumerable<string> authors,
+        IEnumerable<string> authorSorts,
+        IEnumerable<CalibreQuarantineFormatExpectation> formats)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(title);
+        ArgumentNullException.ThrowIfNull(authors);
+        ArgumentNullException.ThrowIfNull(authorSorts);
+        ArgumentNullException.ThrowIfNull(formats);
+        string[] authorValues = authors.ToArray();
+        string[] sortValues = authorSorts.ToArray();
+        CalibreQuarantineFormatExpectation[] formatValues = formats
+            .OrderBy(value => value.Format, StringComparer.Ordinal)
+            .ToArray();
+        if (title.Length > 2_048 || title.Any(char.IsControl)
+            || authorValues.Length is < 1 or > 32
+            || sortValues.Length != authorValues.Length
+            || authorValues.Concat(sortValues).Any(value =>
+                string.IsNullOrWhiteSpace(value) || value.Length > 512 || value.Any(char.IsControl))
+            || formatValues.Length > 32
+            || formatValues.Select(value => value.Format).Distinct(StringComparer.Ordinal).Count()
+                != formatValues.Length)
+            throw new ArgumentException("The quarantine record expectation is invalid.");
+        Title = title;
+        Authors = Array.AsReadOnly(authorValues);
+        AuthorSorts = Array.AsReadOnly(sortValues);
+        Formats = Array.AsReadOnly(formatValues);
+    }
+
+    public string Title { get; }
+    public IReadOnlyList<string> Authors { get; }
+    public IReadOnlyList<string> AuthorSorts { get; }
+    public IReadOnlyList<CalibreQuarantineFormatExpectation> Formats { get; }
 }
 
 public sealed record CalibreMetadataSourceIdentity
@@ -153,7 +220,8 @@ public sealed record CalibreMutationOperation
         string? canonicalFormat,
         CalibreBookId? targetRecordId,
         FormatFileFingerprint? expectedFingerprint,
-        CalibreMetadataMutation? metadata)
+        CalibreMetadataMutation? metadata,
+        CalibreQuarantineRecordExpectation? quarantineExpectation)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(operationId);
         if (operationId.Length > 160) throw new ArgumentOutOfRangeException(nameof(operationId));
@@ -176,6 +244,12 @@ public sealed record CalibreMutationOperation
             && (canonicalFormat is not null || targetRecordId is not null
                 || expectedFingerprint is not null || metadata is not null))
             throw new ArgumentException("The managed-name refresh operation is invalid.", nameof(kind));
+        bool quarantine = kind is CalibreMutationOperationKind.CopyRecordToQuarantine
+            or CalibreMutationOperationKind.RemoveRecordWithContent;
+        if (quarantine != (quarantineExpectation is not null)
+            || quarantine && (canonicalFormat is not null || targetRecordId is not null
+                || expectedFingerprint is not null || metadata is not null))
+            throw new ArgumentException("The quarantine operation is invalid.", nameof(kind));
 
         OperationId = operationId;
         Kind = kind;
@@ -184,6 +258,7 @@ public sealed record CalibreMutationOperation
         TargetRecordId = targetRecordId;
         ExpectedFingerprint = expectedFingerprint;
         Metadata = metadata;
+        QuarantineExpectation = quarantineExpectation;
     }
 
     public string OperationId { get; }
@@ -193,13 +268,14 @@ public sealed record CalibreMutationOperation
     public CalibreBookId? TargetRecordId { get; }
     public FormatFileFingerprint? ExpectedFingerprint { get; }
     public CalibreMetadataMutation? Metadata { get; }
+    public CalibreQuarantineRecordExpectation? QuarantineExpectation { get; }
 
     public static CalibreMutationOperation SetMetadata(
         string operationId,
         CalibreBookId recordId,
         CalibreMetadataMutation metadata) => new(operationId,
         CalibreMutationOperationKind.SetMetadata, recordId, null, null, null,
-        metadata ?? throw new ArgumentNullException(nameof(metadata)));
+        metadata ?? throw new ArgumentNullException(nameof(metadata)), null);
 
     public static CalibreMutationOperation TransferFormat(
         string operationId,
@@ -208,24 +284,50 @@ public sealed record CalibreMutationOperation
         string canonicalFormat,
         FormatFileFingerprint expectedFingerprint) => new(operationId,
         CalibreMutationOperationKind.TransferFormat, sourceRecordId, canonicalFormat,
-        targetRecordId, expectedFingerprint ?? throw new ArgumentNullException(nameof(expectedFingerprint)), null);
+        targetRecordId, expectedFingerprint ?? throw new ArgumentNullException(nameof(expectedFingerprint)), null, null);
 
     public static CalibreMutationOperation RefreshManagedName(
         string operationId,
         CalibreBookId recordId) => new(
         operationId, CalibreMutationOperationKind.RefreshManagedName, recordId,
-        null, null, null, null);
+        null, null, null, null, null);
 
     public static CalibreMutationOperation RemoveFormat(
         string operationId,
         CalibreBookId recordId,
         string canonicalFormat) => new(operationId, CalibreMutationOperationKind.RemoveFormat,
-        recordId, canonicalFormat, null, null, null);
+        recordId, canonicalFormat, null, null, null, null);
 
     public static CalibreMutationOperation RemoveRecord(
         string operationId,
         CalibreBookId recordId) => new(operationId, CalibreMutationOperationKind.RemoveRecord,
-        recordId, null, null, null, null);
+        recordId, null, null, null, null, null);
+
+    public static CalibreMutationOperation CopyRecordToQuarantine(
+        string operationId,
+        CalibreBookId recordId,
+        CalibreQuarantineRecordExpectation expectation) => new(
+        operationId,
+        CalibreMutationOperationKind.CopyRecordToQuarantine,
+        recordId,
+        null,
+        null,
+        null,
+        null,
+        expectation ?? throw new ArgumentNullException(nameof(expectation)));
+
+    public static CalibreMutationOperation RemoveRecordWithContent(
+        string operationId,
+        CalibreBookId recordId,
+        CalibreQuarantineRecordExpectation expectation) => new(
+        operationId,
+        CalibreMutationOperationKind.RemoveRecordWithContent,
+        recordId,
+        null,
+        null,
+        null,
+        null,
+        expectation ?? throw new ArgumentNullException(nameof(expectation)));
 }
 
 public sealed record CalibreMutationChunkRequest
@@ -261,7 +363,8 @@ public sealed record CalibreMutationOperationResult(
     IReadOnlyList<string>? VerifiedAuthorSortValues = null,
     IReadOnlyList<ManagedFormatReadBack>? VerifiedFormats = null,
     bool IsSkipped = false,
-    string? SkipCode = null);
+    string? SkipCode = null,
+    CalibreBookId? QuarantineRecordId = null);
 
 public sealed record CalibreMutationChunkResult(
     string ChunkId,

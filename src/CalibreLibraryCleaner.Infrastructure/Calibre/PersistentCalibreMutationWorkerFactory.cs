@@ -15,7 +15,8 @@ internal sealed class PersistentCalibreMutationWorkerFactory(CalibreExecutionOpt
     private const string WorkerResourceName =
         "CalibreLibraryCleaner.Infrastructure.Calibre.calibre_mutation_worker.py";
     private static readonly string[] RequiredCapabilities =
-        ["setMetadata", "refreshManagedName", "transferFormat", "removeFormat", "removeRecord"];
+        ["setMetadata", "refreshManagedName", "transferFormat", "removeFormat", "removeRecord",
+            "copyRecordToQuarantine", "removeRecordWithContent"];
 
     public async Task<CalibreMutationWorkerOpenResult> TryOpenAsync(
         OpenCalibreMutationWorkerRequest request,
@@ -44,6 +45,24 @@ internal sealed class PersistentCalibreMutationWorkerFactory(CalibreExecutionOpt
                         libraryRoot, request.MetadataCoverStagingRoot, true, out coverStagingRoot, out _)
                     || !ExecutionPathGuard.TryRejectReparsePoints(coverStagingRoot!, true, out _)))
                 return Failed("CALIBRE_WORKER_COVER_STAGING_UNSAFE");
+            string? quarantineRoot = null;
+            bool? quarantineExisted = null;
+            if (request.QuarantineDestinationRoot is not null)
+            {
+                if (!ExecutionPathGuard.TryValidateQuarantineDestination(
+                        libraryRoot,
+                        request.QuarantineDestinationRoot,
+                        out quarantineRoot,
+                        out bool existed,
+                        out _)
+                    || !existed && request.ExpectedQuarantineLibraryUuid is not null)
+                    return Failed("CALIBRE_WORKER_QUARANTINE_DESTINATION_UNSAFE");
+                quarantineExisted = existed;
+            }
+            else if (request.ExpectedQuarantineLibraryUuid is not null)
+            {
+                return Failed("CALIBRE_WORKER_QUARANTINE_DESTINATION_UNSAFE");
+            }
 
             trustedToolLock = new FileStream(trustedCalibredb, FileMode.Open, FileAccess.Read, FileShare.Read,
                 128 * 1024, FileOptions.Asynchronous | FileOptions.SequentialScan);
@@ -76,7 +95,8 @@ internal sealed class PersistentCalibreMutationWorkerFactory(CalibreExecutionOpt
                 128 * 1024, FileOptions.Asynchronous | FileOptions.SequentialScan);
 
             ProcessStartInfo startInfo = CreateStartInfo(executable, canonicalWorkerDirectory!, scriptPath,
-                libraryRoot, request.ExpectedLibraryUuid, coverStagingRoot);
+                libraryRoot, request.ExpectedLibraryUuid, coverStagingRoot, quarantineRoot,
+                request.ExpectedQuarantineLibraryUuid);
             process = new Process { StartInfo = startInfo };
             if (!process.Start()) return await FailAndDisposeAsync("CALIBRE_WORKER_NOT_STARTED").ConfigureAwait(false);
             Task<string> stderr = DrainBoundedAsync(process.StandardError);
@@ -93,6 +113,18 @@ internal sealed class PersistentCalibreMutationWorkerFactory(CalibreExecutionOpt
             if (ready.FailureCode is not null
                 || !RequiredCapabilities.All(ready.Capabilities.Contains))
                 return await FailAndDisposeAsync("CALIBRE_WORKER_HANDSHAKE_FAILED").ConfigureAwait(false);
+            if (quarantineRoot is not null
+                && (string.IsNullOrWhiteSpace(ready.QuarantineLibraryUuid)
+                    || ready.QuarantineLibraryExisted != quarantineExisted
+                    || request.ExpectedQuarantineLibraryUuid is not null
+                    && !string.Equals(
+                        ready.QuarantineLibraryUuid,
+                        request.ExpectedQuarantineLibraryUuid,
+                        StringComparison.Ordinal)))
+                return await FailAndDisposeAsync("CALIBRE_WORKER_QUARANTINE_IDENTITY_MISMATCH").ConfigureAwait(false);
+            if (quarantineRoot is null
+                && (ready.QuarantineLibraryUuid is not null || ready.QuarantineLibraryExisted is not null))
+                return await FailAndDisposeAsync("CALIBRE_WORKER_HANDSHAKE_FAILED").ConfigureAwait(false);
 
             PersistentCalibreMutationWorkerSession session = new(
                 process, trustedToolLock, executableLock, scriptLock, stderr, options);
@@ -100,7 +132,7 @@ internal sealed class PersistentCalibreMutationWorkerFactory(CalibreExecutionOpt
             trustedToolLock = null;
             executableLock = null;
             scriptLock = null;
-            return new(session, null);
+            return new(session, null, ready.QuarantineLibraryUuid, ready.QuarantineLibraryExisted);
         }
         catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
         {
@@ -144,7 +176,9 @@ internal sealed class PersistentCalibreMutationWorkerFactory(CalibreExecutionOpt
         string scriptPath,
         string libraryRoot,
         string expectedLibraryUuid,
-        string? coverStagingRoot)
+        string? coverStagingRoot,
+        string? quarantineRoot,
+        string? expectedQuarantineLibraryUuid)
     {
         ProcessStartInfo startInfo = new()
         {
@@ -165,7 +199,11 @@ internal sealed class PersistentCalibreMutationWorkerFactory(CalibreExecutionOpt
         startInfo.Environment["CALIBRE_CONFIG_DIRECTORY"] = options.ControlledConfigDirectory;
         startInfo.Environment["CLC_WORKER_TEMP_DIRECTORY"] = workingDirectory;
         startInfo.Environment["CLC_WORKER_COVER_DIRECTORY"] = coverStagingRoot ?? string.Empty;
-        foreach (string argument in new[] { "-e", scriptPath, "--", libraryRoot, expectedLibraryUuid })
+        foreach (string argument in new[]
+                 {
+                     "-e", scriptPath, "--", libraryRoot, expectedLibraryUuid,
+                     quarantineRoot ?? string.Empty, expectedQuarantineLibraryUuid ?? string.Empty,
+                 })
             startInfo.ArgumentList.Add(argument);
         return startInfo;
     }
@@ -269,7 +307,16 @@ internal sealed class PersistentCalibreMutationWorkerSession(
                 value.Metadata?.Values, value.Metadata?.AuthorSortValues, value.Metadata?.Source,
                 value.Metadata?.StagedCoverFileName,
                 value.Metadata?.StagedCoverFingerprint?.SizeInBytes,
-                value.Metadata?.StagedCoverFingerprint?.Sha256.Value)).ToArray();
+                value.Metadata?.StagedCoverFingerprint?.Sha256.Value,
+                value.QuarantineExpectation?.Title,
+                value.QuarantineExpectation?.Authors,
+                value.QuarantineExpectation?.AuthorSorts,
+                value.QuarantineExpectation?.Formats.Select(format =>
+                    new CalibreQuarantineFormatExpectationMessage(
+                        format.Format,
+                        format.ExpectedRelativePath,
+                        format.Fingerprint.SizeInBytes,
+                        format.Fingerprint.Sha256.Value)).ToArray())).ToArray();
             try
             {
                 await CalibreMutationWorkerProtocol.WriteAsync(process.StandardInput,
@@ -291,7 +338,8 @@ internal sealed class PersistentCalibreMutationWorkerSession(
                             format.Format,
                             format.StoredFileName,
                             new(format.SizeInBytes, new(format.Sha256)))).ToArray(),
-                        value.IsSkipped, value.SkipCode)).ToArray(),
+                        value.IsSkipped, value.SkipCode,
+                        value.QuarantineRecordId is null ? null : new(value.QuarantineRecordId.Value))).ToArray(),
                     response.FailureCode);
             }
             catch (Exception exception) when (exception is IOException or InvalidDataException
@@ -381,17 +429,22 @@ internal sealed class PersistentCalibreMutationWorkerSession(
                 && operation.Kind == CalibreMutationOperationKind.SetMetadata;
             bool refreshSuccess = result.IsSuccess && !result.IsSkipped
                 && operation.Kind == CalibreMutationOperationKind.RefreshManagedName;
+            bool quarantineCopySuccess = result.IsSuccess && !result.IsSkipped
+                && operation.Kind == CalibreMutationOperationKind.CopyRecordToQuarantine;
             bool authorSortSuccess = metadataSuccess && operation.Metadata?.AuthorSortValues is not null;
             if (metadataSuccess != (result.VerifiedMetadataValues is not null
                     && !string.IsNullOrWhiteSpace(result.VerifiedManagedPath)
                     && !string.IsNullOrWhiteSpace(result.VerifiedAuthorSort))
                 || !metadataSuccess && (result.VerifiedMetadataValues is not null
                     || result.VerifiedAuthorSort is not null)
-                || refreshSuccess != (result.VerifiedFormats is not null
+                || (refreshSuccess || quarantineCopySuccess) != (result.VerifiedFormats is not null
                     && !string.IsNullOrWhiteSpace(result.VerifiedManagedPath))
-                || !refreshSuccess && result.VerifiedFormats is not null
+                || !refreshSuccess && !quarantineCopySuccess && result.VerifiedFormats is not null
                 || result.VerifiedFormats is not null && !ValidManagedFormats(result.VerifiedFormats)
-                || !metadataSuccess && !refreshSuccess && result.VerifiedManagedPath is not null
+                || !metadataSuccess && !refreshSuccess && !quarantineCopySuccess
+                    && result.VerifiedManagedPath is not null
+                || quarantineCopySuccess != (result.QuarantineRecordId is > 0)
+                || !quarantineCopySuccess && result.QuarantineRecordId is not null
                 || authorSortSuccess != (result.VerifiedAuthorSortValues is not null)
                 || result.VerifiedAuthorSortValues is not null
                     && (result.VerifiedAuthorSortValues.Count != operation.Metadata!.Values.Count

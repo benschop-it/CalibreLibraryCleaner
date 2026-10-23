@@ -30,6 +30,13 @@ public partial class MainWindow : System.Windows.Window
                 grid.SelectedItems.OfType<FinalAuthorReviewSubjectRowViewModel>());
     }
 
+    private void QuarantineReviewSubjectsGrid_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (sender is DataGrid grid && DataContext is MainWindowViewModel viewModel)
+            viewModel.UpdateQuarantineReviewSelection(
+                grid.SelectedItems.OfType<QuarantineReviewSubjectRowViewModel>());
+    }
+
     private void BookRowsGrid_MouseDoubleClick(object sender, MouseButtonEventArgs e)
     {
         if (e.ChangedButton != MouseButton.Left

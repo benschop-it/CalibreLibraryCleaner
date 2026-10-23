@@ -654,6 +654,100 @@
           </Border>
         </Grid>
       </TabItem>
+      <TabItem Header="_Unresolvable" AutomationProperties.Name="Unresolvable record quarantine review">
+        <Grid Margin="8">
+          <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="3*" MinHeight="180" />
+            <RowDefinition Height="5" />
+            <RowDefinition Height="2*" MinHeight="140" />
+          </Grid.RowDefinitions>
+          <DockPanel Grid.Row="0" Margin="0,0,0,8">
+            <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" Margin="12,0,0,0">
+              <Label Target="{Binding ElementName=QuarantineFilterBox}" Content="_Show:" />
+              <ComboBox x:Name="QuarantineFilterBox"
+                        MinWidth="125"
+                        ItemsSource="{Binding QuarantineReviewFilterModes}"
+                        SelectedItem="{Binding QuarantineReviewFilterMode, Mode=TwoWay}" />
+            </StackPanel>
+            <StackPanel>
+              <TextBlock FontWeight="Bold" Text="{Binding QuarantineReviewSummary}" TextWrapping="Wrap" />
+              <TextBlock Margin="0,3,0,0"
+                         Text="{Binding QuarantineDestinationPath, StringFormat=Destination: {0}}"
+                         TextWrapping="Wrap" />
+              <WrapPanel Margin="0,6,0,0">
+                <Button Margin="0,0,8,0" Padding="8,4" Content="Check _selected"
+                        Command="{Binding CheckSelectedQuarantineIncludeCommand}" />
+                <Button Margin="0,0,8,0" Padding="8,4" Content="_Uncheck selected"
+                        Command="{Binding UncheckSelectedQuarantineIncludeCommand}" />
+                <Button Margin="0,0,8,0" Padding="8,4" Content="Check _all"
+                        Command="{Binding CheckAllQuarantineIncludeCommand}" />
+                <Button Margin="0,0,16,0" Padding="8,4" Content="Clear all _Include"
+                        Command="{Binding ClearAllQuarantineIncludeCommand}" />
+                <Label Target="{Binding ElementName=ManualQuarantineRecordIdBox}" Content="Record _ID:" />
+                <TextBox x:Name="ManualQuarantineRecordIdBox"
+                         Width="90"
+                         Margin="0,0,6,0"
+                         VerticalContentAlignment="Center"
+                         Text="{Binding QuarantineManualRecordId, UpdateSourceTrigger=PropertyChanged}" />
+                <Button Padding="8,4" Content="_Add" Command="{Binding AddManualQuarantineRecordCommand}" />
+              </WrapPanel>
+            </StackPanel>
+          </DockPanel>
+          <DataGrid Grid.Row="1"
+                    ItemsSource="{Binding QuarantineReviewSubjects}"
+                    SelectedItem="{Binding SelectedQuarantineReviewSubject, Mode=TwoWay}"
+                    SelectionChanged="QuarantineReviewSubjectsGrid_SelectionChanged"
+                    MouseDoubleClick="BookRowsGrid_MouseDoubleClick"
+                    AutoGenerateColumns="False"
+                    IsReadOnly="True"
+                    SelectionMode="Extended"
+                    SelectionUnit="FullRow"
+                    CanUserAddRows="False"
+                    EnableRowVirtualization="True"
+                    EnableColumnVirtualization="True"
+                    VirtualizingPanel.IsVirtualizing="True"
+                    VirtualizingPanel.VirtualizationMode="Recycling"
+                    ScrollViewer.CanContentScroll="True"
+                    AutomationProperties.Name="Quarantine review subjects">
+            <DataGrid.Columns>
+              <DataGridTemplateColumn Width="70" Header="Include">
+                <DataGridTemplateColumn.CellTemplate>
+                  <DataTemplate>
+                    <CheckBox HorizontalAlignment="Center" VerticalAlignment="Center"
+                              IsChecked="{Binding Include, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                              Command="{Binding PersistIncludeCommand}" />
+                  </DataTemplate>
+                </DataGridTemplateColumn.CellTemplate>
+              </DataGridTemplateColumn>
+              <DataGridTextColumn Width="70" Header="Record" Binding="{Binding RecordId}" />
+              <DataGridTextColumn Width="2*" MinWidth="170" Header="Title" Binding="{Binding CurrentTitle}" />
+              <DataGridTextColumn Width="2*" MinWidth="170" Header="Authors" Binding="{Binding CurrentAuthors}" />
+              <DataGridTextColumn Width="2*" MinWidth="170" Header="Reasons" Binding="{Binding Reasons}" />
+              <DataGridTextColumn Width="160" Header="Formats" Binding="{Binding Formats}" />
+              <DataGridCheckBoxColumn Width="70" Header="Manual" Binding="{Binding IsManual, Mode=OneWay}" />
+            </DataGrid.Columns>
+          </DataGrid>
+          <GridSplitter Grid.Row="2" Height="5" HorizontalAlignment="Stretch"
+                        ResizeDirection="Rows" ResizeBehavior="PreviousAndNext"
+                        Background="#B8C1C8" />
+          <Border Grid.Row="3" Margin="0,8,0,0" Padding="10"
+                  BorderBrush="#4B728A" BorderThickness="2,0,0,0"
+                  Background="#EAF4F7"
+                  DataContext="{Binding SelectedQuarantineReviewSubject}">
+            <ScrollViewer VerticalScrollBarVisibility="Auto">
+              <StackPanel>
+                <TextBlock FontSize="15" FontWeight="Bold" Text="Selected quarantine record" />
+                <TextBlock Margin="0,6,0,0" Text="{Binding CurrentTitle, StringFormat=Title: {0}}" TextWrapping="Wrap" />
+                <TextBlock Margin="0,3,0,0" Text="{Binding CurrentAuthors, StringFormat=Authors: {0}}" TextWrapping="Wrap" />
+                <TextBlock Margin="0,3,0,0" Text="{Binding CurrentSorts, StringFormat=Author sorts: {0}}" TextWrapping="Wrap" />
+                <TextBlock Margin="0,3,0,0" Text="{Binding Reasons, StringFormat=Reasons: {0}}" TextWrapping="Wrap" />
+                <TextBlock Margin="0,3,0,0" Text="{Binding Provenance, StringFormat=Provenance: {0}}" TextWrapping="Wrap" />
+              </StackPanel>
+            </ScrollViewer>
+          </Border>
+        </Grid>
+      </TabItem>
       <TabItem Header="E_xpanded candidates" AutomationProperties.Name="Expanded content-confirmed candidates">
         <Grid Margin="8">
           <Grid.RowDefinitions>

@@ -142,6 +142,7 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<ICalibreToolDiscovery, CalibreToolDiscovery>();
         services.AddSingleton<IEbookViewerLauncher, CalibreEbookViewerLauncher>();
         services.AddSingleton<ICalibreMutationWorkerFactory, PersistentCalibreMutationWorkerFactory>();
+        services.AddSingleton<IQuarantineDestinationInspector, QuarantineDestinationInspector>();
         services.AddSingleton<ILibraryMutationLease, FileLibraryMutationLease>();
         services.AddSingleton<ICleanupExecutionIdGenerator, SystemCleanupExecutionIdGenerator>();
         return services;

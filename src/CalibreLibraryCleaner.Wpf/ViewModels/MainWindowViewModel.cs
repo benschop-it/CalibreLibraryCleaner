@@ -136,7 +136,10 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         IMetadataMutationConfirmationService? metadataMutationConfirmation = null,
         InspectEmbeddedAuthorMetadataUseCase? inspectEmbeddedAuthorMetadata = null,
         InspectFrontMatterAuthorsUseCase? inspectFrontMatterAuthors = null,
-        ILogger<MainWindowViewModel>? logger = null)
+        ILogger<MainWindowViewModel>? logger = null,
+        IQuarantineDestinationInspector? quarantineDestinationInspector = null,
+        IQuarantineCleanupExecutor? quarantineCleanupExecutor = null,
+        IQuarantineCleanupConfirmationService? quarantineCleanupConfirmation = null)
     {
         _validateLibrary = validateLibrary;
         _scanLibrary = scanLibrary;
@@ -156,6 +159,9 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         _prepareMetadataReview = prepareMetadataReview;
         _inspectEmbeddedAuthorMetadata = inspectEmbeddedAuthorMetadata;
         _inspectFrontMatterAuthors = inspectFrontMatterAuthors;
+        _quarantineDestinationInspector = quarantineDestinationInspector;
+        _quarantineCleanupExecutor = quarantineCleanupExecutor;
+        _quarantineCleanupConfirmation = quarantineCleanupConfirmation;
         _operationCoordinator = operationCoordinator ?? new();
         _logger = logger ?? NullLogger<MainWindowViewModel>.Instance;
         _uiContext = SynchronizationContext.Current;
@@ -176,6 +182,8 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
             _metadataReviewSubjects);
         FinalAuthorReviewSubjects = new ReadOnlyObservableCollection<FinalAuthorReviewSubjectRowViewModel>(
             _finalAuthorReviewSubjects);
+        QuarantineReviewSubjects = new ReadOnlyObservableCollection<QuarantineReviewSubjectRowViewModel>(
+            _quarantineReviewSubjects);
         EpubAssessments = new ReadOnlyObservableCollection<EpubAssessmentRowViewModel>(_epubAssessments);
         EpubFindings = new ReadOnlyObservableCollection<EpubAssessmentFindingRowViewModel>(_epubFindings);
         PdfAssessments = new ReadOnlyObservableCollection<PdfAssessmentRowViewModel>(_pdfAssessments);
@@ -198,6 +206,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
                     or ExactDuplicateMemberRowViewModel or MetadataDuplicateMemberRowViewModel
                     or ExpandedCandidateMemberRowViewModel or UnifiedCandidateMemberRowViewModel
                     or MetadataReviewSubjectRowViewModel or FinalAuthorReviewSubjectRowViewModel
+                    or QuarantineReviewSubjectRowViewModel
                     or EpubAssessmentRowViewModel or PdfAssessmentRowViewModel);
         OpenSelectedExactDuplicateCommand = new AsyncRelayCommand(
             OpenSelectedExactDuplicateAsync,
@@ -257,6 +266,22 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         UncheckSelectedFinalAuthorApplyCommand = new RelayCommand(
             () => SetSelectedFinalAuthorApply(false),
             () => CanSetSelectedFinalAuthorApply(false));
+        ClearAllQuarantineIncludeCommand = new RelayCommand(
+            () => SetAllQuarantineInclude(false),
+            () => !IsBusy && _quarantineReviewWorkspace?.Subjects.Any(value => value.Include) == true);
+        CheckAllQuarantineIncludeCommand = new RelayCommand(
+            () => SetAllQuarantineInclude(true),
+            () => !IsBusy && _quarantineReviewWorkspace?.Subjects.Any(value => !value.Include) == true);
+        CheckSelectedQuarantineIncludeCommand = new RelayCommand(
+            () => SetSelectedQuarantineInclude(true),
+            () => CanSetSelectedQuarantineInclude(true));
+        UncheckSelectedQuarantineIncludeCommand = new RelayCommand(
+            () => SetSelectedQuarantineInclude(false),
+            () => CanSetSelectedQuarantineInclude(false));
+        AddManualQuarantineRecordCommand = new RelayCommand(
+            AddManualQuarantineRecord,
+            () => !IsBusy && _quarantineReviewWorkspace is not null
+                && long.TryParse(QuarantineManualRecordId, out long value) && value > 0);
         CandidateCleanupCommand = new AsyncRelayCommand(CandidateCleanupAsync, CanRunCandidateCleanup);
     }
 
@@ -464,6 +489,11 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         LibraryWorkflowPhase.CandidateCleanupCompleted when _metadataReviewWorkspace is null =>
             "Prepare online metadata review",
         LibraryWorkflowPhase.CandidateCleanupCompleted => "Apply checked metadata",
+        LibraryWorkflowPhase.Completed when _finalAuthorStageCompleted && _quarantineCompleted =>
+            "Unresolvable quarantine completed",
+        LibraryWorkflowPhase.Completed when _finalAuthorStageCompleted && _quarantineReviewWorkspace is null =>
+            "Prepare Unresolvable review",
+        LibraryWorkflowPhase.Completed when _finalAuthorStageCompleted => "Move checked records to quarantine",
         LibraryWorkflowPhase.Completed when _finalAuthorReviewWorkspace is null => "Prepare final author review",
         LibraryWorkflowPhase.Completed when _finalAuthorReviewWorkspace.Subjects.Any(value => value.Apply) =>
             "Apply checked author corrections",
@@ -481,6 +511,12 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
             "Resolve online metadata only for records retained after Candidate cleanup",
         LibraryWorkflowPhase.CandidateCleanupCompleted =>
             "Apply checked online metadata proposals after backup confirmation",
+        LibraryWorkflowPhase.Completed when _finalAuthorStageCompleted && _quarantineCompleted =>
+            "Run an explicit Rescan before another mutation",
+        LibraryWorkflowPhase.Completed when _finalAuthorStageCompleted && _quarantineReviewWorkspace is null =>
+            "Prepare final reviewed quarantine proposals without mutation",
+        LibraryWorkflowPhase.Completed when _finalAuthorStageCompleted =>
+            "Copy all checked records to the fixed sibling library, verify them, then delete their sources",
         LibraryWorkflowPhase.Completed when _finalAuthorReviewWorkspace is null =>
             "Screen retained authors and selectively inspect unresolved EPUB/PDF evidence without mutation",
         LibraryWorkflowPhase.Completed when _finalAuthorReviewWorkspace.Subjects.Any(value => value.Apply) =>
@@ -1157,6 +1193,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
             UnifiedCandidateMemberRowViewModel member => member.BookId,
             MetadataReviewSubjectRowViewModel subject => subject.TargetBookId,
             FinalAuthorReviewSubjectRowViewModel subject => subject.RecordId,
+            QuarantineReviewSubjectRowViewModel subject => subject.RecordId,
             _ => null,
         };
         if (bookId is null) return Task.CompletedTask;
@@ -1478,6 +1515,11 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
             LibraryWorkflowPhase.CandidateCleanupCompleted => _metadataReviewWorkspace is null
                 ? _prepareMetadataReview is not null
                 : _executeUnifiedCandidateCleanup is not null && _metadataMutationConfirmation is not null,
+            LibraryWorkflowPhase.Completed when _finalAuthorStageCompleted && _quarantineCompleted => false,
+            LibraryWorkflowPhase.Completed when _finalAuthorStageCompleted && _quarantineReviewWorkspace is null =>
+                _quarantineDestinationInspector is not null && _finalAuthorReviewWorkspace is not null,
+            LibraryWorkflowPhase.Completed when _finalAuthorStageCompleted =>
+                _quarantineCleanupExecutor is not null && _quarantineCleanupConfirmation is not null,
             LibraryWorkflowPhase.Completed when _finalAuthorReviewWorkspace is null =>
                 _inspectEmbeddedAuthorMetadata is not null && _inspectFrontMatterAuthors is not null,
             LibraryWorkflowPhase.Completed => _executeUnifiedCandidateCleanup is not null
@@ -1628,6 +1670,19 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         {
             if (startingPhase == LibraryWorkflowPhase.Completed)
             {
+                if (_finalAuthorStageCompleted)
+                {
+                    if (_quarantineCompleted)
+                    {
+                        StatusMessage = "Unresolvable record quarantine already completed. Rescan before another mutation.";
+                        return;
+                    }
+                    if (_quarantineReviewWorkspace is null)
+                        await PrepareQuarantineReviewAsync(startingState).ConfigureAwait(true);
+                    else
+                        await ExecuteQuarantineAsync(startingState).ConfigureAwait(true);
+                    return;
+                }
                 if (_finalAuthorReviewWorkspace is null)
                 {
                     FinalAuthorReviewWorkspace workspace = PrepareFinalAuthorReviewUseCase.Execute(startingState);
@@ -1687,7 +1742,23 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
                 StatusMessage = normalizationResult.IsCompleted
                     ? "Final author corrections completed."
                     : string.Join(" ", normalizationResult.Issues.Select(value => $"{value.Code}: {value.Explanation}"));
-                if (normalizationResult.IsCompleted) ClearFinalAuthorReview();
+                if (normalizationResult.IsCompleted && normalizationFinal is not null)
+                {
+                    FinalAuthorReviewWorkspace previous = _finalAuthorReviewWorkspace;
+                    FinalAuthorReviewWorkspace current = PrepareFinalAuthorReviewUseCase.Execute(
+                        normalizationFinal,
+                        previous.EmbeddedObservations,
+                        previous.MetadataCacheHitCount,
+                        previous.MetadataInspectionCount,
+                        previous.FrontMatterObservations,
+                        previous.FrontMatterCacheHitCount,
+                        previous.FrontMatterInspectionCount);
+                    current = PrepareFinalAuthorReviewUseCase.SetAllApply(current, false);
+                    ApplyFinalAuthorReviewWorkspace(current);
+                    ClearQuarantineReview();
+                    _finalAuthorStageCompleted = true;
+                    NotifyCandidateCleanupStateChanged();
+                }
                 return;
             }
 
@@ -1833,6 +1904,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         {
             await StopCandidateHeartbeatAsync().ConfigureAwait(true);
             _isCandidatePreparationActive = false;
+            IsProgressIndeterminate = false;
             IsBusy = false;
             _scanCancellation.Dispose();
             _scanCancellation = null;
@@ -2018,6 +2090,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         CheckAllFinalAuthorApplyCommand.NotifyCanExecuteChanged();
         CheckSelectedFinalAuthorApplyCommand.NotifyCanExecuteChanged();
         UncheckSelectedFinalAuthorApplyCommand.NotifyCanExecuteChanged();
+        NotifyQuarantineCommands();
         CandidateCleanupCommand.NotifyCanExecuteChanged();
         OnPropertyChanged(nameof(CandidateCleanupAutomationName));
         OnPropertyChanged(nameof(CandidateCleanupToolTip));
@@ -2329,6 +2402,8 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
 
     private void ClearFinalAuthorReview()
     {
+        _finalAuthorStageCompleted = false;
+        ClearQuarantineReview();
         _finalAuthorReviewWorkspace = null;
         _allFinalAuthorReviewSubjects = [];
         UpdateFinalAuthorReviewSelection([]);

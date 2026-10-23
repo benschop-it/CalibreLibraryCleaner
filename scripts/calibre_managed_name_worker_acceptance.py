@@ -10,7 +10,7 @@ import tempfile
 
 
 EXPECTED_MARKER = "I_CONFIRM_THIS_CALIBRE_LIBRARY_IS_DISPOSABLE"
-PROTOCOL_VERSION = "calibre-mutation-worker-protocol/1.3"
+PROTOCOL_VERSION = "calibre-mutation-worker-protocol/1.4"
 
 
 def require(condition, code):
@@ -79,7 +79,7 @@ def main():
         environment["CLC_WORKER_TEMP_DIRECTORY"] = worker_temp
         environment["CLC_WORKER_COVER_DIRECTORY"] = ""
         process = subprocess.Popen(
-            [sys.executable, "-e", worker_script, "--", library_root, library_uuid],
+            [sys.executable, "-e", worker_script, "--", library_root, library_uuid, "", ""],
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
@@ -110,6 +110,10 @@ def main():
             "stagedCoverFileName": None,
             "stagedCoverSizeInBytes": None,
             "stagedCoverSha256": None,
+            "quarantineTitle": None,
+            "quarantineAuthors": None,
+            "quarantineAuthorSorts": None,
+            "quarantineFormats": None,
         }
         write_message(process.stdin, {
             "protocolVersion": PROTOCOL_VERSION,
@@ -143,6 +147,10 @@ def main():
             "stagedCoverFileName": None,
             "stagedCoverSizeInBytes": None,
             "stagedCoverSha256": None,
+            "quarantineTitle": None,
+            "quarantineAuthors": None,
+            "quarantineAuthorSorts": None,
+            "quarantineFormats": None,
         }
         write_message(process.stdin, {
             "protocolVersion": PROTOCOL_VERSION,

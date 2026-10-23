@@ -45,6 +45,53 @@ public sealed class CalibreMutationWorkerBoundaryTests
     }
 
     [Fact]
+    public async Task QuarantineCopyReturnsDestinationIdentityAndVerifiedRecord()
+    {
+        using ControlledCalibreExecutable executable = new();
+        string root = Path.Combine(Path.GetTempPath(), "clcq" + Guid.NewGuid().ToString("N")[..6]);
+        string library = Path.Combine(root, "S");
+        string destination = Path.Combine(root, "S - Unresolvable");
+        Directory.CreateDirectory(library);
+        File.WriteAllBytes(Path.Combine(library, "metadata.db"), [0x00]);
+        try
+        {
+            using ServiceProvider provider = Provider(executable);
+            CalibreToolDescriptor tool = (await provider.GetRequiredService<ICalibreToolDiscovery>()
+                .DiscoverAndProbeAsync(library, CancellationToken.None)).Tool!;
+            CalibreMutationWorkerOpenResult opened = await provider
+                .GetRequiredService<ICalibreMutationWorkerFactory>()
+                .TryOpenAsync(new(
+                    tool,
+                    library,
+                    "87f7ed1f-59a8-45a6-975a-7e06fd84780d",
+                    QuarantineDestinationRoot: destination), CancellationToken.None);
+            await using ICalibreMutationWorkerSession session = opened.Session!;
+            FormatFileFingerprint fingerprint = new(10, new(new string('a', 64)));
+            CalibreQuarantineRecordExpectation expectation = new(
+                "Reviewed Title",
+                ["Reviewed Author"],
+                ["Author, Reviewed"],
+                [new("EPUB", "Reviewed Author/Reviewed Title (1)/book.epub", fingerprint)]);
+
+            CalibreMutationChunkResult result = await session.ExecuteChunkAsync(new(
+                "quarantine-copy",
+                [CalibreMutationOperation.CopyRecordToQuarantine("quarantine:copy:1", new(1), expectation)]),
+                CancellationToken.None);
+
+            opened.IsSuccess.Should().BeTrue(opened.FailureCode);
+            opened.QuarantineLibraryUuid.Should().Be("test-quarantine-uuid");
+            opened.QuarantineLibraryExisted.Should().BeFalse();
+            CalibreMutationOperationResult operation = result.OperationResults.Should().ContainSingle().Subject;
+            operation.QuarantineRecordId.Should().Be(new CalibreBookId(1001));
+            operation.VerifiedFormats.Should().ContainSingle().Which.Fingerprint.Should().Be(fingerprint);
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
     public async Task MetadataOperationReturnsVerifiedValuesPathAndAuthorSort()
     {
         using ControlledCalibreExecutable executable = new();
