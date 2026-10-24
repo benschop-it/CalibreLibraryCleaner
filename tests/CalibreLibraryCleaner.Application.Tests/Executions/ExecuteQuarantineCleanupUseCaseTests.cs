@@ -48,13 +48,64 @@ public sealed class ExecuteQuarantineCleanupUseCaseTests
             .MustHaveHappenedOnceExactly();
     }
 
+    [Fact]
+    public async Task MultipleCopyChunksFinishBeforeAnySingleRecordDeletionInExistingDestination()
+    {
+        Harness harness = new(copyFails: false, recordCount: 101, destinationExists: true);
+
+        QuarantineCleanupResult result = await harness.ExecuteAsync();
+
+        result.IsCompleted.Should().BeTrue();
+        result.CopiedRecordCount.Should().Be(101);
+        result.RemovedSourceRecordCount.Should().Be(101);
+        harness.Chunks.Take(2).SelectMany(value => value.Operations).Should().HaveCount(101)
+            .And.OnlyContain(value => value.Kind == CalibreMutationOperationKind.CopyRecordToQuarantine);
+        harness.Chunks.Skip(2).Should().HaveCount(101)
+            .And.OnlyContain(value => value.Operations.Count == 1
+                && value.Operations[0].Kind == CalibreMutationOperationKind.RemoveRecordWithContent);
+    }
+
+    [Fact]
+    public async Task FailureInSecondCopyChunkNeverStartsSourceDeletion()
+    {
+        Harness harness = new(copyFails: true, recordCount: 101, copyFailureRecord: 101);
+
+        QuarantineCleanupResult result = await harness.ExecuteAsync();
+
+        result.State.Should().Be(QuarantineCleanupState.PartiallyCompleted);
+        result.CopiedRecordCount.Should().Be(100);
+        result.RemovedSourceRecordCount.Should().Be(0);
+        harness.Chunks.SelectMany(value => value.Operations).Should().OnlyContain(value =>
+            value.Kind == CalibreMutationOperationKind.CopyRecordToQuarantine);
+        harness.AppliedDeltas.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task FailedDeletionStopsWithoutRetryingOrDeletingTheNextSource()
+    {
+        Harness harness = new(copyFails: false, recordCount: 2, deleteFails: true);
+
+        QuarantineCleanupResult result = await harness.ExecuteAsync();
+
+        result.State.Should().Be(QuarantineCleanupState.PartiallyCompleted);
+        result.CopiedRecordCount.Should().Be(2);
+        harness.Chunks.Should().HaveCount(2);
+        harness.Chunks[1].Operations.Should().ContainSingle();
+        harness.AppliedDeltas.Should().BeEmpty();
+    }
+
     private sealed class Harness
     {
         private static readonly DateTimeOffset Now = new(2026, 10, 16, 0, 0, 0, TimeSpan.Zero);
         private readonly ExecuteQuarantineCleanupUseCase _useCase;
         private readonly ExecuteQuarantineCleanupRequest _request;
 
-        public Harness(bool copyFails)
+        public Harness(
+            bool copyFails,
+            int recordCount = 1,
+            int copyFailureRecord = 1,
+            bool deleteFails = false,
+            bool destinationExists = false)
         {
             LibraryRoot = "C:\\Libraries\\Source";
             FormatFileFingerprint fingerprint = new(12, new(new string('a', 64)));
@@ -73,12 +124,16 @@ public sealed class ExecuteQuarantineCleanupUseCaseTests
                 [],
                 [format],
                 "Author/Book (1)");
+            CalibreBook[] books = Enumerable.Range(1, recordCount).Select(id => id == 1 ? book : new CalibreBook(
+                new(id), book.Title, book.AuthorSort, book.Authors, book.Identifiers,
+                [new("EPUB", "book.epub", $"Author/Book ({id})/book.epub", FormatFileStatus.Present,
+                    fingerprint, format.Observation)], $"Author/Book ({id})")).ToArray();
             LibraryStateGenerationId generation = new(
                 Guid.Parse("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"));
             LibrarySnapshot snapshot = new(
                 new("87f7ed1f-59a8-45a6-975a-7e06fd84780d", 27, LibraryRoot),
                 Now,
-                [book],
+                books,
                 []);
             LibraryState state = new(
                 generation,
@@ -96,19 +151,18 @@ public sealed class ExecuteQuarantineCleanupUseCaseTests
             FinalRecordDispositionAssessment disposition = new(
                 [FinalRecordDispositionReasonCodes.PlaceholderLabel],
                 [new(FinalRecordDispositionLabelSource.Title, "Unknown")]);
-            QuarantineReviewSubject subject = new(
-                book.Id,
-                book.Title,
-                book.Authors,
-                [new(format.Format, format.ExpectedRelativePath, format.FileStatus, format.Fingerprint)],
-                disposition);
+            QuarantineReviewSubject[] subjects = books.Select(value => new QuarantineReviewSubject(
+                value.Id, value.Title, value.Authors,
+                value.Formats.Select(item => new FinalAuthorFormatIdentity(
+                    item.Format, item.ExpectedRelativePath, item.FileStatus, item.Fingerprint)),
+                disposition, inputIdentity: FinalRecordInputIdentity.Create(value))).ToArray();
             QuarantineReviewWorkspace workspace = new(
                 LibraryRoot,
                 "C:\\Libraries\\Source - Unresolvable",
                 generation,
                 new(0),
-                [subject],
-                new(false, null));
+                subjects,
+                new(destinationExists, destinationExists ? "99999999-8888-7777-6666-555555555555" : null));
             _request = new(LibraryRoot, generation, new(0), workspace, true);
 
             State = A.Fake<ILibraryStateSession>();
@@ -139,29 +193,24 @@ public sealed class ExecuteQuarantineCleanupUseCaseTests
                 {
                     CalibreMutationChunkRequest chunk = call.GetArgument<CalibreMutationChunkRequest>(0)!;
                     Chunks.Add(chunk);
-                    CalibreMutationOperation operation = chunk.Operations.Single();
-                    if (copyFails && operation.Kind == CalibreMutationOperationKind.CopyRecordToQuarantine)
-                        return Task.FromResult(new CalibreMutationChunkResult(
-                            chunk.ChunkId,
-                            true,
-                            [new(operation.OperationId, operation.Kind, false, "quarantine_copy_failed")],
-                            "quarantine_copy_failed"));
-                    return Task.FromResult(new CalibreMutationChunkResult(
-                        chunk.ChunkId,
-                        true,
-                        [new(
-                            operation.OperationId,
-                            operation.Kind,
-                            true,
-                            VerifiedManagedPath: operation.Kind == CalibreMutationOperationKind.CopyRecordToQuarantine
-                                ? "Author/Book (1001)"
-                                : null,
-                            VerifiedFormats: operation.Kind == CalibreMutationOperationKind.CopyRecordToQuarantine
-                                ? [new("EPUB", "book.epub", fingerprint)]
-                                : null,
+                    List<CalibreMutationOperationResult> results = [];
+                    foreach (CalibreMutationOperation operation in chunk.Operations)
+                    {
+                        if (copyFails && operation.Kind == CalibreMutationOperationKind.CopyRecordToQuarantine
+                                && operation.RecordId.Value == copyFailureRecord
+                            || deleteFails && operation.Kind == CalibreMutationOperationKind.RemoveRecordWithContent)
+                        {
+                            results.Add(new(operation.OperationId, operation.Kind, false, "controlled_failure"));
+                            return Task.FromResult(new CalibreMutationChunkResult(
+                                chunk.ChunkId, true, results, "controlled_failure"));
+                        }
+                        results.Add(new(
+                            operation.OperationId, operation.Kind, true,
                             QuarantineRecordId: operation.Kind == CalibreMutationOperationKind.CopyRecordToQuarantine
-                                ? new(1001)
-                                : null)]));
+                                ? new(1000 + operation.RecordId.Value) : null));
+                    }
+                    return Task.FromResult(new CalibreMutationChunkResult(
+                        chunk.ChunkId, true, results));
                 });
             ICalibreMutationWorkerFactory workers = A.Fake<ICalibreMutationWorkerFactory>();
             A.CallTo(() => workers.TryOpenAsync(
@@ -170,7 +219,7 @@ public sealed class ExecuteQuarantineCleanupUseCaseTests
                     worker,
                     null,
                     "99999999-8888-7777-6666-555555555555",
-                    false));
+                    destinationExists));
             ICalibreToolDiscovery tools = A.Fake<ICalibreToolDiscovery>();
             CalibreToolDescriptor tool = new(
                 "C:\\Calibre2\\calibredb.exe",

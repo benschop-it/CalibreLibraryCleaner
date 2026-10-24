@@ -64,6 +64,8 @@ public sealed class InspectEmbeddedAuthorMetadataUseCase(
                 epub ? EmbeddedAuthorMetadataVersions.EpubLimits : EmbeddedAuthorMetadataVersions.PdfLimits);
             EmbeddedAuthorMetadataObservation? observation = await TryReadAsync(
                 key, cancellationToken).ConfigureAwait(false);
+            if (observation?.Status == EmbeddedAuthorMetadataStatus.Unavailable)
+                observation = null;
             if (observation is not null)
             {
                 cacheHits++;
@@ -73,7 +75,9 @@ public sealed class InspectEmbeddedAuthorMetadataUseCase(
                 ResolvedFormatPathOutcome resolved = pathResolver.ResolveFormat(
                     validation.Location!, book.RelativeDirectory, format.StoredFileName, format.Format);
                 if (!resolved.IsSuccess
-                    || !string.Equals(resolved.Path!.RelativePath, format.ExpectedRelativePath, StringComparison.Ordinal))
+                    || !string.Equals(
+                        resolved.Path!.RelativePath.Replace('\\', '/'),
+                        format.ExpectedRelativePath.Replace('\\', '/'), StringComparison.Ordinal))
                 {
                     observation = new(
                         key, EmbeddedAuthorMetadataStatus.Unavailable, null, [],

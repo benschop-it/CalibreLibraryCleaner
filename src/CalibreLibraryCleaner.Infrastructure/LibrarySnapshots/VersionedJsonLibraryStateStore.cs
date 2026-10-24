@@ -2,6 +2,7 @@ using System.Globalization;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using CalibreLibraryCleaner.Application.Abstractions;
 using CalibreLibraryCleaner.Domain.Executions;
 using CalibreLibraryCleaner.Domain.Libraries;
@@ -512,7 +513,17 @@ internal sealed class VersionedJsonLibraryStateStore(
             value.AppliedAuthorProvenance?.ProviderVersion,
             value.AppliedAuthorProvenance?.EditionId,
             value.AppliedAuthorProvenance?.ProposalPolicyVersion,
-            value.AppliedAuthorProvenance?.ValuesIdentity),
+            value.AppliedAuthorProvenance?.ValuesIdentity,
+            ManagedFormats: value.VerifiedFormats?.Select(format => new ManagedFormatPayload(
+                format.Format, format.StoredFileName, format.Fingerprint.SizeInBytes,
+                format.Fingerprint.Sha256.Value, format.Observation)).ToArray()),
+        ReconcileAuthorMetadataLibraryStateDelta value => new(
+            "reconcile-author-metadata", value.ExpectedRevision.Value,
+            value.OperationId, value.AppliedAtUtc, value.RecordId.Value, value.AuthorSort,
+            null, null, null, null,
+            value.Authors.Select(author => author.Name).ToArray(),
+            value.Authors.Select(author => author.SortName).ToArray(),
+            ReconciledAuthorIds: value.Authors.Select(author => author.Id?.Value).ToArray()),
         SkipMetadataLibraryStateDelta value => new("skip-metadata", value.ExpectedRevision.Value,
             value.OperationId, value.AppliedAtUtc, value.RecordId.Value, value.Field.ToString(),
             null, null, null, null, null, [value.ReasonCode]),
@@ -524,7 +535,8 @@ internal sealed class VersionedJsonLibraryStateStore(
                 format.Format,
                 format.StoredFileName,
                 format.Fingerprint.SizeInBytes,
-                format.Fingerprint.Sha256.Value)).ToArray()),
+                format.Fingerprint.Sha256.Value,
+                format.Observation)).ToArray()),
         _ => throw new ArgumentOutOfRangeException(nameof(delta), delta.GetType().Name, "Unsupported persisted state delta."),
     };
 
@@ -553,7 +565,11 @@ internal sealed class VersionedJsonLibraryStateStore(
                 value.OperationId, value.AppliedAtUtc, recordId,
                 Enum.Parse<LibraryMetadataField>(value.Format ?? string.Empty, false),
                 value.Values ?? [], value.VerifiedManagedPath, value.VerifiedAuthorSort,
-                value.VerifiedAuthorSortValues, AppliedAuthorProvenance(value)),
+                value.VerifiedAuthorSortValues, AppliedAuthorProvenance(value),
+                value.ManagedFormats?.Select(format => new ManagedFormatReadBack(
+                    format.Format, format.StoredFileName, Fingerprint(format.SizeInBytes, format.Sha256),
+                    format.Observation))),
+            "reconcile-author-metadata" => ReconciledAuthorDelta(value, generation, revision, recordId),
             "skip-metadata" => new SkipMetadataLibraryStateDelta(generation, revision,
                 value.OperationId, value.AppliedAtUtc, recordId,
                 Enum.Parse<LibraryMetadataField>(value.Format ?? string.Empty, false),
@@ -566,7 +582,8 @@ internal sealed class VersionedJsonLibraryStateStore(
                 value.ManagedFormats?.Select(format => new ManagedFormatReadBack(
                     format.Format,
                     format.StoredFileName,
-                    Fingerprint(format.SizeInBytes, format.Sha256)))
+                    Fingerprint(format.SizeInBytes, format.Sha256),
+                    format.Observation))
                     ?? throw new InvalidDataException("Managed-name refresh has no formats.")),
             _ => throw new InvalidDataException("The persisted state delta kind is unsupported."),
         };
@@ -586,6 +603,33 @@ internal sealed class VersionedJsonLibraryStateStore(
         if (fields.Any(string.IsNullOrWhiteSpace))
             throw new InvalidDataException("Persisted applied author provenance is incomplete.");
         return new(fields[0]!, fields[1]!, fields[2]!, fields[3]!, fields[4]!);
+    }
+
+    private static ReconcileAuthorMetadataLibraryStateDelta ReconciledAuthorDelta(
+        DeltaPayload value,
+        LibraryStateGenerationId generation,
+        LibraryStateRevision revision,
+        CalibreBookId recordId)
+    {
+        string[] names = value.Values
+            ?? throw new InvalidDataException("Reconciled author metadata has no names.");
+        string[] sorts = value.ExtraValues
+            ?? throw new InvalidDataException("Reconciled author metadata has no sorts.");
+        long?[] ids = value.ReconciledAuthorIds
+            ?? throw new InvalidDataException("Reconciled author metadata has no IDs.");
+        if (names.Length == 0 || sorts.Length != names.Length || ids.Length != names.Length)
+            throw new InvalidDataException("Reconciled author metadata has inconsistent values.");
+        return new(
+            generation,
+            revision,
+            value.OperationId,
+            value.AppliedAtUtc,
+            recordId,
+            value.Format ?? throw new InvalidDataException("Reconciled author metadata has no book sort."),
+            names.Select((name, index) => new BookAuthor(
+                ids[index] is null ? null : new(ids[index]!.Value),
+                name,
+                sorts[index])));
     }
 
     private static LibraryState CreatePreExactState(
@@ -979,11 +1023,14 @@ internal sealed class VersionedJsonLibraryStateStore(
         string? AuthorEditionId = null,
         string? AuthorProposalPolicyVersion = null,
         string? AuthorValuesIdentity = null,
-        ManagedFormatPayload[]? ManagedFormats = null);
+        ManagedFormatPayload[]? ManagedFormats = null,
+        long?[]? ReconciledAuthorIds = null);
 
     private sealed record ManagedFormatPayload(
         string Format,
         string StoredFileName,
         long SizeInBytes,
-        string Sha256);
+        string Sha256,
+        [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        FormatFileObservation? Observation = null);
 }

@@ -21,6 +21,7 @@ public partial class App : System.Windows.Application
 {
     private readonly IHost? _host;
     private readonly bool _releaseSmoke;
+    private readonly string? _startupStorageError;
 
     public App()
     {
@@ -34,17 +35,34 @@ public partial class App : System.Windows.Application
         // global and idempotent; the infrastructure layer registers it too.
         System.Text.Encoding.RegisterProvider(System.Text.CodePagesEncodingProvider.Instance);
 
-        Log.Logger = ApplicationLogging.CreateLogger();
+        ApplicationStorageRoot storage;
+        HostApplicationBuilder builder = Host.CreateApplicationBuilder();
+        string logDirectory;
+        try
+        {
+            storage = new(Environment.GetEnvironmentVariable(ApplicationStorageRoot.EnvironmentVariable));
+            logDirectory = storage.GetPath("logs");
+            builder.Services.AddCalibreLibraryInfrastructure(
+                storage,
+                onlineMetadataEnabled: !string.Equals(
+                    Environment.GetEnvironmentVariable("CALIBRE_ONLINE_METADATA_ENABLED"), "0", StringComparison.Ordinal));
+            Log.Logger = ApplicationLogging.CreateLogger(logDirectory);
+        }
+        catch (Exception exception) when (exception is ArgumentException or InvalidOperationException
+                                           or System.IO.IOException or UnauthorizedAccessException)
+        {
+            _startupStorageError = "The configured application storage is unavailable or unsafe. "
+                + "Use an absolute physical directory outside every Calibre library.";
+            return;
+        }
         Log.Information(
             "Application logging initialized. LogDirectory={LogDirectory}, RetainedFiles={RetainedFiles}, FileSizeLimitBytes={FileSizeLimitBytes}, FlushIntervalSeconds={FlushIntervalSeconds}.",
-            ApplicationLogging.DefaultLogDirectory,
+            logDirectory,
             ApplicationLogging.RetainedFileCountLimit,
             ApplicationLogging.FileSizeLimitBytes,
             ApplicationLogging.FlushInterval.TotalSeconds);
-        HostApplicationBuilder builder = Host.CreateApplicationBuilder();
         builder.Logging.ClearProviders();
         builder.Services.AddSerilog(Log.Logger, dispose: false);
-        builder.Services.AddCalibreLibraryInfrastructure();
         builder.Services.AddSingleton<ValidateLibraryUseCase>();
         builder.Services.AddSingleton<EpubAssessmentEngine>();
         builder.Services.AddSingleton<AssessEpubFormatsUseCase>();
@@ -95,6 +113,9 @@ public partial class App : System.Windows.Application
         builder.Services.AddSingleton<ExportRecommendationsUseCase>();
         builder.Services.AddSingleton<ExecuteBulkExactDuplicateCleanupUseCase>();
         builder.Services.AddSingleton<ExecuteUnifiedCandidateCleanupUseCase>();
+        builder.Services.AddSingleton<ReconcileFinalAuthorCatalogUseCase>();
+        builder.Services.AddSingleton<IFinalAuthorCatalogReconciler>(serviceProvider =>
+            serviceProvider.GetRequiredService<ReconcileFinalAuthorCatalogUseCase>());
         builder.Services.AddSingleton<IUnifiedCandidateCleanupExecutor>(serviceProvider =>
             serviceProvider.GetRequiredService<ExecuteUnifiedCandidateCleanupUseCase>());
         builder.Services.AddSingleton<ExecuteQuarantineCleanupUseCase>();
@@ -125,6 +146,14 @@ public partial class App : System.Windows.Application
 
     protected override async void OnStartup(System.Windows.StartupEventArgs e)
     {
+        if (_startupStorageError is not null)
+        {
+            base.OnStartup(e);
+            System.Windows.MessageBox.Show(_startupStorageError, "Application storage",
+                System.Windows.MessageBoxButton.OK, System.Windows.MessageBoxImage.Error);
+            Shutdown(1);
+            return;
+        }
         if (_releaseSmoke)
         {
             base.OnStartup(e);

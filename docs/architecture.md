@@ -155,6 +155,13 @@ for a new destination, uses duplicate record creation rather than merge/overwrit
 and reopens the destination cache after schema changes. Destination state is not a
 second application-managed library state or synchronization boundary.
 
+Calibre author names and sorts are shared entities, so one reviewed final-author write
+can update other records that reference the same author. After the final-author worker
+completes, Application performs one read-only catalog reconciliation. Exact library,
+record, title, managed-path, identifier, and registered-format identity is required;
+only ordered author IDs/names/sorts and book author-sort changes are projected. Any
+non-author difference marks state uncertain and blocks quarantine until Rescan.
+
 Current persistence uses authoritative generations/revisions, workflow checkpoints,
 a mutation marker, hash-chained typed delta journal, complete-chunk projection, and
 uncertainty blocking. It is the implemented baseline, not the long-term complexity
@@ -316,6 +323,51 @@ Production defaults to aggregate Information events plus Warning/Error. Detailed
 matching/inspection diagnostics require explicit developer diagnostics and remain
 bounded. Never log book content, titles, authors, identifiers, paths, provider
 payloads, or embeddings by default.
+
+## Final retained-record qualification
+
+Final author review is not whole-record qualification. After final naming,
+Application builds one disposition row per retained record using an indexed
+assessment/front-matter pass. Domain separately owns bounded field-sensitive
+identity triage and deterministic qualification. Evidence explicitly distinguishes
+unfinished, unavailable, deferred, conflicting and completed routes.
+
+The existing front-matter boundary now returns reduced title/subtitle/byline pairs
+with unit/line provenance, not retained prose. EPUB inspection remains within three
+documents; PDF remains within five pages in the isolated worker. Extractor identity
+includes the paired extraction and credit-resource policies; old author-only cache
+entries cannot establish paired coverage. Unchanged completed warm observations
+avoid parser startup; transient unavailable observations can be retried once per
+deduplicated demand in a later run.
+
+Targeted repair uses the existing edition-provider pipeline and review surface.
+Title-only retrieval cannot establish high confidence. Final metadata repair writes
+non-author fields first, then passes explicitly reviewed authors to the existing
+final-author action. Naming and shared-author reconciliation precede reassessment.
+No analysis path opens a mutation worker.
+
+Review binds an immutable in-memory structural identity over current catalog values,
+complete formats, observations and relevant versions. That value does not print its
+bibliographic fields, is not a new persistence system, and performs no file hashing.
+Existing generation/revision and worker identity checks remain mandatory.
+
+The Unresolvable surface shows all retained records, explicit reviewer acceptance,
+route coverage and frozen accounting. Only verified source removals increase the
+moved count; exclusions stay pending. Cross-library mutation and destination handling
+remain the existing copy-all/verify-all-before-delete boundary.
+
+Path-changing metadata and final naming return verified registered basenames and
+hash-bound current file observations through mutation protocol `1.6`. Projection
+stores catalog filename stems separately from complete relative filenames and
+preserves Present status only with verified observations. Relative-path comparison
+normalizes native/canonical separators; identical-fingerprint assessments remain
+reusable after supported naming. No second scan or filesystem mutation fallback is
+used to hide an incomplete projection.
+
+For explicitly isolated/offline runs, composition accepts
+`CALIBRE_CLEANER_DATA_ROOT` and `CALIBRE_ONLINE_METADATA_ENABLED=0`. The normal data
+root and online defaults are unchanged. Configured storage is physical and outside
+Calibre libraries; offline edition resolution short-circuits before key access.
 
 ## Current architectural debt
 

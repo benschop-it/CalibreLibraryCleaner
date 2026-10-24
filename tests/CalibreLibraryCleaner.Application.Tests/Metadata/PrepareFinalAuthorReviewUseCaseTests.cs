@@ -235,7 +235,7 @@ public sealed class PrepareFinalAuthorReviewUseCaseTests
     }
 
     [Fact]
-    public void UnavailableFrontMatterExhaustsInspectionWithoutInventingAnAuthor()
+    public void UnavailableFrontMatterRemainsIncompleteWithoutInventingAnAuthor()
     {
         CalibreBook book = Book(1, "Unknown", [Format("PDF", "book.pdf", PdfFingerprint)]);
         FrontMatterAuthorObservation observation = new(
@@ -257,7 +257,7 @@ public sealed class PrepareFinalAuthorReviewUseCaseTests
 
         subject.Resolution.ProposalSource.Should().Be(AuthorProposalSource.None);
         subject.Resolution.Status.Should().Be(AuthorResolutionStatus.Unresolved);
-        subject.NeedsInspection.Should().BeFalse();
+        subject.NeedsInspection.Should().BeTrue();
         subject.FrontMatterEvidence.Single().ProblemCode.Should().Be("PDF_FRONT_MATTER.PASSWORD_REQUIRED");
     }
 

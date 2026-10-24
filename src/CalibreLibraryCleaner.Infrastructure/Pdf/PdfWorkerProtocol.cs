@@ -10,7 +10,7 @@ namespace CalibreLibraryCleaner.Infrastructure.Pdf;
 
 internal static class PdfWorkerProtocol
 {
-    public const string Version = "pdf-worker-protocol/1.0";
+    public const string Version = "pdf-worker-protocol/1.1";
 
     public static JsonSerializerOptions SerializerOptions { get; } = CreateSerializerOptions();
 
@@ -217,6 +217,15 @@ internal sealed record PdfWorkerFrontMatterCandidateMessage(
     int LineNumber,
     string Marker);
 
+internal sealed record PdfWorkerIdentityCandidateMessage(
+    string Title,
+    string[] Authors,
+    int UnitNumber,
+    int TitleLineNumber,
+    int AuthorLineNumber,
+    bool ExplicitCredit,
+    string? Subtitle);
+
 internal sealed record PdfWorkerFrontMatterMessage(
     string Format,
     long SizeInBytes,
@@ -229,7 +238,8 @@ internal sealed record PdfWorkerFrontMatterMessage(
     int CompletedUnits,
     int RetainedUsefulCharacters,
     bool Truncated,
-    string? ProblemCode)
+    string? ProblemCode,
+    IReadOnlyList<PdfWorkerIdentityCandidateMessage> IdentityCandidates)
 {
     public static PdfWorkerFrontMatterMessage From(FrontMatterAuthorObservation value) => new(
         value.Format,
@@ -248,5 +258,8 @@ internal sealed record PdfWorkerFrontMatterMessage(
         value.CompletedUnits,
         value.RetainedUsefulCharacters,
         value.Truncated,
-        value.ProblemCode);
+        value.ProblemCode,
+        value.IdentityCandidates.Select(candidate => new PdfWorkerIdentityCandidateMessage(
+            candidate.Title, candidate.Authors.ToArray(), candidate.UnitNumber,
+            candidate.TitleLineNumber, candidate.AuthorLineNumber, candidate.ExplicitCredit, candidate.Subtitle)).ToArray());
 }

@@ -16,6 +16,26 @@ namespace CalibreLibraryCleaner.Application.Tests.Executions;
 
 public sealed class ExecuteUnifiedCandidateCleanupUseCaseTests
 {
+    [Fact]
+    public async Task FinalIdentityMetadataRepairsDeferAuthorsToFinalAuthorWorkerAction()
+    {
+        Harness harness = await Harness.CreateAsync([Book(1, Format(1, "EPUB", 'a'))]);
+        await harness.AdvanceToCompletedAsync();
+        MetadataReviewWorkspace workspace = harness.MetadataWorkspace(Candidate());
+
+        UnifiedCandidateCleanupResult result = await harness.ExecuteMetadataWorkspaceAsync(workspace);
+
+        result.IsCompleted.Should().BeTrue();
+        harness.Chunks.SelectMany(value => value.Operations)
+            .Should().NotContain(value => value.Metadata != null
+                && value.Metadata.Field == LibraryMetadataField.Authors);
+        LibraryState current = harness.State.GetCurrent(harness.Snapshot.Identity.LibraryRoot)!;
+        FinalAuthorReviewWorkspace authors = PrepareFinalAuthorReviewUseCase.AddReviewedBibliographicRepairs(
+            current, PrepareFinalAuthorReviewUseCase.Execute(current), workspace);
+        authors.Subjects.Should().ContainSingle(value =>
+            value.Apply && value.Resolution.ProposalSource == AuthorProposalSource.ReviewedBibliographicRepair);
+    }
+
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
@@ -185,6 +205,7 @@ public sealed class ExecuteUnifiedCandidateCleanupUseCaseTests
 
         result.State.Should().Be(UnifiedCandidateCleanupState.Completed);
         result.RefreshedManagedNameCount.Should().Be(1);
+        result.VerifiedManagedNameBookIds.Should().Equal(new CalibreBookId(1));
         CalibreMutationOperation[] operations = harness.Chunks.SelectMany(value => value.Operations).ToArray();
         operations.Should().HaveCount(2);
         CalibreMetadataMutation metadata = operations[0].Metadata!;
@@ -194,7 +215,7 @@ public sealed class ExecuteUnifiedCandidateCleanupUseCaseTests
         CalibreBook projected = harness.State.GetCurrent(harness.Snapshot.Identity.LibraryRoot)!
             .Snapshot.Books.Single();
         projected.RelativeDirectory.Should().Be("Verified Author/Verified Title (1)");
-        projected.Formats.Single().StoredFileName.Should().Be("Verified Title - Verified Author.epub");
+        projected.Formats.Single().StoredFileName.Should().Be("Verified Title - Verified Author");
     }
 
     [Fact]
@@ -1036,11 +1057,13 @@ public sealed class ExecuteUnifiedCandidateCleanupUseCaseTests
                                     : string.Join(" & ", value.Metadata.AuthorSortValues),
                             VerifiedAuthorSortValues: value.Metadata?.AuthorSortValues,
                             VerifiedFormats: value.Kind == CalibreMutationOperationKind.RefreshManagedName
+                                || value.Metadata?.Field is LibraryMetadataField.Title or LibraryMetadataField.Authors
                                 ? snapshot.Books.Single(book => book.Id == value.RecordId).Formats.Select(format =>
                                     new ManagedFormatReadBack(
                                         format.Format,
                                         $"Verified Title - Verified Author.{format.Format.ToLowerInvariant()}",
-                                        format.Fingerprint!)).ToArray()
+                                        format.Fingerprint!,
+                                        new(format.Fingerprint!.SizeInBytes, Now, Now, 0))).ToArray()
                                 : null) with
                         {
                             VerifiedManagedPath = value.Kind == CalibreMutationOperationKind.RefreshManagedName

@@ -8,7 +8,7 @@ namespace CalibreLibraryCleaner.Infrastructure.Calibre;
 
 internal static class CalibreMutationWorkerProtocol
 {
-    public const string Version = "calibre-mutation-worker-protocol/1.4";
+    public const string Version = "calibre-mutation-worker-protocol/1.6";
     public const string ReadyKind = "ready";
     public const string ExecuteChunkKind = "executeChunk";
     public const string ChunkResultKind = "chunkResult";
@@ -164,4 +164,5 @@ internal sealed record CalibreManagedFormatReadBackMessage(
     string Format,
     string StoredFileName,
     long SizeInBytes,
-    string Sha256);
+    string Sha256,
+    Domain.Libraries.FormatFileObservation? Observation = null);

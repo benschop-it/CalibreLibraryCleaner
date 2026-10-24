@@ -27,6 +27,27 @@ namespace CalibreLibraryCleaner.Wpf.Tests.ViewModels;
 
 public sealed class MainWindowViewModelTests
 {
+    [Fact]
+    public void OperationGateReleaseRefreshesDispositionCommandsForActualWpfBindings()
+    {
+        LibraryOperationCoordinator coordinator = new();
+        using MainWindowViewModel viewModel = CreateViewModel(
+            A.Fake<ILibraryFolderPicker>(), out _, out _, out _, operationCoordinator: coordinator);
+        int repairChanges = 0;
+        int acceptanceChanges = 0;
+        viewModel.ReviewIdentityRepairsCommand.CanExecuteChanged += (_, _) => repairChanges++;
+        viewModel.AcceptSelectedQualificationCommand.CanExecuteChanged += (_, _) => acceptanceChanges++;
+
+        using (coordinator.TryBegin())
+        {
+            viewModel.IsOperationActive.Should().BeTrue();
+        }
+
+        viewModel.IsOperationActive.Should().BeFalse();
+        repairChanges.Should().Be(2, "WPF must be notified when the operation starts and when its gate is released");
+        acceptanceChanges.Should().Be(2);
+    }
+
     [Theory]
     [InlineData("Library", true)]
     [InlineData("Library", false)]
@@ -681,17 +702,31 @@ public sealed class MainWindowViewModelTests
             .Invokes(call => captured = call.GetArgument<ExecuteUnifiedCandidateCleanupRequest>(0))
             .Returns(new UnifiedCandidateCleanupResult(
                 new(Guid.Parse("99999999-8888-7777-6666-555555555555")),
-                UnifiedCandidateCleanupState.Completed, 0, 0, 0, 0, [], UpdatedMetadataFieldCount: 1));
+                UnifiedCandidateCleanupState.Completed, 0, 0, 0, 0, [], UpdatedMetadataFieldCount: 1,
+                RefreshedManagedNameCount: 1, VerifiedManagedNameBookIds: [book.Id]));
         IMetadataMutationConfirmationService confirmation = A.Fake<IMetadataMutationConfirmationService>();
         A.CallTo(() => confirmation.ConfirmAuthorNormalization(1)).Returns(true);
         CapturingLogger<MainWindowViewModel> logger = new();
+        IQuarantineDestinationInspector destination = A.Fake<IQuarantineDestinationInspector>();
+        A.CallTo(() => destination.InspectAsync(
+                libraryRoot, libraryRoot + " - Unresolvable", A<CancellationToken>._))
+            .Returns(new QuarantineDestinationInspection(new(false, null)));
+        IFrontMatterAuthorCache frontCache = A.Fake<IFrontMatterAuthorCache>();
+        A.CallTo(() => frontCache.TryReadAsync(A<FrontMatterAuthorCacheKey>._, A<CancellationToken>._))
+            .Returns(new FrontMatterAuthorObservation(
+                "EPUB", book.Formats[0].Fingerprint!, FrontMatterAuthorVersions.EpubExtractor,
+                FrontMatterAuthorVersions.Limits, FrontMatterAuthorStatus.Missing, [], 1, 1, 0, false));
+        IQuarantineCleanupExecutor quarantine = A.Fake<IQuarantineCleanupExecutor>();
         MainWindowViewModel viewModel = CreateViewModel(
             A.Fake<ILibraryFolderPicker>(), out ILibraryPathResolver pathResolver, out _, out _, new(store), session,
             workflowOptions: LibraryWorkflowOptions.Staged,
             candidateExecutor: executor,
             metadataConfirmation: confirmation,
             enableFinalAuthorReview: true,
-            logger: logger);
+            logger: logger,
+            frontMatterCache: frontCache,
+            quarantineDestination: destination,
+            quarantineExecutor: quarantine);
         A.CallTo(() => pathResolver.ValidateAsync(libraryRoot, A<CancellationToken>._))
             .Returns(LibraryValidationOutcome.Success(new(libraryRoot, $"{libraryRoot}\\metadata.db")));
         await viewModel.InitializeAsync();
@@ -723,11 +758,25 @@ public sealed class MainWindowViewModelTests
         captured.MetadataReview.Should().BeNull();
         captured.GroupSelections.Should().BeEmpty();
         viewModel.CandidateCleanupResultSummary.Should().Be(
-            "Updated 1 of 1 checked author correction(s); refreshed 0 managed name(s); skipped 0 verified-unchanged record(s).");
+            "Updated 1 of 1 checked author correction(s); refreshed 1 managed name(s); skipped 0 verified-unchanged record(s).");
         viewModel.StatusMessage.Should().Be("Final author corrections completed.");
         logger.Entries.Should().Contain(value =>
             value.EventId.Name == "UserVisibleOperationResult"
             && value.Message == viewModel.CandidateCleanupResultSummary);
+
+        await viewModel.CandidateCleanupCommand.ExecuteAsync(null);
+        QuarantineReviewSubjectRowViewModel disposition = viewModel.QuarantineReviewSubjects
+            .Should().ContainSingle().Subject;
+        disposition.Include.Should().BeFalse();
+        viewModel.QuarantineReviewSummary.Should().Contain("Retained input 1").And.Contain("pending 1");
+        viewModel.UpdateQuarantineReviewSelection([disposition]);
+        viewModel.AcceptSelectedQualificationCommand.Execute(null);
+        viewModel.QuarantineReviewSummary.Should().Contain("qualified 1").And.Contain("pending 0");
+        await viewModel.CandidateCleanupCommand.ExecuteAsync(null);
+        viewModel.StatusMessage.Should().Contain("High-quality library complete");
+        A.CallTo(() => quarantine.ExecuteAsync(
+            A<ExecuteQuarantineCleanupRequest>._, A<IProgress<QuarantineCleanupProgress>?>._,
+            A<CancellationToken>._)).MustNotHaveHappened();
     }
 
     [Fact]
@@ -1458,7 +1507,11 @@ public sealed class MainWindowViewModelTests
         PrepareMetadataReviewUseCase? prepareMetadataReview = null,
         IMetadataMutationConfirmationService? metadataConfirmation = null,
         bool enableFinalAuthorReview = false,
-        ILogger<MainWindowViewModel>? logger = null)
+        ILogger<MainWindowViewModel>? logger = null,
+        IFinalAuthorCatalogReconciler? finalAuthorCatalogReconciler = null,
+        IFrontMatterAuthorCache? frontMatterCache = null,
+        IQuarantineDestinationInspector? quarantineDestination = null,
+        IQuarantineCleanupExecutor? quarantineExecutor = null)
     {
         resolver = A.Fake<ILibraryPathResolver>();
         reader = A.Fake<ICalibreMetadataReader>();
@@ -1476,8 +1529,17 @@ public sealed class MainWindowViewModelTests
                 resolver,
                 A.Fake<IEpubFrontMatterAuthorInspector>(),
                 A.Fake<IPdfFrontMatterAuthorInspector>(),
-                A.Fake<IFrontMatterAuthorCache>())
+                frontMatterCache ?? A.Fake<IFrontMatterAuthorCache>())
             : null;
+        if (enableFinalAuthorReview && finalAuthorCatalogReconciler is null)
+        {
+            finalAuthorCatalogReconciler = A.Fake<IFinalAuthorCatalogReconciler>();
+            A.CallTo(() => finalAuthorCatalogReconciler.ExecuteAsync(
+                    A<LibraryState>._, A<CancellationToken>._))
+                .ReturnsLazily(call => Task.FromResult(new FinalAuthorCatalogReconciliationResult(
+                    call.GetArgument<LibraryState>(0),
+                    0)));
+        }
         return new(
             new ValidateLibraryUseCase(resolver),
             new ScanLibraryUseCase(resolver, reader, hasher, clock, new()),
@@ -1495,7 +1557,12 @@ public sealed class MainWindowViewModelTests
             metadataMutationConfirmation: metadataConfirmation,
             inspectEmbeddedAuthorMetadata: embeddedAuthors,
             inspectFrontMatterAuthors: frontMatterAuthors,
-            logger: logger);
+            logger: logger,
+            quarantineDestinationInspector: quarantineDestination,
+            quarantineCleanupExecutor: quarantineExecutor,
+            quarantineCleanupConfirmation: quarantineExecutor is null
+                ? null : A.Fake<IQuarantineCleanupConfirmationService>(),
+            reconcileFinalAuthorCatalog: finalAuthorCatalogReconciler);
     }
 
     private static BookFormat ViewerFormat(

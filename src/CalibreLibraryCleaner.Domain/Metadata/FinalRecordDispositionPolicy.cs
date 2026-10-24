@@ -40,7 +40,9 @@ public sealed record FinalRecordDispositionAssessment
 {
     public FinalRecordDispositionAssessment(
         IEnumerable<string> reasonCodes,
-        IEnumerable<FinalRecordDispositionLabel> supportingLabels)
+        IEnumerable<FinalRecordDispositionLabel> supportingLabels,
+        FinalRecordQualification? qualification = null,
+        FinalRecordQualificationEvidence? evidence = null)
     {
         ArgumentNullException.ThrowIfNull(reasonCodes);
         ArgumentNullException.ThrowIfNull(supportingLabels);
@@ -62,16 +64,24 @@ public sealed record FinalRecordDispositionAssessment
             throw new ArgumentException("Final record disposition assessment is invalid.");
         ReasonCodes = new ReadOnlyCollection<string>(reasons);
         SupportingLabels = new ReadOnlyCollection<FinalRecordDispositionLabel>(labels);
+        Qualification = qualification ?? (reasons.Length > 0
+            ? FinalRecordQualification.ProposedUnresolvable
+            : FinalRecordQualification.NeedsReview);
+        if (!Enum.IsDefined(Qualification))
+            throw new ArgumentOutOfRangeException(nameof(qualification));
+        Evidence = evidence;
     }
 
-    public bool ProposedForQuarantine => ReasonCodes.Count > 0;
+    public bool ProposedForQuarantine => Qualification == FinalRecordQualification.ProposedUnresolvable;
+    public FinalRecordQualification Qualification { get; }
+    public FinalRecordQualificationEvidence? Evidence { get; }
     public IReadOnlyList<string> ReasonCodes { get; }
     public IReadOnlyList<FinalRecordDispositionLabel> SupportingLabels { get; }
 }
 
 public static class FinalRecordDispositionPolicy
 {
-    public const string PolicyVersion = "final-record-disposition/1.0.0";
+    public const string PolicyVersion = "final-record-disposition/2.0.0";
 
     private static readonly HashSet<string> PlaceholderLabels = new(StringComparer.Ordinal)
     {
@@ -124,7 +134,7 @@ public static class FinalRecordDispositionPolicy
             .ToArray();
         if (placeholderEvidence.Length > 0)
             reasons.Add(FinalRecordDispositionReasonCodes.PlaceholderLabel);
-        return new(reasons, placeholderEvidence);
+        return new(reasons, placeholderEvidence, FinalRecordQualification.NeedsReview);
     }
 
     private static bool IsPlaceholder(FinalRecordDispositionLabel label) =>

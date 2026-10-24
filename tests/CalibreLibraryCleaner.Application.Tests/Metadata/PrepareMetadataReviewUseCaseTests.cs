@@ -11,6 +11,45 @@ namespace CalibreLibraryCleaner.Application.Tests.Metadata;
 public sealed class PrepareMetadataReviewUseCaseTests
 {
     [Fact]
+    public async Task ExplicitLocalIdentityCanRepairATitleWithoutAnyAvailableOnlineProvider()
+    {
+        FormatFileFingerprint fingerprint = new(100, new(new string('b', 64)));
+        CalibreBook book = new(
+            new(1), "(2011 Broken Label", "Writer, Reliable",
+            [new(new(1), "Reliable Writer", "Writer, Reliable")], [],
+            [new("EPUB", "book", "Writer/Book (1)/book.epub", FormatFileStatus.Present, fingerprint,
+                new(100, DateTimeOffset.UnixEpoch, DateTimeOffset.UnixEpoch, 0))], "Writer/Book (1)");
+        LibraryStateGenerationId generation = new(Guid.Parse("cccccccc-bbbb-cccc-dddd-eeeeeeeeeeee"));
+        LibraryState state = new(
+            generation, new(0), LibraryStateStatus.Authoritative,
+            new(new("generated", 1, "C:\\generated"), DateTimeOffset.UnixEpoch, [book], []),
+            DateTimeOffset.UnixEpoch, workflowCheckpoint: new(
+                LibraryWorkflowPhase.Completed, generation, new(0), LibraryWorkflowPolicyVersions.Current,
+                DateTimeOffset.UnixEpoch, new(generation, new(0))));
+        FrontMatterAuthorObservation local = new(
+            "EPUB", fingerprint, FrontMatterAuthorVersions.EpubExtractor, FrontMatterAuthorVersions.Limits,
+            FrontMatterAuthorStatus.Available,
+            [new(AuthorCreditRole.Author, ["Reliable Writer"], 1, 2, "By")], 1, 1, 100, false,
+            identityCandidates: [new("A Northern Valley", ["Reliable Writer"], 1, 1, 2, true)]);
+        FinalAuthorReviewWorkspace identity = PrepareFinalAuthorReviewUseCase.Execute(
+            state, frontMatterObservations: [local]);
+        PrepareMetadataReviewUseCase useCase = new(
+            new([], A.Fake<IEditionMetadataProposalCache>(), A.Fake<IClock>(), new()),
+            A.Fake<IMetadataReviewDecisionStore>());
+
+        MetadataReviewWorkspace result = await useCase.ExecuteAsync(
+            state, [], null, CancellationToken.None, identity);
+
+        ReviewedMetadataSubject repair = result.Subjects.Should().ContainSingle().Subject;
+        repair.Apply.Should().BeFalse();
+        repair.Subject.Proposal.Confidence.Should().Be(FusedEditionMetadataConfidence.Low);
+        repair.Subject.Proposal.Candidate!.Title.Should().Be("A Northern Valley");
+        repair.Subject.Proposal.FieldSources.Should().Contain(value =>
+            value.Field == EditionMetadataField.Title && value.Provider.Id == "local-front-matter");
+        result.ProviderResults!.Providers.Sum(value => value.ProviderRequests).Should().Be(0);
+    }
+
+    [Fact]
     public async Task CompatibleOverrideRestoresAndStaleDecisionIsPruned()
     {
         Harness harness = Harness.Create();

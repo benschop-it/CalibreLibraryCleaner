@@ -22,7 +22,7 @@ public sealed class EditionMetadataFusionTests
         FusedEditionMetadataProposal result = EditionMetadataFusionPolicy.Fuse([allCaps, mixedCase]);
 
         result.Candidate!.EditionId.Should().Be("mixed-case");
-        result.PolicyVersion.Should().Be("edition-metadata-fusion/1.1.0");
+        result.PolicyVersion.Should().Be("edition-metadata-fusion/1.2.0");
     }
 
     [Fact]

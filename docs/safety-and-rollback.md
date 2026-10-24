@@ -135,6 +135,20 @@ ambiguous mutation: stop immediately and require Rescan. Internal storage and
 unregistered files are neither adopted nor moved.
 
 Final quarantine is available only after that author/managed-name mutation succeeds.
+Its read-only review covers every retained record, not only final-author exceptions.
+Missing evidence, provider failure, a low score, or a placeholder-like title cannot
+by itself qualify a book or select a default transfer. Explicit route coverage and
+independent title/author evidence remain separate from confirmed mutation authority.
+Reviewer acceptance confirms identity, content and disclosed companion defects; a
+review exclusion alone is never acceptance. Completed moves with pending records
+must not be described as a finished high-quality source library.
+
+Targeted identity repair reuses the existing metadata-only and final-author worker
+actions, with separate backup confirmations and non-author-before-author ordering.
+It does not create a new mutation engine. All final repair replacements start
+unchecked, and changed inputs/evidence invalidate prior review. The application
+does not blindly use a catalog ISBN to override contradictory local identity.
+
 Its destination is the fixed same-parent sibling `<source name> - Unresolvable` and
 must stay within Calibre's supported path bound. An existing destination is inspected
 read-only, bound by UUID, backed up externally, and never reinitialized. Its existing
@@ -148,6 +162,13 @@ Source deletion is then one record per worker chunk and projects only a verified
 `RemoveRecordWithContentLibraryStateDelta`. A copy failure leaves every source record
 untouched. A later delete failure may leave a verified deleted prefix and marks state
 uncertain; explicit Rescan remains mandatory.
+
+Because Calibre author entities are shared, final-author mutation may legitimately
+change author display/sort metadata on records not directly selected in review. Before
+quarantine review, the application rereads the catalog query-only and projects only
+those verified author side effects. Library identity, record IDs, titles, managed
+paths, identifiers, and registered formats must remain exact; any other drift stops
+and requires Rescan.
 
 ## Failure handling
 

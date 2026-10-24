@@ -79,7 +79,8 @@ public sealed class FileEmbeddedAuthorMetadataCacheTests
             5,
             5,
             100,
-            false);
+            false,
+            identityCandidates: [new("The Northern Valley", ["Reliable Writer"], 1, 1, 2, true)]);
 
         await cache.WriteAsync(observation, CancellationToken.None);
         FrontMatterAuthorObservation? loaded = await cache.TryReadAsync(

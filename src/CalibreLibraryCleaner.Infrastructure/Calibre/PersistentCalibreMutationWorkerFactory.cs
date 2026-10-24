@@ -337,7 +337,8 @@ internal sealed class PersistentCalibreMutationWorkerSession(
                         value.VerifiedFormats?.Select(format => new ManagedFormatReadBack(
                             format.Format,
                             format.StoredFileName,
-                            new(format.SizeInBytes, new(format.Sha256)))).ToArray(),
+                            new(format.SizeInBytes, new(format.Sha256)),
+                            format.Observation)).ToArray(),
                         value.IsSkipped, value.SkipCode,
                         value.QuarantineRecordId is null ? null : new(value.QuarantineRecordId.Value))).ToArray(),
                     response.FailureCode);
@@ -429,6 +430,8 @@ internal sealed class PersistentCalibreMutationWorkerSession(
                 && operation.Kind == CalibreMutationOperationKind.SetMetadata;
             bool refreshSuccess = result.IsSuccess && !result.IsSkipped
                 && operation.Kind == CalibreMutationOperationKind.RefreshManagedName;
+            bool pathMetadataSuccess = metadataSuccess
+                && operation.Metadata?.Field is LibraryMetadataField.Title or LibraryMetadataField.Authors;
             bool quarantineCopySuccess = result.IsSuccess && !result.IsSkipped
                 && operation.Kind == CalibreMutationOperationKind.CopyRecordToQuarantine;
             bool authorSortSuccess = metadataSuccess && operation.Metadata?.AuthorSortValues is not null;
@@ -437,9 +440,9 @@ internal sealed class PersistentCalibreMutationWorkerSession(
                     && !string.IsNullOrWhiteSpace(result.VerifiedAuthorSort))
                 || !metadataSuccess && (result.VerifiedMetadataValues is not null
                     || result.VerifiedAuthorSort is not null)
-                || (refreshSuccess || quarantineCopySuccess) != (result.VerifiedFormats is not null
+                || (pathMetadataSuccess || refreshSuccess || quarantineCopySuccess) != (result.VerifiedFormats is not null
                     && !string.IsNullOrWhiteSpace(result.VerifiedManagedPath))
-                || !refreshSuccess && !quarantineCopySuccess && result.VerifiedFormats is not null
+                || !pathMetadataSuccess && !refreshSuccess && !quarantineCopySuccess && result.VerifiedFormats is not null
                 || result.VerifiedFormats is not null && !ValidManagedFormats(result.VerifiedFormats)
                 || !metadataSuccess && !refreshSuccess && !quarantineCopySuccess
                     && result.VerifiedManagedPath is not null
@@ -465,7 +468,12 @@ internal sealed class PersistentCalibreMutationWorkerSession(
             && value.StoredFileName.Length <= 512
             && !value.StoredFileName.Contains('/')
             && !value.StoredFileName.Contains('\\')
+            && value.StoredFileName.EndsWith("." + value.Format, StringComparison.OrdinalIgnoreCase)
+            && value.StoredFileName.Length > value.Format.Length + 1
             && value.SizeInBytes >= 0
+            && value.Observation is not null
+            && value.Observation.Length == value.SizeInBytes
+            && (value.Observation.Attributes & (int)(FileAttributes.Directory | FileAttributes.ReparsePoint)) == 0
             && value.Sha256.Length == 64
             && value.Sha256.All(char.IsAsciiHexDigit));
 

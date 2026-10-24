@@ -1,8 +1,10 @@
 using System.Collections.ObjectModel;
 using CalibreLibraryCleaner.Application.Abstractions;
 using CalibreLibraryCleaner.Application.Executions;
+using CalibreLibraryCleaner.Application.Libraries;
 using CalibreLibraryCleaner.Application.Metadata;
 using CalibreLibraryCleaner.Domain.Libraries;
+using CalibreLibraryCleaner.Domain.Metadata;
 using CalibreLibraryCleaner.Wpf.Services;
 using CommunityToolkit.Mvvm.Input;
 
@@ -18,12 +20,15 @@ public sealed partial class MainWindowViewModel
     private QuarantineReviewSubjectRowViewModel[] _selectedQuarantineReviewSubjects = [];
     private QuarantineReviewWorkspace? _quarantineReviewWorkspace;
     private QuarantineReviewSubjectRowViewModel? _selectedQuarantineReviewSubject;
-    private QuarantineReviewFilterMode _quarantineReviewFilterMode = QuarantineReviewFilterMode.Proposed;
+    private QuarantineReviewFilterMode _quarantineReviewFilterMode = QuarantineReviewFilterMode.All;
     private string _quarantineReviewSummary = "Complete final author and managed-name cleanup, then prepare quarantine review.";
     private string _quarantineDestinationPath = string.Empty;
     private string _quarantineManualRecordId = string.Empty;
     private bool _finalAuthorStageCompleted;
     private bool _quarantineCompleted;
+    private bool _identityRepairReviewReady;
+    private EditionMetadataProvidersBatchResult? _identityRepairProviderResults;
+    private HashSet<CalibreBookId> _verifiedManagedNameBookIds = [];
 
     public ReadOnlyObservableCollection<QuarantineReviewSubjectRowViewModel> QuarantineReviewSubjects { get; }
 
@@ -72,6 +77,8 @@ public sealed partial class MainWindowViewModel
     public IRelayCommand CheckSelectedQuarantineIncludeCommand { get; }
     public IRelayCommand UncheckSelectedQuarantineIncludeCommand { get; }
     public IRelayCommand AddManualQuarantineRecordCommand { get; }
+    public IRelayCommand AcceptSelectedQualificationCommand { get; }
+    public IAsyncRelayCommand ReviewIdentityRepairsCommand { get; }
 
     public void UpdateQuarantineReviewSelection(
         IEnumerable<QuarantineReviewSubjectRowViewModel> subjects)
@@ -87,9 +94,27 @@ public sealed partial class MainWindowViewModel
     private async Task PrepareQuarantineReviewAsync(LibraryState state)
     {
         if (_finalAuthorReviewWorkspace is null || _quarantineDestinationInspector is null) return;
+        if (_inspectFrontMatterAuthors is not null)
+        {
+            UpdateCandidateProgress(new(
+                CandidatePreparationPhase.InspectingFinalIdentity, 0, 0, CandidateProgressUnit.Files,
+                "Inspecting retained identity"));
+            Progress<FrontMatterAuthorProgress> progress = new(value => UpdateCandidateProgress(new(
+                CandidatePreparationPhase.InspectingFinalIdentity, value.CompletedFormats, value.TotalFormats,
+                CandidateProgressUnit.Files, "Inspecting retained identity",
+                $"{value.CacheHits:N0} cached, {value.Inspections:N0} parser starts")));
+            FinalAuthorReviewWorkspace identity = await _inspectFrontMatterAuthors.ExecuteAsync(
+                state, _finalAuthorReviewWorkspace, progress,
+                _scanCancellation?.Token ?? CancellationToken.None, inspectAllRecords: true).ConfigureAwait(true);
+            identity = PrepareFinalAuthorReviewUseCase.SetAllApply(identity, false);
+            ApplyFinalAuthorReviewWorkspace(identity);
+        }
         QuarantineReviewWorkspace workspace = PrepareQuarantineReviewUseCase.Execute(
             state,
-            _finalAuthorReviewWorkspace);
+            _finalAuthorReviewWorkspace,
+            managedLayoutVerified: true,
+            _identityRepairProviderResults,
+            _verifiedManagedNameBookIds);
         QuarantineDestinationInspection inspection = await _quarantineDestinationInspector.InspectAsync(
             workspace.LibraryRoot,
             workspace.DestinationRoot,
@@ -117,7 +142,10 @@ public sealed partial class MainWindowViewModel
         int selected = _quarantineReviewWorkspace.Subjects.Count(value => value.Include);
         if (selected == 0)
         {
-            StatusMessage = "No quarantine records are checked.";
+            StatusMessage = _quarantineReviewWorkspace.IsHighQualityComplete
+                ? "High-quality library complete: all retained records are qualified or verified moved."
+                : $"No quarantine records are checked. {_quarantineReviewWorkspace.PendingCount:N0} records remain pending; "
+                    + "the source is not yet a finished high-quality library.";
             return;
         }
         QuarantineDestinationIdentity destination = _quarantineReviewWorkspace.DestinationIdentity!;
@@ -150,14 +178,18 @@ public sealed partial class MainWindowViewModel
         }
         if (result.IsCompleted)
         {
+            CalibreBookId[] moved = _quarantineReviewWorkspace.Subjects
+                .Where(value => value.Include).Select(value => value.BookId).ToArray();
+            if (result.RemovedSourceRecordCount != moved.Length || result.CopiedRecordCount != moved.Length)
+                throw new InvalidOperationException("Completed quarantine returned inconsistent record accounting.");
+            QuarantineReviewWorkspace accounting = PrepareQuarantineReviewUseCase.RecordVerifiedMoves(
+                _quarantineReviewWorkspace, moved);
             _quarantineCompleted = true;
-            _quarantineReviewWorkspace = null;
-            _allQuarantineReviewSubjects = [];
-            _quarantineReviewSubjects.ReplaceAll([]);
-            UpdateQuarantineReviewSelection([]);
-            SelectedQuarantineReviewSubject = null;
-            QuarantineReviewSummary = "Unresolvable record quarantine completed. Rescan before another mutation.";
-            StatusMessage = "Unresolvable record quarantine completed.";
+            ApplyQuarantineReviewWorkspace(accounting);
+            StatusMessage = accounting.IsHighQualityComplete
+                ? "High-quality library complete: retained records equal qualified records remaining plus verified moves."
+                : $"Unresolvable transfer completed; {accounting.PendingCount:N0} records remain pending. "
+                    + "The source is not yet a finished high-quality library. Rescan before another mutation.";
         }
         else
         {
@@ -167,6 +199,75 @@ public sealed partial class MainWindowViewModel
         NotifyCandidateCleanupStateChanged();
     }
 
+    private void AcceptSelectedQualification()
+    {
+        if (_quarantineReviewWorkspace is null
+            || _libraryStateSession?.GetCurrent(SelectedLibraryPath) is not { } state) return;
+        using IDisposable? operation = _operationCoordinator.TryBegin();
+        if (operation is null) return;
+        try
+        {
+            _quarantineReviewWorkspace = PrepareQuarantineReviewUseCase.AcceptReviewed(
+                state, _quarantineReviewWorkspace,
+                _selectedQuarantineReviewSubjects.Select(value => value.BookId).ToArray());
+            ApplyQuarantineReviewWorkspace(_quarantineReviewWorkspace);
+            StatusMessage = "Selected title, complete author credits, content and disclosed format defects accepted by reviewer.";
+        }
+        catch (InvalidOperationException exception)
+        {
+            ErrorMessage = exception.Message;
+        }
+    }
+
+    private async Task ReviewIdentityRepairsAsync()
+    {
+        if (_prepareMetadataReview is null || _finalAuthorReviewWorkspace is null
+            || _libraryStateSession?.GetCurrent(SelectedLibraryPath) is not { } state) return;
+        using IDisposable? operation = _operationCoordinator.TryBegin();
+        if (operation is null) return;
+        IsBusy = true;
+        ClearError();
+        StartCandidateHeartbeat();
+        try
+        {
+            UpdateCandidateProgress(new(
+                CandidatePreparationPhase.ResolvingIdentityRepairs, 0, 0, CandidateProgressUnit.Records,
+                "Resolving bounded identity repairs"));
+            Progress<EditionMetadataEnrichmentProgress> progress = new(value => UpdateCandidateProgress(new(
+                CandidatePreparationPhase.ResolvingIdentityRepairs, value.CompletedQueries, value.TotalQueries,
+                CandidateProgressUnit.Records, "Resolving bounded identity repairs",
+                $"{value.Provider.Id}: {value.CacheHits:N0} cached, {value.ProviderRequests:N0} HTTP requests; {value.Detail}")));
+            MetadataReviewWorkspace repairs = await _prepareMetadataReview.ExecuteAsync(
+                state, [], progress, CancellationToken.None, _finalAuthorReviewWorkspace).ConfigureAwait(true);
+            _identityRepairProviderResults = repairs.ProviderResults;
+            repairs = await _prepareMetadataReview.SetAllApplyAsync(
+                repairs, false, CancellationToken.None).ConfigureAwait(true);
+            ApplyMetadataReviewWorkspace(repairs, state.Snapshot);
+            _identityRepairReviewReady = true;
+            if (_quarantineReviewWorkspace is not null)
+            {
+                QuarantineReviewWorkspace assessment = PrepareQuarantineReviewUseCase.Execute(
+                    state, _finalAuthorReviewWorkspace, managedLayoutVerified: true,
+                    _identityRepairProviderResults, _verifiedManagedNameBookIds);
+                assessment = PrepareQuarantineReviewUseCase.BindDestination(
+                    assessment, _quarantineReviewWorkspace.DestinationIdentity!);
+                ApplyQuarantineReviewWorkspace(assessment);
+            }
+            StatusMessage = "Identity repairs are ready in Metadata review, initially unchecked. "
+                + "Review replacements, then use Apply checked identity metadata. Authors follow in Final authors.";
+        }
+        catch (Exception exception) when (exception is InvalidOperationException or ArgumentException)
+        {
+            ErrorMessage = exception.Message;
+            ErrorAction = "Review current evidence and retry read-only identity repair preparation.";
+        }
+        finally
+        {
+            await StopCandidateHeartbeatAsync().ConfigureAwait(true);
+            IsBusy = false;
+            NotifyCandidateCleanupStateChanged();
+        }
+    }
     private void ApplyQuarantineReviewWorkspace(QuarantineReviewWorkspace workspace)
     {
         _quarantineReviewWorkspace = workspace;
@@ -274,10 +375,21 @@ public sealed partial class MainWindowViewModel
         string destinationState = _quarantineReviewWorkspace?.DestinationIdentity?.Exists == true
             ? "existing destination"
             : "new destination";
-        QuarantineReviewSummary = _allQuarantineReviewSubjects.Length == 0
-            ? $"No unresolvable records were proposed; {destinationState}."
-            : $"{visible.Length:N0} of {_allQuarantineReviewSubjects.Length:N0} records visible; "
-                + $"checked {checkedCount:N0}, manually included {manualCount:N0}; {destinationState}.";
+        QuarantineReviewWorkspace? accounting = _quarantineReviewWorkspace;
+        FinalRecordResolutionRoute[] routes = (accounting?.Subjects ?? [])
+            .SelectMany(value => value.Disposition.Evidence?.Routes ?? []).ToArray();
+        int noEvidence = routes.Count(value => value.Outcome == FinalRecordRouteOutcome.CompletedWithoutEvidence);
+        int unavailable = routes.Count(value => value.Outcome == FinalRecordRouteOutcome.Unavailable);
+        int deferred = routes.Count(value => value.Outcome == FinalRecordRouteOutcome.DeferredByBounds);
+        int httpRequests = _identityRepairProviderResults?.Providers.Sum(value => value.ProviderRequests) ?? 0;
+        QuarantineReviewSummary = $"{visible.Length:N0} of {_allQuarantineReviewSubjects.Length:N0} records visible; "
+            + $"checked {checkedCount:N0}, manually included {manualCount:N0}; {destinationState}. "
+            + $"Retained input {accounting?.RetainedInputCount ?? 0:N0}; qualified {accounting?.QualifiedCount ?? 0:N0}; "
+            + $"repairable {accounting?.RepairableCount ?? 0:N0}; pending {accounting?.PendingCount ?? 0:N0}; "
+            + $"verified moved {accounting?.VerifiedMovedCount ?? 0:N0}. "
+            + $"Local formats cached {_finalAuthorReviewWorkspace?.FrontMatterCacheHitCount ?? 0:N0}, "
+            + $"parser starts {_finalAuthorReviewWorkspace?.FrontMatterInspectionCount ?? 0:N0}; HTTP requests {httpRequests:N0}. "
+            + $"Routes without usable evidence {noEvidence:N0}, unavailable {unavailable:N0}, deferred {deferred:N0}.";
         NotifyQuarantineCommands();
         NotifyCandidateCleanupStateChanged();
     }
@@ -293,6 +405,9 @@ public sealed partial class MainWindowViewModel
         QuarantineManualRecordId = string.Empty;
         QuarantineReviewSummary = "Complete final author and managed-name cleanup, then prepare quarantine review.";
         _quarantineCompleted = false;
+        _identityRepairReviewReady = false;
+        _identityRepairProviderResults = null;
+        _verifiedManagedNameBookIds.Clear();
         NotifyCandidateCleanupStateChanged();
     }
 
@@ -303,5 +418,7 @@ public sealed partial class MainWindowViewModel
         CheckSelectedQuarantineIncludeCommand.NotifyCanExecuteChanged();
         UncheckSelectedQuarantineIncludeCommand.NotifyCanExecuteChanged();
         AddManualQuarantineRecordCommand.NotifyCanExecuteChanged();
+        AcceptSelectedQualificationCommand.NotifyCanExecuteChanged();
+        ReviewIdentityRepairsCommand.NotifyCanExecuteChanged();
     }
 }

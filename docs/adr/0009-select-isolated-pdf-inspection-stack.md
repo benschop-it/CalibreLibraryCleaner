@@ -95,6 +95,18 @@ used; it does not decode/hash images or depend on unstable parser internals to
 manufacture shared-object evidence. These limitations are disclosed in the
 assessment/handoff and are preferable to weaker or non-deterministic evidence.
 
+## 2026-10-23 paired front-matter identity amendment
+
+The isolated protocol advances to `pdf-worker-protocol/1.1` for bounded reduced
+title/subtitle/byline candidates and unit/line locations. Paired extractor identity
+also includes the credit/extraction resource versions, invalidating author-only
+cache entries. The existing first-five-page and useful-character ceilings remain
+unchanged. Unlabelled pairings remain uncertain; empty/limited/unavailable extraction
+does not establish negative authorship or unusable content.
+
+This amendment does not permit retaining page text, rendering, OCR, extra resources
+or network access. Only reduced bibliographic candidates cross the worker boundary.
+
 ## Alternatives considered
 
 PDFsharp does not provide the required extraction/page-fact surface. iText's

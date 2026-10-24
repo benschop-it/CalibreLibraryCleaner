@@ -692,6 +692,15 @@
                          Text="{Binding QuarantineManualRecordId, UpdateSourceTrigger=PropertyChanged}" />
                 <Button Padding="8,4" Content="_Add" Command="{Binding AddManualQuarantineRecordCommand}" />
               </WrapPanel>
+              <WrapPanel Margin="0,6,0,0">
+                <Button Margin="0,0,8,0" Padding="8,4" Content="Review identity _repairs"
+                        Command="{Binding ReviewIdentityRepairsCommand}" />
+                <Button Padding="8,4" Content="Accept selected title, authors and _content"
+                        ToolTip="Explicitly confirm the complete identity, readable content and all disclosed format defects after inspection."
+                        Command="{Binding AcceptSelectedQualificationCommand}" />
+              </WrapPanel>
+              <TextBlock Margin="0,4,0,0" TextWrapping="Wrap"
+                         Text="Every retained record is assessed. Pending, repairable and excluded records do not certify a finished high-quality library. Check all selects only proposed or previously manual transfers; checking a pending record assigns it manually." />
             </StackPanel>
           </DockPanel>
           <DataGrid Grid.Row="1"
@@ -721,6 +730,7 @@
                 </DataGridTemplateColumn.CellTemplate>
               </DataGridTemplateColumn>
               <DataGridTextColumn Width="70" Header="Record" Binding="{Binding RecordId}" />
+              <DataGridTextColumn Width="150" Header="Qualification" Binding="{Binding Qualification}" />
               <DataGridTextColumn Width="2*" MinWidth="170" Header="Title" Binding="{Binding CurrentTitle}" />
               <DataGridTextColumn Width="2*" MinWidth="170" Header="Authors" Binding="{Binding CurrentAuthors}" />
               <DataGridTextColumn Width="2*" MinWidth="170" Header="Reasons" Binding="{Binding Reasons}" />
@@ -742,6 +752,9 @@
                 <TextBlock Margin="0,3,0,0" Text="{Binding CurrentAuthors, StringFormat=Authors: {0}}" TextWrapping="Wrap" />
                 <TextBlock Margin="0,3,0,0" Text="{Binding CurrentSorts, StringFormat=Author sorts: {0}}" TextWrapping="Wrap" />
                 <TextBlock Margin="0,3,0,0" Text="{Binding Reasons, StringFormat=Reasons: {0}}" TextWrapping="Wrap" />
+                <TextBlock Margin="0,3,0,0" Text="{Binding Coverage, StringFormat=Coverage: {0}}" TextWrapping="Wrap" />
+                <TextBlock Margin="0,3,0,0" Text="{Binding ContentStatus, StringFormat=Content evidence: {0}}" TextWrapping="Wrap" />
+                <TextBlock Margin="0,3,0,0" Text="{Binding ManagedLayoutStatus, StringFormat=Managed layout: {0}}" TextWrapping="Wrap" />
                 <TextBlock Margin="0,3,0,0" Text="{Binding Provenance, StringFormat=Provenance: {0}}" TextWrapping="Wrap" />
               </StackPanel>
             </ScrollViewer>

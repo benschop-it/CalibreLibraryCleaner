@@ -49,6 +49,7 @@ public sealed partial class ExecuteUnifiedCandidateCleanupUseCase(
         int omittedMetadataCovers = 0;
         int omittedMetadataAuthorFields = 0;
         int refreshedManagedNames = 0;
+        HashSet<CalibreBookId> verifiedManagedNameBookIds = [];
         Dictionary<string, int> metadataSkipReasons = new(StringComparer.Ordinal);
         if (!request.ExternalBackupConfirmed)
         {
@@ -66,7 +67,9 @@ public sealed partial class ExecuteUnifiedCandidateCleanupUseCase(
         }
 
         bool candidateCleanup = initial.WorkflowCheckpoint.Phase == LibraryWorkflowPhase.CandidateAnalysisReady;
-        bool metadataMutation = initial.WorkflowCheckpoint.Phase == LibraryWorkflowPhase.CandidateCleanupCompleted;
+        bool metadataMutation = initial.WorkflowCheckpoint.Phase == LibraryWorkflowPhase.CandidateCleanupCompleted
+            || initial.WorkflowCheckpoint.Phase == LibraryWorkflowPhase.Completed
+                && request.MetadataReview is not null && !request.NormalizeAuthors;
         bool authorNormalization = initial.WorkflowCheckpoint.Phase == LibraryWorkflowPhase.Completed
             && request.NormalizeAuthors;
         if (!candidateCleanup && !metadataMutation && !authorNormalization)
@@ -381,6 +384,9 @@ public sealed partial class ExecuteUnifiedCandidateCleanupUseCase(
                 skippedMetadataFields += workerResult.OperationResults.Count(value => value.IsSkipped);
                 refreshedManagedNames += chunk.Count(value =>
                     value.Operation.Kind == CalibreMutationOperationKind.RefreshManagedName);
+                verifiedManagedNameBookIds.UnionWith(chunk
+                    .Where(value => value.Operation.Kind == CalibreMutationOperationKind.RefreshManagedName)
+                    .Select(value => value.Operation.RecordId));
                 foreach (CalibreMutationOperationResult skipped in workerResult.OperationResults.Where(
                              value => value.IsSkipped))
                 {
@@ -509,7 +515,8 @@ public sealed partial class ExecuteUnifiedCandidateCleanupUseCase(
             skippedMetadataFields,
             omittedMetadataCovers,
             omittedMetadataAuthorFields,
-            refreshedManagedNames);
+            refreshedManagedNames,
+            verifiedManagedNameBookIds.OrderBy(value => value.Value).ToArray());
     }
 
     private static MetadataOperationTemplate[] BuildMetadataOperations(
@@ -569,6 +576,7 @@ public sealed partial class ExecuteUnifiedCandidateCleanupUseCase(
             if (applicable.Contains(LibraryMetadataField.Title))
                 Add(LibraryMetadataField.Title, [candidate.Title]);
             if (applicable.Contains(LibraryMetadataField.Authors)
+                && state.WorkflowCheckpoint.Phase != LibraryWorkflowPhase.Completed
                 && EditionMetadataAuthorWritePolicy.TryPrepare(candidate.Authors, out IReadOnlyList<string> authors))
                 Add(LibraryMetadataField.Authors, authors);
             else if (!EditionMetadataAuthorWritePolicy.TryPrepare(candidate.Authors, out _))
@@ -774,7 +782,8 @@ public sealed partial class ExecuteUnifiedCandidateCleanupUseCase(
                 result.VerifiedManagedPath,
                 result.VerifiedAuthorSort,
                 result.VerifiedAuthorSortValues,
-                CreateAppliedAuthorProvenance(planned.Operation.Metadata!, result)),
+                CreateAppliedAuthorProvenance(planned.Operation.Metadata!, result),
+                result.VerifiedFormats),
             CalibreMutationOperationKind.RefreshManagedName => new RefreshManagedNameLibraryStateDelta(
                 generation,
                 revision,

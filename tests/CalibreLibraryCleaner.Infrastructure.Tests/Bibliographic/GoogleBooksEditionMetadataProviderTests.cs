@@ -15,6 +15,26 @@ public sealed class GoogleBooksEditionMetadataProviderTests
     private const string ApiKey = "AIzaFakePrivateKey_1234567890";
 
     [Fact]
+    public async Task TitleOnlyRepairOmitsInauthorInsteadOfSendingAnEmptyOrCorruptAuthor()
+    {
+        RecordingHandler handler = new(ApiKey, _ => new(HttpStatusCode.OK)
+        {
+            Content = new StringContent("""{"totalItems":0}""", Encoding.UTF8, "application/json"),
+        });
+        using HttpClient client = Client(handler);
+        using GoogleBooksEditionMetadataProvider provider = new(client, KeyStore(ApiKey), new());
+        EditionMetadataLookupQuery query = new(
+            new(1), provider.Identity, EditionMetadataQueryFields.Title,
+            null, "A Northern Valley", [], null);
+
+        EditionMetadataSearchResult result = await provider.SearchAsync(query, CancellationToken.None);
+
+        result.Status.Should().Be(EditionMetadataSearchStatus.NotFound);
+        string decoded = Uri.UnescapeDataString(handler.RequestUri!.Query);
+        decoded.Should().Contain("intitle:\"A Northern Valley\"").And.NotContain("inauthor:").And.NotContain("Unknown");
+    }
+
+    [Fact]
     public void DefaultOptionsLimitRequestsToOneEveryThreeSeconds()
     {
         new GoogleBooksOptions().MinimumRequestInterval.Should().Be(TimeSpan.FromSeconds(3));

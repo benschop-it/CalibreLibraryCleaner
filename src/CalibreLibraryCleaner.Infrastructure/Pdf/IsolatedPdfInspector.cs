@@ -91,7 +91,9 @@ public sealed class IsolatedPdfInspector(PdfWorkerOptions options) :
                 || value.SizeInBytes != request.Fingerprint.SizeInBytes
                 || value.Sha256 != request.Fingerprint.Sha256.Value
                 || value.ExtractorVersion != FrontMatterAuthorVersions.PdfExtractor
-                || value.LimitsVersion != FrontMatterAuthorVersions.Limits)
+                || value.LimitsVersion != FrontMatterAuthorVersions.Limits
+                || value.IdentityCandidates is null
+                || value.IdentityCandidates.Count > 16)
             {
                 await TryTerminateAsync(process).ConfigureAwait(false);
                 return Failed("PDF_FRONT_MATTER.WORKER_PROTOCOL_INVALID");
@@ -117,7 +119,10 @@ public sealed class IsolatedPdfInspector(PdfWorkerOptions options) :
                 value.CompletedUnits,
                 value.RetainedUsefulCharacters,
                 value.Truncated,
-                value.ProblemCode);
+                value.ProblemCode,
+                value.IdentityCandidates.Select(candidate => new FrontMatterIdentityCandidate(
+                    candidate.Title, candidate.Authors, candidate.UnitNumber,
+                    candidate.TitleLineNumber, candidate.AuthorLineNumber, candidate.ExplicitCredit, candidate.Subtitle)));
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {

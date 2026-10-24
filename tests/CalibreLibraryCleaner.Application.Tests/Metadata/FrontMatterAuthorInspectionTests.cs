@@ -9,6 +9,67 @@ namespace CalibreLibraryCleaner.Application.Tests.Metadata;
 public sealed class FrontMatterAuthorInspectionTests
 {
     [Fact]
+    public void TitleAndExplicitCreditRetainPairedLocations()
+    {
+        FrontMatterIdentityCandidate candidate = FrontMatterIdentityExtraction.Extract(
+            ["Title: The Northern Valley", "By Reliable Writer"], 2).Should().ContainSingle().Subject;
+
+        candidate.Title.Should().Be("The Northern Valley");
+        candidate.Authors.Should().Equal("Reliable Writer");
+        candidate.UnitNumber.Should().Be(2);
+        candidate.TitleLineNumber.Should().Be(1);
+        candidate.AuthorLineNumber.Should().Be(2);
+        candidate.ExplicitCredit.Should().BeTrue();
+    }
+
+    [Fact]
+    public void UnlabelledPairIsCandidateNotIndependentConfirmation()
+    {
+        FrontMatterIdentityCandidate candidate = FrontMatterIdentityExtraction.Extract(
+            ["The Northern Valley", "Reliable Writer"], 1).Should().ContainSingle().Subject;
+
+        candidate.ExplicitCredit.Should().BeFalse();
+        FrontMatterIdentityExtraction.Extract(
+            ["Copyright Reliable Writer", "Translated by Other Writer"], 1).Should().BeEmpty();
+        FrontMatterIdentityExtraction.Extract([], 1).Should().BeEmpty();
+    }
+
+    [Fact]
+    public void LabelledSubtitleDoesNotReplaceTheMainTitle()
+    {
+        FrontMatterIdentityCandidate candidate = FrontMatterIdentityExtraction.Extract(
+            ["Title: A Northern Valley", "Subtitle: An Oral History", "By Reliable Writer"], 1)
+            .Should().ContainSingle().Subject;
+
+        candidate.Title.Should().Be("A Northern Valley");
+        candidate.Subtitle.Should().Be("An Oral History");
+        candidate.ExplicitCredit.Should().BeTrue();
+    }
+
+    [Fact]
+    public void LongPairedSubtitlesKeepTheirEvidenceWithoutTruncatingTheMainBibliographicTitle()
+    {
+        string title = new('A', 500);
+        string subtitle = new('B', 40);
+        FrontMatterIdentityCandidate candidate = new(title, ["Reliable Writer"], 1, 1, 3, true, subtitle);
+
+        candidate.CompleteTitle.Should().HaveLength(542);
+        candidate.BibliographicTitle.Should().Be(title);
+        candidate.Subtitle.Should().Be(subtitle);
+    }
+
+    [Fact]
+    public void HeadingAloneDoesNotProveATitleAndAdvertisingDoesNotBecomeIdentity()
+    {
+        FrontMatterIdentityExtraction.Extract(
+            ["A Heading", "By Reliable Writer"], 1, [1]).Should().ContainSingle()
+            .Which.ExplicitCredit.Should().BeFalse();
+        FrontMatterIdentityExtraction.Extract(
+            ["Other books by Reliable Writer", "Title: Another Book", "By Reliable Writer"], 1)
+            .Should().BeEmpty();
+    }
+
+    [Fact]
     public void V1CeilingsCannotBeExpanded()
     {
         Action epub = () => _ = new FrontMatterInspectionLimits(4, 5, 32_768);

@@ -1,5 +1,6 @@
 using CalibreLibraryCleaner.Application.Metadata;
 using CalibreLibraryCleaner.Domain.Libraries;
+using CalibreLibraryCleaner.Domain.Metadata;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 
@@ -11,6 +12,9 @@ public enum QuarantineReviewFilterMode
     Checked,
     Proposed,
     Manual,
+    NeedsReview,
+    Repairable,
+    Qualified,
 }
 
 public sealed class QuarantineReviewSubjectRowViewModel : ObservableObject
@@ -38,7 +42,16 @@ public sealed class QuarantineReviewSubjectRowViewModel : ObservableObject
     public string Formats => Join(_subject.Formats.Select(value => value.Format));
     public string Reasons => Join(_subject.Disposition.ReasonCodes);
     public string Provenance => Join(_subject.Disposition.SupportingLabels.Select(value =>
-        $"{value.Source}: {value.Value}"));
+        $"{value.Source}: {value.Value}").Concat(_subject.IdentityCandidates.Select(value =>
+        $"Unit {value.UnitNumber}, lines {value.TitleLineNumber}/{value.AuthorLineNumber}: "
+        + $"{value.CompleteTitle} / {string.Join(", ", value.Authors)}"
+        + (value.ExplicitCredit ? " (explicit title/byline)" : " (uncertain pairing)"))));
+    public FinalRecordQualification Qualification => _subject.Qualification;
+    public string Coverage => Join(_subject.Disposition.Evidence?.Routes.Select(value =>
+        $"{value.Name}: {value.Outcome}") ?? []);
+    public string ContentStatus => _subject.Disposition.Evidence?.Content.ToString() ?? "Incomplete";
+    public string ManagedLayoutStatus => _subject.Disposition.Evidence?.ManagedLayoutVerified == true
+        ? "Verified by the final naming worker" : "Not verified; final managed naming is required";
     public bool IsProposed => _subject.Disposition.ProposedForQuarantine;
     public bool IsManual => _subject.ManuallyIncluded;
 
@@ -56,6 +69,9 @@ public sealed class QuarantineReviewSubjectRowViewModel : ObservableObject
         QuarantineReviewFilterMode.Checked => Include,
         QuarantineReviewFilterMode.Proposed => IsProposed,
         QuarantineReviewFilterMode.Manual => IsManual,
+        QuarantineReviewFilterMode.NeedsReview => Qualification == FinalRecordQualification.NeedsReview,
+        QuarantineReviewFilterMode.Repairable => Qualification == FinalRecordQualification.Repairable,
+        QuarantineReviewFilterMode.Qualified => Qualification == FinalRecordQualification.Qualified,
         _ => false,
     };
 

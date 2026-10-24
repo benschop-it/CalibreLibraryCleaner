@@ -369,9 +369,15 @@ None. The installed Calibre 9.12 capability and fixed-worker acceptance probes p
   values, and separately authorized source deletion all succeeded.
 - Protocol 1.4 managed-name acceptance also passed: author display/sort and managed
   path/basename read-back remained exact and format bytes were unchanged.
-- Standard verification passed: restore, warnings-as-errors build, 1,110 tests,
+- Standard verification passed: restore, warnings-as-errors build, 1,114 tests,
   formatting, diff whitespace, and direct/transitive vulnerability audit. No known
   vulnerable NuGet packages were reported.
+- Personal-library read-only diagnosis after the first blocked copy found Calibre
+  shared-author propagation not represented in projected state: 185 author-display,
+  52 per-author-sort, and 153 book-author-sort differences, with zero title,
+  managed-path, registered-format-set, identifier, or record-set differences. The
+  database hash remained unchanged during diagnosis. A read-only post-author
+  reconciliation now projects those verified shared-entity effects before quarantine.
 - Standard Windows package acceptance passed for the 79-file framework-dependent
   archive. Manifest/dependency/forbidden-file checks and executable smoke passed;
   package SHA-256 is

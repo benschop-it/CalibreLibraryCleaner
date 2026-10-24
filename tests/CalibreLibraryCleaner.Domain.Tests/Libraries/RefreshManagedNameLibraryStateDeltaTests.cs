@@ -28,7 +28,8 @@ public sealed class RefreshManagedNameLibraryStateDeltaTests
 
         CalibreBook book = projected.Snapshot.Books.Single();
         book.RelativeDirectory.Should().Be("Final Author/Final Title (1)");
-        book.Formats.Single().StoredFileName.Should().Be("Final Title - Final Author.epub");
+        book.Formats.Single().StoredFileName.Should().Be("Final Title - Final Author",
+            "catalog stored names are stems, not filenames with an extension");
         book.Formats.Single().ExpectedRelativePath.Should().Be(
             "Final Author/Final Title (1)/Final Title - Final Author.epub");
         book.Formats.Single().Fingerprint.Should().Be(Fingerprint);
@@ -62,6 +63,52 @@ public sealed class RefreshManagedNameLibraryStateDeltaTests
         Action act = () => LibraryStateDeltaPolicy.Apply(state, delta);
 
         act.Should().Throw<InvalidOperationException>().WithMessage("*format set or bytes*");
+    }
+
+    [Fact]
+    public void FreshWorkerObservationMaterializesProjectedFormatsWithoutInventingFileIdentity()
+    {
+        LibraryState state = State();
+        state = LibraryStateDeltaPolicy.Apply(state, new AddOrReplaceFormatLibraryStateDelta(
+            state.GenerationId, state.Revision, "project-format", DateTimeOffset.UnixEpoch,
+            new(1), "EPUB", Fingerprint, Fingerprint));
+        FormatFileObservation current = new(10, DateTimeOffset.UnixEpoch.AddDays(1),
+            DateTimeOffset.UnixEpoch.AddDays(2), 32);
+        RefreshManagedNameLibraryStateDelta delta = new(
+            state.GenerationId, state.Revision, "refresh-observed", DateTimeOffset.UnixEpoch,
+            new(1), "Final Author/Final Title (1)",
+            [new("EPUB", "Final Title - Final Author.epub", Fingerprint, current)]);
+
+        LibraryState projected = LibraryStateDeltaPolicy.Apply(state, delta);
+
+        BookFormat format = projected.Snapshot.Books.Single().Formats.Single();
+        format.FileStatus.Should().Be(FormatFileStatus.Present);
+        format.Observation.Should().Be(current);
+        format.StoredFileName.Should().Be("Final Title - Final Author");
+        format.ExpectedRelativePath.Should().EndWith(".epub").And.NotEndWith(".epub.epub");
+    }
+
+    [Fact]
+    public void ReviewedTitleWriteProjectsItsLiveRegisteredNamesBeforeAnotherNamingPreflight()
+    {
+        LibraryState state = State();
+        FormatFileObservation current = new(10, DateTimeOffset.UnixEpoch.AddDays(1),
+            DateTimeOffset.UnixEpoch.AddDays(2), 32);
+        SetMetadataLibraryStateDelta title = new(
+            state.GenerationId, state.Revision, "reviewed-title", DateTimeOffset.UnixEpoch,
+            new(1), LibraryMetadataField.Title, ["Reviewed Title"],
+            verifiedManagedPath: "Final Author/Reviewed Title (1)",
+            verifiedFormats: [new("EPUB", "Reviewed Title - Final Author.epub", Fingerprint, current)]);
+
+        LibraryState projected = LibraryStateDeltaPolicy.Apply(state, title);
+
+        CalibreBook book = projected.Snapshot.Books.Single();
+        book.Title.Should().Be("Reviewed Title");
+        book.Formats.Single().StoredFileName.Should().Be("Reviewed Title - Final Author");
+        book.Formats.Single().ExpectedRelativePath.Should().Be(
+            "Final Author/Reviewed Title (1)/Reviewed Title - Final Author.epub");
+        book.Formats.Single().Observation.Should().Be(current);
+        book.Formats.Single().Fingerprint.Should().Be(Fingerprint);
     }
 
     private static LibraryState State()

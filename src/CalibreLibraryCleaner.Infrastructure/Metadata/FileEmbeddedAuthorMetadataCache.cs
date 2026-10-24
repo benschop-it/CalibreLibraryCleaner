@@ -119,7 +119,9 @@ internal sealed class FileEmbeddedAuthorMetadataCache(EmbeddedAuthorMetadataCach
             byte[] bytes = await File.ReadAllBytesAsync(path, cancellationToken).ConfigureAwait(false);
             FrontMatterCacheDocument document = JsonSerializer.Deserialize<FrontMatterCacheDocument>(
                 bytes, JsonOptions) ?? throw new InvalidDataException("The front-matter cache entry is empty.");
-            if (document.SchemaVersion != "front-matter-author-cache/1.0"
+            if (document.SchemaVersion != "front-matter-identity-cache/2.0"
+                || document.Candidates is null
+                || document.IdentityCandidates is null
                 || document.Format != key.Format
                 || document.SizeInBytes != key.Fingerprint.SizeInBytes
                 || document.Sha256 != key.Fingerprint.Sha256.Value
@@ -138,7 +140,10 @@ internal sealed class FileEmbeddedAuthorMetadataCache(EmbeddedAuthorMetadataCach
                 document.CompletedUnits,
                 document.RetainedUsefulCharacters,
                 document.Truncated,
-                document.ProblemCode);
+                document.ProblemCode,
+                document.IdentityCandidates.Select(value => new FrontMatterIdentityCandidate(
+                    value.Title, value.Authors, value.UnitNumber, value.TitleLineNumber,
+                    value.AuthorLineNumber, value.ExplicitCredit, value.Subtitle)));
         }
         catch (OperationCanceledException) { throw; }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException
@@ -168,7 +173,7 @@ internal sealed class FileEmbeddedAuthorMetadataCache(EmbeddedAuthorMetadataCach
         if (File.Exists(path) && !ExecutionPathGuard.TryRejectReparsePointLeaf(path, true, out _))
             throw new IOException("The front-matter author cache entry is not a physical file.");
         FrontMatterCacheDocument document = new(
-            "front-matter-author-cache/1.0",
+            "front-matter-identity-cache/2.0",
             observation.Format,
             observation.Fingerprint.SizeInBytes,
             observation.Fingerprint.Sha256.Value,
@@ -181,7 +186,10 @@ internal sealed class FileEmbeddedAuthorMetadataCache(EmbeddedAuthorMetadataCach
             observation.CompletedUnits,
             observation.RetainedUsefulCharacters,
             observation.Truncated,
-            observation.ProblemCode);
+            observation.ProblemCode,
+            observation.IdentityCandidates.Select(value => new IdentityCandidateDocument(
+                value.Title, value.Authors.ToArray(), value.UnitNumber, value.TitleLineNumber,
+                value.AuthorLineNumber, value.ExplicitCredit, value.Subtitle)).ToArray());
         byte[] bytes = JsonSerializer.SerializeToUtf8Bytes(document, JsonOptions);
         if (bytes.Length > options.MaximumEntryBytes)
             throw new InvalidDataException("The front-matter author cache entry exceeds its bound.");
@@ -282,5 +290,15 @@ internal sealed class FileEmbeddedAuthorMetadataCache(EmbeddedAuthorMetadataCach
         int CompletedUnits,
         int RetainedUsefulCharacters,
         bool Truncated,
-        string? ProblemCode);
+        string? ProblemCode,
+        IdentityCandidateDocument[] IdentityCandidates);
+
+    private sealed record IdentityCandidateDocument(
+        string Title,
+        string[] Authors,
+        int UnitNumber,
+        int TitleLineNumber,
+        int AuthorLineNumber,
+        bool ExplicitCredit,
+        string? Subtitle);
 }

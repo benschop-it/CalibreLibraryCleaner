@@ -132,6 +132,7 @@ internal sealed partial class PdfPigPdfInspector : IPdfInspector
             int requested = Math.Min(document.NumberOfPages, limits.MaximumPdfPages);
             if (requested <= 0) return Unavailable(PdfInspectionProblemCode.ZeroPages);
             List<FrontMatterAuthorCandidate> candidates = [];
+            List<FrontMatterIdentityCandidate> identities = [];
             int completed = 0;
             int retained = 0;
             bool truncated = false;
@@ -149,6 +150,7 @@ internal sealed partial class PdfPigPdfInspector : IPdfInspector
                 candidates.AddRange(AuthorBylinePolicy.Extract(pageLines.Lines).Select(value =>
                     new FrontMatterAuthorCandidate(
                         value.Role, value.Names, pageNumber, value.LineNumber, value.Marker)));
+                identities.AddRange(FrontMatterIdentityExtraction.Extract(pageLines.Lines, pageNumber));
             }
             EnsureUnchanged(initial, request);
             FrontMatterAuthorStatus status = candidates.Any(value => value.Role == AuthorCreditRole.Author)
@@ -157,7 +159,8 @@ internal sealed partial class PdfPigPdfInspector : IPdfInspector
             return new(
                 "PDF", request.Fingerprint, FrontMatterAuthorVersions.PdfExtractor,
                 FrontMatterAuthorVersions.Limits, status, candidates, requested, completed,
-                retained, truncated);
+                retained, truncated || identities.Count > 16 || candidates.Count > 32,
+                identityCandidates: identities.Take(16));
         }
         catch (OperationCanceledException) { throw; }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException

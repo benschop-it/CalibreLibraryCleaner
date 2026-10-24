@@ -13,6 +13,9 @@ public sealed class AuthorBylinePolicyTests
     [InlineData("By World Health Organization", "World Health Organization")]
     [InlineData("By Gabriel García Márquez", "Gabriel García Márquez")]
     [InlineData("By 村上 春樹", "村上 春樹")]
+    [InlineData("Geschreven door A. Schrijver", "A. Schrijver")]
+    [InlineData("Auteur: É. Exemple", "É. Exemple")]
+    [InlineData("Autora: María Ejemplo", "María Ejemplo")]
     public void ExplicitAuthorMarkersRetainConservativeNames(string line, string author)
     {
         AuthorBylineCandidate candidate = AuthorBylinePolicy.Extract([line])
@@ -50,6 +53,11 @@ public sealed class AuthorBylinePolicyTests
     [InlineData("Editor: Editorial Person", AuthorCreditRole.Editor)]
     [InlineData("Translated by Translation Person", AuthorCreditRole.Translator)]
     [InlineData("Translator: Translation Person", AuthorCreditRole.Translator)]
+    [InlineData("Illustrated by Visual Artist", AuthorCreditRole.Illustrator)]
+    [InlineData("Foreword by Other Writer", AuthorCreditRole.ForewordWriter)]
+    [InlineData("Published by Publisher Company", AuthorCreditRole.Publisher)]
+    [InlineData("Dedicated to Other Person", AuthorCreditRole.Dedication)]
+    [InlineData("Traduit par Autre Personne", AuthorCreditRole.Translator)]
     public void NonAuthorRolesRemainExplicit(string line, AuthorCreditRole role)
     {
         AuthorBylineCandidate candidate = AuthorBylinePolicy.Extract([line])

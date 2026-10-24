@@ -17,6 +17,88 @@ namespace CalibreLibraryCleaner.Application.Tests.Metadata;
 public sealed class FinalAuthorReviewPerformanceTests(ITestOutputHelper output)
 {
     [Fact]
+    public async Task CompleteRetainedRecordPassDeduplicatesColdDemandAndStartsNoWarmParsers()
+    {
+        const int recordCount = 2_000;
+        const int distinctFormats = 20;
+        const string root = "C:\\generated-library";
+        CalibreBook[] books = Enumerable.Range(1, recordCount).Select(id =>
+        {
+            FormatFileFingerprint fingerprint = Fingerprint(id % distinctFormats);
+            return new CalibreBook(
+                new(id), $"Generated Title {id}", "Reliable Writer",
+                [new(new(id), "Reliable Writer", "Writer, Reliable")], [],
+                [new("EPUB", "book", $"Writer/Book ({id})/book.epub", FormatFileStatus.Present,
+                    fingerprint, new(fingerprint.SizeInBytes, DateTimeOffset.UnixEpoch, DateTimeOffset.UnixEpoch, 0))],
+                $"Writer/Book ({id})");
+        }).ToArray();
+        LibraryStateGenerationId generation = new(Guid.Parse("bbbbbbbb-bbbb-cccc-dddd-eeeeeeeeeeee"));
+        LibraryState state = new(
+            generation, new(0), LibraryStateStatus.Authoritative,
+            new(new("generated", recordCount, root), DateTimeOffset.UnixEpoch, books, []),
+            DateTimeOffset.UnixEpoch, workflowCheckpoint: new(
+                LibraryWorkflowPhase.Completed, generation, new(0), LibraryWorkflowPolicyVersions.Current,
+                DateTimeOffset.UnixEpoch, new(generation, new(0))));
+        FinalAuthorReviewWorkspace initial = PrepareFinalAuthorReviewUseCase.Execute(state);
+        initial.Subjects.Should().BeEmpty("ordinary catalog names are not independent qualification evidence");
+        ILibraryPathResolver resolver = A.Fake<ILibraryPathResolver>();
+        A.CallTo(() => resolver.ValidateAsync(root, A<CancellationToken>._))
+            .Returns(LibraryValidationOutcome.Success(new(root, $"{root}\\metadata.db")));
+        A.CallTo(() => resolver.ResolveFormat(
+                A<ValidatedLibraryLocation>._, A<string>._, A<string>._, "EPUB"))
+            .ReturnsLazily(call =>
+            {
+                string directory = call.GetArgument<string>(1)!;
+                return ResolvedFormatPathOutcome.Success(new(
+                    root, $"{root}\\{directory.Replace('/', '\\')}\\book.epub", $"{directory}/book.epub"));
+            });
+        Dictionary<FrontMatterAuthorCacheKey, FrontMatterAuthorObservation> values = [];
+        IFrontMatterAuthorCache cache = A.Fake<IFrontMatterAuthorCache>();
+        A.CallTo(() => cache.TryReadAsync(A<FrontMatterAuthorCacheKey>._, A<CancellationToken>._))
+            .ReturnsLazily(call => Task.FromResult(values.GetValueOrDefault(
+                call.GetArgument<FrontMatterAuthorCacheKey>(0)!)));
+        A.CallTo(() => cache.WriteAsync(A<FrontMatterAuthorObservation>._, A<CancellationToken>._))
+            .Invokes(call =>
+            {
+                FrontMatterAuthorObservation value = call.GetArgument<FrontMatterAuthorObservation>(0)!;
+                values[new(value.Format, value.Fingerprint, value.ExtractorVersion, value.LimitsVersion)] = value;
+            }).Returns(Task.CompletedTask);
+        IEpubFrontMatterAuthorInspector epub = A.Fake<IEpubFrontMatterAuthorInspector>();
+        A.CallTo(() => epub.InspectFrontMatterAuthorsAsync(
+                A<EpubInspectionRequest>._, A<FrontMatterInspectionLimits>._, A<CancellationToken>._))
+            .ReturnsLazily(call => Task.FromResult(new FrontMatterAuthorObservation(
+                "EPUB", call.GetArgument<EpubInspectionRequest>(0)!.Fingerprint,
+                FrontMatterAuthorVersions.EpubExtractor, FrontMatterAuthorVersions.Limits,
+                FrontMatterAuthorStatus.Missing, [], 1, 1, 100, false)));
+        InspectFrontMatterAuthorsUseCase useCase = new(
+            resolver, epub, A.Fake<IPdfFrontMatterAuthorInspector>(), cache);
+
+        Stopwatch timer = Stopwatch.StartNew();
+        FinalAuthorReviewWorkspace cold = await useCase.ExecuteAsync(
+            state, initial, null, CancellationToken.None, inspectAllRecords: true);
+        long coldMilliseconds = timer.ElapsedMilliseconds;
+        timer.Restart();
+        FinalAuthorReviewWorkspace warm = await useCase.ExecuteAsync(
+            state, initial, null, CancellationToken.None, inspectAllRecords: true);
+        long warmMilliseconds = timer.ElapsedMilliseconds;
+
+        cold.FrontMatterObservations.Should().HaveCount(recordCount);
+        cold.FrontMatterInspectionCount.Should().Be(distinctFormats);
+        warm.FrontMatterInspectionCount.Should().Be(0);
+        warm.FrontMatterCacheHitCount.Should().Be(recordCount);
+        PrepareQuarantineReviewUseCase.Execute(state, warm).RetainedInputCount.Should().Be(recordCount);
+        A.CallTo(() => epub.InspectFrontMatterAuthorsAsync(
+            A<EpubInspectionRequest>._, A<FrontMatterInspectionLimits>._, A<CancellationToken>._))
+            .MustHaveHappened(distinctFormats, Times.Exactly);
+        using Process process = Process.GetCurrentProcess();
+        output.WriteLine(
+            $"syntheticRecords={recordCount}; distinctFormats={distinctFormats}; coldMs={coldMilliseconds}; "
+            + $"warmMs={warmMilliseconds}; coldParserStarts={distinctFormats}; warmParserStarts=0; "
+            + $"warmCacheHits={recordCount}; HTTPRequests=0; "
+            + $"processPeakBytes={process.PeakWorkingSet64}; adapter=fake");
+    }
+
+    [Fact]
     public async Task ColdAndWarmDemandScalesWithSuspectRecordsOnly()
     {
         const int recordCount = 5_000;

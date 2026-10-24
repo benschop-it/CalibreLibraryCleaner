@@ -9,7 +9,7 @@ public sealed class FinalRecordDispositionPolicyTests
     [Theory]
     [InlineData(AuthorResolutionStatus.Unresolved, FinalRecordDispositionReasonCodes.AuthorUnresolved)]
     [InlineData(AuthorResolutionStatus.Conflicting, FinalRecordDispositionReasonCodes.AuthorConflicting)]
-    public void FinalUnresolvedAndConflictingAuthorsAreProposed(
+    public void AuthorStatusAloneRemainsPendingWithExplicitReasons(
         AuthorResolutionStatus status,
         string expectedReason)
     {
@@ -19,7 +19,8 @@ public sealed class FinalRecordDispositionPolicyTests
             inspectionExhausted: false,
             []);
 
-        assessment.ProposedForQuarantine.Should().BeTrue();
+        assessment.ProposedForQuarantine.Should().BeFalse();
+        assessment.Qualification.Should().Be(FinalRecordQualification.NeedsReview);
         assessment.ReasonCodes.Should().Equal(expectedReason);
     }
 
@@ -57,7 +58,7 @@ public sealed class FinalRecordDispositionPolicyTests
 
     [Theory]
     [MemberData(nameof(PlaceholderLabels))]
-    public void ExactPlaceholderLabelsAreProposedRegardlessOfSource(
+    public void ExactPlaceholderLabelsRemainReviewableRegardlessOfSource(
         string value,
         FinalRecordDispositionLabelSource source)
     {

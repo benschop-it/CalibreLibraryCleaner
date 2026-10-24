@@ -52,7 +52,7 @@ public sealed class VersOneEpubInspectorTests
         using TemporaryDirectory directory = new();
         string path = Path.Combine(directory.Path, "FrontMatter.epub");
         SyntheticEpubBuilder.CreateFromEntries(path, StandardEntries(
-            chapter: $"<html><body><h1>The Book</h1><p>By Reliable Writer</p><p>{sentinel}</p></body></html>"));
+            chapter: $"<html xmlns:epub=\"http://www.idpf.org/2007/ops\"><body epub:type=\"titlepage\"><h1>The Book</h1><p>By Reliable Writer</p><p>{sentinel}</p></body></html>"));
         EpubInspectionRequest request = await CreateRequestAsync(path);
         using ServiceProvider provider = TestServices.CreateProvider();
 
@@ -66,6 +66,8 @@ public sealed class VersOneEpubInspectorTests
             value.Role == AuthorCreditRole.Author
             && value.Names.Count == 1
             && value.Names[0] == "Reliable Writer");
+        result.IdentityCandidates.Should().ContainSingle().Which.Title.Should().Be("The Book");
+        result.IdentityCandidates.Single().ExplicitCredit.Should().BeTrue();
         System.Text.Json.JsonSerializer.Serialize(result).Should().NotContain(sentinel);
     }
 

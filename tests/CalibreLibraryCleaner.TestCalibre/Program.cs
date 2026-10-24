@@ -17,7 +17,7 @@ if (values is ["-e", _, "--", _, string libraryUuid, string quarantineRoot, stri
         File.AppendAllText(control.LogPath, JsonSerializer.Serialize(values) + Environment.NewLine);
     WriteWorkerMessage(new
     {
-        protocolVersion = "calibre-mutation-worker-protocol/1.4",
+        protocolVersion = "calibre-mutation-worker-protocol/1.6",
         kind = "ready",
         libraryUuid,
         capabilities,
@@ -41,7 +41,7 @@ if (values is ["-e", _, "--", _, string libraryUuid, string quarantineRoot, stri
         {
             WriteWorkerMessage(new
             {
-                protocolVersion = "calibre-mutation-worker-protocol/1.4",
+                protocolVersion = "calibre-mutation-worker-protocol/1.6",
                 kind = "stopped",
                 mutationStarted = false,
             });
@@ -50,7 +50,7 @@ if (values is ["-e", _, "--", _, string libraryUuid, string quarantineRoot, stri
         JsonElement operations = root.GetProperty("operations");
         WriteWorkerMessage(new
         {
-            protocolVersion = "calibre-mutation-worker-protocol/1.4",
+            protocolVersion = "calibre-mutation-worker-protocol/1.6",
             kind = "chunkResult",
             chunkId = root.GetProperty("chunkId").GetString(),
             mutationStarted = true,
@@ -95,24 +95,22 @@ if (values is ["-e", _, "--", _, string libraryUuid, string quarantineRoot, stri
                 verifiedFormats = operation.GetProperty("kind").GetString() == "refreshManagedName"
                     ? new[]
                     {
-                        new
-                        {
-                            format = "EPUB",
-                            storedFileName = "Verified Title - Verified Author.epub",
-                            sizeInBytes = 10L,
-                            sha256 = new string('a', 64),
-                        },
+                        new VerifiedFormat("EPUB", "Verified Title - Verified Author.epub", 10, new string('a', 64),
+                            new(10, DateTimeOffset.UnixEpoch, DateTimeOffset.UnixEpoch, 0)),
                     }
                     : operation.GetProperty("kind").GetString() == "copyRecordToQuarantine"
-                        ? operation.GetProperty("quarantineFormats").EnumerateArray().Select(format => new
-                        {
-                            format = format.GetProperty("format").GetString()!,
-                            storedFileName = Path.GetFileName(
-                                format.GetProperty("expectedRelativePath").GetString()!)!,
-                            sizeInBytes = format.GetProperty("expectedSizeInBytes").GetInt64(),
-                            sha256 = format.GetProperty("expectedSha256").GetString()!,
-                        }).ToArray()
-                        : null,
+                        ? operation.GetProperty("quarantineFormats").EnumerateArray().Select(format => new VerifiedFormat(
+                            format.GetProperty("format").GetString()!,
+                            Path.GetFileName(format.GetProperty("expectedRelativePath").GetString()!)!,
+                            format.GetProperty("expectedSizeInBytes").GetInt64(),
+                            format.GetProperty("expectedSha256").GetString()!,
+                            new(format.GetProperty("expectedSizeInBytes").GetInt64(),
+                                DateTimeOffset.UnixEpoch, DateTimeOffset.UnixEpoch, 0))).ToArray()
+                        : operation.GetProperty("kind").GetString() == "setMetadata"
+                            && operation.GetProperty("metadataField").GetString() is "title" or "authors"
+                            && !operation.GetProperty("operationId").GetString()!.StartsWith(
+                                "skip-unchanged", StringComparison.Ordinal)
+                            ? Array.Empty<VerifiedFormat>() : null,
                 quarantineRecordId = operation.GetProperty("kind").GetString() == "copyRecordToQuarantine"
                     ? operation.GetProperty("recordId").GetInt64() + 1000
                     : (long?)null,
@@ -177,7 +175,7 @@ return control.ExitCode;
 
 static void WriteWorkerMessage<T>(T message)
 {
-    Console.WriteLine(JsonSerializer.Serialize(message));
+    Console.WriteLine(JsonSerializer.Serialize(message, JsonSerializerOptions.Web));
     Console.Out.Flush();
 }
 
@@ -189,3 +187,9 @@ internal sealed record Control(
     int ExitCode = 0,
     string? ExportSource = null,
     string? EnvironmentProbe = null);
+
+internal sealed record VerifiedFormat(
+    string Format, string StoredFileName, long SizeInBytes, string Sha256, VerifiedObservation Observation);
+
+internal sealed record VerifiedObservation(
+    long Length, DateTimeOffset CreationTimeUtc, DateTimeOffset LastWriteTimeUtc, int Attributes);

@@ -51,3 +51,16 @@ Calibre GUI, Calibre server, and other known library writers must remain closed 
 - Use `calibre-server` as a process-start workaround.
 - Retry a partially executed worker chunk through `calibredb`.
 - Allow concurrent Calibre GUI or third-party writers.
+
+## 2026-10-24 verified naming-context amendment
+
+Protocol `calibre-mutation-worker-protocol/1.6` adds exact registered basenames and
+hash-bound current file observations to final naming and path-changing title/author
+read-back. Before/after hashing must observe the same physical file identity and
+timestamps; projection distinguishes catalog stems from complete filenames.
+Existing delta kinds persist these facts without a new recovery/state system.
+Other metadata fields do not acquire repeated full-format hashing.
+
+This closes post-write analysis/preflight gaps demonstrated by generated packaged
+WPF acceptance. The fixed worker, supported APIs, operation authority, external
+backup confirmations, stop-on-ambiguity and no-fallback rules are unchanged.

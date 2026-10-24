@@ -162,7 +162,8 @@ public sealed record SetMetadataLibraryStateDelta : LibraryStateDelta
         string? verifiedManagedPath = null,
         string? verifiedAuthorSort = null,
         IEnumerable<string>? verifiedAuthorSortValues = null,
-        AppliedAuthorProvenance? appliedAuthorProvenance = null)
+        AppliedAuthorProvenance? appliedAuthorProvenance = null,
+        IEnumerable<ManagedFormatReadBack>? verifiedFormats = null)
         : base(generationId, expectedRevision, operationId, appliedAtUtc)
     {
         ArgumentNullException.ThrowIfNull(values);
@@ -191,6 +192,10 @@ public sealed record SetMetadataLibraryStateDelta : LibraryStateDelta
                 || !appliedAuthorProvenance.Matches(Values)))
             throw new ArgumentException("Applied author provenance does not match the metadata delta.", nameof(appliedAuthorProvenance));
         AppliedAuthorProvenance = appliedAuthorProvenance;
+        VerifiedFormats = verifiedFormats is null ? null : Array.AsReadOnly(verifiedFormats.ToArray());
+        if (VerifiedFormats is not null && (string.IsNullOrWhiteSpace(verifiedManagedPath)
+                || VerifiedFormats.Select(value => value.Format).Distinct(StringComparer.Ordinal).Count() != VerifiedFormats.Count))
+            throw new ArgumentException("Verified metadata format context is invalid.", nameof(verifiedFormats));
     }
 
     public CalibreBookId RecordId { get; }
@@ -200,6 +205,36 @@ public sealed record SetMetadataLibraryStateDelta : LibraryStateDelta
     public string? VerifiedAuthorSort { get; }
     public IReadOnlyList<string>? VerifiedAuthorSortValues { get; }
     public AppliedAuthorProvenance? AppliedAuthorProvenance { get; }
+    public IReadOnlyList<ManagedFormatReadBack>? VerifiedFormats { get; }
+}
+
+public sealed record ReconcileAuthorMetadataLibraryStateDelta : LibraryStateDelta
+{
+    public ReconcileAuthorMetadataLibraryStateDelta(
+        LibraryStateGenerationId generationId,
+        LibraryStateRevision expectedRevision,
+        string operationId,
+        DateTimeOffset appliedAtUtc,
+        CalibreBookId recordId,
+        string authorSort,
+        IEnumerable<BookAuthor> authors)
+        : base(generationId, expectedRevision, operationId, appliedAtUtc)
+    {
+        ArgumentNullException.ThrowIfNull(authorSort);
+        ArgumentNullException.ThrowIfNull(authors);
+        BookAuthor[] values = authors.ToArray();
+        if (authorSort.Length > 512
+            || authorSort.Any(char.IsControl)
+            || values.Length is < 1 or > 32)
+            throw new ArgumentException("Reconciled author metadata is invalid.");
+        RecordId = recordId;
+        AuthorSort = authorSort;
+        Authors = Array.AsReadOnly(values);
+    }
+
+    public CalibreBookId RecordId { get; }
+    public string AuthorSort { get; }
+    public IReadOnlyList<BookAuthor> Authors { get; }
 }
 
 public sealed record SkipMetadataLibraryStateDelta : LibraryStateDelta
@@ -232,7 +267,8 @@ public sealed record ManagedFormatReadBack
     public ManagedFormatReadBack(
         string format,
         string storedFileName,
-        FormatFileFingerprint fingerprint)
+        FormatFileFingerprint fingerprint,
+        FormatFileObservation? observation = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(format);
         ArgumentException.ThrowIfNullOrWhiteSpace(storedFileName);
@@ -242,16 +278,21 @@ public sealed record ManagedFormatReadBack
         if (canonical.Length > 16 || !canonical.All(char.IsAsciiLetterOrDigit)
             || fileName.Length > 512 || fileName.Any(char.IsControl)
             || fileName.Contains('/') || fileName.Contains('\\')
-            || fileName is "." or "..")
+            || !fileName.EndsWith("." + canonical, StringComparison.OrdinalIgnoreCase)
+            || fileName.Length <= canonical.Length + 1
+            || observation is not null && observation.Length != fingerprint.SizeInBytes)
             throw new ArgumentException("Managed format read-back is invalid.");
         Format = canonical;
         StoredFileName = fileName;
         Fingerprint = fingerprint;
+        Observation = observation;
     }
 
     public string Format { get; }
     public string StoredFileName { get; }
     public FormatFileFingerprint Fingerprint { get; }
+    public FormatFileObservation? Observation { get; }
+    public string StoredName => StoredFileName[..^(Format.Length + 1)];
 }
 
 public sealed record RefreshManagedNameLibraryStateDelta : LibraryStateDelta
@@ -303,6 +344,8 @@ public static class LibraryStateDeltaPolicy
                 state.Snapshot, removeWithContent.RecordId, requireEmpty: false),
             CreateRecordLibraryStateDelta createRecord => CreateRecord(state.Snapshot, createRecord),
             SetMetadataLibraryStateDelta setMetadata => SetMetadata(state.Snapshot, setMetadata),
+            ReconcileAuthorMetadataLibraryStateDelta reconcileAuthors => ReconcileAuthors(
+                state.Snapshot, reconcileAuthors),
             SkipMetadataLibraryStateDelta skipMetadata => SkipMetadata(state.Snapshot, skipMetadata),
             RefreshManagedNameLibraryStateDelta refreshManagedName => RefreshManagedName(
                 state.Snapshot, refreshManagedName),
@@ -410,20 +453,7 @@ public static class LibraryStateDeltaPolicy
     {
         CalibreBook current = snapshot.Books.SingleOrDefault(value => value.Id == delta.RecordId)
             ?? throw new InvalidOperationException("The managed-name target is not present.");
-        Dictionary<string, ManagedFormatReadBack> readBack = delta.Formats.ToDictionary(
-            value => value.Format, StringComparer.Ordinal);
-        if (!current.Formats.Select(value => value.Format).ToHashSet(StringComparer.Ordinal)
-                .SetEquals(readBack.Keys)
-            || current.Formats.Any(value => value.Fingerprint is null
-                || readBack[value.Format].Fingerprint != value.Fingerprint))
-            throw new InvalidOperationException("Managed-name refresh changed the registered format set or bytes.");
-        BookFormat[] formats = current.Formats.Select(value => new BookFormat(
-            value.Format,
-            readBack[value.Format].StoredFileName,
-            $"{delta.VerifiedManagedPath}/{readBack[value.Format].StoredFileName}",
-            value.FileStatus,
-            value.Fingerprint,
-            value.Observation)).ToArray();
+        BookFormat[] formats = VerifiedFormats(current, delta.VerifiedManagedPath, delta.Formats);
         CalibreBook replacement = new(
             current.Id, current.Title, current.AuthorSort, current.Authors, current.Identifiers,
             formats, delta.VerifiedManagedPath, current.PublicationMetadata,
@@ -436,6 +466,25 @@ public static class LibraryStateDeltaPolicy
             snapshot.ExactMetadataDuplicateGroups,
             snapshot.EpubAssessments,
             snapshot.PdfAssessments);
+    }
+
+    private static BookFormat[] VerifiedFormats(
+        CalibreBook current, string managedPath, IReadOnlyList<ManagedFormatReadBack> formats)
+    {
+        Dictionary<string, ManagedFormatReadBack> readBack = formats.ToDictionary(
+            value => value.Format, StringComparer.Ordinal);
+        if (!current.Formats.Select(value => value.Format).ToHashSet(StringComparer.Ordinal)
+                .SetEquals(readBack.Keys)
+            || current.Formats.Any(value => value.Fingerprint is null
+                || readBack[value.Format].Fingerprint != value.Fingerprint))
+            throw new InvalidOperationException("Verified Calibre read-back changed the registered format set or bytes.");
+        return current.Formats.Select(value => new BookFormat(
+            value.Format,
+            readBack[value.Format].StoredName,
+            $"{managedPath.Replace('\\', '/')}/{readBack[value.Format].StoredFileName}",
+            readBack[value.Format].Observation is not null ? FormatFileStatus.Present : value.FileStatus,
+            value.Fingerprint,
+            readBack[value.Format].Observation ?? value.Observation)).ToArray();
     }
 
     private static void ApplyRemoveFormat(
@@ -600,7 +649,36 @@ public static class LibraryStateDeltaPolicy
         CalibreBook current = snapshot.Books.SingleOrDefault(value => value.Id == delta.RecordId)
             ?? throw new InvalidOperationException("The metadata target record is not present in authoritative state.");
         CalibreBook replacement = UpdateMetadata(current, delta);
+        if (delta.VerifiedFormats is not null)
+            replacement = CopyBook(replacement, VerifiedFormats(current, replacement.RelativeDirectory, delta.VerifiedFormats));
         CalibreBook[] books = snapshot.Books.Select(value => value.Id == current.Id ? replacement : value).ToArray();
+        ExactMetadataDuplicateGroup[] metadataGroups = ExactMetadataDuplicateDetector.Detect(books).ToArray();
+        return Project(snapshot, books, snapshot.Findings, snapshot.ExactBinaryDuplicateGroups,
+            metadataGroups, snapshot.EpubAssessments, snapshot.PdfAssessments);
+    }
+
+    private static LibrarySnapshot ReconcileAuthors(
+        LibrarySnapshot snapshot,
+        ReconcileAuthorMetadataLibraryStateDelta delta)
+    {
+        CalibreBook current = snapshot.Books.SingleOrDefault(value => value.Id == delta.RecordId)
+            ?? throw new InvalidOperationException("The author reconciliation target is not present.");
+        AppliedAuthorProvenance? provenance = current.AppliedAuthorProvenance is { } applied
+            && applied.Matches(delta.Authors.Select(value => value.Name))
+                ? applied
+                : null;
+        CalibreBook replacement = new(
+            current.Id,
+            current.Title,
+            delta.AuthorSort,
+            delta.Authors,
+            current.Identifiers,
+            current.Formats,
+            current.RelativeDirectory,
+            current.PublicationMetadata,
+            provenance);
+        CalibreBook[] books = snapshot.Books.Select(value =>
+            value.Id == current.Id ? replacement : value).ToArray();
         ExactMetadataDuplicateGroup[] metadataGroups = ExactMetadataDuplicateDetector.Detect(books).ToArray();
         return Project(snapshot, books, snapshot.Findings, snapshot.ExactBinaryDuplicateGroups,
             metadataGroups, snapshot.EpubAssessments, snapshot.PdfAssessments);

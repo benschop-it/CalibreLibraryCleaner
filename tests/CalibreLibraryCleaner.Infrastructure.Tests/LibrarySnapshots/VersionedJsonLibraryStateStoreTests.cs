@@ -178,7 +178,10 @@ public sealed class VersionedJsonLibraryStateStoreTests
         VersionedJsonLibraryStateStore store = new(new() { StorageRoot = cacheRoot });
         LibraryState baseline = LibraryState.FromScan(
             fixture.Snapshot, new(Guid.Parse("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee")));
-        CalibreBook target = baseline.Snapshot.Books[0];
+        CalibreBook target = baseline.Snapshot.Books.Single(value => value.Formats.Count > 0);
+        FormatFileObservation verifiedObservation = new(
+            target.Formats[0].Fingerprint!.SizeInBytes,
+            baseline.ProjectedAtUtc.AddSeconds(1), baseline.ProjectedAtUtc.AddSeconds(2), 32);
         RefreshManagedNameLibraryStateDelta refresh = new(
             baseline.GenerationId,
             baseline.Revision,
@@ -189,7 +192,7 @@ public sealed class VersionedJsonLibraryStateStoreTests
             target.Formats.Select(format => new ManagedFormatReadBack(
                 format.Format,
                 $"Verified Title - Verified Author.{format.Format.ToLowerInvariant()}",
-                format.Fingerprint!)));
+                format.Fingerprint!, verifiedObservation)));
         LibraryState projected = LibraryStateDeltaPolicy.Apply(baseline, refresh);
         LibraryStateMutationIntent intent = new(
             "refresh-intent", baseline.GenerationId, baseline.Revision, 1, refresh.AppliedAtUtc);
@@ -210,10 +213,82 @@ public sealed class VersionedJsonLibraryStateStoreTests
 
         CalibreBook book = loaded.Snapshot.Books.Single(value => value.Id == target.Id);
         book.RelativeDirectory.Should().Be($"Verified Author/Verified Title ({target.Id.Value})");
-        book.Formats.Should().OnlyContain(format =>
-            format.StoredFileName.StartsWith("Verified Title - Verified Author.", StringComparison.Ordinal));
+        book.Formats.Should().ContainSingle().Which.StoredFileName.Should().Be("Verified Title - Verified Author");
+        book.Formats[0].FileStatus.Should().Be(FormatFileStatus.Present);
+        book.Formats[0].Observation.Should().Be(verifiedObservation);
         book.Formats.Select(value => value.Fingerprint).Should()
             .Equal(target.Formats.Select(value => value.Fingerprint));
+    }
+
+    [Fact]
+    public async Task PathChangingMetadataKeepsVerifiedRegisteredFormatsAcrossRestart()
+    {
+        using TemporaryDirectory directory = new();
+        InfrastructureExecutionFixture fixture = InfrastructureExecutionTestData.Create(directory.Path);
+        VersionedJsonLibraryStateStore store = new(new() { StorageRoot = Path.Combine(directory.Path, "state") });
+        LibraryState baseline = LibraryState.FromScan(fixture.Snapshot,
+            new(Guid.Parse("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee")));
+        CalibreBook target = baseline.Snapshot.Books.Single(value => value.Formats.Count > 0);
+        FormatFileObservation observation = new(target.Formats[0].Fingerprint!.SizeInBytes,
+            baseline.ProjectedAtUtc.AddSeconds(1), baseline.ProjectedAtUtc.AddSeconds(2), 32);
+        SetMetadataLibraryStateDelta title = new(
+            baseline.GenerationId, baseline.Revision, "title-format-context", baseline.ProjectedAtUtc.AddSeconds(3),
+            target.Id, LibraryMetadataField.Title, ["Reviewed Title"],
+            verifiedManagedPath: $"Author/Reviewed Title ({target.Id.Value})",
+            verifiedFormats: [new("PDF", "Reviewed Title - Author.pdf", target.Formats[0].Fingerprint!, observation)]);
+        LibraryState projected = LibraryStateDeltaPolicy.Apply(baseline, title);
+        await store.WriteBaselineAsync(baseline, CancellationToken.None);
+        LibraryStateMutationIntent intent = new("title-intent", baseline.GenerationId, baseline.Revision, 1, title.AppliedAtUtc);
+        await store.WriteMutationIntentAsync(baseline.Snapshot.Identity.LibraryRoot, intent, CancellationToken.None);
+        await store.AppendDeltaBatchAsync(baseline.Snapshot.Identity.LibraryRoot, [title], projected,
+            false, intent.IntentId, true, CancellationToken.None);
+
+        LibraryState loaded = (await store.ReadAsync(baseline.Snapshot.Identity.LibraryRoot, CancellationToken.None))!;
+        BookFormat format = loaded.Snapshot.Books.Single(value => value.Id == target.Id).Formats.Single();
+
+        format.StoredFileName.Should().Be("Reviewed Title - Author");
+        format.ExpectedRelativePath.Should().Be($"Author/Reviewed Title ({target.Id.Value})/Reviewed Title - Author.pdf");
+        format.Observation.Should().Be(observation);
+        format.FileStatus.Should().Be(FormatFileStatus.Present);
+    }
+
+    [Fact]
+    public async Task ReconciledSharedAuthorMetadataRoundTrips()
+    {
+        using TemporaryDirectory directory = new();
+        InfrastructureExecutionFixture fixture = InfrastructureExecutionTestData.Create(directory.Path);
+        string cacheRoot = Path.Combine(directory.Path, "state-cache");
+        VersionedJsonLibraryStateStore store = new(new() { StorageRoot = cacheRoot });
+        LibraryState baseline = LibraryState.FromScan(
+            fixture.Snapshot, new(Guid.Parse("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee")));
+        CalibreBook target = baseline.Snapshot.Books[0];
+        BookAuthor author = new(new(917), "Updated Author", "Author, Updated");
+        ReconcileAuthorMetadataLibraryStateDelta reconcile = new(
+            baseline.GenerationId,
+            baseline.Revision,
+            "reconcile-shared-author",
+            baseline.ProjectedAtUtc.AddSeconds(1),
+            target.Id,
+            "Author, Updated",
+            [author]);
+        LibraryState projected = LibraryStateDeltaPolicy.Apply(baseline, reconcile);
+        await store.WriteBaselineAsync(baseline, CancellationToken.None);
+        await store.AppendDeltaBatchAsync(
+            baseline.Snapshot.Identity.LibraryRoot,
+            [reconcile],
+            projected,
+            false,
+            null,
+            false,
+            CancellationToken.None);
+
+        LibraryState loaded = (await new VersionedJsonLibraryStateStore(new() { StorageRoot = cacheRoot })
+            .ReadAsync(baseline.Snapshot.Identity.LibraryRoot, CancellationToken.None))!;
+
+        CalibreBook book = loaded.Snapshot.Books.Single(value => value.Id == target.Id);
+        book.Authors.Should().Equal(author);
+        book.AuthorSort.Should().Be("Author, Updated");
+        book.Formats.Should().BeEquivalentTo(target.Formats);
     }
 
     [Fact]

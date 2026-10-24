@@ -9,6 +9,10 @@ public enum AuthorCreditRole
     Author,
     Editor,
     Translator,
+    Illustrator,
+    ForewordWriter,
+    Publisher,
+    Dedication,
 }
 
 public sealed record AuthorBylineCandidate
@@ -42,13 +46,26 @@ public sealed record AuthorBylineCandidate
 
 public static class AuthorBylinePolicy
 {
-    public const string PolicyVersion = "author-byline/1.0.0";
+    public const string PolicyVersion = "author-byline/1.1.0";
     public const int MaximumLines = 200;
     public const int MaximumLineCharacters = 512;
 
     private static readonly (string Marker, AuthorCreditRole Role)[] Markers =
     [
         ("translated by ", AuthorCreditRole.Translator),
+        ("illustrated by ", AuthorCreditRole.Illustrator),
+        ("foreword by ", AuthorCreditRole.ForewordWriter),
+        ("introduction by ", AuthorCreditRole.ForewordWriter),
+        ("published by ", AuthorCreditRole.Publisher),
+        ("dedicated to ", AuthorCreditRole.Dedication),
+        ("vertaald door ", AuthorCreditRole.Translator),
+        ("traduit par ", AuthorCreditRole.Translator),
+        ("traducido por ", AuthorCreditRole.Translator),
+        ("geschreven door ", AuthorCreditRole.Author),
+        ("verfasst von ", AuthorCreditRole.Author),
+        ("auteur: ", AuthorCreditRole.Author),
+        ("autor: ", AuthorCreditRole.Author),
+        ("autora: ", AuthorCreditRole.Author),
         ("translator: ", AuthorCreditRole.Translator),
         ("written by ", AuthorCreditRole.Author),
         ("edited by ", AuthorCreditRole.Editor),

@@ -17,6 +17,8 @@ public enum CandidatePreparationPhase
     PublishingCandidateAnalysis,
     PreparingPresentation,
     Completed,
+    InspectingFinalIdentity,
+    ResolvingIdentityRepairs,
 }
 
 public enum CandidateProgressUnit

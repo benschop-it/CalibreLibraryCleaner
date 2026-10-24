@@ -28,6 +28,9 @@ decision.
 
 Active execution plans are listed in the [plans index](plans/README.md), including
 current provider/review follow-up work. The completed
+[high-quality library disposition plan](archive/plans/high-quality-library-and-unresolvable-disposition.md)
+records generated mixed-library WPF acceptance and real-parser measurements.
+The completed
 [final author resolution and managed naming plan](archive/plans/final-author-resolution-and-managed-naming.md)
 is archived with its implementation and acceptance evidence.
 The completed one-time cleanup plan is under [archive/plans](archive/plans/).

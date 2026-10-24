@@ -93,7 +93,7 @@ public sealed class EditionMetadataProposalTests
             .And.HaveFlag(EditionMetadataQueryFields.Language);
         validation.Fields.Should().NotHaveFlag(EditionMetadataQueryFields.Identifier);
         validation.Title.Should().Be("Book Title: A Subtitle");
-        EditionMetadataLookupQuery.PolicyVersion.Should().Be("edition-metadata-query/1.6.0");
+        EditionMetadataLookupQuery.PolicyVersion.Should().Be("edition-metadata-query/1.7.0");
     }
 
     [Fact]
@@ -135,6 +135,38 @@ public sealed class EditionMetadataProposalTests
         CandidateMetadataNormalizer.HaveCompatibleAuthorIdentity(
             CandidateMetadataNormalizer.AuthorKeys(query.Authors),
             CandidateMetadataNormalizer.AuthorKeys(candidate.Authors)).Should().BeTrue();
+    }
+
+    [Fact]
+    public void CorruptAuthorCannotPreventBoundedTitleOnlyRetrieval()
+    {
+        CalibreBook book = new(new(1), "The Northern Valley", "Unknown",
+            [new(new(1), "Unknown", "Unknown")], [], [], "Unknown/Book (1)");
+
+        EditionMetadataLookupQuery query = EditionMetadataLookupQuery.CreateVariants(book, Provider)[0];
+        EditionMetadataProposal proposal = EditionMetadataProposalPolicy.Resolve(query,
+            new(Provider, EditionMetadataSearchStatus.Success, RetrievedAt,
+                [new("work", "edition", book.Title, ["Reliable Writer"])]));
+
+        query.Authors.Should().BeEmpty();
+        query.Fields.Should().NotHaveFlag(EditionMetadataQueryFields.Authors);
+        proposal.Status.Should().Be(EditionMetadataProposalStatus.Proposed);
+        proposal.ReasonCodes.Should().Contain("METADATA.EDITION.TITLE_ONLY_RETRIEVAL");
+        EditionMetadataFusionPolicy.Fuse([proposal]).Confidence.Should().Be(FusedEditionMetadataConfidence.Low);
+    }
+
+    [Fact]
+    public void TitleOnlyAlternativesRemainAmbiguousRegardlessOfCompleteness()
+    {
+        EditionMetadataLookupQuery query = new(new(1), Provider, EditionMetadataQueryFields.Title,
+            null, "The Northern Valley", [], null);
+
+        EditionMetadataProposal proposal = EditionMetadataProposalPolicy.Resolve(query,
+            new(Provider, EditionMetadataSearchStatus.Success, RetrievedAt,
+                [new("work-a", "edition-a", query.Title!, ["First Writer"]),
+                 new("work-b", "edition-b", query.Title!, ["Second Writer"], publisher: "Publisher")]));
+
+        proposal.Status.Should().Be(EditionMetadataProposalStatus.Ambiguous);
     }
 
     [Fact]

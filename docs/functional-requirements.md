@@ -370,9 +370,44 @@ bounded, HTTPS-only, outside the library, and removed after the run.
   fingerprints/bytes, and preserved metadata/local fields. No-op metadata tricks,
   direct renames, retries, or fallback engines are permitted.
 - After final author and managed-name cleanup succeeds, prepare a final reviewed
-  `Unresolvable` disposition. Default unresolved, conflicting, exhausted strong-
-  suspect, and exact `Unknown`/`Unkown`/`User` label records checked regardless of
-  label provenance; permit explicit add-by-record-ID and user unchecking.
+  disposition for every retained record, independently assessing title and author
+  identity, usable content, and managed layout. Outcomes are Qualified, Repairable,
+  Needs review, or Proposed Unresolvable. Catalog plausibility, absent final-author
+  subjects, and exact placeholder labels alone do not establish qualification or
+  authorize a default transfer.
+- Reuse bounded opening-page EPUB/PDF inspection for paired title/subtitle and
+  ordered author candidates with unit/line locations. Unlabelled pairs remain
+  uncertain. Editor, translator, illustrator, foreword, publisher and dedication
+  credits do not become author credits. Unsupported, image-only, limited and
+  unavailable inspection remains incomplete, not proof of corruption.
+- Track applicable local/provider routes as not needed, not attempted, completed
+  with/without evidence, conflicting, unavailable, or deferred. A material identity
+  problem may default to transfer only after applicable routes complete; confirmed
+  unusable content without a usable companion may also be proposed. Unavailable
+  providers, missing keys, caps and timeouts are not completed negative findings.
+  Conflicts and unresolved companion defects require review.
+- Offer targeted read-only identity repair from the existing Unresolvable review.
+  Use a unique explicit local title/byline pair when available; suspect authors may
+  use bounded title-only retrieval. Title-only alternatives remain ambiguous and
+  title-only provider agreement stays Low/unchecked. Existing bibliographic budgets,
+  field disclosure, caches, provenance and applicability policies remain in force.
+  Local identity repair searches use text validation rather than blindly trusting
+  a catalog ISBN that may identify a different publication.
+- Final repair review starts unchecked. Apply reviewed non-author fields through
+  the metadata-only worker action; then carry reviewed author proposals into Final
+  authors for a separately confirmed author/managed-name action and shared-author
+  reconciliation. Reassess actual current values afterward; never rewrite already
+  applied fields merely to advance review.
+- Permit explicit reviewer acceptance of title, complete credits, retained content
+  and disclosed format defects after inspection, and explicit manual transfer by
+  record ID or individual selection. Check all selects only policy proposals or
+  previously manual transfers. Exclusion/Skip is not acceptance.
+- Freeze retained-input accounting for the final pass. A finished high-quality
+  source requires `retained input = qualified remaining + verified moved`, with
+  zero pending records. Existing destination records are not new moves. A completed
+  transfer with pending source records is not a completed high-quality library.
+  Decisions bind current metadata, complete format identity, policies, generation
+  and revision; changed evidence requires rebuilt review.
 - Derive the destination as the fixed physical sibling
   `<source name> - Unresolvable`. Create it through the supported Calibre API when
   absent or bind/reuse its exact UUID when present. Never reinitialize, merge, or
@@ -383,6 +418,10 @@ bounded, HTTPS-only, outside the library, and removed after the run.
   covers, extra files, formats, sizes, and SHA-256 values, and only then deletes
   verified source records. Any failed or ambiguous copy/delete stops and requires
   Rescan; no fallback, retry, rollback, or inferred successful prefix is allowed.
+- Reconcile Calibre's shared-author side effects read-only after final author mutation
+  and before quarantine review. Project exact live ordered author IDs/names/sorts and
+  book author sorts for every affected record, but reject any simultaneous non-author
+  catalog drift and require Rescan.
 
 ## Explicit non-goals
 

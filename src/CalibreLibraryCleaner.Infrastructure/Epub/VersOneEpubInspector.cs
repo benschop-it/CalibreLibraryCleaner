@@ -138,6 +138,7 @@ internal sealed partial class VersOneEpubInspector(ILogger<VersOneEpubInspector>
                 .Take(limits.MaximumEpubDocuments)
                 .ToArray();
             List<FrontMatterAuthorCandidate> candidates = [];
+            List<FrontMatterIdentityCandidate> identities = [];
             int completed = 0;
             int retained = 0;
             bool truncated = false;
@@ -152,6 +153,7 @@ internal sealed partial class VersOneEpubInspector(ILogger<VersOneEpubInspector>
                     .ConfigureAwait(false);
                 HtmlDocument document = LoadBoundedHtml(html, request.Limits, cancellationToken);
                 List<string> lines = [];
+                List<int> headingLines = [];
                 int useful = 0;
                 foreach (HtmlNode node in document.DocumentNode.SelectNodes(
                              "//h1|//h2|//h3|//p|//div[not(.//p or .//div or .//section)]|//section[not(.//p or .//div or .//section)]")
@@ -168,11 +170,23 @@ internal sealed partial class VersOneEpubInspector(ILogger<VersOneEpubInspector>
                     }
                     useful += lineUseful;
                     lines.Add(line);
+                    if (node.Name is "h1" or "h2" or "h3") headingLines.Add(lines.Count);
                 }
                 retained = checked(retained + useful);
                 completed++;
                 candidates.AddRange(AuthorBylinePolicy.Extract(lines).Select(value => new FrontMatterAuthorCandidate(
                     value.Role, value.Names, index + 1, value.LineNumber, value.Marker)));
+                bool declaredTitlePage = document.DocumentNode.Descendants().Any(node =>
+                    node.GetAttributeValue("epub:type", string.Empty)
+                        .Split(' ', StringSplitOptions.RemoveEmptyEntries).Contains("titlepage", StringComparer.Ordinal))
+                    || package.Descendants().Any(element =>
+                        element.Name.LocalName == "reference"
+                        && element.Attribute("type")?.Value is "title-page" or "titlepage"
+                        && EpubArchivePathResolver.TryResolve(
+                            packagePath, element.Attribute("href")?.Value ?? string.Empty, out string target)
+                        && target == spinePaths[index]);
+                identities.AddRange(FrontMatterIdentityExtraction.Extract(
+                    lines, index + 1, headingLines, declaredTitlePage));
             }
             EnsureCurrentFile(request);
             FrontMatterAuthorStatus status = candidates.Any(value => value.Role == AuthorCreditRole.Author)
@@ -181,7 +195,8 @@ internal sealed partial class VersOneEpubInspector(ILogger<VersOneEpubInspector>
             return new(
                 "EPUB", request.Fingerprint, FrontMatterAuthorVersions.EpubExtractor,
                 FrontMatterAuthorVersions.Limits, status, candidates, spinePaths.Length,
-                completed, retained, truncated);
+                completed, retained, truncated || identities.Count > 16 || candidates.Count > 32,
+                identityCandidates: identities.Take(16));
         }
         catch (OperationCanceledException) { throw; }
         catch (FileChangedException)

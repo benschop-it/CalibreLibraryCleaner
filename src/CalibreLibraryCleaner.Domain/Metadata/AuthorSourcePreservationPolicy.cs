@@ -12,6 +12,7 @@ public enum AuthorEvidenceSource
     PdfDocumentMetadata,
     EpubFrontMatter,
     PdfFrontMatter,
+    ReviewedBibliographicRepair,
 }
 
 public enum AuthorProposalSource
@@ -22,6 +23,7 @@ public enum AuthorProposalSource
     CachedEmbeddedMetadata,
     ContentDerivedFrontMatter,
     PseudonymAnnotationRemoval,
+    ReviewedBibliographicRepair,
 }
 
 public enum CurrentAuthorProtection

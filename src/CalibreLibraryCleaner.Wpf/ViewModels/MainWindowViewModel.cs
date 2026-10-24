@@ -39,6 +39,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
     private readonly PrepareMetadataReviewUseCase? _prepareMetadataReview;
     private readonly InspectEmbeddedAuthorMetadataUseCase? _inspectEmbeddedAuthorMetadata;
     private readonly InspectFrontMatterAuthorsUseCase? _inspectFrontMatterAuthors;
+    private readonly IFinalAuthorCatalogReconciler? _reconcileFinalAuthorCatalog;
     private readonly LibraryOperationCoordinator _operationCoordinator;
     private readonly ILogger<MainWindowViewModel> _logger;
     private readonly SynchronizationContext? _uiContext;
@@ -139,7 +140,8 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         ILogger<MainWindowViewModel>? logger = null,
         IQuarantineDestinationInspector? quarantineDestinationInspector = null,
         IQuarantineCleanupExecutor? quarantineCleanupExecutor = null,
-        IQuarantineCleanupConfirmationService? quarantineCleanupConfirmation = null)
+        IQuarantineCleanupConfirmationService? quarantineCleanupConfirmation = null,
+        IFinalAuthorCatalogReconciler? reconcileFinalAuthorCatalog = null)
     {
         _validateLibrary = validateLibrary;
         _scanLibrary = scanLibrary;
@@ -162,6 +164,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         _quarantineDestinationInspector = quarantineDestinationInspector;
         _quarantineCleanupExecutor = quarantineCleanupExecutor;
         _quarantineCleanupConfirmation = quarantineCleanupConfirmation;
+        _reconcileFinalAuthorCatalog = reconcileFinalAuthorCatalog;
         _operationCoordinator = operationCoordinator ?? new();
         _logger = logger ?? NullLogger<MainWindowViewModel>.Instance;
         _uiContext = SynchronizationContext.Current;
@@ -282,6 +285,14 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
             AddManualQuarantineRecord,
             () => !IsBusy && _quarantineReviewWorkspace is not null
                 && long.TryParse(QuarantineManualRecordId, out long value) && value > 0);
+        AcceptSelectedQualificationCommand = new RelayCommand(
+            AcceptSelectedQualification,
+            () => !IsBusy && !_operationCoordinator.IsOperationActive && !_quarantineCompleted
+                && _selectedQuarantineReviewSubjects.Length > 0);
+        ReviewIdentityRepairsCommand = new AsyncRelayCommand(
+            ReviewIdentityRepairsAsync,
+            () => !IsBusy && !_operationCoordinator.IsOperationActive && !_quarantineCompleted
+                && _quarantineReviewWorkspace is not null && _prepareMetadataReview is not null);
         CandidateCleanupCommand = new AsyncRelayCommand(CandidateCleanupAsync, CanRunCandidateCleanup);
     }
 
@@ -489,6 +500,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         LibraryWorkflowPhase.CandidateCleanupCompleted when _metadataReviewWorkspace is null =>
             "Prepare online metadata review",
         LibraryWorkflowPhase.CandidateCleanupCompleted => "Apply checked metadata",
+        LibraryWorkflowPhase.Completed when _identityRepairReviewReady => "Apply checked identity metadata",
         LibraryWorkflowPhase.Completed when _finalAuthorStageCompleted && _quarantineCompleted =>
             "Unresolvable quarantine completed",
         LibraryWorkflowPhase.Completed when _finalAuthorStageCompleted && _quarantineReviewWorkspace is null =>
@@ -511,6 +523,8 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
             "Resolve online metadata only for records retained after Candidate cleanup",
         LibraryWorkflowPhase.CandidateCleanupCompleted =>
             "Apply checked online metadata proposals after backup confirmation",
+        LibraryWorkflowPhase.Completed when _identityRepairReviewReady =>
+            "Apply checked non-author repairs first; review authors and refresh managed naming afterward",
         LibraryWorkflowPhase.Completed when _finalAuthorStageCompleted && _quarantineCompleted =>
             "Run an explicit Rescan before another mutation",
         LibraryWorkflowPhase.Completed when _finalAuthorStageCompleted && _quarantineReviewWorkspace is null =>
@@ -900,6 +914,9 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         OnlineMetadataSettingsCommand.NotifyCanExecuteChanged();
         SkipAllUnifiedCandidatesCommand.NotifyCanExecuteChanged();
         NotifyMetadataApplyCommands();
+        NotifyQuarantineCommands();
+        CheckSelectedFinalAuthorApplyCommand.NotifyCanExecuteChanged();
+        UncheckSelectedFinalAuthorApplyCommand.NotifyCanExecuteChanged();
         CandidateCleanupCommand.NotifyCanExecuteChanged();
     }
 
@@ -1524,6 +1541,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
                 _inspectEmbeddedAuthorMetadata is not null && _inspectFrontMatterAuthors is not null,
             LibraryWorkflowPhase.Completed => _executeUnifiedCandidateCleanup is not null
                 && _metadataMutationConfirmation is not null
+                && _reconcileFinalAuthorCatalog is not null
                 && _currentSnapshot?.Books.Any(value => value.Formats.Count > 0) == true,
             _ => false,
         };
@@ -1666,10 +1684,59 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
             _isCandidatePreparationActive = true;
             StartCandidateHeartbeat();
         }
+        else if (startingPhase == LibraryWorkflowPhase.Completed && _finalAuthorStageCompleted
+            && _quarantineReviewWorkspace is null)
+        {
+            StartCandidateHeartbeat();
+        }
         try
         {
             if (startingPhase == LibraryWorkflowPhase.Completed)
             {
+                if (_identityRepairReviewReady && _metadataReviewWorkspace is not null)
+                {
+                    MetadataReviewWorkspace reviewed = _metadataReviewWorkspace;
+                    if (!reviewed.Subjects.Any(value => value.Apply))
+                    {
+                        _identityRepairReviewReady = false;
+                        ClearMetadataReview();
+                        NotifyCandidateCleanupStateChanged();
+                        StatusMessage = "No identity repairs were checked. Returned to disposition review without mutation.";
+                        return;
+                    }
+                    if (_metadataMutationConfirmation is null
+                        || !_metadataMutationConfirmation.ConfirmExternalBackup(reviewed.Subjects.Count(value => value.Apply)))
+                    {
+                        StatusMessage = "Identity metadata update canceled; external backup confirmation is required.";
+                        return;
+                    }
+                    Progress<UnifiedCandidateCleanupProgress> progress = new(value =>
+                        UpdateOperationProgress(value.Message, value.CompletedOperations, value.TotalOperations));
+                    UnifiedCandidateCleanupResult identityRepairResult = await _executeUnifiedCandidateCleanup!.ExecuteAsync(new(
+                        SelectedLibraryPath, startingState.GenerationId, startingState.Revision, [],
+                        ExternalBackupConfirmed: true, reviewed), progress, _scanCancellation.Token).ConfigureAwait(true);
+                    CandidateCleanupResultSummary = FormatMetadataResultSummary(identityRepairResult);
+                    if (!identityRepairResult.IsCompleted)
+                    {
+                        StatusMessage = string.Join(" ", identityRepairResult.Issues.Select(value => $"{value.Code}: {value.Explanation}"));
+                        return;
+                    }
+                    LibraryState current = _libraryStateSession!.GetCurrent(SelectedLibraryPath)
+                        ?? throw new InvalidOperationException("Identity repair state is unavailable.");
+                    FinalAuthorReviewWorkspace authors = PrepareFinalAuthorReviewUseCase.Execute(
+                        current, frontMatterObservations: _finalAuthorReviewWorkspace!.FrontMatterObservations);
+                    authors = PrepareFinalAuthorReviewUseCase.AddReviewedBibliographicRepairs(current, authors, reviewed);
+                    ClearMetadataReview();
+                    ClearQuarantineReview();
+                    _finalAuthorStageCompleted = false;
+                    ApplyFinalAuthorReviewWorkspace(authors);
+                    SnapshotPresentation presentation = await PreparePresentationAsync(
+                        current.Snapshot, CancellationToken.None).ConfigureAwait(true);
+                    ApplySnapshot(current.Snapshot, presentation, current.IsAuthoritative);
+                    StatusMessage = "Non-author identity repairs completed. Review checked bibliographic authors in Final authors, "
+                        + "then apply final authors and managed naming before reassessment.";
+                    return;
+                }
                 if (_finalAuthorStageCompleted)
                 {
                     if (_quarantineCompleted)
@@ -1709,12 +1776,24 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
                 }
                 int correctionCount = _finalAuthorReviewWorkspace.Subjects.Count(value => value.Apply);
                 int bookCount = startingState.Snapshot.Books.Count(value => value.Formats.Count > 0);
-                if (bookCount == 0 || _metadataMutationConfirmation is null
-                    || !_metadataMutationConfirmation.ConfirmAuthorNormalization(bookCount))
+                if (_reconcileFinalAuthorCatalog is null)
                 {
-                    StatusMessage = bookCount == 0
-                        ? "No retained records with registered formats require managed naming."
-                        : "Final author correction canceled. Confirm a complete external backup before retrying.";
+                    ErrorMessage = "Final author reconciliation is unavailable.";
+                    ErrorAction = "Restart the application before final author mutation.";
+                    return;
+                }
+                if (bookCount == 0 && correctionCount == 0)
+                {
+                    ClearQuarantineReview();
+                    _finalAuthorStageCompleted = true;
+                    NotifyCandidateCleanupStateChanged();
+                    StatusMessage = "No retained formats require managed naming. Prepare final disposition review without mutation.";
+                    return;
+                }
+                if (_metadataMutationConfirmation is null
+                    || !_metadataMutationConfirmation.ConfirmAuthorNormalization(Math.Max(bookCount, correctionCount)))
+                {
+                    StatusMessage = "Final author correction canceled. Confirm a complete external backup before retrying.";
                     return;
                 }
                 IsProgressIndeterminate = false;
@@ -1733,17 +1812,34 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
                     + $"refreshed {normalizationResult.RefreshedManagedNameCount:N0} managed name(s); "
                     + $"skipped {normalizationResult.SkippedMetadataFieldCount:N0} verified-unchanged record(s).";
                 LibraryState? normalizationFinal = _libraryStateSession.GetCurrent(SelectedLibraryPath);
-                if (normalizationFinal is not null)
-                {
-                    SnapshotPresentation presentation = await PreparePresentationAsync(
-                        normalizationFinal.Snapshot, CancellationToken.None).ConfigureAwait(true);
-                    ApplySnapshot(normalizationFinal.Snapshot, presentation, normalizationFinal.IsAuthoritative);
-                }
                 StatusMessage = normalizationResult.IsCompleted
                     ? "Final author corrections completed."
                     : string.Join(" ", normalizationResult.Issues.Select(value => $"{value.Code}: {value.Explanation}"));
                 if (normalizationResult.IsCompleted && normalizationFinal is not null)
                 {
+                    FinalAuthorCatalogReconciliationResult reconciliation = await _reconcileFinalAuthorCatalog!
+                        .ExecuteAsync(normalizationFinal, _scanCancellation.Token).ConfigureAwait(true);
+                    if (!reconciliation.IsSuccess)
+                    {
+                        await _libraryStateSession.MarkUncertainAsync(
+                            SelectedLibraryPath,
+                            new(
+                                reconciliation.FailureCode ?? "FINAL_AUTHOR_RECONCILIATION.FAILED",
+                                reconciliation.Explanation ?? "Final author side effects could not be reconciled.",
+                                _clock?.GetUtcNow() ?? DateTimeOffset.UtcNow),
+                            CancellationToken.None).ConfigureAwait(true);
+                        ErrorMessage = reconciliation.Explanation
+                            ?? "Final author side effects could not be reconciled.";
+                        ErrorAction = "Run an explicit Rescan before another mutation.";
+                        StatusMessage = "Final author mutation completed, but shared author changes require Rescan.";
+                        return;
+                    }
+                    normalizationFinal = reconciliation.State!;
+                    if (reconciliation.ReconciledRecordCount > 0)
+                        CandidateCleanupResultSummary += $" Reconciled {reconciliation.ReconciledRecordCount:N0} shared-author record(s).";
+                    SnapshotPresentation presentation = await PreparePresentationAsync(
+                        normalizationFinal.Snapshot, CancellationToken.None).ConfigureAwait(true);
+                    ApplySnapshot(normalizationFinal.Snapshot, presentation, normalizationFinal.IsAuthoritative);
                     FinalAuthorReviewWorkspace previous = _finalAuthorReviewWorkspace;
                     FinalAuthorReviewWorkspace current = PrepareFinalAuthorReviewUseCase.Execute(
                         normalizationFinal,
@@ -1756,8 +1852,10 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
                     current = PrepareFinalAuthorReviewUseCase.SetAllApply(current, false);
                     ApplyFinalAuthorReviewWorkspace(current);
                     ClearQuarantineReview();
+                    _verifiedManagedNameBookIds = normalizationResult.VerifiedManagedNameBookIds?.ToHashSet() ?? [];
                     _finalAuthorStageCompleted = true;
                     NotifyCandidateCleanupStateChanged();
+                    StatusMessage = "Final author corrections completed.";
                 }
                 return;
             }

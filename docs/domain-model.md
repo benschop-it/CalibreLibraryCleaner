@@ -20,6 +20,11 @@ relative directory, publication metadata, and formats. `BookFormat` contains
 canonical format, stored name/relative path, physical status, fingerprint, and file
 observation where available.
 
+Catalog stored names are filename stems; worker read-back carries complete
+basenames separately. Verified naming/title/author deltas bind unchanged format
+fingerprints to current observations and actual names before subsequent analysis.
+Missing observations never become invented Present identity.
+
 `FormatFileFingerprint` is byte length plus SHA-256. `FormatFileObservation` records
 technical file identity used for change/cache checks. Non-physical statuses never
 carry invented fingerprint/observation facts.
@@ -131,6 +136,22 @@ General cleanup-plan, execution-history, backup-bundle, rollback, and recovery
 aggregates are not current product concepts.
 
 ## Core invariants
+
+### Final disposition values
+
+`RecordIdentityTriageAssessment` describes bounded field-sensitive warnings without
+guessing authorship. `FinalRecordQualificationEvidence` keeps title/author support,
+content usability, layout verification, contradictions, concrete repair and explicit
+local/provider route outcomes separate. `FinalRecordQualificationPolicy` returns
+NeedsReview, Repairable, Qualified or ProposedUnresolvable; author suspicion alone
+does not decide disposition.
+
+Reviewer acceptance and manual transfer are explicit review choices, never inferred
+from missing proposals or Skip. Application's final workspace freezes the retained
+input count and accounts separately for qualified remaining records and verified
+new moves. An incomplete workspace cannot certify the source as high quality.
+
+### General invariants
 
 - Exact groups have at least two distinct file references/records as appropriate.
 - Exact Metadata never degrades to title-only matching.

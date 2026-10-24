@@ -72,6 +72,58 @@ one verified-unchanged author display skip, and one omitted transient cover. The
 continued after the typed skip and finished authoritative at revision 2,352 with no
 pending mutation intent or worker process.
 
+## Final-quality follow-up acceptance, 2026-10-24
+
+The high-quality/Unresolvable implementation has a separately verified preview
+package; it does not replace the historical representative acceptance above.
+
+| Field | Actual value |
+| --- | --- |
+| Version | `0.1.1-quality-20261023` |
+| ZIP | `CalibreLibraryCleaner-0.1.1-quality-20261023-win-x64-framework-dependent.zip` |
+| Compressed bytes | 9,674,950 |
+| Payload files | 79 |
+| ZIP SHA-256 | `99b0e0e43c2fa47f79b1b7f6b0932c14fb7f16e50d330361695df8839c3b769b` |
+| Build SDK / test runtime | 10.0.401 / 10.0.12 |
+| Regression suite | 1,185 passed, zero skipped |
+| Package manifest / extracted executable smoke | Passed |
+| Generated fixed-worker quarantine acceptance | Passed using Calibre 9.12 |
+| Generated mixed-library packaged WPF acceptance | Passed: 12 retained inputs = 8 qualified remaining + 4 verified moves, zero pending |
+| Existing destination / preservation | Original destination record unchanged; formats, covers, extras, identifiers, publication/local/custom metadata and sorts verified |
+| Restart / Calibre open | Eight authoritative source books loaded; both libraries independently reopened read-only; Rescan boundary preserved |
+
+Small synthetic holdout/work-count results and their limitations are recorded in
+the completed [final-quality disposition plan](../archive/plans/high-quality-library-and-unresolvable-disposition.md).
+No personal library or live provider request was used for these checks.
+
+WPF acceptance used package hash
+`581045128244cf13f8b07399369aa594183400a8f54433d715beaa2350955621`.
+The final ZIP additionally bounds long subtitle transport without truncating its
+evidence; this normal-short-title-equivalent refresh passed the complete suite and
+package smoke. The two hashes are recorded separately rather than claiming an
+unperformed UI rerun of that edge-only refresh.
+
+Reproduce setup with the supported Calibre runtime (the short root must not exist):
+
+```powershell
+& 'C:\Program Files\Calibre2\calibre-debug.exe' -e .\scripts\calibre_final_quality_fixture.py -- create C:\Temp\clc-quality-fixture I_CONFIRM_THIS_IS_GENERATED_ACCEPTANCE_DATA
+```
+
+In the UI, review author record 10 and title record 2; explicitly accept retained
+records 5, 7 and 8; manually assign 3, 4, 9 and 12 to transfer. Confirm complete
+current external fixture copies before each mutation. Afterwards run:
+
+```powershell
+& 'C:\Program Files\Calibre2\calibre-debug.exe' -e .\scripts\calibre_final_quality_fixture.py -- verify C:\Temp\clc-quality-fixture I_CONFIRM_THIS_IS_GENERATED_ACCEPTANCE_DATA
+```
+
+Setup creates generated libraries and complete verified external fixture copies,
+not an application backup feature.
+Launch the package with `CALIBRE_CLEANER_DATA_ROOT=<root>\app-state` and
+`CALIBRE_ONLINE_METADATA_ENABLED=0`; all state/credentials/logs remain isolated and
+edition providers are disabled before credential access. Storage roots must be
+absolute physical directories outside Calibre libraries.
+
 ## Interrupted acceptance attempt
 
 The first packaged attempt used the caller-confirmed disposable library and current

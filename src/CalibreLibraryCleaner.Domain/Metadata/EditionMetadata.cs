@@ -37,7 +37,7 @@ public sealed record EditionMetadataProviderIdentity
 
 public sealed record EditionMetadataLookupQuery
 {
-    public const string PolicyVersion = "edition-metadata-query/1.6.0";
+    public const string PolicyVersion = "edition-metadata-query/1.7.0";
     private const EditionMetadataQueryFields AllFields = EditionMetadataQueryFields.Identifier
         | EditionMetadataQueryFields.Title | EditionMetadataQueryFields.Authors
         | EditionMetadataQueryFields.Language;
@@ -67,8 +67,7 @@ public sealed record EditionMetadataLookupQuery
             || fields.HasFlag(EditionMetadataQueryFields.Authors) != (boundedAuthors.Length > 0)
             || fields.HasFlag(EditionMetadataQueryFields.Language) != (normalizedLanguage is not null)
             || normalizedIdentifier is null
-                && (!fields.HasFlag(EditionMetadataQueryFields.Title)
-                    || !fields.HasFlag(EditionMetadataQueryFields.Authors)))
+                && !fields.HasFlag(EditionMetadataQueryFields.Title))
             throw new ArgumentException("Edition metadata query values do not match disclosed fields.");
 
         BookId = bookId;
@@ -95,12 +94,25 @@ public sealed record EditionMetadataLookupQuery
     public static IReadOnlyList<EditionMetadataLookupQuery> CreateVariants(
         CalibreBook book,
         EditionMetadataProviderIdentity provider)
+        => CreateIdentityRepairVariants(book, provider, book.Title,
+            AuthorSuspicionPolicy.Assess(book.Title, book.Authors.Select(value =>
+                AuthorPseudonymAnnotationPolicy.ForMatching(value.Name))).Status
+                == AuthorResolutionStatus.Known
+                ? book.Authors.Select(value => value.Name) : []);
+
+    public static IReadOnlyList<EditionMetadataLookupQuery> CreateIdentityRepairVariants(
+        CalibreBook book,
+        EditionMetadataProviderIdentity provider,
+        string title,
+        IEnumerable<string> reliableAuthors)
     {
         ArgumentNullException.ThrowIfNull(book);
+        ArgumentException.ThrowIfNullOrWhiteSpace(title);
+        ArgumentNullException.ThrowIfNull(reliableAuthors);
         string? isbn = book.Identifiers.Select(value =>
                 CandidateMetadataNormalizer.NormalizeStrongIdentifier(value.Type, value.Value))
             .FirstOrDefault(value => value?.StartsWith("ISBN:", StringComparison.Ordinal) == true);
-        string[] authors = book.Authors.Select(value => AuthorPseudonymAnnotationPolicy.ForMatching(value.Name)).ToArray();
+        string[] authors = reliableAuthors.Select(AuthorPseudonymAnnotationPolicy.ForMatching).ToArray();
         string[] languages = book.PublicationMetadata.Languages
             .Select(CandidateMetadataNormalizer.NormalizeLanguage)
             .Where(value => value is not null).Distinct(StringComparer.Ordinal)
@@ -110,12 +122,12 @@ public sealed record EditionMetadataLookupQuery
         if (isbn is not null)
             variants.Add(new(book.Id, provider, EditionMetadataQueryFields.Identifier,
                 isbn, null, null, null));
-        Add(book.Title, authors, language);
-        if (language is not null) Add(book.Title, authors, null);
-        if (authors.Length > 1) Add(book.Title, [authors[0]], null);
-        string coreTitle = CoreTitle(book.Title);
-        if (!string.Equals(coreTitle, book.Title, StringComparison.Ordinal))
-            Add(coreTitle, [authors[0]], null);
+        Add(title, authors, language);
+        if (language is not null) Add(title, authors, null);
+        if (authors.Length > 1) Add(title, [authors[0]], null);
+        string coreTitle = CoreTitle(title);
+        if (!string.Equals(coreTitle, title, StringComparison.Ordinal))
+            Add(coreTitle, authors.Take(1).ToArray(), null);
         return new ReadOnlyCollection<EditionMetadataLookupQuery>(variants
             .DistinctBy(value => new
             {
@@ -129,8 +141,8 @@ public sealed record EditionMetadataLookupQuery
 
         void Add(string title, IReadOnlyList<string> queryAuthors, string? queryLanguage)
         {
-            EditionMetadataQueryFields fields = EditionMetadataQueryFields.Title
-                | EditionMetadataQueryFields.Authors;
+            EditionMetadataQueryFields fields = EditionMetadataQueryFields.Title;
+            if (queryAuthors.Count > 0) fields |= EditionMetadataQueryFields.Authors;
             if (queryLanguage is not null) fields |= EditionMetadataQueryFields.Language;
             variants.Add(new(book.Id, provider, fields, null, title, queryAuthors, queryLanguage));
         }
@@ -463,6 +475,8 @@ public static class EditionMetadataProposalPolicy
             .ThenBy(value => value.Candidate.EditionId, StringComparer.Ordinal).ToArray();
         if (scored.Length == 0)
             return Proposal(EditionMetadataProposalStatus.NotFound);
+        if (query.Identifier is null && query.Authors.Count == 0 && scored.Length > 1)
+            return Proposal(EditionMetadataProposalStatus.Ambiguous);
         if (scored.Length > 1 && scored[0].Score == scored[1].Score)
             return Proposal(EditionMetadataProposalStatus.Ambiguous);
         return Proposal(
@@ -506,14 +520,19 @@ public static class EditionMetadataProposalPolicy
                 query.Authors, normalizePseudonymAnnotations: false);
             string[] candidateAuthorKeys = CandidateMetadataNormalizer.AuthorKeys(
                 candidate.Authors, normalizePseudonymAnnotations: false);
-            if (!CandidateMetadataNormalizer.HaveCompatibleAuthorIdentity(queryAuthorKeys, candidateAuthorKeys))
+            if (query.Authors.Count > 0
+                && !CandidateMetadataNormalizer.HaveCompatibleAuthorIdentity(queryAuthorKeys, candidateAuthorKeys))
                 return null;
             bool exactAuthor = CandidateMetadataNormalizer.HaveExactAuthorIdentity(
                 queryAuthorKeys, candidateAuthorKeys);
-            score += exactAuthor ? 1_000 : 500;
-            reasons.Add(exactAuthor
-                ? "METADATA.EDITION.AUTHOR_EXACT"
-                : "METADATA.EDITION.AUTHOR_COMPATIBLE");
+            if (query.Authors.Count > 0)
+            {
+                score += exactAuthor ? 1_000 : 500;
+                reasons.Add(exactAuthor
+                    ? "METADATA.EDITION.AUTHOR_EXACT"
+                    : "METADATA.EDITION.AUTHOR_COMPATIBLE");
+            }
+            else reasons.Add("METADATA.EDITION.TITLE_ONLY_RETRIEVAL");
 
             string queryCoreTitle = EditionMetadataLookupQuery.CoreTitle(query.Title!);
             string candidateCoreTitle = EditionMetadataLookupQuery.CoreTitle(candidate.Title);

@@ -10,7 +10,7 @@ import tempfile
 
 
 EXPECTED_MARKER = "I_CONFIRM_THIS_CALIBRE_LIBRARY_IS_DISPOSABLE"
-PROTOCOL_VERSION = "calibre-mutation-worker-protocol/1.4"
+PROTOCOL_VERSION = "calibre-mutation-worker-protocol/1.6"
 
 
 def require(condition, code):
@@ -168,6 +168,13 @@ def main():
         require(len(formats) == 1 and formats[0]["format"] == "TXT", "format_readback")
         require(formats[0]["storedFileName"] == "Final Title - Final Author.txt", "basename_readback")
         require(formats[0]["sha256"] == hashlib.sha256(original_bytes).hexdigest(), "hash_readback")
+        observation = formats[0].get("observation") or {}
+        current_path = os.path.join(library_root, result["verifiedManagedPath"], formats[0]["storedFileName"])
+        current_stat = os.stat(current_path)
+        require(observation.get("length") == current_stat.st_size, "observation_size_readback")
+        require(observation.get("attributes") == current_stat.st_file_attributes, "observation_attributes_readback")
+        require(len(observation.get("creationTimeUtc", "")) == 28
+                and len(observation.get("lastWriteTimeUtc", "")) == 28, "observation_timestamp_precision")
         write_message(process.stdin, {
             "protocolVersion": PROTOCOL_VERSION,
             "kind": "shutdown",
@@ -217,6 +224,7 @@ def main():
             "author_display": "J. K. Rowling",
             "author_sort": "Rowling, J. K.",
             "author_write_applied": True,
+            "current_file_observation_verified": True,
             "record_count": 2,
             "format_count": 2,
             "bytes_unchanged": True,

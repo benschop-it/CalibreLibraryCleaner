@@ -121,7 +121,8 @@ internal sealed class GoogleBooksEditionMetadataProvider(
     {
         string search = query.Identifier is not null
             ? "isbn:" + query.Identifier[5..]
-            : $"intitle:\"{SearchValue(query.Title!)}\" inauthor:\"{SearchValue(string.Join("; ", query.Authors))}\"";
+            : $"intitle:\"{SearchValue(query.Title!)}\""
+                + (query.Authors.Count > 0 ? $" inauthor:\"{SearchValue(string.Join("; ", query.Authors))}\"" : string.Empty);
         List<string> parameters =
         [
             "q=" + Uri.EscapeDataString(search),

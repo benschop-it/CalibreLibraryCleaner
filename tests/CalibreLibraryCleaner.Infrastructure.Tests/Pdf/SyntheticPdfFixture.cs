@@ -79,7 +79,9 @@ internal sealed class SyntheticPdfFixture : IDisposable
         foreach (string line in pageLines)
         {
             PdfPageBuilder page = builder.AddPage(595, 842);
-            page.AddText(line, 12, new PdfPoint(36, 770), font);
+            int index = 0;
+            foreach (string text in line.Split('\n'))
+                page.AddText(text, 12, new PdfPoint(36, 770 - index++ * 20), font);
         }
         File.WriteAllBytes(path, builder.Build());
         return new(root, path);

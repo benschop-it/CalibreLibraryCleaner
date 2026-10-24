@@ -10,6 +10,24 @@ namespace CalibreLibraryCleaner.Wpf.Tests.ViewModels;
 public sealed class QuarantineReviewSubjectRowViewModelTests
 {
     [Fact]
+    public void PendingRowsExposeRouteCoverageWithoutSelectingTransfer()
+    {
+        FinalRecordQualificationEvidence evidence = new(
+            false, false, FinalRecordContentStatus.Incomplete, true, true, false, false,
+            [new("local-PDF", "2.0", FinalRecordRouteOutcome.Unavailable)]);
+        QuarantineReviewSubject subject = new(
+            new(9), "The Book", [new(new(4), "Reliable Writer", "Writer, Reliable")], [],
+            new(["TITLE.UNBALANCED_DELIMITER"], [],
+                FinalRecordQualificationPolicy.Assess(evidence), evidence));
+        QuarantineReviewSubjectRowViewModel row = new(subject, (_, _) => Task.CompletedTask);
+
+        row.Include.Should().BeFalse();
+        row.Coverage.Should().Be("local-PDF: Unavailable");
+        row.MatchesFilter(QuarantineReviewFilterMode.NeedsReview).Should().BeTrue();
+        row.MatchesFilter(QuarantineReviewFilterMode.Qualified).Should().BeFalse();
+    }
+
+    [Fact]
     public async Task RowDisplaysProvenanceAndPersistsInclude()
     {
         List<(CalibreBookId Id, bool Include)> persisted = [];

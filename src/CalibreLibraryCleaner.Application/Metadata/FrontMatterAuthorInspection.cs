@@ -29,8 +29,10 @@ public sealed record FrontMatterInspectionLimits
 
 public static class FrontMatterAuthorVersions
 {
-    public const string EpubExtractor = "epub-front-matter-author/1.0.0";
-    public const string PdfExtractor = "pdf-front-matter-author/1.0.0";
+    public const string EpubExtractor = "epub-front-matter-identity/2.0.0+"
+        + FrontMatterIdentityExtraction.PolicyVersion + "+" + AuthorBylinePolicy.PolicyVersion;
+    public const string PdfExtractor = "pdf-front-matter-identity/2.0.0+"
+        + FrontMatterIdentityExtraction.PolicyVersion + "+" + AuthorBylinePolicy.PolicyVersion;
     public const string Limits = "front-matter-author-limits/1.0.0";
 }
 
@@ -108,7 +110,8 @@ public sealed record FrontMatterAuthorObservation
         int completedUnits,
         int retainedUsefulCharacters,
         bool truncated,
-        string? problemCode = null)
+        string? problemCode = null,
+        IEnumerable<FrontMatterIdentityCandidate>? identityCandidates = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(format);
         ArgumentNullException.ThrowIfNull(fingerprint);
@@ -117,6 +120,7 @@ public sealed record FrontMatterAuthorObservation
         ArgumentNullException.ThrowIfNull(candidates);
         string canonicalFormat = format.Trim().ToUpperInvariant();
         FrontMatterAuthorCandidate[] values = candidates.Take(32).ToArray();
+        FrontMatterIdentityCandidate[] identities = (identityCandidates ?? []).Take(17).ToArray();
         string? problem = string.IsNullOrWhiteSpace(problemCode) ? null : problemCode.Trim();
         if (canonicalFormat is not ("EPUB" or "PDF")
             || !Enum.IsDefined(status)
@@ -124,6 +128,11 @@ public sealed record FrontMatterAuthorObservation
             || completedUnits < 0
             || completedUnits > requestedUnits
             || retainedUsefulCharacters < 0
+            || requestedUnits > (canonicalFormat == "EPUB" ? 3 : 5)
+            || retainedUsefulCharacters > completedUnits * 32_768
+            || identities.Length > 16
+            || identities.Any(value => value.UnitNumber > requestedUnits)
+            || status == FrontMatterAuthorStatus.Unavailable && identities.Length > 0
             || extractorVersion.Length > 128
             || limitsVersion.Length > 128
             || problem is { Length: > 128 }
@@ -145,6 +154,7 @@ public sealed record FrontMatterAuthorObservation
         RetainedUsefulCharacters = retainedUsefulCharacters;
         Truncated = truncated;
         ProblemCode = problem;
+        IdentityCandidates = new ReadOnlyCollection<FrontMatterIdentityCandidate>(identities);
     }
 
     public string Format { get; }
@@ -158,6 +168,16 @@ public sealed record FrontMatterAuthorObservation
     public int RetainedUsefulCharacters { get; }
     public bool Truncated { get; }
     public string? ProblemCode { get; }
+    public IReadOnlyList<FrontMatterIdentityCandidate> IdentityCandidates { get; }
+    public FinalRecordRouteOutcome Coverage => Status == FrontMatterAuthorStatus.Unavailable
+        ? FinalRecordRouteOutcome.Unavailable
+        : Truncated || CompletedUnits < RequestedUnits || RequestedUnits == 0
+            ? FinalRecordRouteOutcome.DeferredByBounds
+            : Candidates.Count > 0 || IdentityCandidates.Count > 0
+                ? FinalRecordRouteOutcome.CompletedWithEvidence
+                : RetainedUsefulCharacters == 0
+                    ? FinalRecordRouteOutcome.Unavailable
+                    : FinalRecordRouteOutcome.CompletedWithoutEvidence;
 }
 
 public interface IFrontMatterAuthorCache

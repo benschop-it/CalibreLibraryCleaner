@@ -9,7 +9,7 @@ import sys
 
 
 EXPECTED_MARKER = "I_CONFIRM_THE_QUARANTINE_WORKER_ROOT_IS_DISPOSABLE"
-PROTOCOL_VERSION = "calibre-mutation-worker-protocol/1.4"
+PROTOCOL_VERSION = "calibre-mutation-worker-protocol/1.6"
 
 
 def require(condition, code):

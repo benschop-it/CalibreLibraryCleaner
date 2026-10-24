@@ -666,6 +666,23 @@ public sealed class PdfPigPdfInspectorTests
     }
 
     [Fact]
+    public async Task IsolatedInspectorReturnsPairedIdentityWithPageLocations()
+    {
+        using SyntheticPdfFixture fixture = SyntheticPdfFixture.CreateFrontMatter(
+            "Title: The Northern Valley\nBy Reliable Writer");
+        string worker = Path.Combine(
+            FindRepositoryRoot(), "src", "CalibreLibraryCleaner.PdfWorker", "bin", "Debug", "net10.0",
+            OperatingSystem.IsWindows() ? "CalibreLibraryCleaner.PdfWorker.exe" : "CalibreLibraryCleaner.PdfWorker");
+        IsolatedPdfInspector isolated = new(new PdfWorkerOptions { ExecutablePath = worker });
+
+        FrontMatterAuthorObservation result = await isolated.InspectFrontMatterAuthorsAsync(
+            fixture.CreateRequest(), FrontMatterInspectionLimits.V1, CancellationToken.None);
+
+        result.IdentityCandidates.Should().ContainSingle().Which.Title.Should().Be("The Northern Valley");
+        result.IdentityCandidates.Single().UnitNumber.Should().Be(1);
+    }
+
+    [Fact]
     public async Task IsolatedInspectorFailsClosedWhenTheFixedWorkerIsMissing()
     {
         using SyntheticPdfFixture fixture = SyntheticPdfFixture.CreateText();

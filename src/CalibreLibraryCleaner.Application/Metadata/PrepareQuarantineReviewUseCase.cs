@@ -1,5 +1,10 @@
 using System.Collections.ObjectModel;
+using CalibreLibraryCleaner.Application.Assessments;
+using CalibreLibraryCleaner.Application.Assessments.Pdf;
+using CalibreLibraryCleaner.Domain.Assessments;
+using CalibreLibraryCleaner.Domain.Duplicates;
 using CalibreLibraryCleaner.Domain.Libraries;
+using CalibreLibraryCleaner.Domain.Matching;
 using CalibreLibraryCleaner.Domain.Metadata;
 
 namespace CalibreLibraryCleaner.Application.Metadata;
@@ -13,14 +18,14 @@ public sealed record QuarantineReviewSubject
         IEnumerable<FinalAuthorFormatIdentity> formats,
         FinalRecordDispositionAssessment disposition,
         bool manuallyIncluded = false,
-        bool? include = null)
+        bool? include = null,
+        IEnumerable<FrontMatterIdentityCandidate>? identityCandidates = null,
+        FinalRecordInputIdentity? inputIdentity = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(currentTitle);
         ArgumentNullException.ThrowIfNull(currentAuthors);
         ArgumentNullException.ThrowIfNull(formats);
         ArgumentNullException.ThrowIfNull(disposition);
-        if (!disposition.ProposedForQuarantine && !manuallyIncluded)
-            throw new ArgumentException("A quarantine review subject requires policy or manual inclusion.");
         BookId = bookId;
         CurrentTitle = currentTitle;
         CurrentAuthors = new ReadOnlyCollection<BookAuthor>(currentAuthors.ToArray());
@@ -29,8 +34,12 @@ public sealed record QuarantineReviewSubject
             .ThenBy(value => value.ExpectedRelativePath, StringComparer.Ordinal)
             .ToArray());
         Disposition = disposition;
+        IdentityCandidates = Array.AsReadOnly((identityCandidates ?? []).Take(16).ToArray());
+        InputIdentity = inputIdentity;
         ManuallyIncluded = manuallyIncluded;
-        Include = include ?? true;
+        Include = include ?? (disposition.ProposedForQuarantine || manuallyIncluded);
+        if (Include && !disposition.ProposedForQuarantine && !manuallyIncluded)
+            throw new ArgumentException("A pending record requires explicit manual transfer assignment.");
     }
 
     public CalibreBookId BookId { get; }
@@ -40,6 +49,10 @@ public sealed record QuarantineReviewSubject
     public FinalRecordDispositionAssessment Disposition { get; }
     public bool ManuallyIncluded { get; }
     public bool Include { get; }
+    public FinalRecordQualification Qualification => Include && ManuallyIncluded
+        ? FinalRecordQualification.ProposedUnresolvable : Disposition.Qualification;
+    public IReadOnlyList<FrontMatterIdentityCandidate> IdentityCandidates { get; }
+    public FinalRecordInputIdentity? InputIdentity { get; }
 
     public QuarantineReviewSubject WithInclude(bool include) => new(
         BookId,
@@ -47,8 +60,29 @@ public sealed record QuarantineReviewSubject
         CurrentAuthors,
         Formats,
         Disposition,
-        ManuallyIncluded,
-        include);
+        ManuallyIncluded || include && !Disposition.ProposedForQuarantine,
+        include,
+        IdentityCandidates,
+        InputIdentity);
+
+    public QuarantineReviewSubject AcceptReviewed()
+    {
+        FinalRecordQualificationEvidence evidence = Disposition.Evidence
+            ?? throw new InvalidOperationException("Current qualification evidence is required.");
+        if (!evidence.ManagedLayoutVerified)
+            throw new InvalidOperationException("Managed naming must be verified before reviewer acceptance.");
+        if (Formats.Count == 0 || Formats.All(value =>
+                value.FileStatus != FormatFileStatus.Present || value.Fingerprint is null))
+            throw new InvalidOperationException("Reviewer acceptance requires retained content with verified file identity.");
+        FinalRecordQualificationEvidence accepted = new(
+            evidence.TitleSupported, evidence.AuthorsSupported, evidence.Content,
+            evidence.ManagedLayoutVerified, evidence.MaterialIdentityProblem,
+            concreteRepairAvailable: false, evidence.Conflicting, evidence.Routes, reviewerAccepted: true);
+        return new(
+            BookId, CurrentTitle, CurrentAuthors, Formats,
+            new(["RECORD.REVIEWER_ACCEPTED"], [], FinalRecordQualificationPolicy.Assess(accepted), accepted),
+            include: false, identityCandidates: IdentityCandidates, inputIdentity: InputIdentity);
+    }
 }
 
 public sealed record QuarantineReviewWorkspace
@@ -59,7 +93,9 @@ public sealed record QuarantineReviewWorkspace
         LibraryStateGenerationId generationId,
         LibraryStateRevision revision,
         IEnumerable<QuarantineReviewSubject> subjects,
-        QuarantineDestinationIdentity? destinationIdentity = null)
+        QuarantineDestinationIdentity? destinationIdentity = null,
+        int? retainedInputCount = null,
+        int verifiedMovedCount = 0)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(libraryRoot);
         ArgumentException.ThrowIfNullOrWhiteSpace(destinationRoot);
@@ -73,6 +109,10 @@ public sealed record QuarantineReviewWorkspace
         GenerationId = generationId;
         Revision = revision;
         Subjects = new ReadOnlyCollection<QuarantineReviewSubject>(values);
+        RetainedInputCount = retainedInputCount ?? values.Length;
+        VerifiedMovedCount = verifiedMovedCount;
+        if (verifiedMovedCount < 0 || RetainedInputCount != values.Length + verifiedMovedCount)
+            throw new ArgumentException("Final record accounting is inconsistent.");
         DestinationIdentity = destinationIdentity;
         DispositionPolicyVersion = FinalRecordDispositionPolicy.PolicyVersion;
     }
@@ -84,6 +124,15 @@ public sealed record QuarantineReviewWorkspace
     public IReadOnlyList<QuarantineReviewSubject> Subjects { get; }
     public QuarantineDestinationIdentity? DestinationIdentity { get; }
     public string DispositionPolicyVersion { get; }
+    public int RetainedInputCount { get; }
+    public int VerifiedMovedCount { get; }
+    public int QualifiedCount => Subjects.Count(value =>
+        !value.Include && value.Disposition.Qualification == FinalRecordQualification.Qualified);
+    public int RepairableCount => Subjects.Count(value =>
+        value.Disposition.Qualification == FinalRecordQualification.Repairable);
+    public int PendingCount => Subjects.Count - QualifiedCount;
+    public bool IsHighQualityComplete => PendingCount == 0
+        && RetainedInputCount == QualifiedCount + VerifiedMovedCount;
 }
 
 public sealed record QuarantineDestinationIdentity
@@ -107,16 +156,36 @@ public static class PrepareQuarantineReviewUseCase
 
     public static QuarantineReviewWorkspace Execute(
         LibraryState state,
-        FinalAuthorReviewWorkspace finalAuthorReview)
+        FinalAuthorReviewWorkspace finalAuthorReview,
+        bool managedLayoutVerified = false,
+        EditionMetadataProvidersBatchResult? providerResults = null,
+        IReadOnlySet<CalibreBookId>? verifiedManagedNameBookIds = null)
     {
         ValidateCurrent(state, finalAuthorReview);
+        if (providerResults is not null && providerResults.InputIdentities is null)
+            throw new InvalidOperationException("Identity repair results have no current input binding.");
         Dictionary<CalibreBookId, FinalAuthorReviewSubject> finalSubjects = finalAuthorReview.Subjects
             .ToDictionary(value => value.BookId);
+        ILookup<CalibreBookId, EpubAssessment> epubs = state.Snapshot.EpubAssessments.ToLookup(value => value.CalibreBookId);
+        ILookup<CalibreBookId, PdfAssessment> pdfs = state.Snapshot.PdfAssessments.ToLookup(value => value.CalibreBookId);
+        ILookup<FormatFileFingerprint, FrontMatterAuthorObservation> observations = finalAuthorReview
+            .FrontMatterObservations.DistinctBy(value => new { value.Format, value.Fingerprint })
+            .ToLookup(value => value.Fingerprint);
+        HashSet<CalibreBookId> layoutProblems = state.Snapshot.Findings
+            .Where(value => value.BookId is not null
+                && value.Code is "MANAGED_PATH_INVALID" or "MANAGED_LAYOUT_UNSAFE"
+                    or "MANAGED_LAYOUT_INTERNAL_STORAGE" or "MANAGED_LAYOUT_UNREGISTERED_FILES")
+            .Select(value => value.BookId!.Value).ToHashSet();
         QuarantineReviewSubject[] subjects = state.Snapshot.Books
             .OrderBy(value => value.Id.Value)
-            .Select(book => Assess(book, finalSubjects.GetValueOrDefault(book.Id)))
-            .Where(value => value is not null)
-            .Cast<QuarantineReviewSubject>()
+            .Select(book => Assess(
+                book, finalSubjects.GetValueOrDefault(book.Id),
+                epubs[book.Id].ToArray(), pdfs[book.Id].ToArray(), observations,
+                managedLayoutVerified && !layoutProblems.Contains(book.Id)
+                    && (verifiedManagedNameBookIds is null || verifiedManagedNameBookIds.Contains(book.Id))
+                    && book.Formats.Count > 0
+                    && book.Formats.All(value => value.FileStatus == FormatFileStatus.Present
+                        && value.Fingerprint is not null), providerResults))
             .ToArray();
         return new(
             state.Snapshot.Identity.LibraryRoot,
@@ -134,8 +203,9 @@ public static class PrepareQuarantineReviewUseCase
         ArgumentNullException.ThrowIfNull(workspace);
         ArgumentNullException.ThrowIfNull(bookIds);
         HashSet<CalibreBookId> selected = bookIds.ToHashSet();
+        HashSet<CalibreBookId> available = workspace.Subjects.Select(value => value.BookId).ToHashSet();
         if (selected.Count != bookIds.Count
-            || selected.Any(id => workspace.Subjects.All(value => value.BookId != id)))
+            || !selected.IsSubsetOf(available))
             throw new ArgumentException("Quarantine review selections are not current.", nameof(bookIds));
         return Copy(workspace, workspace.Subjects.Select(value =>
             selected.Contains(value.BookId) ? value.WithInclude(include) : value));
@@ -145,8 +215,44 @@ public static class PrepareQuarantineReviewUseCase
         QuarantineReviewWorkspace workspace,
         bool include) => SetInclude(
         workspace,
-        workspace.Subjects.Select(value => value.BookId).ToArray(),
+        workspace.Subjects.Where(value => !include || value.Disposition.ProposedForQuarantine || value.ManuallyIncluded)
+            .Select(value => value.BookId).ToArray(),
         include);
+
+    public static QuarantineReviewWorkspace AcceptReviewed(
+        LibraryState state,
+        QuarantineReviewWorkspace workspace,
+        IReadOnlyCollection<CalibreBookId> bookIds)
+    {
+        ValidateCurrent(state, workspace);
+        HashSet<CalibreBookId> selected = bookIds.ToHashSet();
+        HashSet<CalibreBookId> available = workspace.Subjects.Select(value => value.BookId).ToHashSet();
+        if (selected.Count != bookIds.Count || !selected.IsSubsetOf(available))
+            throw new ArgumentException("Reviewer acceptance selections are stale.", nameof(bookIds));
+        Dictionary<CalibreBookId, CalibreBook> books = state.Snapshot.Books.ToDictionary(value => value.Id);
+        if (workspace.Subjects.Where(value => selected.Contains(value.BookId))
+            .Any(value => !books.TryGetValue(value.BookId, out CalibreBook? book)
+                || value.InputIdentity != FinalRecordInputIdentity.Create(book)))
+            throw new InvalidOperationException("Reviewer acceptance evidence changed; prepare a new assessment.");
+        return Copy(workspace, workspace.Subjects.Select(value =>
+            selected.Contains(value.BookId) ? value.AcceptReviewed() : value));
+    }
+
+    public static QuarantineReviewWorkspace RecordVerifiedMoves(
+        QuarantineReviewWorkspace workspace,
+        IReadOnlyCollection<CalibreBookId> movedIds)
+    {
+        ArgumentNullException.ThrowIfNull(workspace);
+        ArgumentNullException.ThrowIfNull(movedIds);
+        HashSet<CalibreBookId> moved = movedIds.ToHashSet();
+        if (moved.Count != movedIds.Count
+            || !moved.SetEquals(workspace.Subjects.Where(value => value.Include).Select(value => value.BookId)))
+            throw new InvalidOperationException("Verified move accounting does not match the reviewed selection.");
+        return new(
+            workspace.LibraryRoot, workspace.DestinationRoot, workspace.GenerationId, workspace.Revision,
+            workspace.Subjects.Where(value => !moved.Contains(value.BookId)), workspace.DestinationIdentity,
+            workspace.RetainedInputCount, checked(workspace.VerifiedMovedCount + moved.Count));
+    }
 
     public static QuarantineReviewWorkspace BindDestination(
         QuarantineReviewWorkspace workspace,
@@ -176,10 +282,22 @@ public static class PrepareQuarantineReviewUseCase
         return Copy(workspace, workspace.Subjects.Append(manual));
     }
 
-    private static QuarantineReviewSubject? Assess(
+    private static QuarantineReviewSubject Assess(
         CalibreBook book,
-        FinalAuthorReviewSubject? finalSubject)
+        FinalAuthorReviewSubject? finalSubject,
+        IReadOnlyList<EpubAssessment> epubs,
+        IReadOnlyList<PdfAssessment> pdfs,
+        ILookup<FormatFileFingerprint, FrontMatterAuthorObservation> observations,
+        bool managedLayoutVerified,
+        EditionMetadataProvidersBatchResult? providers)
     {
+        if (providers is not null)
+        {
+            if (!providers.InputIdentities!.TryGetValue(book.Id, out FinalRecordInputIdentity? expected))
+                providers = null;
+            else if (expected != FinalRecordInputIdentity.Create(book))
+                throw new InvalidOperationException("Identity repair inputs changed; prepare a new repair review.");
+        }
         AuthorResolutionStatus status = finalSubject?.Resolution.Status ?? AuthorResolutionStatus.Known;
         IReadOnlyList<string> reasons = finalSubject?.Resolution.ReasonCodes ?? [];
         bool inspectionExhausted = finalSubject is not null
@@ -190,13 +308,136 @@ public static class PrepareQuarantineReviewUseCase
             reasons,
             inspectionExhausted,
             Labels(book));
-        return disposition.ProposedForQuarantine ? Subject(book, disposition) : null;
+        RecordIdentityTriageAssessment triage = RecordIdentityTriagePolicy.Assess(
+            book.Title, book.Authors.Select(value => value.Name));
+        FrontMatterAuthorObservation[] local = book.Formats
+            .Where(value => value.Fingerprint is not null)
+            .SelectMany(format => observations[format.Fingerprint!].Where(value =>
+                value.Format == format.Format && value.ExtractorVersion == (format.Format == "EPUB"
+                    ? FrontMatterAuthorVersions.EpubExtractor : FrontMatterAuthorVersions.PdfExtractor)
+                && value.LimitsVersion == FrontMatterAuthorVersions.Limits)).ToArray();
+        FrontMatterIdentityCandidate[] pairs = local
+            .Where(value => value.Coverage == FinalRecordRouteOutcome.CompletedWithEvidence)
+            .SelectMany(value => value.IdentityCandidates).ToArray();
+        bool agrees = pairs.Any(value => value.ExplicitCredit && IdentityTitleMatches(value, book.Title)
+            && AuthorsMatch(value.Authors, book.Authors.Select(author => author.Name)));
+        bool conflict = pairs.Any(value => value.ExplicitCredit
+            && (!IdentityTitleMatches(value, book.Title)
+                || !AuthorsMatch(value.Authors, book.Authors.Select(author => author.Name))));
+        List<FinalRecordResolutionRoute> routes = [];
+        foreach (BookFormat format in book.Formats.Where(value => value.Format is "EPUB" or "PDF"))
+        {
+            FrontMatterAuthorObservation? observation = local.FirstOrDefault(value =>
+                value.Format == format.Format && value.Fingerprint == format.Fingerprint);
+            routes.Add(new(
+                $"local-{format.Format}", format.Format == "EPUB"
+                    ? FrontMatterAuthorVersions.EpubExtractor : FrontMatterAuthorVersions.PdfExtractor,
+                observation?.Coverage ?? (format.FileStatus == FormatFileStatus.Present && format.Fingerprint is not null
+                    ? FinalRecordRouteOutcome.NotAttempted : FinalRecordRouteOutcome.Unavailable)));
+        }
+        if (book.Formats.Any(value => value.Format is not ("EPUB" or "PDF")))
+            routes.Add(new("local-unsupported-formats", FrontMatterAuthorVersions.Limits,
+                FinalRecordRouteOutcome.Unavailable));
+        if (routes.Count == 0)
+            routes.Add(new("local-identity", FrontMatterAuthorVersions.Limits, FinalRecordRouteOutcome.Unavailable));
+        foreach (EditionMetadataProposalBatchResult provider in (providers?.Providers ?? [])
+                     .Where(value => value.Provider.Id != "local-front-matter"))
+        {
+            EditionMetadataProposal? proposal = provider.Proposals.GetValueOrDefault(book.Id);
+            routes.Add(new(
+                provider.Provider.Id, provider.Provider.Version,
+                provider.RequestLimitReached && proposal?.Status is null or EditionMetadataProposalStatus.NotFound
+                    ? FinalRecordRouteOutcome.DeferredByBounds : proposal?.Status switch
+                    {
+                        EditionMetadataProposalStatus.NotFound => FinalRecordRouteOutcome.CompletedWithoutEvidence,
+                        EditionMetadataProposalStatus.Proposed => FinalRecordRouteOutcome.CompletedWithEvidence,
+                        EditionMetadataProposalStatus.Ambiguous => FinalRecordRouteOutcome.Conflicting,
+                        EditionMetadataProposalStatus.Unavailable => FinalRecordRouteOutcome.Unavailable,
+                        _ => provider.RequestLimitReached ? FinalRecordRouteOutcome.DeferredByBounds
+                            : FinalRecordRouteOutcome.Unavailable,
+                    }));
+        }
+        if (providers is null || providers.Providers.All(value => value.Provider.Id == "local-front-matter"))
+            routes.Add(new("bibliographic-repair", EditionMetadataLookupQuery.PolicyVersion,
+                FinalRecordRouteOutcome.NotAttempted));
+        EpubAssessment[] compatibleEpubs = epubs.Where(value => book.Formats.Any(format =>
+            format.Format == "EPUB" && format.FileStatus == FormatFileStatus.Present
+            && format.Fingerprint == value.ObservedFingerprint)
+            && value.AnalyzerVersion == EpubAssessmentEngine.AnalyzerVersion
+            && value.ScoringModelVersion == EpubAssessmentEngine.ScoringModelVersion).ToArray();
+        PdfAssessment[] compatiblePdfs = pdfs.Where(value => book.Formats.Any(format =>
+            format.Format == "PDF" && format.FileStatus == FormatFileStatus.Present
+            && format.Fingerprint == value.ObservedFingerprint)
+            && value.AnalyzerVersion == PdfAssessmentEngine.AnalyzerVersion
+            && value.ScoringModelVersion == PdfAssessmentEngine.ScoringModelVersion
+            && value.Features.ResourceProfileVersion == PdfAssessmentEngine.ResourceProfileVersion).ToArray();
+        bool usable = compatibleEpubs.Any(value => value.Status == AssessmentStatus.Completed
+                && value.Features.ReadableCharacterCount > 0 && !value.Features.AnalysisTruncated)
+            || compatiblePdfs.Any(value => value.Status == AssessmentStatus.Completed
+                && value.Features.Text.UsefulCharacterCount > 0
+                && value.Features.PageAnalysis.FailedPages == 0);
+        bool defectiveCompanion = book.Formats.Any(format => format.FileStatus != FormatFileStatus.Present)
+            || book.Formats.Any(format => format.Format switch
+            {
+                "EPUB" => compatibleEpubs.All(value => value.ObservedFingerprint != format.Fingerprint),
+                "PDF" => compatiblePdfs.All(value => value.ObservedFingerprint != format.Fingerprint),
+                _ => true,
+            })
+            || compatibleEpubs.Any(value => value.Status != AssessmentStatus.Completed)
+            || compatiblePdfs.Any(value => value.Status != AssessmentStatus.Completed);
+        bool confirmedUnusable = book.Formats.Count > 0 && book.Formats.All(format =>
+            format.FileStatus == FormatFileStatus.Present && format.Fingerprint is not null
+            && (format.Format == "EPUB" && compatibleEpubs.Any(value =>
+                    value.ObservedFingerprint == format.Fingerprint && value.Status == AssessmentStatus.Disqualified)
+                || format.Format == "PDF" && compatiblePdfs.Any(value =>
+                    value.ObservedFingerprint == format.Fingerprint && value.Features.OpenStatus == PdfOpenStatus.Unreadable
+                    && value.Features.EncryptionStatus == PdfEncryptionStatus.NotEncrypted)));
+        bool providerRepair = (providers?.Providers ?? []).Select(value => value.Proposals.GetValueOrDefault(book.Id))
+            .Any(value => value?.Status == EditionMetadataProposalStatus.Proposed
+                && value.Candidate is not null
+                && (!TitleMatches(value.Candidate.Title, book.Title)
+                    || !AuthorsMatch(value.Candidate.Authors, book.Authors.Select(author => author.Name))));
+        FinalRecordQualificationEvidence evidence = new(
+            titleSupported: agrees,
+            authorsSupported: agrees,
+            usable ? FinalRecordContentStatus.Usable : confirmedUnusable
+                ? FinalRecordContentStatus.ConfirmedUnusable : FinalRecordContentStatus.Incomplete,
+            managedLayoutVerified,
+            materialIdentityProblem: triage.MaterialIdentityProblem,
+            concreteRepairAvailable: finalSubject?.CanApply == true || providerRepair,
+            conflicting: conflict || usable && defectiveCompanion || status == AuthorResolutionStatus.Conflicting,
+            routes);
+        disposition = new(
+            disposition.ReasonCodes.Concat(triage.ReasonCodes)
+                .Concat(defectiveCompanion ? ["RECORD.FORMAT_DEFECT_REQUIRES_REVIEW"] : Array.Empty<string>())
+                .Concat(conflict ? ["RECORD.LOCAL_IDENTITY_CONFLICT"] : Array.Empty<string>())
+                .Concat(!agrees ? ["RECORD.IDENTITY_EVIDENCE_INCOMPLETE"] : Array.Empty<string>())
+                .Concat(!usable && !confirmedUnusable ? ["RECORD.CONTENT_EVIDENCE_INCOMPLETE"] : Array.Empty<string>())
+                .Concat(!managedLayoutVerified ? ["RECORD.MANAGED_LAYOUT_UNVERIFIED"] : Array.Empty<string>()),
+            disposition.SupportingLabels,
+            FinalRecordQualificationPolicy.Assess(evidence),
+            evidence);
+        return Subject(book, disposition, identityCandidates: pairs);
     }
+
+    private static bool TitleMatches(string left, string right) =>
+        MetadataTextNormalizer.TryNormalizeTitle(left, out NormalizedTitle? a)
+        && MetadataTextNormalizer.TryNormalizeTitle(right, out NormalizedTitle? b)
+        && a == b;
+
+    private static bool IdentityTitleMatches(FrontMatterIdentityCandidate candidate, string title) =>
+        TitleMatches(candidate.Title, title) || TitleMatches(candidate.CompleteTitle, title);
+
+    private static bool AuthorsMatch(IEnumerable<string> left, IEnumerable<string> right) =>
+        CandidateMetadataNormalizer.HaveExactAuthorIdentity(
+            CandidateMetadataNormalizer.AuthorKeys(left, normalizePseudonymAnnotations: false),
+            CandidateMetadataNormalizer.AuthorKeys(right, normalizePseudonymAnnotations: false));
 
     private static QuarantineReviewSubject Subject(
         CalibreBook book,
         FinalRecordDispositionAssessment disposition,
-        bool manuallyIncluded = false) => new(
+        bool manuallyIncluded = false,
+        IEnumerable<FrontMatterIdentityCandidate>? identityCandidates = null) => new(
         book.Id,
         book.Title,
         book.Authors,
@@ -206,7 +447,9 @@ public static class PrepareQuarantineReviewUseCase
             value.FileStatus,
             value.Fingerprint)),
         disposition,
-        manuallyIncluded);
+        manuallyIncluded,
+        identityCandidates: identityCandidates,
+        inputIdentity: FinalRecordInputIdentity.Create(book));
 
     private static IEnumerable<FinalRecordDispositionLabel> Labels(CalibreBook book)
     {
@@ -291,5 +534,7 @@ public static class PrepareQuarantineReviewUseCase
         source.GenerationId,
         source.Revision,
         subjects,
-        destinationIdentity ?? source.DestinationIdentity);
+        destinationIdentity ?? source.DestinationIdentity,
+        source.RetainedInputCount,
+        source.VerifiedMovedCount);
 }

@@ -101,6 +101,31 @@ capability with independently justified data.
 
 ## Cache and performance tests
 
+Final disposition adds independent synthetic identity-damage holdout labels and
+explicit retained-record accounting gates. Current small holdout coverage is 24
+cases across Latin/non-Latin credits and field-damage families; it is not a claim
+of broad real-book calibration. Tests separately require paired EPUB/PDF extraction,
+uncertain unlabelled pages, role separation, provider/title-only ambiguity, incomplete
+route safety, reviewer acceptance, stale structural identity, and post-repair
+reassessment. A 2,000-record fake-adapter performance fixture asserts 20 distinct
+cold parser starts, zero warm starts, and 2,000 warm hits; measured times and process
+memory are observations, not universal budgets or real-parser throughput claims.
+
+Quarantine orchestration tests cover 101 records across copy chunks, existing
+destination binding, second-copy-chunk failure without deletion, and stop on the
+first failed source deletion. The fixed-worker generated-library acceptance remains
+separate from fakes and representative packaged UI acceptance.
+
+The completed follow-up also runs 22 real bounded-parser cases across EPUB/PDF
+and seven languages after simulated verified-name projection. Cold parsing started
+22 parsers/10 PDF workers; warm reuse started none. Captured parent I/O is labeled
+separately from child/source-only bytes. Generated packaged WPF acceptance applied
+reviewed author/title repairs, manually accepted three legitimate incomplete cases,
+and verified `12 = 8 qualified remaining + 4 moved`, zero pending, unchanged existing
+destination data, complete metadata/file preservation and restart/Rescan boundaries.
+The reproducible fixture generator is `scripts/calibre_final_quality_fixture.py`;
+these finite labels do not claim universal performance or accuracy.
+
 Every cache test covers:
 
 - canonical input identity;

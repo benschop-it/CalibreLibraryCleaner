@@ -26,7 +26,8 @@ public sealed record MetadataReviewWorkspace
         IEnumerable<ReviewedMetadataSubject> subjects,
         bool persistenceAvailable,
         string? persistenceProblemCode = null,
-        int deferredQueryCount = 0)
+        int deferredQueryCount = 0,
+        EditionMetadataProvidersBatchResult? providerResults = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(libraryRoot);
         ArgumentNullException.ThrowIfNull(generationId);
@@ -45,6 +46,7 @@ public sealed record MetadataReviewWorkspace
         PersistenceAvailable = persistenceAvailable;
         PersistenceProblemCode = persistenceProblemCode;
         DeferredQueryCount = deferredQueryCount;
+        ProviderResults = providerResults;
     }
 
     public string LibraryRoot { get; }
@@ -54,6 +56,7 @@ public sealed record MetadataReviewWorkspace
     public bool PersistenceAvailable { get; }
     public string? PersistenceProblemCode { get; }
     public int DeferredQueryCount { get; }
+    public EditionMetadataProvidersBatchResult? ProviderResults { get; }
 }
 
 public sealed class PrepareMetadataReviewUseCase(
@@ -64,15 +67,72 @@ public sealed class PrepareMetadataReviewUseCase(
         LibraryState state,
         IReadOnlyList<MetadataReviewKeeperSelection> keeperSelections,
         IProgress<EditionMetadataEnrichmentProgress>? progress,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        FinalAuthorReviewWorkspace? identityReview = null)
     {
         ArgumentNullException.ThrowIfNull(state);
         ArgumentNullException.ThrowIfNull(keeperSelections);
         if (!state.IsAuthoritative || !state.IsWorkflowCheckpointCurrent
-            || state.WorkflowCheckpoint.Phase != LibraryWorkflowPhase.CandidateCleanupCompleted)
+            || state.WorkflowCheckpoint.Phase != LibraryWorkflowPhase.CandidateCleanupCompleted
+                && !(state.WorkflowCheckpoint.Phase == LibraryWorkflowPhase.Completed
+                    && identityReview is not null))
             throw new InvalidOperationException("Metadata review requires completed Candidate cleanup state.");
+        if (identityReview is not null
+            && (identityReview.GenerationId != state.GenerationId || identityReview.Revision != state.Revision
+                || identityReview.LibraryRoot != state.Snapshot.Identity.LibraryRoot))
+            throw new InvalidOperationException("Identity repair evidence is stale.");
+        Dictionary<CalibreBookId, FrontMatterIdentityCandidate> localIdentities = [];
+        if (identityReview is not null)
+        {
+            ILookup<FormatFileFingerprint, FrontMatterAuthorObservation> observations =
+                identityReview.FrontMatterObservations.ToLookup(value => value.Fingerprint);
+            foreach (CalibreBook book in state.Snapshot.Books)
+            {
+                FrontMatterIdentityCandidate[] candidates = book.Formats
+                    .Where(value => value.Fingerprint is not null)
+                    .SelectMany(format => observations[format.Fingerprint!].Where(value =>
+                        value.Format == format.Format
+                        && value.ExtractorVersion == (format.Format == "EPUB"
+                            ? FrontMatterAuthorVersions.EpubExtractor : FrontMatterAuthorVersions.PdfExtractor)
+                        && value.LimitsVersion == FrontMatterAuthorVersions.Limits
+                        && value.Coverage == FinalRecordRouteOutcome.CompletedWithEvidence))
+                    .SelectMany(value => value.IdentityCandidates.Where(candidate => candidate.ExplicitCredit))
+                    .DistinctBy(value => (value.Title, Authors: string.Join('\u001f', value.Authors))).ToArray();
+                if (candidates.Length == 1) localIdentities.Add(book.Id, candidates[0]);
+            }
+        }
+        CalibreBook[] demand = state.Snapshot.Books.Where(book => identityReview is null
+            || RecordIdentityTriagePolicy.Assess(book.Title, book.Authors.Select(value => value.Name)).ReasonCodes.Count > 0
+            || localIdentities.TryGetValue(book.Id, out FrontMatterIdentityCandidate? identity)
+                && (identity.Title != book.Title
+                    || !identity.Authors.SequenceEqual(book.Authors.Select(value => value.Name)))).ToArray();
         EditionMetadataProvidersBatchResult providerResults = await resolveProposals.ExecuteAsync(
-            state.Snapshot.Books, progress, cancellationToken).ConfigureAwait(false);
+            demand, progress, cancellationToken, localIdentities).ConfigureAwait(false);
+        Dictionary<CalibreBookId, EditionMetadataProposal> localRepairs = [];
+        EditionMetadataProviderIdentity localSource = new("local-front-matter",
+            FrontMatterIdentityExtraction.PolicyVersion + "+" + AuthorBylinePolicy.PolicyVersion);
+        foreach (CalibreBook book in demand)
+        {
+            if (!localIdentities.TryGetValue(book.Id, out FrontMatterIdentityCandidate? identity)
+                || (identity.Title == book.Title || identity.CompleteTitle == book.Title)
+                    && CandidateMetadataNormalizer.HaveExactAuthorIdentity(
+                        CandidateMetadataNormalizer.AuthorKeys(identity.Authors),
+                        CandidateMetadataNormalizer.AuthorKeys(book.Authors.Select(value => value.Name))))
+                continue;
+            string sourceId = $"local-identity:{book.Id.Value}";
+            localRepairs.Add(book.Id, new(
+                book.Id, localSource, EditionMetadataQueryFields.Title | EditionMetadataQueryFields.Authors,
+                state.Snapshot.ScannedAt, EditionMetadataProposalStatus.Proposed,
+                new(sourceId, sourceId, identity.BibliographicTitle, identity.Authors), 1,
+                identity.BibliographicTitle == identity.CompleteTitle
+                    ? ["METADATA.LOCAL.PAIRED_IDENTITY_REQUIRES_REVIEW"]
+                    : ["METADATA.LOCAL.PAIRED_IDENTITY_REQUIRES_REVIEW", "METADATA.LOCAL.SUBTITLE_RETAINED_IN_EVIDENCE"]));
+        }
+        if (localRepairs.Count > 0)
+            providerResults = new([
+                .. providerResults.Providers,
+                new(localSource, localRepairs, 0, 0, 0, 0, 0, localRepairs.Count, 0, false, true),
+            ], providerResults.InputIdentities);
         IReadOnlyList<MetadataReviewSubject> subjects = BuildMetadataReviewSubjectsUseCase.Execute(
             state.Snapshot, providerResults, keeperSelections);
         int deferredQueryCount = providerResults.Providers
@@ -127,7 +187,8 @@ public sealed class PrepareMetadataReviewUseCase(
             reviewedSubjects,
             persistenceAvailable,
             problemCode,
-            deferredQueries);
+            deferredQueries,
+            providerResults);
     }
 
     public async Task<MetadataReviewWorkspace> SetApplyAsync(

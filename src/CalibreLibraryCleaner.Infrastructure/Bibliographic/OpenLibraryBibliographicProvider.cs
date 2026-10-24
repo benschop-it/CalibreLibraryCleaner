@@ -258,7 +258,8 @@ internal sealed class OpenLibraryBibliographicProvider(
         else
         {
             parameters.Add("title=" + Uri.EscapeDataString(query.Title!));
-            parameters.Add("author=" + Uri.EscapeDataString(string.Join("; ", query.Authors)));
+            if (query.Authors.Count > 0)
+                parameters.Add("author=" + Uri.EscapeDataString(string.Join("; ", query.Authors)));
             if (query.Language is not null) parameters.Add("lang=" + Uri.EscapeDataString(query.Language));
         }
         parameters.Add("fields=key%2Ctitle%2Cauthor_name%2Ceditions%2Ceditions.key%2Ceditions.title%2Ceditions.language%2Ceditions.isbn%2Ceditions.publisher%2Ceditions.publish_date%2Ceditions.cover_i%2Ceditions.series");
@@ -343,7 +344,8 @@ internal sealed class OpenLibraryBibliographicProvider(
             query.Authors, normalizePseudonymAnnotations: false);
         string[] workAuthors = CandidateMetadataNormalizer.AuthorKeys(
             work.AuthorName!, normalizePseudonymAnnotations: false);
-        if (!CandidateMetadataNormalizer.HaveCompatibleAuthorIdentity(queryAuthors, workAuthors)) return false;
+        if (query.Authors.Count > 0
+            && !CandidateMetadataNormalizer.HaveCompatibleAuthorIdentity(queryAuthors, workAuthors)) return false;
         string[] queryTitleKeys = CandidateMetadataNormalizer.TitleKeys(query.Title!);
         string[] workTitleKeys = CandidateMetadataNormalizer.TitleKeys(work.Title!);
         return queryTitleKeys.Intersect(workTitleKeys, StringComparer.Ordinal).Any()

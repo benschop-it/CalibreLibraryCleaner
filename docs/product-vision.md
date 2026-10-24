@@ -78,6 +78,17 @@ never mutation authority.
 
 ## Success measures
 
+The requested final-quality follow-up separates the retained source from the fixed
+sibling Unresolvable library. It requires trustworthy title and author identity,
+usable content and verified Calibre-managed naming, or explicit reviewer
+confirmation of the identity/content evidence. Optional missing rich metadata or a
+low keeper score is not failure. Difficult books are retained for review or
+transferred through the existing confirmed workflow, never silently discarded.
+All retained inputs must end as qualified remaining books or verified new moves;
+pending/excluded books prevent a finished high-quality claim. This follow-up's
+generated mixed-library packaged UI acceptance is recorded in the completed
+[disposition plan](archive/plans/high-quality-library-and-unresolvable-disposition.md).
+
 - Every expected retained record receives one coherent proposal or an explicit
   unavailable outcome.
 - High/Medium proposals default checked; Low proposals default unchecked and remain

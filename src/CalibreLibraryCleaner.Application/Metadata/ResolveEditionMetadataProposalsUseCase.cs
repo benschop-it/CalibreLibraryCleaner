@@ -147,7 +147,8 @@ public sealed record EditionMetadataProposalBatchResult(
 }
 
 public sealed record EditionMetadataProvidersBatchResult(
-    IReadOnlyList<EditionMetadataProposalBatchResult> Providers);
+    IReadOnlyList<EditionMetadataProposalBatchResult> Providers,
+    IReadOnlyDictionary<CalibreBookId, FinalRecordInputIdentity>? InputIdentities = null);
 
 public sealed class ResolveEditionMetadataProposalsUseCase
 {
@@ -177,7 +178,8 @@ public sealed class ResolveEditionMetadataProposalsUseCase
     public async Task<EditionMetadataProvidersBatchResult> ExecuteAsync(
         IReadOnlyList<CalibreBook> books,
         IProgress<EditionMetadataEnrichmentProgress>? progress,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        IReadOnlyDictionary<CalibreBookId, FrontMatterIdentityCandidate>? localIdentities = null)
     {
         ArgumentNullException.ThrowIfNull(books);
         List<EditionMetadataProposalBatchResult> results = [];
@@ -185,22 +187,23 @@ public sealed class ResolveEditionMetadataProposalsUseCase
         {
             cancellationToken.ThrowIfCancellationRequested();
             results.Add(await ExecuteProviderAsync(
-                provider, books, progress, cancellationToken).ConfigureAwait(false));
+                provider, books, progress, localIdentities, cancellationToken).ConfigureAwait(false));
         }
-        return new(results);
+        return new(results, books.ToDictionary(value => value.Id, FinalRecordInputIdentity.Create));
     }
 
     private async Task<EditionMetadataProposalBatchResult> ExecuteProviderAsync(
         IEditionMetadataProvider provider,
         IReadOnlyList<CalibreBook> books,
         IProgress<EditionMetadataEnrichmentProgress>? progress,
+        IReadOnlyDictionary<CalibreBookId, FrontMatterIdentityCandidate>? localIdentities,
         CancellationToken cancellationToken)
     {
         if (!_options.Enabled || provider is IEditionMetadataProviderAvailability availability
             && !await availability.IsAvailableAsync(cancellationToken).ConfigureAwait(false))
             return EditionMetadataProposalBatchResult.Disabled(provider.Identity, 0);
         QueryPlan[] queries = books.OrderBy(value => value.Id.Value)
-            .Select(book => TryCreateQueryPlan(provider, book))
+            .Select(book => TryCreateQueryPlan(provider, book, localIdentities?.GetValueOrDefault(book.Id)))
             .Where(value => value is not null).Select(value => value!).ToArray();
         int unqueryable = books.Count - queries.Length;
         QueryPlanGroup[] groups = queries
@@ -368,14 +371,20 @@ public sealed class ResolveEditionMetadataProposalsUseCase
 
     private static QueryPlan? TryCreateQueryPlan(
         IEditionMetadataProvider provider,
-        CalibreBook book)
+        CalibreBook book,
+        FrontMatterIdentityCandidate? localIdentity)
     {
         try
         {
+            IReadOnlyList<EditionMetadataLookupQuery> variants = localIdentity?.ExplicitCredit == true
+                ? EditionMetadataLookupQuery.CreateIdentityRepairVariants(
+                    book, provider.Identity, localIdentity.BibliographicTitle, localIdentity.Authors)
+                    .Where(value => value.Identifier is null).ToArray()
+                : EditionMetadataLookupQuery.CreateVariants(book, provider.Identity);
             return new(
                 book.Id,
-                EditionMetadataLookupQuery.CreateValidation(book, provider.Identity),
-                EditionMetadataLookupQuery.CreateVariants(book, provider.Identity));
+                variants.First(value => value.Title is not null),
+                variants);
         }
         catch (ArgumentException)
         {

@@ -168,6 +168,50 @@ public sealed record FinalAuthorReviewWorkspace
 
 public static class PrepareFinalAuthorReviewUseCase
 {
+    public static FinalAuthorReviewWorkspace AddReviewedBibliographicRepairs(
+        LibraryState state,
+        FinalAuthorReviewWorkspace current,
+        MetadataReviewWorkspace reviewedMetadata)
+    {
+        ArgumentNullException.ThrowIfNull(state);
+        ArgumentNullException.ThrowIfNull(current);
+        ArgumentNullException.ThrowIfNull(reviewedMetadata);
+        if (current.GenerationId != state.GenerationId || current.Revision != state.Revision
+            || reviewedMetadata.GenerationId != state.GenerationId)
+            throw new InvalidOperationException("Reviewed identity repair evidence is stale.");
+        Dictionary<CalibreBookId, FinalAuthorReviewSubject> subjects =
+            current.Subjects.ToDictionary(value => value.BookId);
+        Dictionary<CalibreBookId, CalibreBook> books = state.Snapshot.Books.ToDictionary(value => value.Id);
+        foreach (ReviewedMetadataSubject reviewed in reviewedMetadata.Subjects.Where(value => value.Apply))
+        {
+            EditionMetadataCandidate? candidate = reviewed.Subject.Proposal.Candidate;
+            if (candidate is null || !books.TryGetValue(reviewed.Subject.TargetBookId, out CalibreBook? book)
+                || !string.Equals(book.Title, candidate.Title, StringComparison.Ordinal)
+                || book.Authors.Select(value => value.Name).SequenceEqual(candidate.Authors)
+                || !EditionMetadataAuthorWritePolicy.TryPrepare(candidate.Authors, out IReadOnlyList<string> names))
+                continue;
+            EditionMetadataProviderIdentity provider = reviewed.Subject.Proposal.PrimaryProvider!;
+            AuthorResolution resolution = new(
+                AuthorResolutionStatus.Suspect, CurrentAuthorProtection.Unverified,
+                ["AUTHOR.REVIEWED_BIBLIOGRAPHIC_REPAIR"],
+                [new(AuthorEvidenceSource.ReviewedBibliographicRepair,
+                    $"{provider.Id}:{provider.Version}:{candidate.EditionId}", names)],
+                AuthorProposalSource.ReviewedBibliographicRepair, names);
+            subjects[book.Id] = new(
+                book.Id, book.Title, book.Authors,
+                book.Formats.Select(value => new FinalAuthorFormatIdentity(
+                    value.Format, value.ExpectedRelativePath, value.FileStatus, value.Fingerprint)),
+                resolution, FinalAuthorEvidenceCoverage.None, needsInspection: false, apply: true);
+        }
+        return new(
+            current.LibraryRoot, current.GenerationId, current.Revision, subjects.Values,
+            current.ScreenedCount, current.ScreenedCount - subjects.Count,
+            current.CompatibleEvidenceCount, current.AppliedOnlineProvenanceAvailable,
+            current.MetadataCacheHitCount, current.MetadataInspectionCount,
+            current.EmbeddedObservations, current.FrontMatterObservations,
+            current.FrontMatterCacheHitCount, current.FrontMatterInspectionCount);
+    }
+
     public static FinalAuthorReviewWorkspace SetApply(
         FinalAuthorReviewWorkspace workspace,
         IReadOnlyCollection<CalibreBookId> bookIds,
@@ -314,7 +358,9 @@ public static class PrepareFinalAuthorReviewUseCase
                 && value.Format is "EPUB" or "PDF").ToArray();
             bool frontMatterExhausted = inspectableFormats.Length > 0
                 && inspectableFormats.All(format => bookFrontMatter.Any(value =>
-                    value.Format == format.Format && value.Fingerprint == format.Fingerprint));
+                    value.Format == format.Format && value.Fingerprint == format.Fingerprint
+                    && value.Coverage is FinalRecordRouteOutcome.CompletedWithEvidence
+                        or FinalRecordRouteOutcome.CompletedWithoutEvidence));
             needsInspection &= !frontMatterExhausted;
             subjects.Add(new(
                 book.Id,
@@ -375,7 +421,9 @@ public static class PrepareFinalAuthorReviewUseCase
         FormatFileFingerprint fingerprint) => book.Formats.SingleOrDefault(value =>
         value.FileStatus == FormatFileStatus.Present
         && string.Equals(value.Format, format, StringComparison.OrdinalIgnoreCase)
-        && string.Equals(value.ExpectedRelativePath, expectedRelativePath, StringComparison.Ordinal)
+        && string.Equals(
+            value.ExpectedRelativePath.Replace('\\', '/'), expectedRelativePath.Replace('\\', '/'),
+            StringComparison.Ordinal)
         && value.Fingerprint == fingerprint);
 
     private static bool MatchesObservation(
@@ -387,7 +435,11 @@ public static class PrepareFinalAuthorReviewUseCase
 
     private static bool MatchesFrontMatterObservation(
         CalibreBook book,
-        FrontMatterAuthorObservation observation) => book.Formats.Any(value =>
+        FrontMatterAuthorObservation observation) =>
+        observation.ExtractorVersion == (observation.Format == "EPUB"
+            ? FrontMatterAuthorVersions.EpubExtractor : FrontMatterAuthorVersions.PdfExtractor)
+        && observation.LimitsVersion == FrontMatterAuthorVersions.Limits
+        && book.Formats.Any(value =>
         value.FileStatus == FormatFileStatus.Present
         && string.Equals(value.Format, observation.Format, StringComparison.OrdinalIgnoreCase)
         && value.Fingerprint == observation.Fingerprint);

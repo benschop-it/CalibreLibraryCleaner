@@ -48,7 +48,7 @@ public sealed record EditionMetadataFieldSource
 
 public sealed record FusedEditionMetadataProposal
 {
-    public const string CurrentPolicyVersion = "edition-metadata-fusion/1.1.0";
+    public const string CurrentPolicyVersion = "edition-metadata-fusion/1.2.0";
 
     public FusedEditionMetadataProposal(
         FusedEditionMetadataConfidence confidence,
@@ -218,7 +218,11 @@ public static class EditionMetadataFusionPolicy
                 "METADATA.EDITION.TITLE_EXACT", StringComparer.Ordinal)
             && primary.Proposal.ReasonCodes.Contains(
                 "METADATA.EDITION.AUTHOR_EXACT", StringComparer.Ordinal);
-        FusedEditionMetadataConfidence confidence = sharedIsbnAgreement && !providerDisagreement
+        bool titleOnlyRetrieval = selections.Any(value => value.Proposal.ReasonCodes.Contains(
+            "METADATA.EDITION.TITLE_ONLY_RETRIEVAL", StringComparer.Ordinal));
+        FusedEditionMetadataConfidence confidence = titleOnlyRetrieval
+            ? FusedEditionMetadataConfidence.Low
+            : sharedIsbnAgreement && !providerDisagreement
             ? FusedEditionMetadataConfidence.High
             : !providerDisagreement && (exactIsbn || exactTitleAuthor)
                 ? FusedEditionMetadataConfidence.Medium

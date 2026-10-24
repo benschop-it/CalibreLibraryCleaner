@@ -19,6 +19,16 @@ plan is archived under `archive/plans/`.
 Matching calibration is frozen. Metadata enrichment must not change the existing
 grouping authority.
 
+## Requested final-quality follow-up
+
+The completed [high-quality library and Unresolvable disposition plan](archive/plans/high-quality-library-and-unresolvable-disposition.md)
+extends the completed baseline with whole-record title/author/content qualification,
+bounded paired local identity, targeted reviewed repair, explicit evidence coverage,
+reviewer acceptance and complete two-library accounting. It does not reopen duplicate
+matching. Generated mixed-library packaged WPF acceptance, restart, exact data
+preservation and real EPUB/PDF cold/warm measurements passed. This finite fixture
+acceptance does not certify unseen personal libraries or remove explicit review.
+
 ## Completed sequence
 
 1. Remove review ambiguity and prevent analysis/cleanup operation overlap.

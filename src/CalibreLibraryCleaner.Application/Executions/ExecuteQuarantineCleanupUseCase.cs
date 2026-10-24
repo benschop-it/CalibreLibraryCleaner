@@ -280,6 +280,7 @@ public sealed partial class ExecuteQuarantineCleanupUseCase(
         {
             if (!books.TryGetValue(subject.BookId, out CalibreBook? book)
                 || subject.CurrentTitle != book.Title
+                || subject.InputIdentity != FinalRecordInputIdentity.Create(book)
                 || !subject.CurrentAuthors.SequenceEqual(book.Authors)
                 || subject.Formats.Count != book.Formats.Count
                 || book.Formats.Any(value => value.FileStatus != FormatFileStatus.Present

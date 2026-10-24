@@ -23,7 +23,8 @@ public sealed class InspectFrontMatterAuthorsUseCase(
         LibraryState state,
         FinalAuthorReviewWorkspace initial,
         IProgress<FrontMatterAuthorProgress>? progress,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        bool inspectAllRecords = false)
     {
         ArgumentNullException.ThrowIfNull(state);
         ArgumentNullException.ThrowIfNull(initial);
@@ -36,18 +37,21 @@ public sealed class InspectFrontMatterAuthorsUseCase(
         if (!validation.IsSuccess)
             throw new InvalidOperationException("The final author review library is unavailable.");
         Dictionary<CalibreBookId, CalibreBook> books = state.Snapshot.Books.ToDictionary(value => value.Id);
-        (CalibreBook Book, BookFormat Format)[] demands = initial.Subjects
-            .Where(value => value.NeedsInspection)
-            .SelectMany(subject => books[subject.BookId].Formats
+        HashSet<CalibreBookId> selected = initial.Subjects
+            .Where(value => value.NeedsInspection).Select(value => value.BookId).ToHashSet();
+        (CalibreBook Book, BookFormat Format)[] demands = books.Values
+            .Where(book => inspectAllRecords || selected.Contains(book.Id))
+            .SelectMany(book => book.Formats
                 .Where(format => format.Format is "EPUB" or "PDF"
                     && format.FileStatus == FormatFileStatus.Present
                     && format.Fingerprint is not null
                     && format.Observation is not null)
-                .Select(format => (Book: books[subject.BookId], Format: format)))
+                .Select(format => (Book: book, Format: format)))
             .OrderBy(value => value.Book.Id.Value)
             .ThenBy(value => value.Format.ExpectedRelativePath, StringComparer.Ordinal)
             .ToArray();
         List<FrontMatterAuthorObservation> observations = [];
+        Dictionary<FrontMatterAuthorCacheKey, FrontMatterAuthorObservation> completed = [];
         int cacheHits = 0;
         int inspections = 0;
         for (int index = 0; index < demands.Length; index++)
@@ -60,8 +64,10 @@ public sealed class InspectFrontMatterAuthorsUseCase(
                 format.Fingerprint!,
                 epub ? FrontMatterAuthorVersions.EpubExtractor : FrontMatterAuthorVersions.PdfExtractor,
                 FrontMatterAuthorVersions.Limits);
-            FrontMatterAuthorObservation? observation = await TryReadAsync(key, cancellationToken)
-                .ConfigureAwait(false);
+            FrontMatterAuthorObservation? observation = completed.GetValueOrDefault(key)
+                ?? await TryReadAsync(key, cancellationToken).ConfigureAwait(false);
+            if (observation?.Status == FrontMatterAuthorStatus.Unavailable && !completed.ContainsKey(key))
+                observation = null;
             if (observation is not null)
             {
                 cacheHits++;
@@ -71,7 +77,9 @@ public sealed class InspectFrontMatterAuthorsUseCase(
                 ResolvedFormatPathOutcome resolved = pathResolver.ResolveFormat(
                     validation.Location!, book.RelativeDirectory, format.StoredFileName, format.Format);
                 if (!resolved.IsSuccess
-                    || !string.Equals(resolved.Path!.RelativePath, format.ExpectedRelativePath, StringComparison.Ordinal))
+                    || !string.Equals(
+                        resolved.Path!.RelativePath.Replace('\\', '/'),
+                        format.ExpectedRelativePath.Replace('\\', '/'), StringComparison.Ordinal))
                 {
                     observation = Unavailable(key, $"{format.Format}_FRONT_MATTER.UNSAFE_PATH");
                 }
@@ -97,6 +105,7 @@ public sealed class InspectFrontMatterAuthorsUseCase(
                 await TryWriteAsync(observation, cancellationToken).ConfigureAwait(false);
             }
             observations.Add(observation);
+            completed[key] = observation;
             progress?.Report(new(index + 1, demands.Length, cacheHits, inspections,
                 $"{format.Format} front matter"));
         }

@@ -12,6 +12,27 @@ namespace CalibreLibraryCleaner.Infrastructure.Tests.Bibliographic;
 public sealed class OpenLibraryEditionMetadataProviderTests
 {
     [Fact]
+    public async Task TitleOnlyRepairDoesNotTransmitTheCorruptCatalogAuthor()
+    {
+        RecordingHandler handler = new(_ => new(HttpStatusCode.OK)
+        {
+            Content = new StringContent("""{"docs":[]}""", Encoding.UTF8, "application/json"),
+        });
+        using HttpClient client = new(handler) { BaseAddress = new("https://openlibrary.org/") };
+        using OpenLibraryBibliographicProvider provider = new(client, new(minimumRequestInterval: TimeSpan.Zero));
+        IEditionMetadataProvider editions = provider;
+        EditionMetadataLookupQuery query = new(
+            new(1), editions.Identity, EditionMetadataQueryFields.Title | EditionMetadataQueryFields.Language,
+            null, "A Northern Valley", [], "en");
+
+        EditionMetadataSearchResult result = await editions.SearchAsync(query, CancellationToken.None);
+
+        result.Status.Should().Be(EditionMetadataSearchStatus.NotFound);
+        handler.RequestUri!.Query.Should().Contain("title=A%20Northern%20Valley").And.Contain("lang=en");
+        handler.RequestUri.Query.Should().NotContain("author=").And.NotContain("Unknown");
+    }
+
+    [Fact]
     public async Task SearchRequestsAndParsesOneCoherentNestedEdition()
     {
         RecordingHandler handler = new(_ => new(HttpStatusCode.OK)

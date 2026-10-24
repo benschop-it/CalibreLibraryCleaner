@@ -4,11 +4,11 @@ import os
 import sys
 import tempfile
 import unicodedata
-from datetime import datetime
+from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
 
 
-PROTOCOL_VERSION = "calibre-mutation-worker-protocol/1.4"
+PROTOCOL_VERSION = "calibre-mutation-worker-protocol/1.6"
 MAXIMUM_MESSAGE_BYTES = 1048576
 MAXIMUM_OPERATIONS = 100
 CAPABILITIES = ["setMetadata", "refreshManagedName", "transferFormat", "removeFormat", "removeRecord",
@@ -68,6 +68,8 @@ def operation_result(operation, success, failure_code=None, metadata=None, manag
         result["verifiedMetadataValues"] = metadata["values"]
         result["verifiedManagedPath"] = metadata["managedPath"]
         result["verifiedAuthorSort"] = metadata["authorSort"]
+        if metadata.get("formats") is not None:
+            result["verifiedFormats"] = metadata["formats"]
         if metadata.get("authorSortValues") is not None:
             result["verifiedAuthorSortValues"] = metadata["authorSortValues"]
     if managed_name is not None:
@@ -309,15 +311,38 @@ def managed_format_state(cache, book_id, library_root=None):
         path = os.path.realpath(cache.format_abspath(book_id, canonical))
         if os.path.commonpath((library_root, path)) != library_root or not os.path.isfile(path):
             raise ValueError("managed_format_unavailable")
+        before = os.stat(path, follow_symlinks=False)
         size, digest = hash_file(path)
+        after = os.stat(path, follow_symlinks=False)
+        if file_observation(before) != file_observation(after) or size != after.st_size \
+                or (before.st_dev, before.st_ino) != (after.st_dev, after.st_ino):
+            raise ValueError("managed_format_changed_while_hashing")
         result.append({
             "format": canonical,
             "storedFileName": os.path.basename(path),
             "relativePath": os.path.relpath(path, library_root).replace("\\", "/"),
             "sizeInBytes": size,
             "sha256": digest,
+            "observation": file_observation(after),
         })
     return result
+
+
+def file_observation(value):
+    def timestamp(nanoseconds):
+        seconds, remainder = divmod(nanoseconds, 1000000000)
+        return datetime.fromtimestamp(seconds, timezone.utc).strftime("%Y-%m-%dT%H:%M:%S") \
+            + ".{:07d}Z".format(remainder // 100)
+
+    attributes = getattr(value, "st_file_attributes", 0)
+    if attributes & (16 | 1024):
+        raise ValueError("managed_format_not_a_regular_file")
+    return {
+        "length": value.st_size,
+        "creationTimeUtc": timestamp(getattr(value, "st_birthtime_ns", value.st_ctime_ns)),
+        "lastWriteTimeUtc": timestamp(value.st_mtime_ns),
+        "attributes": attributes,
+    }
 
 
 def managed_record_state(cache, book_id, library_root=None):
@@ -390,6 +415,7 @@ def protocol_format_state(formats):
         "storedFileName": value["storedFileName"],
         "sizeInBytes": value["sizeInBytes"],
         "sha256": value["sha256"],
+        "observation": value["observation"],
     } for value in formats]
 
 
@@ -520,6 +546,7 @@ def metadata_state(cache, operation):
         "local": local_values(cache, book_id),
         "path": cache.field_for("path", book_id),
         "authorSort": cache.field_for("author_sort", book_id),
+        "formats": managed_format_state(cache, book_id) if field in {"title", "authors"} else None,
     }
 
 
@@ -582,6 +609,7 @@ def set_metadata(cache, operation):
     if not cache.has_id(book_id):
         raise ValueError("metadata_target_missing")
     preserved = local_values(cache, book_id)
+    before_formats = managed_format_state(cache, book_id) if field in {"title", "authors"} else None
     expected = values
     requested_author_sorts = operation["metadataAuthorSortValues"]
     if field == "cover":
@@ -685,7 +713,13 @@ def set_metadata(cache, operation):
     if not isinstance(managed_path, str) or not managed_path or len(managed_path) > 1024 \
             or not isinstance(author_sort, str) or not author_sort or len(author_sort) > 512:
         raise ValueError("metadata_context_readback_failed")
+    after_formats = managed_format_state(cache, book_id) if before_formats is not None else None
+    if before_formats is not None and \
+            [(item["format"], item["sizeInBytes"], item["sha256"]) for item in before_formats] \
+            != [(item["format"], item["sizeInBytes"], item["sha256"]) for item in after_formats]:
+        raise ValueError("metadata_format_bytes_changed")
     return {"values": verified, "managedPath": managed_path, "authorSort": author_sort,
+            "formats": protocol_format_state(after_formats) if after_formats is not None else None,
             "authorSortValues": verified_author_sorts if field == "authors"
             and requested_author_sorts is not None else None}
 

@@ -56,7 +56,8 @@ public sealed record UnifiedCandidateCleanupResult(
     int SkippedMetadataFieldCount = 0,
     int OmittedMetadataCoverCount = 0,
     int OmittedMetadataAuthorFieldCount = 0,
-    int RefreshedManagedNameCount = 0)
+    int RefreshedManagedNameCount = 0,
+    IReadOnlyList<CalibreBookId>? VerifiedManagedNameBookIds = null)
 {
     public bool IsCompleted => State is UnifiedCandidateCleanupState.Completed
         or UnifiedCandidateCleanupState.NothingToDo;

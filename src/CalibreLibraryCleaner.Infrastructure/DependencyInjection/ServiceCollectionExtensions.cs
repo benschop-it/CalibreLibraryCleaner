@@ -22,9 +22,13 @@ namespace CalibreLibraryCleaner.Infrastructure.DependencyInjection;
 
 public static class ServiceCollectionExtensions
 {
-    public static IServiceCollection AddCalibreLibraryInfrastructure(this IServiceCollection services)
+    public static IServiceCollection AddCalibreLibraryInfrastructure(
+        this IServiceCollection services,
+        ApplicationStorageRoot? storage = null,
+        bool onlineMetadataEnabled = true)
     {
         ArgumentNullException.ThrowIfNull(services);
+        storage ??= new();
 
         // Enable legacy single-byte code pages (e.g. windows-1252) so EPUB XML
         // documents that declare a non-Unicode encoding decode accurately. This
@@ -34,13 +38,13 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<IClock, SystemClock>();
         services.AddSingleton<ILibraryPathResolver, LibraryPathResolver>();
         services.AddSingleton<ICalibreMetadataReader, SqliteCalibreMetadataReader>();
-        services.AddSingleton(new FormatHashCacheOptions());
+        services.AddSingleton(new FormatHashCacheOptions(storage.GetPath("format-hashes")));
         services.AddSingleton<IFormatHashCacheKeyFactory, Sha256FormatHashCacheKeyFactory>();
         services.AddSingleton<IFormatHashCache, FileFormatHashCache>();
         services.AddSingleton<IFormatFileHasher, StreamingSha256FormatFileHasher>();
         services.AddSingleton<IFormatFileProbe, PhysicalFormatFileProbe>();
         services.AddSingleton<IManagedBookLayoutInspector, PhysicalManagedBookLayoutInspector>();
-        services.AddSingleton(new LibrarySnapshotStorageOptions());
+        services.AddSingleton(new LibrarySnapshotStorageOptions { StorageRoot = storage.GetPath("library-snapshots") });
         services.AddSingleton<ILibrarySnapshotStore, VersionedJsonLibrarySnapshotStore>();
         services.AddSingleton<ILibraryStateStore, VersionedJsonLibraryStateStore>();
         services.AddSingleton<VersOneEpubInspector>();
@@ -48,36 +52,40 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<IEpubFrontMatterAuthorInspector>(provider =>
             provider.GetRequiredService<VersOneEpubInspector>());
         services.AddSingleton<IEpubContentSignatureInspector>(provider => provider.GetRequiredService<VersOneEpubInspector>());
-        services.AddSingleton(new EpubContentSignatureCacheOptions());
+        services.AddSingleton(new EpubContentSignatureCacheOptions(storage.GetPath("epub-content-signatures")));
         services.AddSingleton<IEpubContentSignatureCache, FileEpubContentSignatureCache>();
-        bool openLibraryEnabled = !string.Equals(
+        bool openLibraryEnabled = onlineMetadataEnabled && !string.Equals(
             Environment.GetEnvironmentVariable("CALIBRE_OPEN_LIBRARY_ENABLED"), "0", StringComparison.Ordinal);
         OpenLibraryOptions openLibraryOptions = new(
             enabled: openLibraryEnabled,
             contact: Environment.GetEnvironmentVariable("CALIBRE_OPEN_LIBRARY_CONTACT"));
         services.AddSingleton(openLibraryOptions);
         services.AddSingleton(new BibliographicEnrichmentOptions(enabled: openLibraryEnabled));
-        services.AddSingleton(new BibliographicResolutionCacheOptions());
+        services.AddSingleton(new BibliographicResolutionCacheOptions(storage.GetPath("bibliographic-resolutions")));
         services.AddSingleton<IBibliographicResolutionCache, FileBibliographicResolutionCache>();
-        services.AddSingleton(new EditionMetadataEnrichmentOptions());
-        services.AddSingleton(new EditionMetadataProposalCacheOptions());
+        services.AddSingleton(new EditionMetadataEnrichmentOptions(enabled: onlineMetadataEnabled));
+        services.AddSingleton(new EditionMetadataProposalCacheOptions(storage.GetPath("edition-metadata-proposals")));
         services.AddSingleton<IEditionMetadataProposalCache, FileEditionMetadataProposalCache>();
-        services.AddSingleton(new MetadataReviewDecisionStoreOptions());
+        services.AddSingleton(new MetadataReviewDecisionStoreOptions(storage.GetPath("metadata-review-decisions")));
         services.AddSingleton<IMetadataReviewDecisionStore, FileMetadataReviewDecisionStore>();
-        services.AddSingleton(new EmbeddedAuthorMetadataCacheOptions());
+        services.AddSingleton(new EmbeddedAuthorMetadataCacheOptions(storage.GetPath("embedded-author-metadata-cache")));
         services.AddSingleton<FileEmbeddedAuthorMetadataCache>();
         services.AddSingleton<IEmbeddedAuthorMetadataCache>(provider =>
             provider.GetRequiredService<FileEmbeddedAuthorMetadataCache>());
         services.AddSingleton<IFrontMatterAuthorCache>(provider =>
             provider.GetRequiredService<FileEmbeddedAuthorMetadataCache>());
-        services.AddSingleton(new EditionCoverStagingOptions());
+        services.AddSingleton(new EditionCoverStagingOptions
+        {
+            StorageRoot = storage.GetPath("metadata-cover-staging"),
+            CacheRoot = storage.GetPath("metadata-cover-cache"),
+        });
         services.AddSingleton<IEditionCoverStager>(provider => new BoundedEditionCoverStager(
             new HttpClient(new SocketsHttpHandler { AllowAutoRedirect = false })
             {
                 Timeout = Timeout.InfiniteTimeSpan,
             },
             provider.GetRequiredService<EditionCoverStagingOptions>()));
-        services.AddSingleton(new GoogleBooksApiKeyStoreOptions());
+        services.AddSingleton(new GoogleBooksApiKeyStoreOptions(storage.GetPath("credentials")));
         services.AddSingleton<IGoogleBooksApiKeyStore, WindowsProtectedGoogleBooksApiKeyStore>();
         services.AddSingleton(new GoogleBooksOptions());
         services.AddSingleton(_ => new HttpClient(new SocketsHttpHandler
@@ -116,7 +124,7 @@ public static class ServiceCollectionExtensions
         OllamaEmbeddingOptions embeddingOptions = new(
             embeddingModel, embeddingVersion, ollamaRuntimeVersion);
         services.AddSingleton(embeddingOptions);
-        services.AddSingleton(new LocalEmbeddingComparisonCacheOptions());
+        services.AddSingleton(new LocalEmbeddingComparisonCacheOptions(storage.GetPath("local-embedding-comparisons")));
         services.AddSingleton<ILocalEmbeddingComparisonCache, FileLocalEmbeddingComparisonCache>();
         services.AddSingleton<ILocalEmbeddingProvider>(_ =>
         {
@@ -136,8 +144,17 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<IPdfFrontMatterAuthorInspector>(provider =>
             provider.GetRequiredService<IsolatedPdfInspector>());
         services.AddSingleton<IRecommendationExporter, VersionedJsonRecommendationExporter>();
-        services.AddSingleton(new CalibreExecutionOptions());
-        services.AddSingleton(new ExecutionStorageOptions());
+        services.AddSingleton(new CalibreExecutionOptions
+        {
+            ControlledConfigDirectory = storage.GetPath("calibre-config", "9.x"),
+            ViewerStagingRoot = storage.GetPath("viewer-staging"),
+        });
+        services.AddSingleton(new ExecutionStorageOptions
+        {
+            LeaseRoot = storage.GetPath("leases"),
+            HistoryRoot = storage.GetPath("execution-history"),
+            TransferStagingRoot = storage.GetPath("transfer-staging"),
+        });
         services.AddSingleton<DirectCalibreProcessRunner>();
         services.AddSingleton<ICalibreToolDiscovery, CalibreToolDiscovery>();
         services.AddSingleton<IEbookViewerLauncher, CalibreEbookViewerLauncher>();
