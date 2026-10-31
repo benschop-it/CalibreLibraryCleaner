@@ -1,4 +1,5 @@
 using System.Collections.ObjectModel;
+using System.Text.RegularExpressions;
 using CalibreLibraryCleaner.Application.Abstractions;
 using CalibreLibraryCleaner.Application.Executions;
 using CalibreLibraryCleaner.Application.Libraries;
@@ -255,6 +256,10 @@ public sealed partial class MainWindowViewModel
             }
             StatusMessage = "Identity repairs are ready in Metadata review, initially unchecked. "
                 + "Review replacements, then use Apply checked identity metadata. Authors follow in Final authors.";
+        }
+        catch (RegexMatchTimeoutException)
+        {
+            ReportReadOnlyRegexTimeout();
         }
         catch (Exception exception) when (exception is InvalidOperationException or ArgumentException)
         {

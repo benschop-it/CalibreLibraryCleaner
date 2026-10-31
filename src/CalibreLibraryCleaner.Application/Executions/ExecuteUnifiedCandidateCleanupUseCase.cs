@@ -573,13 +573,15 @@ public sealed partial class ExecuteUnifiedCandidateCleanupUseCase(
             if (applicable.Count == 0) continue;
             CalibreMetadataSourceIdentity source = new(
                 provider.Id, provider.Version, candidate.EditionId, subject.Proposal.PolicyVersion);
+            bool authorsPrepared = EditionMetadataAuthorWritePolicy.TryPrepare(
+                currentBook, candidate, out IReadOnlyList<string> authors);
             if (applicable.Contains(LibraryMetadataField.Title))
                 Add(LibraryMetadataField.Title, [candidate.Title]);
             if (applicable.Contains(LibraryMetadataField.Authors)
                 && state.WorkflowCheckpoint.Phase != LibraryWorkflowPhase.Completed
-                && EditionMetadataAuthorWritePolicy.TryPrepare(candidate.Authors, out IReadOnlyList<string> authors))
+                && authorsPrepared)
                 Add(LibraryMetadataField.Authors, authors);
-            else if (!EditionMetadataAuthorWritePolicy.TryPrepare(candidate.Authors, out _))
+            else if (!authorsPrepared)
                 omittedAuthorFields++;
             if (applicable.Contains(LibraryMetadataField.Identifiers))
                 Add(LibraryMetadataField.Identifiers,

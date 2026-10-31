@@ -43,6 +43,14 @@ Exact and Candidate mutation are separate runs with separate external-backup
 confirmation. Candidate preparation is a read-only activation; Candidate execution
 is a later activation.
 
+Expanded evidence summaries are presentation-state aware. An Exact-only snapshot
+points to Candidate preparation; projected snapshots after completed Candidate
+cleanup point to online metadata review instead of asking to repeat Scan. These
+messages require the exact displayed snapshot to belong to a current authoritative
+workflow checkpoint. Legacy/untrusted states and unexpectedly absent Candidate
+analysis evidence retain rescan warnings. No obsolete groups or evidence are made
+executable to avoid an unavailable summary.
+
 ## Matching architecture
 
 ### Implemented
@@ -115,6 +123,13 @@ evidence, and groups where practical.
 Analysis opens `metadata.db` read-only and managed files read-only. EPUB/PDF inputs
 remain untrusted and are processed with bounded sizes, counts, concurrency, and
 parser/process limits.
+
+EPUB front-matter extraction explicitly validates unique package manifest IDs
+before following spine references. A duplicate, including an identical declaration
+or conflicting media type, produces `EPUB_FRONT_MATTER.DUPLICATE_MANIFEST_ID`.
+Application retains the code as that record's disposition evidence while continuing
+other records. Duplicate normalized ZIP paths remain rejected by archive preflight;
+distinct manifest IDs referencing the same resource are not treated as duplicate IDs.
 
 Long operations are asynchronous and non-blocking to WPF. Progress is mandatory and
 uses truthful phase-local units plus elapsed heartbeat. Cancellation is optional and
@@ -261,6 +276,60 @@ additive or bounded casing-improvement merges remain automatic; destructive fiel
 differences become unchecked Needs review rows. Explicit Apply is persisted relative
 to that book-aware default. Domain owns one merge preview used by WPF and the same
 applicable-field policy consumed by execution.
+
+Provider author lists pass through the same author-write preparation in
+applicability, preview, metadata execution and final bibliographic-author handoff.
+Pseudonym-annotated provider lists are withheld as a complete field, including the
+explicit `psued.` spelling. WPF displays prepared writable authors or a withholding
+message, separately retaining raw credits as provider evidence. Fused review policy
+`1.6.0` invalidates prior Apply overrides. Explicit comma/pipe family-given
+notation uses the existing name normalization policy to produce given-first display
+values, including bounded alternating pipe pairs. Prepared values—not raw
+provider labels—drive preview, application, casing defaults and final handoff equality.
+Provider candidate credits retain source order instead of being alphabetically sorted.
+Proposal interpretation `1.1.0` preserves new source credit order. Recognized
+`1.0.0` proposal/query identities remain reusable under exact input/version checks
+and local positive revalidation, including compatible query `1.6.0` outcomes and
+identifier-alias backfill. Compatible results are promoted to current keys without
+renewing retrieval times or failure retry windows. Original provider/query/proposal
+versions and opaque source query identity survive promotion, aliases and book
+rebinding; WPF discloses the original versions separately from current validation.
+Local positive promotion also seeds missing ISBN aliases after the one-time
+backfill marker, without overwriting newer evidence or recursively expanding aliases.
+Known older extraction misses, unsupported versions, stale or corrupt entries
+remain misses. Existing artifacts and provider request budgets are preserved.
+
+Legacy outer author arrays lost their original order. This coverage flag survives
+cache round-trip and fusion. A single stored credit retains its internal order.
+Unknown multi-credit order permits author preparation only when the complete
+case-insensitively unique current credit set independently establishes exact
+correspondence and order; otherwise the entire author field is withheld while
+independently applicable metadata remains usable. Missing order is an unavailable
+resolution route, not exhausted evidence authorizing an Unresolvable transfer.
+Matching and opt-in current-catalog annotation removal are unchanged.
+
+Prepared author displays also reuse the existing display harmonization routine
+after credit/order preparation, including canonical dot-and-space initials.
+This does not add a second typography parser or rewrite raw provider evidence.
+Existing canonical names converge without author writes; a normalization collision
+with another credited author withholds the field rather than silently dropping one.
+Initial-spacing changes reuse compatible raw provider cache entries.
+
+Bounded Domain pseudonym and identity-triage checks use the non-backtracking regex
+engine, not short wall-clock timers. Existing field limits remain in force.
+Marker boundary consumption is used only for boolean checks; bare-suffix removal
+retains its original match span. Debugger/scheduling delays therefore cannot turn
+these checks into regex timeout failures or missing-marker evidence. Their matching
+semantics and policy/cache versions are unchanged.
+
+WPF read-only scan/load/review commands also contain regex timeout failures at
+their operation boundaries, reporting `ANALYSIS.REGEX_TIMEOUT` through existing
+user-visible logging instead of forwarding a faulted async command to the
+dispatcher. They do not publish successful review state or retry automatically.
+The combined workflow's boundary stops applying once mutation is entered; it
+cannot relabel a mutation failure as unchanged analysis. Cleanup additionally
+requires the authoritative snapshot to be the one currently displayed, including
+after a failed load that already changed the application-owned state.
 
 Infrastructure persists only bounded Apply overrides in an atomic path-private file;
 no proposal fields, local metadata, provider payloads, API keys, or library paths are

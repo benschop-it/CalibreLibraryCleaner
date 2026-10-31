@@ -31,6 +31,18 @@ current provider/review follow-up work. The completed
 [high-quality library disposition plan](archive/plans/high-quality-library-and-unresolvable-disposition.md)
 records generated mixed-library WPF acceptance and real-parser measurements.
 The completed
+[metadata cache compatibility fix](archive/plans/reuse-compatible-metadata-cache-after-author-display-fixes.md)
+records legacy reuse, preserved author-order coverage and measured zero-request
+first-reuse/warm verification.
+The completed
+[bounded metadata regex fix](archive/plans/eliminate-bounded-metadata-regex-timeouts.md)
+records linear-time execution and unchanged matching/author decisions without
+short wall-clock timeouts.
+The completed
+[read-only timeout boundary fix](archive/plans/contain-read-only-regex-timeouts.md)
+records command failure containment, retained display/state safety and explicit
+retry verification.
+The completed
 [final author resolution and managed naming plan](archive/plans/final-author-resolution-and-managed-naming.md)
 is archived with its implementation and acceptance evidence.
 The completed one-time cleanup plan is under [archive/plans](archive/plans/).

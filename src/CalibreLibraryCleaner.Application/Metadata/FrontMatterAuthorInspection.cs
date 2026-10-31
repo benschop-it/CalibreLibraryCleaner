@@ -29,7 +29,7 @@ public sealed record FrontMatterInspectionLimits
 
 public static class FrontMatterAuthorVersions
 {
-    public const string EpubExtractor = "epub-front-matter-identity/2.0.0+"
+    public const string EpubExtractor = "epub-front-matter-identity/2.0.1+"
         + FrontMatterIdentityExtraction.PolicyVersion + "+" + AuthorBylinePolicy.PolicyVersion;
     public const string PdfExtractor = "pdf-front-matter-identity/2.0.0+"
         + FrontMatterIdentityExtraction.PolicyVersion + "+" + AuthorBylinePolicy.PolicyVersion;

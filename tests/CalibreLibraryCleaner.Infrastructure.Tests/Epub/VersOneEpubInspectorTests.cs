@@ -13,6 +13,7 @@ using CalibreLibraryCleaner.Domain.Assessments;
 using CalibreLibraryCleaner.Domain.Libraries;
 using CalibreLibraryCleaner.Domain.Metadata;
 using CalibreLibraryCleaner.Infrastructure.Epub;
+using CalibreLibraryCleaner.Infrastructure.Metadata;
 using CalibreLibraryCleaner.Infrastructure.Tests.Fixtures;
 using FluentAssertions;
 using Microsoft.Extensions.DependencyInjection;
@@ -23,6 +24,145 @@ namespace CalibreLibraryCleaner.Infrastructure.Tests.Epub;
 
 public sealed class VersOneEpubInspectorTests
 {
+    [Theory]
+    [InlineData("chapter.xhtml", "application/xhtml+xml", false)]
+    [InlineData("another.xhtml", "application/xhtml+xml", false)]
+    [InlineData("cover.png", "image/png", false)]
+    [InlineData("cover.png", "image/png", true)]
+    public async Task DuplicateFrontMatterManifestIdsAreIncompleteEvidenceInsteadOfThrowing(
+        string duplicatePath, string duplicateMediaType, bool reverseOrder)
+    {
+        using TemporaryDirectory directory = new();
+        string path = Path.Combine(directory.Path, "DuplicateManifest.epub");
+        string first = "<item id=\"opening-id\" href=\"chapter.xhtml\" media-type=\"application/xhtml+xml\"/>";
+        string second = $"<item id=\"opening-id\" href=\"{duplicatePath}\" media-type=\"{duplicateMediaType}\"/>";
+        SyntheticEpubBuilder.CreateFromEntries(path, StandardEntries(
+            packageBody: $"<manifest>{(reverseOrder ? second + first : first + second)}</manifest>"
+                + "<spine><itemref idref=\"opening-id\"/></spine>",
+            chapter: "<html><body><h1>Title: Generated Book</h1><p>By Reliable Writer</p></body></html>"));
+        EpubInspectionRequest request = await CreateRequestAsync(path);
+        CapturingLogger<VersOneEpubInspector> logger = new();
+        VersOneEpubInspector inspector = new(logger);
+
+        FrontMatterAuthorObservation result = await inspector.InspectFrontMatterAuthorsAsync(
+            request, FrontMatterInspectionLimits.V1, CancellationToken.None);
+
+        result.Status.Should().Be(FrontMatterAuthorStatus.Unavailable);
+        result.ProblemCode.Should().Be("EPUB_FRONT_MATTER.DUPLICATE_MANIFEST_ID");
+        result.Coverage.Should().Be(FinalRecordRouteOutcome.Unavailable);
+        result.Candidates.Should().BeEmpty();
+        result.IdentityCandidates.Should().BeEmpty();
+        result.CompletedUnits.Should().Be(0);
+        result.Fingerprint.Should().Be(request.Fingerprint);
+        (await CreateRequestAsync(path)).Fingerprint.Should().Be(request.Fingerprint);
+        logger.Messages.Should().ContainSingle().Which.Should()
+            .Contain("EPUB_FRONT_MATTER.DUPLICATE_MANIFEST_ID").And.NotContain("opening-id").And.NotContain(path);
+    }
+
+    [Fact]
+    public async Task DuplicateManifestInOneBookDoesNotPreventCompleteDispositionReview()
+    {
+        using SyntheticCalibreLibrary library = new();
+        using TemporaryDirectory inputs = new();
+        using TemporaryDirectory cacheRoot = new();
+        string malformedPath = Path.Combine(inputs.Path, "malformed.epub");
+        SyntheticEpubBuilder.CreateFromEntries(malformedPath, StandardEntries(
+            packageBody: "<manifest>"
+                + "<item id=\"opening-id\" href=\"chapter.xhtml\" media-type=\"application/xhtml+xml\"/>"
+                + "<item id=\"opening-id\" href=\"other.xhtml\" media-type=\"application/xhtml+xml\"/>"
+                + "</manifest><spine><itemref idref=\"opening-id\"/></spine>"));
+        string validPath = Path.Combine(inputs.Path, "valid.epub");
+        SyntheticEpubBuilder.CreateFromEntries(validPath, StandardEntries(
+            chapter: "<html><body><h1>Title: Generated Book</h1><p>By Reliable Writer</p></body></html>"));
+        library.AddMetadataBook(1, "Suspect Record", ["Unknown"], ["Unknown"],
+            await File.ReadAllBytesAsync(malformedPath));
+        library.AddMetadataBook(2, "Generated Book", ["Reliable Writer"], ["Writer, Reliable"],
+            await File.ReadAllBytesAsync(validPath));
+        byte[] catalogBefore = SHA256.HashData(await File.ReadAllBytesAsync(library.DatabasePath));
+        using ServiceProvider services = TestServices.CreateProvider();
+        LibraryScanOutcome scan = await TestServices.CreateScanUseCase(services).ExecuteAsync(
+            library.RootPath, null, CancellationToken.None, mode: LibraryAnalysisMode.ExactOnly);
+        scan.IsSuccess.Should().BeTrue();
+        LibrarySnapshot snapshot = scan.Snapshot!;
+        LibraryStateGenerationId generation = new(Guid.Parse("eeeeeeee-bbbb-cccc-dddd-eeeeeeeeeeee"));
+        LibraryState state = new(
+            generation, new(0), LibraryStateStatus.Authoritative, snapshot, snapshot.ScannedAt,
+            workflowCheckpoint: new(
+                LibraryWorkflowPhase.Completed, generation, new(0), LibraryWorkflowPolicyVersions.Current,
+                snapshot.ScannedAt, new(generation, new(0))));
+        InspectFrontMatterAuthorsUseCase inspect = new(
+            services.GetRequiredService<ILibraryPathResolver>(),
+            services.GetRequiredService<IEpubFrontMatterAuthorInspector>(),
+            services.GetRequiredService<IPdfFrontMatterAuthorInspector>(),
+            new FileEmbeddedAuthorMetadataCache(new(cacheRoot.Path)));
+
+        FinalAuthorReviewWorkspace authors = await inspect.ExecuteAsync(
+            state, PrepareFinalAuthorReviewUseCase.Execute(state), null,
+            CancellationToken.None, inspectAllRecords: true);
+        QuarantineReviewWorkspace review = PrepareQuarantineReviewUseCase.Execute(state, authors);
+
+        authors.ScreenedCount.Should().Be(2);
+        authors.FrontMatterObservations.Should().HaveCount(2);
+        authors.FrontMatterObservations.Should().ContainSingle(value =>
+            value.Status == FrontMatterAuthorStatus.Available);
+        review.Subjects.Select(value => value.BookId.Value).Should().Equal(1, 2);
+        QuarantineReviewSubject malformed = review.Subjects[0];
+        malformed.Disposition.Qualification.Should().Be(FinalRecordQualification.NeedsReview);
+        malformed.Disposition.ReasonCodes.Should().Contain("EPUB_FRONT_MATTER.DUPLICATE_MANIFEST_ID");
+        malformed.Disposition.Evidence!.ResolutionExhausted.Should().BeFalse();
+        malformed.Include.Should().BeFalse();
+        authors.Subjects.Single(value => value.BookId.Value == 1).NeedsInspection.Should().BeTrue();
+        SHA256.HashData(await File.ReadAllBytesAsync(library.DatabasePath)).Should().Equal(catalogBefore);
+        foreach (CalibreBook book in snapshot.Books)
+        {
+            string formatPath = Path.Combine(library.RootPath, book.Formats[0].ExpectedRelativePath);
+            string digest = Convert.ToHexStringLower(SHA256.HashData(await File.ReadAllBytesAsync(formatPath)));
+            digest.Should().Be(book.Formats[0].Fingerprint!.Sha256.Value);
+        }
+    }
+
+    [Fact]
+    public async Task DifferentManifestIdsMayReferToTheSameFrontMatterResource()
+    {
+        using TemporaryDirectory directory = new();
+        string path = Path.Combine(directory.Path, "SharedResource.epub");
+        SyntheticEpubBuilder.CreateFromEntries(path, StandardEntries(
+            packageBody: "<manifest>"
+                + "<item id=\"opening\" href=\"chapter.xhtml\" media-type=\"application/xhtml+xml\"/>"
+                + "<item id=\"other-reference\" href=\"chapter.xhtml\" media-type=\"application/xhtml+xml\"/>"
+                + "</manifest><spine><itemref idref=\"opening\"/></spine>",
+            chapter: "<html><body><h1>Title: Generated Book</h1><p>By Reliable Writer</p></body></html>"));
+        EpubInspectionRequest request = await CreateRequestAsync(path);
+        using ServiceProvider provider = TestServices.CreateProvider();
+
+        FrontMatterAuthorObservation result = await provider.GetRequiredService<IEpubFrontMatterAuthorInspector>()
+            .InspectFrontMatterAuthorsAsync(request, FrontMatterInspectionLimits.V1, CancellationToken.None);
+
+        result.Status.Should().Be(FrontMatterAuthorStatus.Available);
+        result.CompletedUnits.Should().Be(1);
+        result.IdentityCandidates.Should().ContainSingle().Which.Title.Should().Be("Generated Book");
+    }
+
+    [Theory]
+    [InlineData("OEBPS/chapter.xhtml")]
+    [InlineData("OEBPS/./chapter.xhtml")]
+    public async Task DuplicateFrontMatterArchivePathsRemainStructuredPreflightFailures(string duplicatePath)
+    {
+        using TemporaryDirectory directory = new();
+        string path = Path.Combine(directory.Path, "DuplicateArchive.epub");
+        SyntheticEpubBuilder.CreateFromEntries(path, StandardEntries()
+            .Append((duplicatePath, "<html><body>Duplicate</body></html>", CompressionLevel.NoCompression)));
+        EpubInspectionRequest request = await CreateRequestAsync(path);
+        using ServiceProvider provider = TestServices.CreateProvider();
+
+        FrontMatterAuthorObservation result = await provider.GetRequiredService<IEpubFrontMatterAuthorInspector>()
+            .InspectFrontMatterAuthorsAsync(request, FrontMatterInspectionLimits.V1, CancellationToken.None);
+
+        result.Status.Should().Be(FrontMatterAuthorStatus.Unavailable);
+        result.ProblemCode.Should().Be("EPUB_FRONT_MATTER.UNSAFEARCHIVE");
+        result.Candidates.Should().BeEmpty();
+    }
+
     [Fact]
     public async Task AuthorMetadataInspectionStopsBeforeMissingSpineContent()
     {
@@ -787,6 +927,7 @@ public sealed class VersOneEpubInspectorTests
     private sealed class CapturingLogger<T> : ILogger<T>
     {
         public List<LogLevel> Levels { get; } = [];
+        public List<string> Messages { get; } = [];
 
         public IDisposable? BeginScope<TState>(TState state)
             where TState : notnull => null;
@@ -798,7 +939,11 @@ public sealed class VersOneEpubInspectorTests
             EventId eventId,
             TState state,
             Exception? exception,
-            Func<TState, Exception?, string> formatter) => Levels.Add(logLevel);
+            Func<TState, Exception?, string> formatter)
+        {
+            Levels.Add(logLevel);
+            Messages.Add(formatter(state, exception));
+        }
     }
 
     private static void SetCompressionMethod(string path, string entryName, ushort method)

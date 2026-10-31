@@ -291,14 +291,15 @@ public sealed record EditionMetadataCandidate
         IEnumerable<string>? languages = null,
         string? series = null,
         decimal? seriesIndex = null,
-        EditionCoverReference? cover = null)
+        EditionCoverReference? cover = null,
+        bool authorOrderKnown = true)
     {
         ArgumentNullException.ThrowIfNull(authors);
         WorkId = Bound(workId, 160, nameof(workId));
         EditionId = Bound(editionId, 160, nameof(editionId));
         Title = Bound(title, 512, nameof(title));
         string[] authorValues = authors.Where(value => !string.IsNullOrWhiteSpace(value))
-            .Select(value => value.Trim()).Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal)
+            .Select(value => value.Trim()).Distinct(StringComparer.Ordinal)
             .Take(17).ToArray();
         EditionMetadataIdentifier[] identifierValues = (identifiers ?? []).Distinct()
             .OrderBy(value => value.Type, StringComparer.Ordinal)
@@ -312,6 +313,7 @@ public sealed record EditionMetadataCandidate
             || seriesIndex is < 0 or > 1_000_000)
             throw new ArgumentException("Edition metadata candidate facts are invalid.");
         Authors = new ReadOnlyCollection<string>(authorValues);
+        AuthorOrderKnown = authorOrderKnown;
         Identifiers = new ReadOnlyCollection<EditionMetadataIdentifier>(identifierValues);
         Publisher = Optional(publisher, 512, nameof(publisher));
         PublicationDate = publicationDate;
@@ -325,6 +327,7 @@ public sealed record EditionMetadataCandidate
     public string EditionId { get; }
     public string Title { get; }
     public IReadOnlyList<string> Authors { get; }
+    public bool AuthorOrderKnown { get; }
     public IReadOnlyList<EditionMetadataIdentifier> Identifiers { get; }
     public string? Publisher { get; }
     public EditionPublicationDate? PublicationDate { get; }
@@ -401,9 +404,36 @@ public enum EditionMetadataProposalStatus
     Unavailable,
 }
 
+public sealed record EditionMetadataCacheOrigin
+{
+    public EditionMetadataCacheOrigin(
+        EditionMetadataProviderIdentity provider,
+        string queryPolicyVersion,
+        string proposalPolicyVersion,
+        string queryIdentity)
+    {
+        ArgumentNullException.ThrowIfNull(provider);
+        ArgumentException.ThrowIfNullOrWhiteSpace(queryPolicyVersion);
+        ArgumentException.ThrowIfNullOrWhiteSpace(proposalPolicyVersion);
+        if (queryPolicyVersion.Length > 128 || proposalPolicyVersion.Length > 128
+            || queryPolicyVersion.Any(char.IsControl) || proposalPolicyVersion.Any(char.IsControl)
+            || queryIdentity is not { Length: 64 } || !queryIdentity.All(char.IsAsciiHexDigit))
+            throw new ArgumentException("Edition metadata cache origin is invalid.");
+        Provider = provider;
+        QueryPolicyVersion = queryPolicyVersion;
+        ProposalPolicyVersion = proposalPolicyVersion;
+        QueryIdentity = queryIdentity;
+    }
+
+    public EditionMetadataProviderIdentity Provider { get; }
+    public string QueryPolicyVersion { get; }
+    public string ProposalPolicyVersion { get; }
+    public string QueryIdentity { get; }
+}
+
 public sealed record EditionMetadataProposal
 {
-    public const string PolicyVersion = "edition-metadata-proposal/1.0.0";
+    public const string PolicyVersion = "edition-metadata-proposal/1.1.0";
     private const EditionMetadataQueryFields AllQueryFields = EditionMetadataQueryFields.Identifier
         | EditionMetadataQueryFields.Title | EditionMetadataQueryFields.Authors
         | EditionMetadataQueryFields.Language;
@@ -417,7 +447,8 @@ public sealed record EditionMetadataProposal
         EditionMetadataCandidate? candidate = null,
         int matchScore = 0,
         IEnumerable<string>? reasonCodes = null,
-        string? problemCode = null)
+        string? problemCode = null,
+        EditionMetadataCacheOrigin? cacheOrigin = null)
     {
         ArgumentNullException.ThrowIfNull(provider);
         string[] reasons = (reasonCodes ?? []).Where(value => !string.IsNullOrWhiteSpace(value))
@@ -430,6 +461,8 @@ public sealed record EditionMetadataProposal
             || status == EditionMetadataProposalStatus.Proposed && (matchScore == 0 || reasons.Length == 0)
             || status != EditionMetadataProposalStatus.Proposed && (matchScore != 0 || reasons.Length != 0))
             throw new ArgumentException("Edition metadata proposal is invalid.");
+        if (cacheOrigin is not null && cacheOrigin.Provider.Id != provider.Id)
+            throw new ArgumentException("Cached metadata cannot change its source provider.", nameof(cacheOrigin));
         BookId = bookId;
         Provider = provider;
         QueryFields = queryFields;
@@ -439,6 +472,7 @@ public sealed record EditionMetadataProposal
         MatchScore = matchScore;
         ReasonCodes = new ReadOnlyCollection<string>(reasons);
         ProblemCode = string.IsNullOrWhiteSpace(problemCode) ? null : problemCode.Trim();
+        CacheOrigin = cacheOrigin;
     }
 
     public CalibreBookId BookId { get; }
@@ -450,6 +484,10 @@ public sealed record EditionMetadataProposal
     public int MatchScore { get; }
     public IReadOnlyList<string> ReasonCodes { get; }
     public string? ProblemCode { get; }
+    public EditionMetadataCacheOrigin? CacheOrigin { get; }
+
+    public EditionMetadataProposal WithCacheOrigin(EditionMetadataCacheOrigin? origin) => new(
+        BookId, Provider, QueryFields, RetrievedAtUtc, Status, Candidate, MatchScore, ReasonCodes, ProblemCode, origin);
 }
 
 public static class EditionMetadataProposalPolicy

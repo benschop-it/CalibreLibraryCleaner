@@ -87,6 +87,60 @@ and provider failure. Tests assert categorical
 High/Medium/Low/Unavailable defaults, field provenance, provider versions/retrieval
 facts, reason codes, and fusion policy version.
 
+Author-write regression cases cover repeated/bracketed provider pseudonym markers,
+malformed annotations and `psued.` suffixes. Checked metadata must retain the entire
+current author list, leave no author/sort worker operation, and still apply
+independent non-author fields. Repeated cached preparation converges without new
+network requests or stale Apply overrides. WPF separates withheld author proposals
+from original provider evidence. Matching remains frozen; no author-specific rule
+is permitted.
+
+Bounded metadata regex regressions assert the actual non-backtracking engine and
+absence of wall-clock timers. Differential generated cases compare all seven
+pseudonym/triage expressions against their legacy behavior, including Unicode,
+whitespace, deceptive boundaries, maximum-length fields and exact suffix spans.
+Public checks retain complete-field pseudonym withholding and over-limit rejection;
+timeouts must not be converted to clean identity or absent-marker evidence.
+
+UI command regressions inject regex timeouts through scan, saved-state load,
+Candidate preparation and actual metadata-provider dependencies. Real `ICommand`
+invocation must complete without forwarding a fault, preserve displayed book rows,
+report failure, release busy/operation gates and omit regex input/pattern from logs.
+An explicit metadata retry succeeds after the injected failure is removed. A load
+that replaces authoritative state before failing blocks cleanup until the matching
+snapshot has been successfully displayed.
+
+Author-order regressions cover individual comma/pipe forms, alternating multi-author
+pipe pairs, separate provider credit arrays, particles/non-Latin names, idempotence,
+bounded pair counts and ambiguous qualifiers. Tests assert separate given-first
+worker values and preview, original credit order through cache round-trip, no
+automatic reordering disguised as casing, and convergence after corrected names
+are present. Legacy alphabetically canonicalized multi-author credits retain unknown
+source order through lookup, promotion, warm reads, fusion and identifier aliases.
+Tests permit exact complete current-credit alignment but prohibit invented order,
+case-folded duplicates, unsafe worker writes and falsely exhausted Unresolvable
+routes. Single-credit legacy entries and current order-preserving documents without
+the optional coverage flag retain their established order.
+
+Generated real-file-cache/fake-provider fixtures measure first compatible legacy
+reuse and warm preparation separately, requiring zero provider requests and
+unchanged retrieval timestamps. Exact old query/proposal keys cover positive,
+ambiguous, no-match and fresh unavailable outcomes; unsupported versions and older
+extraction misses remain misses. Expired unavailable results still retry rather than
+having their six-hour window renewed by promotion. Provenance checks retain original
+provider/query/proposal versions and source identity through promotion, warm reads,
+aliases and Application rebinding, with WPF disclosure.
+Provider-version-only compatibility changes still require current positive
+validation and refresh older extraction misses even when the query version matches.
+Locally revalidated older-provider positives seed ISBN aliases after the one-time
+backfill marker, while preserving existing newer aliases.
+
+Initial-typography regressions assert `A.C.` to `A. C.` preparation after display,
+comma and pipe forms, preserved canonical current names in checked/non-checked
+previews, no author write during unrelated metadata changes, cached no-op review,
+canonical actual worker values and safe coauthor-collision handling. Raw provider
+typography remains unchanged as evidence.
+
 Local embedding tests use fake vectors and fake loopback HTTP in the ordinary suite.
 They cover finite dimensions, symmetric integer cosine similarity, complete
 runtime/model/preprocessing cache identity, batching/caps, cold/warm reuse,
@@ -110,6 +164,12 @@ route safety, reviewer acceptance, stale structural identity, and post-repair
 reassessment. A 2,000-record fake-adapter performance fixture asserts 20 distinct
 cold parser starts, zero warm starts, and 2,000 warm hits; measured times and process
 memory are observations, not universal budgets or real-parser throughput claims.
+
+Generated EPUB regressions also cover duplicate manifest IDs with identical and
+conflicting targets/media types, duplicate normalized ZIP paths, and distinct IDs
+sharing one resource. A real-inspector two-book orchestration test requires the
+valid book to complete while the malformed book remains visible, unselected and
+incomplete with its problem code. Catalog and managed format hashes must not change.
 
 Quarantine orchestration tests cover 101 records across copy chunks, existing
 destination binding, second-copy-chunk failure without deletion, and stop on the
@@ -170,6 +230,12 @@ worker integration, online-provider clients, and local-model adapters.
 Workflow gating, progress/heartbeat, evidence display, filtering/sorting, keeper
 changes, Skip, backup confirmation, viewer launch, terminal outcomes, and large-group
 presentation.
+
+Expanded-summary regressions distinguish expected absent/stale evidence in staged
+Exact/preparation/completed-cleanup snapshots from genuinely missing Candidate
+analysis. Guidance must follow the correct next phase without asking for a redundant
+Scan, while uncertain/incompatible or different displayed snapshots retain warnings.
+These are presentation-only checks and must not weaken execution preconditions.
 
 ### Architecture
 

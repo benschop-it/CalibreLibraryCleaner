@@ -10,6 +10,88 @@ namespace CalibreLibraryCleaner.Application.Tests.Metadata;
 
 public sealed class PrepareMetadataReviewUseCaseTests
 {
+    [Theory]
+    [InlineData("A.C. Baantjer")]
+    [InlineData("Baantjer, A.C.")]
+    public async Task CachedCompactInitialsCannotReopenAlreadyCanonicalCurrentAuthorWork(string providerAuthor)
+    {
+        Harness harness = Harness.Create(alreadyApplied: true, currentAuthors: ["A. C. Baantjer"]);
+        EditionMetadataCandidate candidate = new("work", "edition", "Title",
+            [providerAuthor], [new("isbn", "9780306406157")], "Provider Publisher");
+        UseCachedCandidate(harness, candidate);
+
+        MetadataReviewWorkspace first = await harness.UseCase.ExecuteAsync(
+            harness.State, [], null, CancellationToken.None);
+        MetadataReviewWorkspace repeated = await harness.UseCase.ExecuteAsync(
+            harness.State, [], null, CancellationToken.None);
+
+        first.Subjects.Single().IsAlreadyApplied.Should().BeTrue();
+        repeated.Subjects.Single().IsAlreadyApplied.Should().BeTrue();
+        repeated.Subjects.Single().Apply.Should().BeFalse();
+        repeated.Subjects.Single().Subject.Proposal.Candidate!.Authors.Should().Equal(providerAuthor);
+        A.CallTo(() => harness.Provider.SearchAsync(A<EditionMetadataLookupQuery>._, A<CancellationToken>._))
+            .MustNotHaveHappened();
+    }
+
+    [Fact]
+    public async Task CachedSurnameFirstCoauthorsAreAlreadyAppliedWhenCurrentDisplayNamesAreNormalized()
+    {
+        Harness harness = Harness.Create(alreadyApplied: true,
+            currentAuthors: ["Stacy Lannert", "Kristen Kemp"]);
+        EditionMetadataCandidate candidate = new("work", "edition", "Title",
+            ["Lannert, Stacy", "Kemp, Kristen"], [new("isbn", "9780306406157")], "Provider Publisher");
+        UseCachedCandidate(harness, candidate);
+
+        MetadataReviewWorkspace first = await harness.UseCase.ExecuteAsync(
+            harness.State, [], null, CancellationToken.None);
+        MetadataReviewWorkspace repeated = await harness.UseCase.ExecuteAsync(
+            harness.State, [], null, CancellationToken.None);
+
+        first.Subjects.Single().IsAlreadyApplied.Should().BeTrue();
+        repeated.Subjects.Single().IsAlreadyApplied.Should().BeTrue();
+        repeated.Subjects.Single().Apply.Should().BeFalse();
+        repeated.Subjects.Single().Subject.Proposal.Candidate!.Authors.Should().Equal(candidate.Authors);
+        A.CallTo(() => harness.Provider.SearchAsync(A<EditionMetadataLookupQuery>._, A<CancellationToken>._))
+            .MustNotHaveHappened();
+    }
+
+    [Theory]
+    [InlineData("Author [pseud. ] [pseud.]")]
+    [InlineData("Author psued. van Another Writer")]
+    public async Task CachedAnnotatedAuthorsConvergeWithoutRequestsOrRestoringStaleApplyOverrides(string author)
+    {
+        Harness harness = Harness.Create(alreadyApplied: true);
+        EditionMetadataCandidate candidate = new(
+            "work", "edition", "Title", [author],
+            [new("isbn", "9780306406157")], "Provider Publisher");
+        UseCachedCandidate(harness, candidate);
+        MetadataReviewWorkspace first = await harness.UseCase.ExecuteAsync(
+            harness.State, [], null, CancellationToken.None);
+        MetadataReviewSubject subject = first.Subjects.Single().Subject;
+        MetadataReviewDecisionKey currentKey = MetadataReviewDecisionPolicy.CreateKey(
+            subject, harness.State.GenerationId, harness.State.Revision);
+        MetadataReviewDecision oldOverride = new(new(
+            currentKey.SubjectId, "edition-metadata-fusion/1.5.0", currentKey.EditionIdentity,
+            currentKey.GenerationId, currentKey.Revision), true);
+        A.CallTo(() => harness.Store.ReadAsync(A<string>._, A<CancellationToken>._)).Returns([oldOverride]);
+
+        MetadataReviewWorkspace second = await harness.UseCase.ExecuteAsync(
+            harness.State, [], null, CancellationToken.None);
+        MetadataReviewWorkspace checkedAll = await harness.UseCase.SetAllApplyAsync(
+            second, true, CancellationToken.None);
+
+        first.Subjects.Single().IsAlreadyApplied.Should().BeTrue();
+        checkedAll.Subjects.Single().IsAlreadyApplied.Should().BeTrue();
+        checkedAll.Subjects.Single().Apply.Should().BeFalse();
+        checkedAll.Subjects.Single().IsOverride.Should().BeFalse();
+        second.Subjects.Single().Subject.Proposal.Candidate!.Authors.Should().Equal(author);
+        A.CallTo(() => harness.Provider.SearchAsync(A<EditionMetadataLookupQuery>._, A<CancellationToken>._))
+            .MustNotHaveHappened();
+        A.CallTo(() => harness.Store.WriteAsync(
+            A<string>._, A<IReadOnlyList<MetadataReviewDecision>>.That.Matches(value => value.Count == 0),
+            A<CancellationToken>._)).MustHaveHappened();
+    }
+
     [Fact]
     public async Task ExplicitLocalIdentityCanRepairATitleWithoutAnyAvailableOnlineProvider()
     {
@@ -241,12 +323,28 @@ public sealed class PrepareMetadataReviewUseCaseTests
         reset.Subjects.Single().IsOverride.Should().BeFalse();
     }
 
+    private static void UseCachedCandidate(Harness harness, EditionMetadataCandidate candidate) =>
+        A.CallTo(() => harness.Cache.TryReadAsync(
+                A<EditionMetadataLookupQuery>._, A<DateTimeOffset>._, A<CancellationToken>._))
+            .ReturnsLazily(call =>
+            {
+                EditionMetadataLookupQuery query = call.GetArgument<EditionMetadataLookupQuery>(0)!;
+                return Task.FromResult<EditionMetadataProposal?>(new(
+                    query.BookId, query.Provider, query.Fields, DateTimeOffset.UnixEpoch,
+                    EditionMetadataProposalStatus.Proposed, candidate, 10_001, ["METADATA.EDITION.ISBN_EXACT"]));
+            });
+
     private sealed record Harness(
         PrepareMetadataReviewUseCase UseCase,
         IMetadataReviewDecisionStore Store,
-        LibraryState State)
+        LibraryState State,
+        IEditionMetadataProvider Provider,
+        IEditionMetadataProposalCache Cache)
     {
-        public static Harness Create(bool alreadyApplied = false, bool riskyProposal = false)
+        public static Harness Create(
+            bool alreadyApplied = false,
+            bool riskyProposal = false,
+            IReadOnlyList<string>? currentAuthors = null)
         {
             EditionMetadataProviderIdentity providerIdentity = new("provider", "provider/1.0.0");
             IEditionMetadataProvider provider = A.Fake<IEditionMetadataProvider>();
@@ -278,7 +376,8 @@ public sealed class PrepareMetadataReviewUseCaseTests
                 .Returns(Array.Empty<MetadataReviewDecision>());
             PrepareMetadataReviewUseCase useCase = new(resolver, store);
             CalibreBook book = new(
-                new(1), "Title", "Author", [new(new(1), "Author", "Author")],
+                new(1), "Title", "Author",
+                (currentAuthors ?? ["Author"]).Select((name, index) => new BookAuthor(new(index + 1), name, name)),
                 [new("isbn", "9780306406157")], [], "Author/Title (1)",
                 new(
                     publisher: riskyProposal ? "Current Publisher" : alreadyApplied ? "Provider Publisher" : null,
@@ -302,7 +401,7 @@ public sealed class PrepareMetadataReviewUseCaseTests
                     LibraryWorkflowPolicyVersions.Current,
                     DateTimeOffset.UnixEpoch,
                     new(generation, new(0))));
-            return new(useCase, store, state);
+            return new(useCase, store, state, provider, cache);
         }
     }
 }

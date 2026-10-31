@@ -11,6 +11,32 @@ namespace CalibreLibraryCleaner.Domain.Tests.Metadata;
 
 public sealed class EditionMetadataProposalTests
 {
+    [Fact]
+    public void CacheOriginCannotRelabelEvidenceAsAnotherProvider()
+    {
+        EditionMetadataProviderIdentity provider = new("open-library", "current/1");
+        EditionMetadataProposal proposal = new(new(1), provider, EditionMetadataQueryFields.Identifier,
+            DateTimeOffset.UnixEpoch, EditionMetadataProposalStatus.NotFound);
+        EditionMetadataCacheOrigin origin = new(new("google-books", "legacy/1"),
+            "query/1", "proposal/1", new string('a', 64));
+
+        Action relabel = () => proposal.WithCacheOrigin(origin);
+
+        relabel.Should().Throw<ArgumentException>();
+    }
+
+    [Fact]
+    public void CandidateCreditsPreserveProviderOrderInsteadOfAlphabetizingCoauthors()
+    {
+        EditionMetadataCandidate candidate = new(
+            "work", "edition", "Title", ["Lannert, Stacy", "Kemp, Kristen", "Lannert, Stacy"]);
+
+        candidate.Authors.Should().Equal("Lannert, Stacy", "Kemp, Kristen");
+        EditionMetadataAuthorWritePolicy.TryPrepare(candidate.Authors, out IReadOnlyList<string> prepared)
+            .Should().BeTrue();
+        prepared.Should().Equal("Stacy Lannert", "Kristen Kemp");
+    }
+
     private static readonly JsonSerializerOptions FixtureJsonOptions = new()
     {
         PropertyNameCaseInsensitive = true,

@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 using System.Collections.Specialized;
 using System.IO;
+using System.Text.RegularExpressions;
 using CalibreLibraryCleaner.Application.Abstractions;
 using CalibreLibraryCleaner.Application.Assessments;
 using CalibreLibraryCleaner.Application.Assessments.Pdf;
@@ -27,6 +28,114 @@ namespace CalibreLibraryCleaner.Wpf.Tests.ViewModels;
 
 public sealed class MainWindowViewModelTests
 {
+    [Theory]
+    [InlineData("scan")]
+    [InlineData("load")]
+    [InlineData("load-replaced")]
+    [InlineData("candidate")]
+    [InlineData("metadata")]
+    public async Task ReadOnlyRegexTimeoutIsReportedWithoutFaultingTheCommandOrReplacingResults(string action)
+    {
+        const string libraryRoot = "C:\\Books";
+        LibrarySnapshot snapshot = Snapshot(libraryRoot);
+        LibraryWorkflowSource source = new(new(Guid.NewGuid()), new(3));
+        LibraryState state = WorkflowState(snapshot, action == "metadata"
+            ? LibraryWorkflowPhase.CandidateCleanupCompleted : LibraryWorkflowPhase.CandidatePreparationReady, source);
+        ILibrarySnapshotStore store = A.Fake<ILibrarySnapshotStore>();
+        A.CallTo(() => store.ListAsync(A<CancellationToken>._)).Returns([new(libraryRoot, snapshot.ScannedAt)]);
+        ILibraryStateSession session = A.Fake<ILibraryStateSession>();
+        A.CallTo(() => session.LoadAsync(libraryRoot, A<CancellationToken>._))
+            .Returns(LibraryStateSessionOutcome.Success(state));
+        LibraryState current = state;
+        A.CallTo(() => session.GetCurrent(libraryRoot)).ReturnsLazily(() => current);
+        RegexMatchTimeoutException timeout = new(
+            "PRIVATE_REGEX_INPUT", "PRIVATE_REGEX_PATTERN", TimeSpan.FromMilliseconds(50));
+        ICandidatePreparationWorkflow preparation = A.Fake<ICandidatePreparationWorkflow>();
+        A.CallTo(() => preparation.AnalyzeAsync(
+                libraryRoot, A<IProgress<CandidatePreparationProgress>?>._, A<CancellationToken>._))
+            .Throws(timeout);
+        bool failMetadata = true;
+        PrepareMetadataReviewUseCase metadata = CreateMetadataReviewUseCase([], () =>
+        {
+            if (failMetadata) throw timeout;
+        });
+        LibraryOperationCoordinator coordinator = new();
+        CapturingLogger<MainWindowViewModel> logger = new();
+        using MainWindowViewModel viewModel = CreateViewModel(
+            A.Fake<ILibraryFolderPicker>(), out ILibraryPathResolver resolver,
+            out ICalibreMetadataReader reader, out _, new(store), session,
+            workflowOptions: LibraryWorkflowOptions.Staged, candidatePreparation: preparation,
+            operationCoordinator: coordinator, prepareMetadataReview: metadata, logger: logger);
+        await viewModel.InitializeAsync();
+        viewModel.SelectedPersistedLibraryPath = libraryRoot;
+        await viewModel.LoadPersistedSnapshotCommand.ExecuteAsync(null);
+        BookRowViewModel[] previousRows = viewModel.Books.ToArray();
+        if (action == "scan")
+        {
+            ValidatedLibraryLocation location = new(libraryRoot, "database");
+            A.CallTo(() => resolver.ValidateAsync(libraryRoot, A<CancellationToken>._))
+                .Returns(LibraryValidationOutcome.Success(location));
+            A.CallTo(() => reader.ReadAsync(
+                    location, A<IProgress<LibraryScanProgress>?>._, A<CancellationToken>._))
+                .Throws(timeout);
+        }
+        else if (action == "load")
+            A.CallTo(() => session.LoadAsync(libraryRoot, A<CancellationToken>._)).Throws(timeout);
+        else if (action == "load-replaced")
+            A.CallTo(() => session.LoadAsync(libraryRoot, A<CancellationToken>._)).ReturnsLazily(() =>
+            {
+                current = WorkflowState(Snapshot(libraryRoot), LibraryWorkflowPhase.CandidatePreparationReady, source);
+                return Task.FromException<LibraryStateSessionOutcome>(timeout);
+            });
+
+        CommunityToolkit.Mvvm.Input.IAsyncRelayCommand command = action switch
+        {
+            "scan" => viewModel.ScanCommand,
+            "load" or "load-replaced" => viewModel.LoadPersistedSnapshotCommand,
+            _ => viewModel.CandidateCleanupCommand,
+        };
+        command.Execute(null);
+        Func<Task> execute = () => command.ExecutionTask!;
+        await execute.Should().NotThrowAsync();
+
+        command.ExecutionTask!.IsCompletedSuccessfully.Should().BeTrue();
+        viewModel.ErrorMessage.Should().Contain("ANALYSIS.REGEX_TIMEOUT");
+        viewModel.ErrorAction.Should().NotBeNullOrWhiteSpace();
+        viewModel.StatusMessage.Should().Contain("stopped");
+        viewModel.Books.Should().Equal(previousRows);
+        viewModel.IsBusy.Should().BeFalse();
+        viewModel.IsProgressIndeterminate.Should().BeFalse();
+        coordinator.IsOperationActive.Should().BeFalse();
+        viewModel.ScanCommand.CanExecute(null).Should().BeTrue();
+        if (action == "load-replaced")
+        {
+            viewModel.CandidateCleanupCommand.CanExecute(null).Should().BeFalse();
+            viewModel.ErrorAction.Should().Contain("Reload");
+            A.CallTo(() => session.LoadAsync(libraryRoot, A<CancellationToken>._))
+                .Returns(LibraryStateSessionOutcome.Success(current));
+            await viewModel.LoadPersistedSnapshotCommand.ExecuteAsync(null);
+            viewModel.CandidateCleanupCommand.CanExecute(null).Should().BeTrue();
+        }
+        else
+            session.GetCurrent(libraryRoot).Should().BeSameAs(state);
+        A.CallTo(() => session.MarkUncertainAsync(
+            A<string>._, A<LibraryStateUncertainty>._, A<CancellationToken>._)).MustNotHaveHappened();
+        logger.Entries.Should().Contain(value => value.Level == LogLevel.Error);
+        logger.Entries.Should().OnlyContain(value =>
+            !value.Message.Contains("PRIVATE_REGEX_INPUT", StringComparison.Ordinal)
+            && !value.Message.Contains("PRIVATE_REGEX_PATTERN", StringComparison.Ordinal));
+
+        if (action == "metadata")
+        {
+            failMetadata = false;
+            await viewModel.CandidateCleanupCommand.ExecuteAsync(null);
+            viewModel.ErrorMessage.Should().BeEmpty();
+            viewModel.StatusMessage.Should().Contain("metadata review ready");
+            viewModel.MetadataReviewFilterMode = MetadataReviewFilterMode.All;
+            viewModel.MetadataReviewSubjects.Should().NotBeEmpty();
+        }
+    }
+
     [Fact]
     public void OperationGateReleaseRefreshesDispositionCommandsForActualWpfBindings()
     {
@@ -268,6 +377,8 @@ public sealed class MainWindowViewModelTests
         viewModel.StatusMessage.Should().StartWith("Exact-only analysis complete");
         viewModel.CandidateCleanupCommand.CanExecute(null).Should().BeTrue();
         viewModel.CandidateCleanupAutomationName.Should().Be("Prepare Candidate review");
+        viewModel.ExpandedCandidateSummary.Should().Contain("Prepare Candidate review")
+            .And.NotContain("Run a fresh scan");
         A.CallTo(() => stateSession.StartFromExactAnalysisAsync(
             A<LibrarySnapshot>._, A<CancellationToken>._)).MustHaveHappenedOnceExactly();
         A.CallTo(() => stateSession.StartFromScanAsync(
@@ -800,6 +911,99 @@ public sealed class MainWindowViewModelTests
         viewModel.Books.Should().ContainSingle(book => book.Title == "Persisted Book");
         viewModel.StatusMessage.Should().Contain("Loaded persisted scan").And.Contain("may be stale");
         viewModel.ExpandedCandidateSummary.Should().Contain("Run a fresh scan");
+    }
+
+    [Theory]
+    [InlineData(LibraryWorkflowPhase.ExactReady, MatchingEvidenceStatus.Unavailable, "Exact cleanup")]
+    [InlineData(LibraryWorkflowPhase.ExactReady, MatchingEvidenceStatus.Stale, "Exact cleanup")]
+    [InlineData(LibraryWorkflowPhase.CandidatePreparationReady, MatchingEvidenceStatus.Unavailable, "Prepare Candidate review")]
+    [InlineData(LibraryWorkflowPhase.CandidatePreparationReady, MatchingEvidenceStatus.Stale, "Prepare Candidate review")]
+    [InlineData(LibraryWorkflowPhase.CandidateCleanupCompleted, MatchingEvidenceStatus.Unavailable, "metadata review")]
+    [InlineData(LibraryWorkflowPhase.CandidateCleanupCompleted, MatchingEvidenceStatus.Stale, "metadata review")]
+    [InlineData(LibraryWorkflowPhase.Completed, MatchingEvidenceStatus.Unavailable, "final review")]
+    [InlineData(LibraryWorkflowPhase.Completed, MatchingEvidenceStatus.Stale, "final review")]
+    public async Task StagedExpandedSummaryExplainsTheActualNextStepInsteadOfRepeatingScan(
+        LibraryWorkflowPhase phase, MatchingEvidenceStatus evidence, string nextStep)
+    {
+        const string root = "C:\\Books";
+        LibrarySnapshot baseline = Snapshot(root);
+        LibrarySnapshot snapshot = new(
+            baseline.Identity, baseline.ScannedAt, baseline.Books, [],
+            matchingRunSummary: new(MatchingPolicyVersion.Current, evidence, 1, 0, 0, 0, 0, 0, 0, 0, 0));
+        ILibrarySnapshotStore store = A.Fake<ILibrarySnapshotStore>();
+        A.CallTo(() => store.ListAsync(A<CancellationToken>._)).Returns([new(root, snapshot.ScannedAt)]);
+        LibraryState state = WorkflowState(snapshot, phase, new(
+            new(Guid.Parse("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee")), new(0)));
+        ILibraryStateSession session = A.Fake<ILibraryStateSession>();
+        A.CallTo(() => session.LoadAsync(root, A<CancellationToken>._))
+            .Returns(LibraryStateSessionOutcome.Success(state));
+        A.CallTo(() => session.GetCurrent(root)).Returns(state);
+        using MainWindowViewModel viewModel = CreateViewModel(
+            A.Fake<ILibraryFolderPicker>(), out _, out _, out _, new(store), session,
+            workflowOptions: LibraryWorkflowOptions.Staged);
+        await viewModel.InitializeAsync();
+        viewModel.SelectedPersistedLibraryPath = root;
+
+        await viewModel.LoadPersistedSnapshotCommand.ExecuteAsync(null);
+
+        viewModel.ExpandedCandidateSummary.Should().Contain(nextStep).And.NotContain("Run a fresh scan");
+        viewModel.ExpandedCandidateGroups.Should().BeEmpty();
+        viewModel.ErrorMessage.Should().BeEmpty();
+        session.GetCurrent(root).Should().BeSameAs(state);
+    }
+
+    [Theory]
+    [InlineData("candidate-review")]
+    [InlineData("uncertain")]
+    [InlineData("incompatible-checkpoint")]
+    [InlineData("different-snapshot")]
+    public async Task ExpandedSummaryDoesNotHideMissingEvidenceBehindAnUntrustedWorkflow(string scenario)
+    {
+        const string root = "C:\\Books";
+        LibrarySnapshot snapshot = Snapshot(root);
+        LibraryWorkflowSource source = new(new(Guid.Parse("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee")), new(0));
+        LibraryState loaded = WorkflowState(snapshot,
+            scenario == "candidate-review" ? LibraryWorkflowPhase.CandidateAnalysisReady
+                : LibraryWorkflowPhase.CandidateCleanupCompleted, source);
+        LibraryState current = loaded;
+        if (scenario == "uncertain")
+        {
+            current = loaded = new(
+                loaded.GenerationId, loaded.Revision, LibraryStateStatus.Uncertain, snapshot, loaded.ProjectedAtUtc,
+                new("TEST.UNCERTAIN", "Generated ambiguous mutation.", loaded.ProjectedAtUtc),
+                loaded.WorkflowCheckpoint);
+        }
+        else if (scenario == "incompatible-checkpoint")
+        {
+            current = loaded = new(
+                loaded.GenerationId, loaded.Revision, LibraryStateStatus.Authoritative, snapshot, loaded.ProjectedAtUtc,
+                workflowCheckpoint: new(
+                    LibraryWorkflowPhase.CandidateCleanupCompleted, loaded.GenerationId, loaded.Revision,
+                    new("old-workflow", "old-analysis", "old-cleanup", "old-candidates"),
+                    loaded.ProjectedAtUtc, source));
+        }
+        else if (scenario == "different-snapshot")
+        {
+            LibrarySnapshot changed = new(snapshot.Identity, snapshot.ScannedAt, snapshot.Books, []);
+            current = WorkflowState(changed, LibraryWorkflowPhase.CandidateCleanupCompleted, source);
+        }
+        ILibrarySnapshotStore store = A.Fake<ILibrarySnapshotStore>();
+        A.CallTo(() => store.ListAsync(A<CancellationToken>._)).Returns([new(root, snapshot.ScannedAt)]);
+        ILibraryStateSession session = A.Fake<ILibraryStateSession>();
+        A.CallTo(() => session.LoadAsync(root, A<CancellationToken>._))
+            .Returns(LibraryStateSessionOutcome.Success(loaded));
+        A.CallTo(() => session.GetCurrent(root)).Returns(current);
+        using MainWindowViewModel viewModel = CreateViewModel(
+            A.Fake<ILibraryFolderPicker>(), out _, out _, out _, new(store), session,
+            workflowOptions: LibraryWorkflowOptions.Staged);
+        await viewModel.InitializeAsync();
+        viewModel.SelectedPersistedLibraryPath = root;
+
+        await viewModel.LoadPersistedSnapshotCommand.ExecuteAsync(null);
+
+        viewModel.ExpandedCandidateSummary.Should().Contain("Run a fresh scan")
+            .And.NotContain("Continue with online metadata review");
+        viewModel.ExpandedCandidateGroups.Should().BeEmpty();
     }
 
     [Fact]

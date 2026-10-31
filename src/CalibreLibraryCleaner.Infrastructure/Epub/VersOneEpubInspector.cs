@@ -112,24 +112,20 @@ internal sealed partial class VersOneEpubInspector(ILogger<VersOneEpubInspector>
             XDocument package = await ReadXmlAsync(
                 packageEntry, request.Limits.MaximumXmlBytes, readBudget, cancellationToken)
                 .ConfigureAwait(false);
-            Dictionary<string, string> manifest = package.Descendants()
-                .Where(element => element.Name.LocalName == "item")
-                .Select(element => (
-                    Id: element.Attribute("id")?.Value,
-                    Href: element.Attribute("href")?.Value,
-                    MediaType: element.Attribute("media-type")?.Value))
-                .Where(value => !string.IsNullOrWhiteSpace(value.Id)
-                    && !string.IsNullOrWhiteSpace(value.Href)
-                    && value.MediaType?.Contains("html", StringComparison.OrdinalIgnoreCase) == true
-                    && EpubArchivePathResolver.TryResolve(packagePath, value.Href!, out _))
-                .ToDictionary(
-                    value => value.Id!,
-                    value =>
-                    {
-                        EpubArchivePathResolver.TryResolve(packagePath, value.Href!, out string resolved);
-                        return resolved;
-                    },
-                    StringComparer.Ordinal);
+            HashSet<string> manifestIds = new(StringComparer.Ordinal);
+            Dictionary<string, string> manifest = new(StringComparer.Ordinal);
+            foreach (XElement item in package.Descendants().Where(element => element.Name.LocalName == "item"))
+            {
+                string? id = item.Attribute("id")?.Value;
+                if (string.IsNullOrWhiteSpace(id)) continue;
+                if (!manifestIds.Add(id))
+                    return Unavailable("EPUB_FRONT_MATTER.DUPLICATE_MANIFEST_ID");
+                string? href = item.Attribute("href")?.Value;
+                if (!string.IsNullOrWhiteSpace(href)
+                    && item.Attribute("media-type")?.Value.Contains("html", StringComparison.OrdinalIgnoreCase) == true
+                    && EpubArchivePathResolver.TryResolve(packagePath, href, out string resolved))
+                    manifest.Add(id, resolved);
+            }
             string[] spinePaths = package.Descendants()
                 .Where(element => element.Name.LocalName == "itemref")
                 .Select(element => element.Attribute("idref")?.Value)
@@ -210,10 +206,14 @@ internal sealed partial class VersOneEpubInspector(ILogger<VersOneEpubInspector>
             return Unavailable("EPUB_FRONT_MATTER.UNAVAILABLE");
         }
 
-        FrontMatterAuthorObservation Unavailable(string code) => new(
-            "EPUB", request.Fingerprint, FrontMatterAuthorVersions.EpubExtractor,
-            FrontMatterAuthorVersions.Limits, FrontMatterAuthorStatus.Unavailable, [],
-            0, 0, 0, false, code);
+        FrontMatterAuthorObservation Unavailable(string code)
+        {
+            InspectionFailed(logger, code, null);
+            return new(
+                "EPUB", request.Fingerprint, FrontMatterAuthorVersions.EpubExtractor,
+                FrontMatterAuthorVersions.Limits, FrontMatterAuthorStatus.Unavailable, [],
+                0, 0, 0, false, code);
+        }
     }
 
     public async Task<EpubInspectionResult> InspectAsync(

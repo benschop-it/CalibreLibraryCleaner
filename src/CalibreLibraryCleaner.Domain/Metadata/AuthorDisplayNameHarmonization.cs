@@ -51,7 +51,12 @@ public static partial class AuthorDisplayNameHarmonizationPolicy
         return true;
     }
 
-    private static string NormalizeDisplay(string value) => NormalizeInitialPrefix(NormalizeBase(value));
+    public static string NormalizeDisplay(string value)
+    {
+        ArgumentNullException.ThrowIfNull(value);
+        return ContainsQualifierDelimiters(value)
+            ? value : NormalizeInitialPrefix(NormalizeBase(value));
+    }
 
     private static string NormalizeSort(string value)
     {

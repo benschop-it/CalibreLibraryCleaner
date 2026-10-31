@@ -496,6 +496,7 @@
                 <TextBlock FontSize="15"
                            FontWeight="Bold"
                            Text="Selected proposal details" />
+                <TextBlock Margin="0,6,0,0" Text="{Binding AuthorWriteNotice}" TextWrapping="Wrap" />
                 <Grid Margin="0,8,0,0">
                   <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="*" />
@@ -539,6 +540,8 @@
                   </StackPanel>
                 </Grid>
                 <TextBlock Margin="0,10,0,0" FontWeight="Bold" Text="Provider outcomes" />
+                <TextBlock Margin="0,3,0,0" Text="{Binding ProviderAuthors, StringFormat=Provider author evidence: {0}}"
+                           TextWrapping="Wrap" />
                 <TextBox Margin="0,3,0,0"
                          Padding="6"
                          IsReadOnly="True"

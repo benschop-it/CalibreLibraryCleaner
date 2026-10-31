@@ -56,7 +56,10 @@ public sealed class MetadataReviewSubjectRowViewModel : ObservableObject
     public bool IsAlreadyApplied => _reviewed.IsAlreadyApplied;
     public bool CanApply => !IsUnavailable && !IsAlreadyApplied;
     public bool IsOverride => _reviewed.IsOverride;
-    public string Reasons => string.Join(", ", _reviewed.Subject.Proposal.ReasonCodes);
+    public string Reasons => string.Join(", ", _reviewed.Subject.Proposal.ReasonCodes.Concat(
+        HasPseudonymAnnotations ? [EditionMetadataAuthorWritePolicy.PseudonymAnnotationWithheld] : Array.Empty<string>())
+        .Concat(Candidate is { AuthorOrderKnown: false }
+            ? [EditionMetadataAuthorWritePolicy.LegacyAuthorOrderUnavailable] : Array.Empty<string>()));
     public string ProviderOutcomes => FormatProviderOutcomes(_reviewed.Subject.Proposal);
     public string Provenance => FormatProvenance(_reviewed.Subject.Proposal);
 
@@ -104,7 +107,20 @@ public sealed class MetadataReviewSubjectRowViewModel : ObservableObject
     public string CurrentCover => _currentBook.PublicationMetadata.HasCover ? "Available" : "None";
 
     public string ProposedTitle => Value(Candidate?.Title);
-    public string ProposedAuthors => Join(Candidate?.Authors ?? []);
+    public string ProposedAuthors => Candidate is null ? "None"
+        : EditionMetadataAuthorWritePolicy.TryPrepare(_currentBook, Candidate, out IReadOnlyList<string> prepared)
+            ? Join(prepared) : "Unchanged (provider author field withheld)";
+    public string ProviderAuthors => Join(Candidate?.Authors ?? []);
+    public string AuthorWriteNotice => HasPseudonymAnnotations
+        ? "Provider authors contain pseudonym annotations. The complete current author list will be retained, "
+            + "even when Apply is checked; unrelated metadata can still be applied."
+        : Candidate is { AuthorOrderKnown: false }
+            ? EditionMetadataAuthorWritePolicy.TryPrepare(_currentBook, Candidate, out _)
+                ? "Legacy cached coauthor order is unavailable. Author preparation preserves the corresponding current credit order."
+                : "Legacy cached coauthor order is unavailable. The complete current author list will be retained; unrelated metadata can still be applied."
+        : Candidate is not null && !EditionMetadataAuthorWritePolicy.TryPrepare(_currentBook, Candidate, out _)
+            ? "Provider authors cannot be safely prepared. The complete current author list will be retained."
+            : "Provider authors can be applied according to the current review choice.";
     public string ProposedIdentifiers => Join(Candidate?.Identifiers.Select(value => value.CanonicalValue) ?? []);
     public string ProposedPublisher => Value(Candidate?.Publisher);
     public string ProposedPublicationDate => Date(Candidate?.PublicationDate);
@@ -125,6 +141,8 @@ public sealed class MetadataReviewSubjectRowViewModel : ObservableObject
     public string FinalCover => MergePreview.HasCover ? "Available" : "None";
 
     private EditionMetadataCandidate? Candidate => _reviewed.Subject.Proposal.Candidate;
+    private bool HasPseudonymAnnotations => Candidate is not null
+        && EditionMetadataAuthorWritePolicy.HasPseudonymAnnotations(Candidate.Authors);
     private EditionMetadataMergePreview MergePreview => EditionMetadataApplicationPolicy.Preview(
         _currentBook, Candidate, Apply);
 
@@ -147,7 +165,10 @@ public sealed class MetadataReviewSubjectRowViewModel : ObservableObject
         string primary = $"Primary: {proposal.PrimaryProvider.Id} {proposal.PrimaryProvider.Version} / {proposal.Candidate.EditionId}";
         string providers = string.Join("; ", proposal.ProviderProposals
             .Where(value => value.Candidate is not null)
-            .Select(value => $"{value.Provider.Id} {value.Provider.Version} / {value.Candidate!.EditionId} / {value.RetrievedAtUtc:u}")
+            .Select(value => $"{value.Provider.Id} {value.Provider.Version} / {value.Candidate!.EditionId} / {value.RetrievedAtUtc:u}"
+                + (value.CacheOrigin is { } origin
+                    ? $" (cached source: {origin.Provider.Version}; {origin.QueryPolicyVersion}; {origin.ProposalPolicyVersion})"
+                    : string.Empty))
             .Distinct(StringComparer.Ordinal)
             .Take(16));
         return providers.Length == 0 ? primary : primary + "; Sources: " + providers;

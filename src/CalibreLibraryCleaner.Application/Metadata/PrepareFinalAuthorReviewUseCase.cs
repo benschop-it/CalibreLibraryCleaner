@@ -187,8 +187,8 @@ public static class PrepareFinalAuthorReviewUseCase
             EditionMetadataCandidate? candidate = reviewed.Subject.Proposal.Candidate;
             if (candidate is null || !books.TryGetValue(reviewed.Subject.TargetBookId, out CalibreBook? book)
                 || !string.Equals(book.Title, candidate.Title, StringComparison.Ordinal)
-                || book.Authors.Select(value => value.Name).SequenceEqual(candidate.Authors)
-                || !EditionMetadataAuthorWritePolicy.TryPrepare(candidate.Authors, out IReadOnlyList<string> names))
+                || !EditionMetadataAuthorWritePolicy.TryPrepare(book, candidate, out IReadOnlyList<string> names)
+                || book.Authors.Select(value => value.Name).SequenceEqual(names))
                 continue;
             EditionMetadataProviderIdentity provider = reviewed.Subject.Proposal.PrimaryProvider!;
             AuthorResolution resolution = new(

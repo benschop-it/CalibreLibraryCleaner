@@ -458,7 +458,8 @@ public sealed class ResolveEditionMetadataProposalsUseCase
         foreach (EditionMetadataLookupQuery alias in EditionMetadataLookupQuery.CreateIdentifierAliases(
                      proposal.BookId, proposal.Provider, proposal.Candidate))
         {
-            EditionMetadataProposal aliasProposal = EditionMetadataProposalPolicy.Resolve(alias, search);
+            EditionMetadataProposal aliasProposal = EditionMetadataProposalPolicy.Resolve(alias, search)
+                .WithCacheOrigin(proposal.CacheOrigin);
             await TryWriteCacheAsync(alias, aliasProposal, cancellationToken).ConfigureAwait(false);
         }
     }
@@ -499,7 +500,8 @@ public sealed class ResolveEditionMetadataProposalsUseCase
         value.Candidate,
         value.MatchScore,
         value.ReasonCodes,
-        value.ProblemCode);
+        value.ProblemCode,
+        value.CacheOrigin);
 
     private static EditionMetadataProposal ForQuery(
         EditionMetadataProposal value,
@@ -512,7 +514,8 @@ public sealed class ResolveEditionMetadataProposalsUseCase
         value.Candidate,
         value.MatchScore,
         value.ReasonCodes,
-        value.ProblemCode);
+        value.ProblemCode,
+        value.CacheOrigin);
 
     private static bool IsRecoverable(Exception exception) => exception is IOException
         or UnauthorizedAccessException

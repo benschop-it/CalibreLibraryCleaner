@@ -47,6 +47,16 @@ The analyzer advances to `epub-inspector/1.0.3` and the scoring model to `epub-q
 
 The scoring model advances to `epub-quality/1.0.2`; analyzer `epub-inspector/1.0.3` is unchanged because extracted facts and limits did not change. EPUB `Disqualified` now means a definitive file open/read failure (`CannotOpen` or `Unreadable`). Other incomplete inspections, including archive-policy rejection, malformed mandatory package XML, unsupported parser features, encryption, changed identity, and resource limits, are `Unassessed`: they retain warning evidence, have no numeric score, and make no claim that Calibre cannot open the publication. Unassessed candidates are incomparable in recommendation policy and require manual review.
 
+## 2026-10-24 front-matter duplicate-manifest amendment
+
+The separate bounded EPUB front-matter identity extractor advances to
+`epub-front-matter-identity/2.0.1` (plus unchanged extraction/credit resource versions).
+It validates unique package manifest IDs explicitly instead of allowing duplicate
+dictionary insertion to escape into final-review orchestration. Duplicate IDs are
+unavailable evidence with a stable technical problem code; no declaration is chosen.
+Archive preflight, parser limits, PDF extraction, the general EPUB analyzer and
+quality scoring are unchanged. Other retained books must still complete inspection.
+
 ## Fallback-readable scoring amendment
 
 The analyzer advances to `epub-inspector/1.0.4` and scoring model to `epub-quality/1.0.3`. When ordinary package inspection cannot complete, Infrastructure may inventory the archive again and inspect only safe, unique, unencrypted entries using supported compression and existing bounds. It never extracts or reads excluded entries. `FallbackReadable` coverage requires positive bounded renderability evidence from local XHTML/HTML/SVG content; otherwise the result remains `Incomplete`. Structured issue codes, available facets, candidate counts, and renderability evidence cross the Application boundary without ZIP, parser, HTML, or filesystem types. Application applies versioned per-occurrence warning penalties and an explicit score ceiling of 70. Non-identical recommendation comparisons involving a capped candidate require manual review, while sole-copy and exact-binary behavior is unchanged.

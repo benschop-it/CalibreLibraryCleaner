@@ -1,6 +1,7 @@
 using System.Collections.ObjectModel;
 using System.Collections.Specialized;
 using System.ComponentModel;
+using System.Text.RegularExpressions;
 using CalibreLibraryCleaner.Application.Abstractions;
 using CalibreLibraryCleaner.Application.Executions;
 using CalibreLibraryCleaner.Application.Libraries;
@@ -1050,6 +1051,11 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
             progress.Complete();
             StatusMessage = "Scan canceled. Previous results, if any, were not replaced.";
         }
+        catch (RegexMatchTimeoutException)
+        {
+            progress.Complete();
+            ReportReadOnlyRegexTimeout();
+        }
         finally
         {
             progress.Complete();
@@ -1154,6 +1160,10 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
             StatusMessage = migratedState is null
                 ? $"Loaded persisted scan from {snapshot.ScannedAt:u}. Results may be stale; select Scan before cleanup or recovery work."
                 : $"Migrated and loaded trusted development snapshot from {snapshot.ScannedAt:u} as authoritative projected state revision 0.";
+        }
+        catch (RegexMatchTimeoutException)
+        {
+            ReportReadOnlyRegexTimeout();
         }
         finally
         {
@@ -1484,10 +1494,8 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
             : "Local embedding observations were disabled.";
         ExpandedCandidateSummary = snapshot.MatchingRunSummary.Status switch
         {
-            MatchingEvidenceStatus.Unavailable =>
-                "Expanded matching evidence is unavailable for this snapshot. Run a fresh scan to generate it.",
-            MatchingEvidenceStatus.Stale =>
-                "Expanded matching evidence is stale after library changes. Run a fresh scan to regenerate it.",
+            MatchingEvidenceStatus.Unavailable or MatchingEvidenceStatus.Stale =>
+                MissingExpandedEvidenceSummary(snapshot),
             _ when presentation.ExpandedGroups.Count == 0 =>
                 $"No expanded work-language candidate groups were found from {snapshot.MatchingRunSummary.RetainedPairCount:N0} retained pairs. {bibliographicSummary} {localModelSummary}",
             _ =>
@@ -1515,6 +1523,31 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         NotifyCandidateCleanupStateChanged();
     }
 
+    private string MissingExpandedEvidenceSummary(LibrarySnapshot snapshot)
+    {
+        LibraryState? state = _workflowOptions.IsStaged
+            ? _libraryStateSession?.GetCurrent(snapshot.Identity.LibraryRoot) : null;
+        if (state is { IsWorkflowCheckpointCurrent: true } && ReferenceEquals(state.Snapshot, snapshot))
+        {
+            string? guidance = state.WorkflowCheckpoint.Phase switch
+            {
+                LibraryWorkflowPhase.ExactReady =>
+                    "Expanded matching is not part of the Exact scan. Complete Exact cleanup, then choose Prepare Candidate review.",
+                LibraryWorkflowPhase.CandidatePreparationReady =>
+                    "Expanded matching has not been prepared for the retained library. Choose Prepare Candidate review; no new scan is needed.",
+                LibraryWorkflowPhase.CandidateCleanupCompleted =>
+                    "Candidate cleanup is complete. Pre-cleanup Expanded evidence is no longer current for the retained library. Continue with online metadata review; no new scan is needed.",
+                LibraryWorkflowPhase.Completed =>
+                    "Duplicate cleanup is complete. Pre-cleanup Expanded evidence is no longer current after approved library changes. Continue with the remaining final review steps.",
+                _ => null,
+            };
+            if (guidance is not null) return guidance;
+        }
+        return snapshot.MatchingRunSummary.Status == MatchingEvidenceStatus.Stale
+            ? "Expanded matching evidence is stale after library changes. Run a fresh scan to regenerate it."
+            : "Expanded matching evidence is unavailable for this snapshot. Run a fresh scan to generate it.";
+    }
+
     private bool CanRunCandidateCleanup()
     {
         if (IsBusy || _operationCoordinator.IsOperationActive
@@ -1522,7 +1555,8 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
             || string.IsNullOrWhiteSpace(SelectedLibraryPath))
             return false;
         LibraryState? state = _libraryStateSession.GetCurrent(SelectedLibraryPath);
-        if (state is not { IsAuthoritative: true, IsWorkflowCheckpointCurrent: true }) return false;
+        if (state is not { IsAuthoritative: true, IsWorkflowCheckpointCurrent: true }
+            || !ReferenceEquals(state.Snapshot, _currentSnapshot)) return false;
         return state.WorkflowCheckpoint.Phase switch
         {
             LibraryWorkflowPhase.CandidatePreparationReady =>
@@ -1672,6 +1706,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         LibraryState? startingState = _libraryStateSession.GetCurrent(SelectedLibraryPath);
         if (startingState is null) return;
         LibraryWorkflowPhase startingPhase = startingState.WorkflowCheckpoint.Phase;
+        bool mutationStarted = false;
         _scanCancellation?.Dispose();
         _scanCancellation = new CancellationTokenSource();
         IsBusy = true;
@@ -1712,6 +1747,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
                     }
                     Progress<UnifiedCandidateCleanupProgress> progress = new(value =>
                         UpdateOperationProgress(value.Message, value.CompletedOperations, value.TotalOperations));
+                    mutationStarted = true;
                     UnifiedCandidateCleanupResult identityRepairResult = await _executeUnifiedCandidateCleanup!.ExecuteAsync(new(
                         SelectedLibraryPath, startingState.GenerationId, startingState.Revision, [],
                         ExternalBackupConfirmed: true, reviewed), progress, _scanCancellation.Token).ConfigureAwait(true);
@@ -1747,7 +1783,10 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
                     if (_quarantineReviewWorkspace is null)
                         await PrepareQuarantineReviewAsync(startingState).ConfigureAwait(true);
                     else
+                    {
+                        mutationStarted = true;
                         await ExecuteQuarantineAsync(startingState).ConfigureAwait(true);
+                    }
                     return;
                 }
                 if (_finalAuthorReviewWorkspace is null)
@@ -1799,6 +1838,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
                 IsProgressIndeterminate = false;
                 Progress<UnifiedCandidateCleanupProgress> normalizationProgress = new(value =>
                     UpdateOperationProgress(value.Message, value.CompletedOperations, value.TotalOperations));
+                mutationStarted = true;
                 UnifiedCandidateCleanupResult normalizationResult = await _executeUnifiedCandidateCleanup!.ExecuteAsync(new(
                     SelectedLibraryPath,
                     startingState.GenerationId,
@@ -1921,6 +1961,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
                 IsProgressIndeterminate = false;
                 Progress<UnifiedCandidateCleanupProgress> metadataProgress = new(value =>
                     UpdateOperationProgress(value.Message, value.CompletedOperations, value.TotalOperations));
+                mutationStarted = true;
                 UnifiedCandidateCleanupResult metadataResult = await _executeUnifiedCandidateCleanup!.ExecuteAsync(new(
                     SelectedLibraryPath,
                     startingState.GenerationId,
@@ -1963,6 +2004,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
             IsProgressIndeterminate = false;
             Progress<UnifiedCandidateCleanupProgress> cleanupProgress = new(value =>
                 UpdateOperationProgress(value.Message, value.CompletedOperations, value.TotalOperations));
+            mutationStarted = true;
             UnifiedCandidateCleanupResult result = await _executeUnifiedCandidateCleanup.ExecuteAsync(new(
                 SelectedLibraryPath,
                 startingState.GenerationId,
@@ -1992,6 +2034,10 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
                 ? "Candidate preparation canceled without mutation."
                 : "Candidate cleanup cancellation was requested; review the terminal state before continuing.";
         }
+        catch (RegexMatchTimeoutException) when (!mutationStarted)
+        {
+            ReportReadOnlyRegexTimeout();
+        }
         catch (Exception exception) when (exception is ArgumentException or InvalidOperationException)
         {
             ErrorMessage = exception.Message;
@@ -2009,6 +2055,18 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
             CancelCommand.NotifyCanExecuteChanged();
             NotifyCandidateCleanupStateChanged();
         }
+    }
+
+    private void ReportReadOnlyRegexTimeout()
+    {
+        ErrorMessage = "Read-only analysis stopped because a document or metadata regex exceeded its processing limit "
+            + "(ANALYSIS.REGEX_TIMEOUT).";
+        ErrorAction = _libraryStateSession?.GetCurrent(SelectedLibraryPath) is { } state
+            && !ReferenceEquals(state.Snapshot, _currentSnapshot)
+            ? "Reload the current state or run Scan before continuing; displayed results belong to an earlier state."
+            : "The application remains open. Retry the read-only action explicitly; no mutation was started.";
+        StatusMessage = "Read-only analysis stopped. Displayed library results remain available.";
+        IsProgressIndeterminate = false;
     }
 
     private void UpdateCandidateProgress(CandidatePreparationProgress progress)

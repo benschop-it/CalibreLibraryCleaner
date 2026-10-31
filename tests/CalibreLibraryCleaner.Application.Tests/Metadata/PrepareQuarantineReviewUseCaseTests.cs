@@ -11,6 +11,34 @@ namespace CalibreLibraryCleaner.Application.Tests.Metadata;
 
 public sealed class PrepareQuarantineReviewUseCaseTests
 {
+    [Fact]
+    public void UnavailableLegacyCoauthorOrderDoesNotCountAsExhaustedResolution()
+    {
+        CalibreBook book = Book(1, "The Book", "Unknown");
+        LibraryState state = State([book]);
+        EditionMetadataProviderIdentity provider = new("open-library", "provider/1");
+        EditionMetadataCandidate candidate = new("work", "edition", book.Title,
+            ["Kemp, Kristen", "Lannert, Stacy"], authorOrderKnown: false);
+        EditionMetadataProposal proposal = new(book.Id, provider, EditionMetadataQueryFields.Identifier,
+            DateTimeOffset.UnixEpoch, EditionMetadataProposalStatus.Proposed, candidate, 10_001,
+            ["METADATA.EDITION.ISBN_EXACT"]);
+        EditionMetadataProvidersBatchResult results = new(
+            [new(provider, new Dictionary<CalibreBookId, EditionMetadataProposal> { [book.Id] = proposal },
+                1, 1, 0, 1, 0, 1, 0, false, true)],
+            new Dictionary<CalibreBookId, FinalRecordInputIdentity> { [book.Id] = FinalRecordInputIdentity.Create(book) });
+
+        QuarantineReviewWorkspace review = PrepareQuarantineReviewUseCase.Execute(
+            state, FinalAuthors(state), providerResults: results);
+
+        QuarantineReviewSubject subject = review.Subjects.Should().ContainSingle().Subject;
+        subject.Include.Should().BeFalse();
+        subject.Disposition.Qualification.Should().Be(FinalRecordQualification.NeedsReview);
+        subject.Disposition.ReasonCodes.Should().Contain(EditionMetadataAuthorWritePolicy.LegacyAuthorOrderUnavailable);
+        subject.Disposition.Evidence!.Routes.Should().Contain(value =>
+            value.Name == provider.Id && value.Outcome == FinalRecordRouteOutcome.Unavailable);
+        subject.Disposition.Evidence.ResolutionExhausted.Should().BeFalse();
+    }
+
     private static readonly LibraryStateGenerationId Generation = new(
         Guid.Parse("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"));
 

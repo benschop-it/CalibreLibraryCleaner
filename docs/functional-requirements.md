@@ -41,6 +41,8 @@ An explicit Scan:
   when no Exact groups exist.
 
 Exact analysis does not run EPUB/PDF assessment or Candidate matching.
+The Expanded evidence view must describe that expected absence and direct the user
+through Exact cleanup and Prepare Candidate review, not ask for another Exact scan.
 
 ### 2. Exact cleanup
 
@@ -108,6 +110,12 @@ advisory; a group is processed unless the user selects Skip. Candidate cleanup:
 - keeps the keeper's existing same-format file;
 - removes all formats from non-keepers; and
 - removes non-keeper records proven empty.
+
+After completed Candidate cleanup, projected pre-cleanup Expanded evidence may be
+absent or stale by design. The evidence-view summary must direct the user to
+retained-record metadata review, not a redundant Rescan. Genuine missing evidence
+in an expected Candidate review, uncertain state and incompatible checkpoints
+retain their existing recovery guidance.
 
 ## Implemented matching evidence
 
@@ -209,12 +217,22 @@ under current provider-edition rules without renewing their retrieval time. Prov
 edition author comparison is independent of local pseudonym-aware matching. Recognized
 annotations are removed from actual outgoing author query values, giving affected
 queries different complete input identities without mutating catalog metadata.
-Policy-1.4 misses from the unchanged provider version remain reusable because its
-edition-comparison/extraction behavior is preserved. Uncertain policy-1.5 text misses
+Policy-1.4 and policy-1.6 misses from the unchanged provider version remain reusable
+because their edition-comparison/extraction behavior is preserved. Uncertain policy-1.5 text misses
 and older-provider extraction failures refresh. Compatible previous-query candidates can seed current ISBN aliases after
 metadata changes; this bounded local backfill preserves newer cached evidence and
 uses a versioned completion marker. Cache compatibility never disables policy,
 expiry, corruption, or physical-path checks.
+
+Known proposal-1.0 cache identities also remain reusable after author display fixes;
+they do not require a new online retrieval merely because current proposal
+interpretation is 1.1. Compatible promotion preserves original timestamps, failure
+status/codes and source provider/query/proposal versions. Expired unavailable
+outcomes still retry under the existing six-hour window.
+Legacy sorted multi-author evidence cannot invent original credit order. Authors
+may follow the complete independently matching current credit order; otherwise they
+are withheld with an explanation, without discarding compatible non-author facts or
+treating that missing coverage as exhausted resolution.
 
 Each provider reads every query group's strict-to-broader cached prefix before any
 network request. Fully cached groups publish first. Groups whose first missing
@@ -363,6 +381,24 @@ bounded, HTTPS-only, outside the library, and removed after the run.
   full catalog names; unrelated qualifiers and malformed annotations are not
   guessed away. These proposals preserve pen names, never substitute real names,
   and do not trigger an early metadata mutation or a new workflow stage.
+- Metadata review must not reintroduce provider pseudonym annotations into cleaned
+  authors. Recognized `pseud.`/pseudonym markers and the explicit `psued.` misspelling
+  withhold the complete provider author field, even for checked metadata. Retain the
+  current complete author list, allow independently applicable non-author fields,
+  and show the original provider credits only as evidence with an explanation.
+  Do not infer a real author or silently clean/partially apply provider coauthors.
+- Prepare individual provider `Family, Given` names and alternating
+  `Family| Given| Family| Given` pairs as given-first display names, keeping separate
+  ordered author values. Reuse the same prepared values in Proposed authors,
+  final preview, checked mutation and final-author handoff. Author-sort values remain
+  a distinct family-first concern. Extra/ambiguous components and qualifiers are
+  withheld rather than guessed away. Reordering/splitting credits is not merely
+  a casing improvement and does not become automatically checked on that basis.
+- Use the same deterministic typography policy for prepared provider authors and
+  Final authors: initial blocks retain a dot and space between initials
+  (`A.C. Baantjer` prepares as `A. C. Baantjer`). Canonical current spacing must not
+  be compacted by a checked metadata row or treated as unapplied work merely because
+  the provider uses compact initials. Preserve raw provider typography as evidence.
 - A separately confirmed final mutation applies only checked stale-validated author
   corrections, then refreshes every retained formatted record through the fixed
   worker's typed Calibre `update_path` operation. Verify and project actual two-level
@@ -380,6 +416,10 @@ bounded, HTTPS-only, outside the library, and removed after the run.
   uncertain. Editor, translator, illustrator, foreword, publisher and dedication
   credits do not become author credits. Unsupported, image-only, limited and
   unavailable inspection remains incomplete, not proof of corruption.
+- Duplicate EPUB package manifest IDs must produce a per-book unavailable finding,
+  not abort final review or silently choose one declaration. Preserve complete
+  retained-record accounting and expose the technical problem code in that book's
+  reasons. This remains incomplete evidence, never an automatic transfer decision.
 - Track applicable local/provider routes as not needed, not attempted, completed
   with/without evidence, conflicting, unavailable, or deferred. A material identity
   problem may default to transfer only after applicable routes complete; confirmed

@@ -95,15 +95,15 @@ public static partial class AuthorPseudonymAnnotationPolicy
         return true;
     }
 
-    [GeneratedRegex(@"\A(?:is\s+)?(?:pseud\.?|pseudoniem|pseudonym)(?=\s|\z)",
-        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant, 50)]
+    [GeneratedRegex(@"\A(?:is\s+)?(?:pseud\.?|pseudoniem|pseudonym)(?:\s|\z)",
+        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant | RegexOptions.NonBacktracking)]
     private static partial Regex BracketMarker();
 
-    [GeneratedRegex(@"\s+(?:is\s+)?(?:pseud\.?|pseudoniem|pseudonym)(?=\s|\z)(?:\s+van\s+[^()\[\]]+)?\s*\z",
-        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant, 50)]
+    [GeneratedRegex(@"\s+(?:is\s+)?(?:pseud\.?|pseudoniem|pseudonym)(?:\s+van\s+[^()\[\]]+)?\s*\z",
+        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant | RegexOptions.NonBacktracking)]
     private static partial Regex BareSuffix();
 
-    [GeneratedRegex(@"(?:\A|[\s(\[])(?:is\s+)?(?:pseud\.?|pseudoniem|pseudonym)(?=\s|[\])]|\z)",
-        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant, 50)]
+    [GeneratedRegex(@"(?:\A|[\s(\[])(?:is\s+)?(?:pseud\.?|pseudoniem|pseudonym)(?:\s|[)\]]|\z)",
+        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant | RegexOptions.NonBacktracking)]
     private static partial Regex AnyMarker();
 }

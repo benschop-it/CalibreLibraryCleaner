@@ -48,7 +48,7 @@ public sealed record EditionMetadataFieldSource
 
 public sealed record FusedEditionMetadataProposal
 {
-    public const string CurrentPolicyVersion = "edition-metadata-fusion/1.2.0";
+    public const string CurrentPolicyVersion = "edition-metadata-fusion/1.6.0";
 
     public FusedEditionMetadataProposal(
         FusedEditionMetadataConfidence confidence,
@@ -319,7 +319,8 @@ public static class EditionMetadataFusionPolicy
             languages.Languages,
             series.Series,
             seriesIndex.SeriesIndex,
-            cover.Cover), fieldSources.Distinct().ToArray(), filled);
+            cover.Cover,
+            source.AuthorOrderKnown), fieldSources.Distinct().ToArray(), filled);
 
         void AddSource<T>(
             EditionMetadataField field,

@@ -27,9 +27,8 @@ public static class EditionMetadataApplicationPolicy
         if (fields.Contains(LibraryMetadataField.Title)
             && !IsCasingImprovement(book.Title, candidate.Title)) return false;
         if (fields.Contains(LibraryMetadataField.Authors)
-            && !IsCasingImprovement(
-                book.Authors.Select(value => value.Name),
-                candidate.Authors)) return false;
+            && (!EditionMetadataAuthorWritePolicy.TryPrepare(book, candidate, out IReadOnlyList<string> authors)
+                || !IsCasingImprovement(book.Authors.Select(value => value.Name), authors))) return false;
         if (fields.Contains(LibraryMetadataField.Identifiers)
             && WritableIdentifiers(candidate).Any(proposed => book.Identifiers.Any(current =>
                 string.Equals(current.Type, proposed.Type, StringComparison.OrdinalIgnoreCase)))) return false;
@@ -57,7 +56,7 @@ public static class EditionMetadataApplicationPolicy
             : new HashSet<LibraryMetadataField>();
         IReadOnlyList<string> authors = book.Authors.Select(value => value.Name).ToArray();
         if (candidate is not null && fields.Contains(LibraryMetadataField.Authors)
-            && EditionMetadataAuthorWritePolicy.TryPrepare(candidate.Authors, out IReadOnlyList<string> prepared))
+            && EditionMetadataAuthorWritePolicy.TryPrepare(book, candidate, out IReadOnlyList<string> prepared))
             authors = prepared;
         Dictionary<string, string> identifiers = book.Identifiers
             .ToDictionary(value => value.Type, value => value.Value, StringComparer.OrdinalIgnoreCase);
@@ -94,7 +93,7 @@ public static class EditionMetadataApplicationPolicy
         List<LibraryMetadataField> fields = [];
         if (!string.Equals(book.Title, candidate.Title, StringComparison.Ordinal))
             fields.Add(LibraryMetadataField.Title);
-        if (EditionMetadataAuthorWritePolicy.TryPrepare(candidate.Authors, out IReadOnlyList<string> authors)
+        if (EditionMetadataAuthorWritePolicy.TryPrepare(book, candidate, out IReadOnlyList<string> authors)
             && !SameTextValues(book.Authors.Select(value => value.Name), authors))
             fields.Add(LibraryMetadataField.Authors);
         if (!IdentifiersApplied(book, WritableIdentifiers(candidate)))

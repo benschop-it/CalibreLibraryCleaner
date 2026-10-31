@@ -350,7 +350,9 @@ public static class PrepareQuarantineReviewUseCase
                     ? FinalRecordRouteOutcome.DeferredByBounds : proposal?.Status switch
                     {
                         EditionMetadataProposalStatus.NotFound => FinalRecordRouteOutcome.CompletedWithoutEvidence,
-                        EditionMetadataProposalStatus.Proposed => FinalRecordRouteOutcome.CompletedWithEvidence,
+                        EditionMetadataProposalStatus.Proposed => proposal?.Candidate is { AuthorOrderKnown: false } candidate
+                            && !EditionMetadataAuthorWritePolicy.TryPrepare(book, candidate, out _)
+                                ? FinalRecordRouteOutcome.Unavailable : FinalRecordRouteOutcome.CompletedWithEvidence,
                         EditionMetadataProposalStatus.Ambiguous => FinalRecordRouteOutcome.Conflicting,
                         EditionMetadataProposalStatus.Unavailable => FinalRecordRouteOutcome.Unavailable,
                         _ => provider.RequestLimitReached ? FinalRecordRouteOutcome.DeferredByBounds
@@ -395,8 +397,8 @@ public static class PrepareQuarantineReviewUseCase
         bool providerRepair = (providers?.Providers ?? []).Select(value => value.Proposals.GetValueOrDefault(book.Id))
             .Any(value => value?.Status == EditionMetadataProposalStatus.Proposed
                 && value.Candidate is not null
-                && (!TitleMatches(value.Candidate.Title, book.Title)
-                    || !AuthorsMatch(value.Candidate.Authors, book.Authors.Select(author => author.Name))));
+                && EditionMetadataApplicationPolicy.ApplicableFields(book, value.Candidate).Any(field =>
+                    field == LibraryMetadataField.Title || field == LibraryMetadataField.Authors));
         FinalRecordQualificationEvidence evidence = new(
             titleSupported: agrees,
             authorsSupported: agrees,
@@ -409,6 +411,11 @@ public static class PrepareQuarantineReviewUseCase
             routes);
         disposition = new(
             disposition.ReasonCodes.Concat(triage.ReasonCodes)
+                .Concat((providers?.Providers ?? []).Any(value =>
+                    value.Proposals.GetValueOrDefault(book.Id)?.Candidate is { AuthorOrderKnown: false } candidate
+                    && !EditionMetadataAuthorWritePolicy.TryPrepare(book, candidate, out _))
+                    ? [EditionMetadataAuthorWritePolicy.LegacyAuthorOrderUnavailable] : Array.Empty<string>())
+                .Concat(local.Where(value => value.ProblemCode is not null).Select(value => value.ProblemCode!))
                 .Concat(defectiveCompanion ? ["RECORD.FORMAT_DEFECT_REQUIRES_REVIEW"] : Array.Empty<string>())
                 .Concat(conflict ? ["RECORD.LOCAL_IDENTITY_CONFLICT"] : Array.Empty<string>())
                 .Concat(!agrees ? ["RECORD.IDENTITY_EVIDENCE_INCOMPLETE"] : Array.Empty<string>())

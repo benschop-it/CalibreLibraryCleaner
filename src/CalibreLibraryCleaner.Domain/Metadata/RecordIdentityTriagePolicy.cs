@@ -84,13 +84,13 @@ public static partial class RecordIdentityTriagePolicy
         return delimiters.Count > 0;
     }
 
-    [GeneratedRegex(@"^\(?[12][0-9]{3}\)?\s+\S", RegexOptions.CultureInvariant, 100)]
+    [GeneratedRegex(@"^\(?[12][0-9]{3}\)?\s+\S", RegexOptions.CultureInvariant | RegexOptions.NonBacktracking)]
     private static partial Regex YearPrefix();
 
-    [GeneratedRegex(@"^\d{1,4}[.)-]?\s+\S", RegexOptions.CultureInvariant, 100)]
+    [GeneratedRegex(@"^\d{1,4}[.)-]?\s+\S", RegexOptions.CultureInvariant | RegexOptions.NonBacktracking)]
     private static partial Regex NumberPrefix();
 
     [GeneratedRegex(@"(?:^|\s)(?:vol(?:ume)?|deel|tome|band|boek|book|part|том|巻)\.?\s*[0-9]{1,4}(?:\s|$)",
-        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant, 100)]
+        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant | RegexOptions.NonBacktracking)]
     private static partial Regex VolumeMarker();
 }

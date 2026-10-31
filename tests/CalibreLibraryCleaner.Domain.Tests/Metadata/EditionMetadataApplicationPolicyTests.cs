@@ -7,6 +7,118 @@ namespace CalibreLibraryCleaner.Domain.Tests.Metadata;
 
 public sealed class EditionMetadataApplicationPolicyTests
 {
+    [Theory]
+    [InlineData("Lannert| Stacy| Kemp| Kristen")]
+    [InlineData("Stacy Lannert")]
+    public void LegacyCoauthorOrderIsAppliedOnlyWhenTheCompleteCurrentCreditsEstablishIt(string current)
+    {
+        BookAuthor[] credits = current.Contains('|', StringComparison.Ordinal)
+            ? [new(new(1), current, "Source Sort")]
+            : [new(new(1), "Stacy Lannert", "Lannert, Stacy"), new(new(2), "Kristen Kemp", "Kemp, Kristen")];
+        CalibreBook book = new(new(1), "Title", "Source Sort", credits, [], [], "Author/Title (1)");
+        EditionMetadataCandidate legacy = new("work", "edition", "Title",
+            ["Kemp, Kristen", "Lannert, Stacy"], publisher: "Publisher", authorOrderKnown: false);
+
+        EditionMetadataAuthorWritePolicy.TryPrepare(book, legacy, out IReadOnlyList<string> prepared).Should().BeTrue();
+        prepared.Should().Equal("Stacy Lannert", "Kristen Kemp");
+        EditionMetadataApplicationPolicy.Preview(book, legacy, true).Authors.Should().Equal(prepared);
+        legacy.AuthorOrderKnown.Should().BeFalse();
+        legacy.Authors.Should().Equal("Kemp, Kristen", "Lannert, Stacy");
+    }
+
+    [Fact]
+    public void LegacyFactsRemainUsableWithoutGuessingMissingAuthorOrderOrDroppingCoauthors()
+    {
+        CalibreBook book = new(new(1), "Title", "Unknown", [new(new(1), "Unknown", "Unknown")],
+            [], [], "Author/Title (1)");
+        EditionMetadataCandidate legacy = new("work", "edition", "Title",
+            ["Kemp, Kristen", "Lannert, Stacy"], publisher: "Publisher", authorOrderKnown: false);
+
+        EditionMetadataAuthorWritePolicy.TryPrepare(book, legacy, out IReadOnlyList<string> prepared).Should().BeFalse();
+        prepared.Should().BeEmpty();
+        EditionMetadataApplicationPolicy.ApplicableFields(book, legacy).Should().Equal(LibraryMetadataField.Publisher);
+        EditionMetadataMergePreview preview = EditionMetadataApplicationPolicy.Preview(book, legacy, true);
+        preview.Authors.Should().Equal("Unknown");
+        preview.Publisher.Should().Be("Publisher");
+    }
+
+    [Fact]
+    public void LegacyOrderAlignmentCannotMatchTwoCurrentCreditsToOnlyOneProviderCredit()
+    {
+        CalibreBook book = new(new(1), "Title", "Source",
+            [new(new(1), "Alice Writer", "Source"), new(new(2), "alice writer", "Source")],
+            [], [], "Author/Title (1)");
+        EditionMetadataCandidate legacy = new("work", "edition", "Title",
+            ["Alice Writer", "Bob Writer"], authorOrderKnown: false);
+
+        EditionMetadataAuthorWritePolicy.TryPrepare(book, legacy, out _).Should().BeFalse();
+    }
+
+    [Theory]
+    [InlineData("A.C. Baantjer")]
+    [InlineData("Baantjer, A.C.")]
+    public void CanonicalCurrentInitialSpacingCannotBeCompactedByProviderMetadata(string providerAuthor)
+    {
+        CalibreBook book = new(new(1), "Title", "Baantjer, A. C.",
+            [new(new(1), "A. C. Baantjer", "Baantjer, A. C.")], [], [], "Author/Title (1)");
+        EditionMetadataCandidate candidate = new("work", "edition", "Title", [providerAuthor]);
+
+        EditionMetadataApplicationPolicy.ApplicableFields(book, candidate).Should().BeEmpty();
+        EditionMetadataApplicationPolicy.Preview(book, candidate, true).Authors.Should().Equal("A. C. Baantjer");
+        EditionMetadataApplicationPolicy.Preview(book, candidate, false).Authors.Should().Equal("A. C. Baantjer");
+        book.Authors[0].SortName.Should().Be("Baantjer, A. C.");
+    }
+
+    [Theory]
+    [InlineData("Henry, Patrick")]
+    [InlineData("Henry| Patrick")]
+    public void MetadataAuthorPreviewUsesDisplayOrderAndConvergesAfterNormalization(string providerAuthor)
+    {
+        CalibreBook pipe = new(new(1), "Title", "Henry, Patrick",
+            [new(new(1), "Henry| Patrick", "Henry, Patrick")], [], [], "Author/Title (1)");
+        EditionMetadataCandidate candidate = new("work", "edition", "Title", [providerAuthor]);
+
+        EditionMetadataApplicationPolicy.Preview(pipe, candidate, true).Authors.Should().Equal("Patrick Henry");
+        EditionMetadataApplicationPolicy.Preview(pipe, candidate, false).Authors.Should().Equal("Henry| Patrick");
+        EditionMetadataApplicationPolicy.CanApplyAutomatically(pipe, candidate).Should().BeFalse();
+        CalibreBook corrected = new(pipe.Id, pipe.Title, pipe.AuthorSort,
+            [new(new(1), "Patrick Henry", "Henry, Patrick")], [], [], pipe.RelativeDirectory);
+        EditionMetadataApplicationPolicy.ApplicableFields(corrected, candidate).Should().BeEmpty();
+        EditionMetadataApplicationPolicy.Preview(corrected, candidate, true).Authors.Should().Equal("Patrick Henry");
+    }
+
+    [Fact]
+    public void PipePairCaseImprovementCannotAutomaticallyReorderOrSplitTheAuthorIdentity()
+    {
+        CalibreBook book = new(new(1), "Title", "LANNERT, STACY & KEMP, KRISTEN",
+            [new(new(1), "LANNERT| STACY| KEMP| KRISTEN", "LANNERT, STACY & KEMP, KRISTEN")],
+            [], [], "Author/Title (1)");
+        EditionMetadataCandidate candidate = new(
+            "work", "edition", "Title", ["Lannert| Stacy| Kemp| Kristen"]);
+
+        EditionMetadataApplicationPolicy.Preview(book, candidate, true).Authors
+            .Should().Equal("Stacy Lannert", "Kristen Kemp");
+        EditionMetadataApplicationPolicy.CanApplyAutomatically(book, candidate).Should().BeFalse();
+    }
+
+    [Theory]
+    [InlineData("Victor Victor Appleton", "Victor [pseud. ] Victor [pseud.] Appleton")]
+    [InlineData("Sam Christer", "Christer, Sam psued. van Michael Morley")]
+    public void CheckedMetadataPreservesCleanedAuthorsAndStillAppliesOtherFields(
+        string currentAuthor, string providerAuthor)
+    {
+        CalibreBook book = new(new(1), "Title", currentAuthor,
+            [new(new(1), currentAuthor, currentAuthor)], [], [], "Author/Title (1)");
+        EditionMetadataCandidate candidate = new(
+            "work", "edition", "Title", [providerAuthor], publisher: "Publisher");
+
+        EditionMetadataApplicationPolicy.ApplicableFields(book, candidate)
+            .Should().Equal(LibraryMetadataField.Publisher);
+        EditionMetadataApplicationPolicy.Preview(book, candidate, true).Authors.Should().Equal(currentAuthor);
+        EditionMetadataApplicationPolicy.Preview(book, candidate, true).Publisher.Should().Be("Publisher");
+        candidate.Authors.Should().Equal([providerAuthor], "raw provider provenance must not be rewritten");
+    }
+
     [Fact]
     public void FullyAppliedCandidateHasNoApplicableFields()
     {

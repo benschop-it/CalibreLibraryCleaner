@@ -10,6 +10,22 @@ namespace CalibreLibraryCleaner.Domain.Tests.Metadata;
 public sealed class EditionMetadataFusionTests
 {
     [Fact]
+    public void FusionRetainsLegacyAuthorOrderUncertainty()
+    {
+        EditionMetadataProviderIdentity provider = new("open-library", "provider/1");
+        EditionMetadataCandidate candidate = new("work", "edition", "Title",
+            ["Second Writer", "First Writer"], authorOrderKnown: false);
+        EditionMetadataProposal proposal = new(new(1), provider, EditionMetadataQueryFields.Identifier,
+            DateTimeOffset.UnixEpoch, EditionMetadataProposalStatus.Proposed, candidate, 10_001,
+            ["METADATA.EDITION.ISBN_EXACT"]);
+
+        FusedEditionMetadataProposal fused = EditionMetadataFusionPolicy.Fuse([proposal]);
+
+        fused.Candidate!.AuthorOrderKnown.Should().BeFalse();
+        fused.Candidate.Authors.Should().Equal("Second Writer", "First Writer");
+    }
+
+    [Fact]
     public void MixedCaseCandidateOutranksSlightlyHigherScoredAllCapsCandidate()
     {
         EditionMetadataProposal allCaps = Proposal(new(
@@ -22,7 +38,7 @@ public sealed class EditionMetadataFusionTests
         FusedEditionMetadataProposal result = EditionMetadataFusionPolicy.Fuse([allCaps, mixedCase]);
 
         result.Candidate!.EditionId.Should().Be("mixed-case");
-        result.PolicyVersion.Should().Be("edition-metadata-fusion/1.2.0");
+        result.PolicyVersion.Should().Be("edition-metadata-fusion/1.6.0");
     }
 
     [Fact]

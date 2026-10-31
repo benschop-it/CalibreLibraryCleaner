@@ -16,6 +16,188 @@ namespace CalibreLibraryCleaner.Application.Tests.Executions;
 
 public sealed class ExecuteUnifiedCandidateCleanupUseCaseTests
 {
+    [Theory]
+    [InlineData("Lannert| Stacy| Kemp| Kristen", true)]
+    [InlineData("Unknown", false)]
+    public async Task FinalAuthorHandoffHonorsLegacyOrderCoverage(string currentAuthor, bool canPrepare)
+    {
+        CalibreBook original = Book(1, Format(1, "EPUB", 'a'));
+        CalibreBook book = new(original.Id, "Qualified Title", "Source Sort",
+            [new(new(1), currentAuthor, "Source Sort")],
+            original.Identifiers, original.Formats, original.RelativeDirectory);
+        Harness harness = await Harness.CreateAsync([book]);
+        await harness.AdvanceToCompletedAsync();
+        LibraryState state = harness.State.GetCurrent(harness.Snapshot.Identity.LibraryRoot)!;
+        FinalAuthorReviewWorkspace initial = PrepareFinalAuthorReviewUseCase.Execute(state);
+
+        FinalAuthorReviewWorkspace final = PrepareFinalAuthorReviewUseCase.AddReviewedBibliographicRepairs(
+            state, initial, harness.MetadataWorkspace(Candidate(
+                authors: ["Kemp, Kristen", "Lannert, Stacy"], authorOrderKnown: false)));
+
+        if (canPrepare)
+            final.Subjects.Should().ContainSingle(value =>
+                value.Resolution.ProposalSource == AuthorProposalSource.ReviewedBibliographicRepair)
+                .Which.Resolution.ProposedDisplayNames.Should().Equal("Stacy Lannert", "Kristen Kemp");
+        else
+            final.Subjects.Should().Equal(initial.Subjects);
+        harness.Chunks.Should().BeEmpty();
+    }
+
+    [Theory]
+    [InlineData("Lannert| Stacy| Kemp| Kristen", true)]
+    [InlineData("Unknown", false)]
+    public async Task LegacyCachedAuthorValuesNeedIndependentCurrentOrderBeforeTheyReachTheWorker(
+        string currentAuthor, bool expectedAuthorWrite)
+    {
+        CalibreBook original = Book(1, Format(1, "EPUB", 'a'));
+        CalibreBook book = new(original.Id, original.Title, "Source Sort",
+            [new(new(1), currentAuthor, "Source Sort")],
+            original.Identifiers, original.Formats, original.RelativeDirectory);
+        Harness harness = await Harness.CreateAsync([book]);
+
+        UnifiedCandidateCleanupResult result = await harness.ExecuteMetadataAsync(Candidate(
+            authors: ["Kemp, Kristen", "Lannert, Stacy"], authorOrderKnown: false));
+
+        result.IsCompleted.Should().BeTrue();
+        CalibreMutationOperation[] authors = harness.Chunks.SelectMany(value => value.Operations)
+            .Where(value => value.Metadata?.Field == LibraryMetadataField.Authors).ToArray();
+        if (expectedAuthorWrite)
+            authors.Should().ContainSingle().Which.Metadata!.Values.Should().Equal("Stacy Lannert", "Kristen Kemp");
+        else
+        {
+            authors.Should().BeEmpty();
+            harness.State.GetCurrent(harness.Snapshot.Identity.LibraryRoot)!.Snapshot.Books.Single()
+                .Authors.Should().Equal(book.Authors);
+        }
+        result.UpdatedMetadataFieldCount.Should().BePositive();
+    }
+
+    public static TheoryData<string, string[], string[]> ExplicitAuthorOrderCases => new()
+    {
+        { "Henry| Patrick", ["Henry, Patrick"], ["Patrick Henry"] },
+        { "Henry| Patrick", ["Henry| Patrick"], ["Patrick Henry"] },
+        { "Lannert| Stacy| Kemp| Kristen", ["Lannert| Stacy| Kemp| Kristen"], ["Stacy Lannert", "Kristen Kemp"] },
+        { "Lannert| Stacy| Kemp| Kristen", ["Lannert, Stacy", "Kemp, Kristen"], ["Stacy Lannert", "Kristen Kemp"] },
+        { "A.C. Baantjer", ["A.C. Baantjer"], ["A. C. Baantjer"] },
+        { "Baantjer| A.C.", ["Baantjer, A.C."], ["A. C. Baantjer"] },
+        { "Baantjer| A.C.| Writer| J.K.", ["Baantjer| A.C.| Writer| J.K."], ["A. C. Baantjer", "J. K. Writer"] },
+    };
+
+    [Theory]
+    [MemberData(nameof(ExplicitAuthorOrderCases))]
+    public async Task CheckedExplicitAuthorNotationWritesSeparateGivenFirstCredits(
+        string currentAuthor, string[] providerAuthors, string[] expectedAuthors)
+    {
+        CalibreBook original = Book(1, Format(1, "EPUB", 'a'));
+        CalibreBook book = new(original.Id, original.Title, "Source Author Sort",
+            [new(new(1), currentAuthor, "Source Author Sort")],
+            original.Identifiers, original.Formats, original.RelativeDirectory);
+        Harness harness = await Harness.CreateAsync([book]);
+
+        UnifiedCandidateCleanupResult result = await harness.ExecuteMetadataAsync(
+            Candidate(authors: providerAuthors));
+
+        result.IsCompleted.Should().BeTrue();
+        CalibreMutationOperation authors = harness.Chunks.SelectMany(value => value.Operations)
+            .Should().ContainSingle(value => value.Metadata != null
+                && value.Metadata.Field == LibraryMetadataField.Authors).Subject;
+        authors.Metadata!.Values.Should().Equal(expectedAuthors);
+        harness.State.GetCurrent(harness.Snapshot.Identity.LibraryRoot)!.Snapshot.Books.Single()
+            .Authors.Select(value => value.Name).Should().Equal(expectedAuthors);
+    }
+
+    [Theory]
+    [MemberData(nameof(ExplicitAuthorOrderCases))]
+    public async Task PreparedBibliographicCreditsDoNotReturnAsFinalAuthorWorkWhenAlreadyApplied(
+        string currentAuthor, string[] providerAuthors, string[] expectedAuthors)
+    {
+        CalibreBook original = Book(1, Format(1, "EPUB", 'a'));
+        CalibreBook book = new(original.Id, "Qualified Title", currentAuthor,
+            expectedAuthors.Select((name, index) => new BookAuthor(new(index + 1), name, name)),
+            original.Identifiers, original.Formats, original.RelativeDirectory);
+        Harness harness = await Harness.CreateAsync([book]);
+        await harness.AdvanceToCompletedAsync();
+        LibraryState state = harness.State.GetCurrent(harness.Snapshot.Identity.LibraryRoot)!;
+        FinalAuthorReviewWorkspace initial = PrepareFinalAuthorReviewUseCase.Execute(state);
+
+        FinalAuthorReviewWorkspace final = PrepareFinalAuthorReviewUseCase.AddReviewedBibliographicRepairs(
+            state, initial, harness.MetadataWorkspace(Candidate(authors: providerAuthors)));
+
+        final.Subjects.Should().Equal(initial.Subjects);
+        final.Subjects.Should().NotContain(value =>
+            value.Resolution.ProposalSource == AuthorProposalSource.ReviewedBibliographicRepair);
+        harness.Chunks.Should().BeEmpty();
+    }
+
+    [Theory]
+    [InlineData("A.C. Baantjer")]
+    [InlineData("Baantjer, A.C.")]
+    public async Task ApplyingOtherMetadataCannotRemoveCanonicalSpacesBetweenAuthorInitials(string providerAuthor)
+    {
+        CalibreBook original = Book(1, Format(1, "EPUB", 'a'));
+        CalibreBook book = new(original.Id, original.Title, "Baantjer, A. C.",
+            [new(new(1), "A. C. Baantjer", "Baantjer, A. C.")],
+            original.Identifiers, original.Formats, original.RelativeDirectory);
+        Harness harness = await Harness.CreateAsync([book]);
+
+        UnifiedCandidateCleanupResult result = await harness.ExecuteMetadataAsync(Candidate(authors: [providerAuthor]));
+
+        result.IsCompleted.Should().BeTrue();
+        result.UpdatedMetadataFieldCount.Should().BePositive();
+        harness.Chunks.SelectMany(value => value.Operations).Should().NotContain(value =>
+            value.Metadata != null && value.Metadata.Field == LibraryMetadataField.Authors);
+        harness.State.GetCurrent(harness.Snapshot.Identity.LibraryRoot)!.Snapshot.Books.Single()
+            .Authors.Should().Equal(book.Authors);
+    }
+
+    [Theory]
+    [InlineData("Victor Victor Appleton", "Victor [pseud. ] Victor [pseud.] Appleton")]
+    [InlineData("Sam Christer", "Christer, Sam psued. van Michael Morley")]
+    public async Task CheckedProviderAnnotationsCannotUndoCurrentAuthorCleanup(
+        string currentAuthor, string providerAuthor)
+    {
+        CalibreBook original = Book(1, Format(1, "EPUB", 'a'));
+        CalibreBook book = new(original.Id, original.Title, currentAuthor,
+            [new(new(1), currentAuthor, currentAuthor)],
+            original.Identifiers, original.Formats, original.RelativeDirectory);
+        Harness harness = await Harness.CreateAsync([book]);
+
+        UnifiedCandidateCleanupResult result = await harness.ExecuteMetadataAsync(
+            Candidate(authors: [providerAuthor]));
+
+        result.IsCompleted.Should().BeTrue();
+        harness.Chunks.SelectMany(value => value.Operations).Should().NotContain(value =>
+            value.Metadata != null && (value.Metadata.Field == LibraryMetadataField.Authors
+                || value.Metadata.Field == LibraryMetadataField.AuthorSort));
+        result.OmittedMetadataAuthorFieldCount.Should().Be(1);
+        result.UpdatedMetadataFieldCount.Should().BePositive();
+        CalibreBook actual = harness.State.GetCurrent(harness.Snapshot.Identity.LibraryRoot)!.Snapshot.Books.Single();
+        actual.Authors.Should().Equal(book.Authors);
+        actual.PublicationMetadata.Publisher.Should().Be("Qualified Publisher");
+    }
+
+    [Theory]
+    [InlineData("Writer [pseud.]")]
+    [InlineData("Writer psued. van Other Writer")]
+    public async Task FinalBibliographicRepairHandoffCannotReintroduceProviderAnnotations(string providerAuthor)
+    {
+        CalibreBook original = Book(1, Format(1, "EPUB", 'a'));
+        Harness harness = await Harness.CreateAsync([new(
+            original.Id, "Qualified Title", original.AuthorSort, original.Authors,
+            original.Identifiers, original.Formats, original.RelativeDirectory)]);
+        await harness.AdvanceToCompletedAsync();
+        LibraryState current = harness.State.GetCurrent(harness.Snapshot.Identity.LibraryRoot)!;
+        FinalAuthorReviewWorkspace initial = PrepareFinalAuthorReviewUseCase.Execute(current);
+
+        FinalAuthorReviewWorkspace final = PrepareFinalAuthorReviewUseCase.AddReviewedBibliographicRepairs(
+            current, initial, harness.MetadataWorkspace(Candidate(authors: [providerAuthor])));
+
+        final.Subjects.Should().Equal(initial.Subjects);
+        final.Subjects.Should().NotContain(value =>
+            value.Resolution.ProposalSource == AuthorProposalSource.ReviewedBibliographicRepair);
+        harness.Chunks.Should().BeEmpty();
+    }
+
     [Fact]
     public async Task FinalIdentityMetadataRepairsDeferAuthorsToFinalAuthorWorkerAction()
     {
@@ -1283,7 +1465,8 @@ public sealed class ExecuteUnifiedCandidateCleanupUseCaseTests
     private static EditionMetadataCandidate Candidate(
         bool withCover = false,
         IEnumerable<string>? languages = null,
-        IEnumerable<string>? authors = null) => new(
+        IEnumerable<string>? authors = null,
+        bool authorOrderKnown = true) => new(
         "qualified-work",
         "qualified-edition",
         "Qualified Title",
@@ -1294,7 +1477,8 @@ public sealed class ExecuteUnifiedCandidateCleanupUseCaseTests
         languages ?? ["eng"],
         "Qualified Series",
         3.5m,
-        withCover ? new("qualified-cover", "https://covers.openlibrary.org/b/id/123-L.jpg") : null);
+        withCover ? new("qualified-cover", "https://covers.openlibrary.org/b/id/123-L.jpg") : null,
+        authorOrderKnown);
 
     private sealed class FakeCoverSession(
         string stagingRoot,

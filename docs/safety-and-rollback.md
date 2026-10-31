@@ -127,6 +127,27 @@ but original metadata remains available for review. Ambiguous or malformed marke
 are flagged without automatically replacing the author. Only the existing confirmed
 final-author worker action may persist a checked removal and refresh managed names.
 
+Metadata provider annotations are not approved author replacements. The shared
+author-write policy withholds the whole provider author field for recognized
+pseudonym markers (including `psued.`), preserving all current names and per-author
+sorts rather than guessing a replacement or dropping coauthors. This applies even
+when the metadata row is checked and to final bibliographic-repair handoff.
+Unrelated metadata may still apply; raw provider names remain labeled evidence,
+not proposed writes. Existing annotated catalog names still require the separate
+explicit Final authors cleanup. This does not change matching normalization.
+
+Provider display preparation can invert explicit two-part family/given notation
+and split bounded alternating pipe pairs into distinct credited authors. It does
+not remove qualifiers or infer identities from familiar names. The prepared result,
+not the raw provider casing, determines whether a merge is automatic; changing
+order or credit count still requires explicit review. Complete ordered provider
+credits, author display and author-sort values remain separate.
+
+Provider-author preparation shares Final authors' deterministic initial typography:
+each initial retains its dot and following space. Metadata review must not undo
+an already canonical initial block. Normalizing two distinct provider credits to
+the same display value withholds the whole author field, not a partial list.
+
 The confirmed final mutation writes checked authors through the fixed worker, then
 uses typed `update_path` for retained formatted records. Worker read-back must prove
 two-level ID-suffixed containment, registered basenames/availability, unchanged format
@@ -248,6 +269,22 @@ generation, and revision identity; stale decisions reset to safe confidence defa
 The review decision store contains no API keys, raw provider payloads, bibliographic
 metadata, covers, or library paths. Cover review currently shows availability and
 bounded references only; it downloads nothing.
+
+Legacy metadata cache reuse requires recognized exact input/version identities and
+current local validation of positive candidates. Promotion preserves the original
+retrieval time, source versions, opaque source identity and unavailable retry age;
+it cannot manufacture freshness or successful evidence. Unknown multi-author order
+is explicitly carried through cache and fusion, never guessed from alphabetized
+legacy credits. Author writes require independently established complete current
+credit correspondence/order or preserved provider order. Unavailable order coverage
+does not qualify a record for an automatic Unresolvable transfer.
+
+Read-only UI actions contain regex timeout failures, display a technical error and
+release their operation resources without automatic retry or successful fallback.
+The error/log contains neither regex input nor pattern. A newly loaded authoritative
+state cannot enable cleanup against older displayed results; reload or scan must
+first present that state. The read-only error boundary never masks a mutation
+exception or changes the existing stop/Rescan requirements.
 
 Configured local Ollama observations are versioned and bounded but do not affect
 grouping or cleanup. Provider/model output is evidence or a review proposal, never
