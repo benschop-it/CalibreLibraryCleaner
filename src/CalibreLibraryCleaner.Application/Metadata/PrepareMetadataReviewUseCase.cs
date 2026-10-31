@@ -68,10 +68,17 @@ public sealed class PrepareMetadataReviewUseCase(
         IReadOnlyList<MetadataReviewKeeperSelection> keeperSelections,
         IProgress<EditionMetadataEnrichmentProgress>? progress,
         CancellationToken cancellationToken,
-        FinalAuthorReviewWorkspace? identityReview = null)
+        FinalAuthorReviewWorkspace? identityReview = null,
+        IReadOnlyCollection<CalibreBookId>? repairBookIds = null)
     {
         ArgumentNullException.ThrowIfNull(state);
         ArgumentNullException.ThrowIfNull(keeperSelections);
+        HashSet<CalibreBookId>? repairScope = repairBookIds?.ToHashSet();
+        if (identityReview is not null && (repairScope is null || repairScope.Count == 0)
+            || identityReview is null && repairScope is not null
+            || repairScope is not null && (repairScope.Count != repairBookIds!.Count
+                || !repairScope.IsSubsetOf(state.Snapshot.Books.Select(value => value.Id))))
+            throw new ArgumentException("Identity repairs require distinct selected current record IDs.", nameof(repairBookIds));
         if (!state.IsAuthoritative || !state.IsWorkflowCheckpointCurrent
             || state.WorkflowCheckpoint.Phase != LibraryWorkflowPhase.CandidateCleanupCompleted
                 && !(state.WorkflowCheckpoint.Phase == LibraryWorkflowPhase.Completed
@@ -81,12 +88,14 @@ public sealed class PrepareMetadataReviewUseCase(
             && (identityReview.GenerationId != state.GenerationId || identityReview.Revision != state.Revision
                 || identityReview.LibraryRoot != state.Snapshot.Identity.LibraryRoot))
             throw new InvalidOperationException("Identity repair evidence is stale.");
+        CalibreBook[] demand = state.Snapshot.Books
+            .Where(book => repairScope is null || repairScope.Contains(book.Id)).ToArray();
         Dictionary<CalibreBookId, FrontMatterIdentityCandidate> localIdentities = [];
         if (identityReview is not null)
         {
             ILookup<FormatFileFingerprint, FrontMatterAuthorObservation> observations =
                 identityReview.FrontMatterObservations.ToLookup(value => value.Fingerprint);
-            foreach (CalibreBook book in state.Snapshot.Books)
+            foreach (CalibreBook book in demand)
             {
                 FrontMatterIdentityCandidate[] candidates = book.Formats
                     .Where(value => value.Fingerprint is not null)
@@ -101,11 +110,6 @@ public sealed class PrepareMetadataReviewUseCase(
                 if (candidates.Length == 1) localIdentities.Add(book.Id, candidates[0]);
             }
         }
-        CalibreBook[] demand = state.Snapshot.Books.Where(book => identityReview is null
-            || RecordIdentityTriagePolicy.Assess(book.Title, book.Authors.Select(value => value.Name)).ReasonCodes.Count > 0
-            || localIdentities.TryGetValue(book.Id, out FrontMatterIdentityCandidate? identity)
-                && (identity.Title != book.Title
-                    || !identity.Authors.SequenceEqual(book.Authors.Select(value => value.Name)))).ToArray();
         EditionMetadataProvidersBatchResult providerResults = await resolveProposals.ExecuteAsync(
             demand, progress, cancellationToken, localIdentities).ConfigureAwait(false);
         Dictionary<CalibreBookId, EditionMetadataProposal> localRepairs = [];
@@ -134,7 +138,7 @@ public sealed class PrepareMetadataReviewUseCase(
                 new(localSource, localRepairs, 0, 0, 0, 0, 0, localRepairs.Count, 0, false, true),
             ], providerResults.InputIdentities);
         IReadOnlyList<MetadataReviewSubject> subjects = BuildMetadataReviewSubjectsUseCase.Execute(
-            state.Snapshot, providerResults, keeperSelections);
+            state.Snapshot, providerResults, keeperSelections, repairScope);
         int deferredQueryCount = providerResults.Providers
             .Where(value => value.Enabled && value.RequestLimitReached)
             .Sum(value => Math.Max(0, value.QueryCount - value.CompletedQueryCount));
@@ -148,22 +152,18 @@ public sealed class PrepareMetadataReviewUseCase(
         catch (Exception exception) when (IsPersistenceFailure(exception))
         {
             return Workspace(
-                ApplyConvergence(state.Snapshot, MetadataReviewDecisionPolicy.Reconcile(
-                    subjects, state.GenerationId, state.Revision, [])),
+                Review([]),
                 persistenceAvailable: false,
                 "METADATA_REVIEW.DECISION_READ_FAILED",
                 deferredQueryCount);
         }
-        IReadOnlyList<ReviewedMetadataSubject> reviewed = ApplyConvergence(
-            state.Snapshot,
-            MetadataReviewDecisionPolicy.Reconcile(
-                subjects, state.GenerationId, state.Revision, decisions));
+        IReadOnlyList<ReviewedMetadataSubject> reviewed = Review(decisions);
         MetadataReviewWorkspace workspace = Workspace(
             reviewed, persistenceAvailable: true, null, deferredQueryCount);
         try
         {
             await decisionStore.WriteAsync(
-                workspace.LibraryRoot, CurrentDecisions(workspace), cancellationToken).ConfigureAwait(false);
+                workspace.LibraryRoot, MergeDecisions(workspace, decisions), cancellationToken).ConfigureAwait(false);
             return workspace;
         }
         catch (OperationCanceledException) { throw; }
@@ -174,6 +174,15 @@ public sealed class PrepareMetadataReviewUseCase(
                 persistenceAvailable: false,
                 "METADATA_REVIEW.DECISION_WRITE_FAILED",
                 deferredQueryCount);
+        }
+
+        IReadOnlyList<ReviewedMetadataSubject> Review(IReadOnlyList<MetadataReviewDecision> saved)
+        {
+            ReviewedMetadataSubject[] values = ApplyConvergence(state.Snapshot,
+                MetadataReviewDecisionPolicy.Reconcile(subjects, state.GenerationId, state.Revision, saved));
+            return identityReview is null ? values : values.Select(value => new ReviewedMetadataSubject(
+                value.Subject, false, false, null, value.IsAlreadyApplied,
+                requiresReview: !value.IsAlreadyApplied && value.Subject.Proposal.Candidate is not null)).ToArray();
         }
 
         MetadataReviewWorkspace Workspace(
@@ -191,59 +200,11 @@ public sealed class PrepareMetadataReviewUseCase(
             providerResults);
     }
 
-    public async Task<MetadataReviewWorkspace> SetApplyAsync(
+    public Task<MetadataReviewWorkspace> SetApplyAsync(
         MetadataReviewWorkspace workspace,
         MetadataReviewSubjectId subjectId,
         bool apply,
-        CancellationToken cancellationToken)
-    {
-        ArgumentNullException.ThrowIfNull(workspace);
-        int index = workspace.Subjects.Select((value, position) => (value, position))
-            .SingleOrDefault(value => value.value.Subject.Id == subjectId).position;
-        if (workspace.Subjects.Count == 0 || workspace.Subjects[index].Subject.Id != subjectId)
-            throw new ArgumentException("The metadata review subject is not current.", nameof(subjectId));
-        ReviewedMetadataSubject current = workspace.Subjects[index];
-        if (current.Subject.Proposal.Confidence == FusedEditionMetadataConfidence.Unavailable
-            || current.IsAlreadyApplied)
-            return workspace;
-        MetadataReviewDecision? decision = MetadataReviewDecisionPolicy.CreateOverride(
-            current.Subject, workspace.GenerationId, workspace.Revision, apply, DefaultApply(current));
-        ReviewedMetadataSubject updated = decision is null
-            ? new(current.Subject, DefaultApply(current), false, null, requiresReview: current.RequiresReview)
-            : new(current.Subject, decision.Apply, true, decision.Key, requiresReview: current.RequiresReview);
-        ReviewedMetadataSubject[] reviewed = workspace.Subjects.ToArray();
-        reviewed[index] = updated;
-        MetadataReviewWorkspace next = new(
-            workspace.LibraryRoot,
-            workspace.GenerationId,
-            workspace.Revision,
-            reviewed,
-            workspace.PersistenceAvailable,
-            workspace.PersistenceProblemCode);
-        try
-        {
-            await decisionStore.WriteAsync(
-                next.LibraryRoot, CurrentDecisions(next), cancellationToken).ConfigureAwait(false);
-            return new(
-                next.LibraryRoot,
-                next.GenerationId,
-                next.Revision,
-                next.Subjects,
-                persistenceAvailable: true);
-        }
-        catch (OperationCanceledException) { throw; }
-        catch (Exception exception) when (IsPersistenceFailure(exception))
-        {
-            return new(
-                next.LibraryRoot,
-                next.GenerationId,
-                next.Revision,
-                next.Subjects,
-                persistenceAvailable: false,
-                "METADATA_REVIEW.DECISION_WRITE_FAILED",
-                next.DeferredQueryCount);
-        }
-    }
+        CancellationToken cancellationToken) => SetApplyAsync(workspace, [subjectId], apply, cancellationToken);
 
     public async Task<MetadataReviewWorkspace> SetAllApplyAsync(
         MetadataReviewWorkspace workspace,
@@ -292,12 +253,16 @@ public sealed class PrepareMetadataReviewUseCase(
             reviewed,
             workspace.PersistenceAvailable,
             workspace.PersistenceProblemCode,
-            workspace.DeferredQueryCount);
+            workspace.DeferredQueryCount,
+            workspace.ProviderResults);
         try
         {
+            IReadOnlyList<MetadataReviewDecision> existing = await decisionStore.ReadAsync(
+                next.LibraryRoot, cancellationToken).ConfigureAwait(false);
             await decisionStore.WriteAsync(
-                next.LibraryRoot, CurrentDecisions(next), cancellationToken).ConfigureAwait(false);
-            return next;
+                next.LibraryRoot, MergeDecisions(next, existing), cancellationToken).ConfigureAwait(false);
+            return new(next.LibraryRoot, next.GenerationId, next.Revision, next.Subjects,
+                persistenceAvailable: true, deferredQueryCount: next.DeferredQueryCount, providerResults: next.ProviderResults);
         }
         catch (OperationCanceledException) { throw; }
         catch (Exception exception) when (IsPersistenceFailure(exception))
@@ -309,7 +274,8 @@ public sealed class PrepareMetadataReviewUseCase(
                 next.Subjects,
                 persistenceAvailable: false,
                 "METADATA_REVIEW.DECISION_WRITE_FAILED",
-                next.DeferredQueryCount);
+                next.DeferredQueryCount,
+                next.ProviderResults);
         }
     }
 
@@ -358,7 +324,18 @@ public sealed class PrepareMetadataReviewUseCase(
             reviewed,
             workspace.PersistenceAvailable,
             workspace.PersistenceProblemCode,
-            workspace.DeferredQueryCount);
+            workspace.DeferredQueryCount,
+            workspace.ProviderResults);
+    }
+
+    private static MetadataReviewDecision[] MergeDecisions(
+        MetadataReviewWorkspace workspace,
+        IReadOnlyList<MetadataReviewDecision> previous)
+    {
+        HashSet<MetadataReviewSubjectId> subjects = workspace.Subjects.Select(value => value.Subject.Id).ToHashSet();
+        return previous.Where(value => !subjects.Contains(value.Key.SubjectId))
+            .Concat(CurrentDecisions(workspace))
+            .OrderBy(value => value.Key.SubjectId.Value, StringComparer.Ordinal).ToArray();
     }
 
     private static MetadataReviewDecision[] CurrentDecisions(MetadataReviewWorkspace workspace) =>

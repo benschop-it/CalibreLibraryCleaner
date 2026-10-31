@@ -165,6 +165,51 @@ reassessment. A 2,000-record fake-adapter performance fixture asserts 20 distinc
 cold parser starts, zero warm starts, and 2,000 warm hits; measured times and process
 memory are observations, not universal budgets or real-parser throughput claims.
 
+Unresolvable presentation has independent labeled review-only examples for
+delimiter-separated complete author credits inside titles, title-like author
+fields, bracketed numeric author annotations and legitimate multilingual/name/date
+counterexamples. An exact reversed title/author pair requires explicit local credit
+evidence; uncertain or partially matching pairs do not assert swapped fields.
+These checks do not change duplicate matching or automatic transfer defaults.
+
+WPF regressions require verification-only records to be hidden by default, still
+counted and available through the single Show all books checkbox. Check all shown
+must actually select unchecked NeedsReview problem rows without assigning hidden
+normal books. Empty/already-checked views disable it. Individual checkbox, selected
+and bulk choices agree and do not call the mutation executor. Optional accounting
+preserves qualified/pending/moved totals and cannot certify missing naming evidence.
+An STA window test verifies the exact simplified columns, absence of the Manual
+checkbox and seven-way filter, and an actual Move checkbox click/persistence.
+`CLC_PROBLEM_REVIEW_CAPTURE` optionally captures that generated-only test window
+for visual layout validation; it never opens or changes a user library.
+
+Selected identity-repair regressions use 1,000 generated records. A one-book cold
+request must query/publish only that ID, and its compatible warm repeat must make
+zero provider requests. Multi-selection stays within the chosen IDs. Empty,
+missing, duplicate and unknown scope fails before I/O, including attempts to scope
+normal non-repair preparation incorrectly. Local paired-credit proposals and
+decision-read failures also remain selected-only/unchecked.
+Saved decision merging preserves other subject overrides through preparation and
+individual/bulk Apply changes, with provider provenance intact. Quarantine
+reassessment preserves unselected choices, accepted evidence and total accounting.
+Actual WPF command tests cover record 467/current-row fallback, multi-selection,
+no-selection disabling, truthful scope text and no unrelated provider requests.
+Large-choice regressions use 1,000 generated books with hundreds of checked moves
+and explicit exclusions. Repeat read-only repair reassessment preserves the exact
+move list, including a checked or unchecked repaired record. WPF command coverage
+also checks that selecting a Metadata proposal and changing the view leave that
+list intact. Superseded automatic proposals retain checked state as reviewed
+choices without claiming their obsolete automatic authority.
+
+Manual quarantine preparation must make zero new opening-page cache/parser or
+provider calls; it uses current metadata and already available evidence. Optional
+selected inspection reads only selected fingerprints and retains other existing
+observations. An explicit 289-book selection in a 1,000-book generated library
+produces exactly 289 verified copies followed by 289 source deletions, with no
+metadata-repair/naming operations or unselected targets. Source command-separation
+coverage uses 289 move choices and seven repair proposals and requires independent
+counts/confirmation services; pending repair proposals must not redirect a move.
+
 Generated EPUB regressions also cover duplicate manifest IDs with identical and
 conflicting targets/media types, duplicate normalized ZIP paths, and distinct IDs
 sharing one resource. A real-inspector two-book orchestration test requires the
@@ -186,6 +231,38 @@ destination data, complete metadata/file preservation and restart/Rescan boundar
 The reproducible fixture generator is `scripts/calibre_final_quality_fixture.py`;
 these finite labels do not claim universal performance or accuracy.
 
+Managed-name worker checks run with
+`python scripts/calibre_managed_name_worker_checks.py` using stdlib generated
+dependencies, not a Calibre library. They exercise all failure phases,
+exception-category/OS-code bounds and payload redaction, worker validation-code
+compatibility, and a failure at operation 59 that never executes the remaining
+operations. Application tests preserve prior committed chunks, refuse to project
+the failed chunk's first 58 successful results, identify the record and block a
+second mutation while state is uncertain. An independently verified unchanged
+operation-59 rejection instead skips that one book, executes the remaining books
+and next chunk, retains authoritative state and journals a typed no-op naming delta.
+Per-component differences, unreadable read-back and in-place mutation of cached
+values must never pass the detached full-state comparison. Snapshot/journal
+round-trip preserves skipped book identity and does not invent naming evidence.
+
+The existing `scripts/calibre_managed_name_worker_acceptance.py` separately uses
+the installed Calibre runtime and a freshly generated disposable library. It
+verifies normal path/basename refresh and checked author typography, unchanged
+format bytes/cover/extra file/local metadata, and a real Windows read-sharing lock.
+The lock must produce a typed unchanged skip with
+`managed_name_preflight_os_error_errno_13_winerror_32`, no invented read-back and no
+retry; a following book in the same chunk must actually be renamed. All four
+generated records/formats, bytes, cover, extras and local fields remain preserved.
+The read-only preflight exists because the real installed Calibre was observed to
+change format attributes before an otherwise rejected rename; such a changed-state
+failure remains blocking, not relabeled unchanged. These generated checks do not
+establish that a particular production failure was caused by a lock.
+
+Protocol tests accept naming skips only without naming read-back and reject skips
+claimed by removal operations. WPF reports separate skip counts/IDs/reasons, permits
+disposition review after partial naming success, and disables reviewer acceptance
+for records without verified managed layout.
+
 Every cache test covers:
 
 - canonical input identity;
@@ -204,6 +281,22 @@ Performance baselines use deterministic synthetic libraries and explicitly suppl
 disposable copies. Record cold/warm durations, cache hit rates, bytes read, parser
 work, candidate counts, memory, log volume, and mutation throughput. Treat observed
 numbers as regression baselines, not universal time promises.
+
+Author review scale regressions additionally use 17,000 associations/20 distinct
+format identities with failed cache persistence. Cold metadata demand must make
+only 20 parser/cache calls; a warm workspace makes zero parser/cache calls.
+Compatible already-assessed metadata, including unchanged bytes at newly verified
+managed names, makes zero parser/cache calls even on the first review pass.
+Stale fingerprints, extractor/analyzer/scoring/limit versions and missing metadata
+facets must not hit. Shared observations remain compact and full record accounting
+is preserved. Timing output is explicitly fake-adapter orchestration evidence,
+not actual file-parser or production-library throughput.
+
+Read-only SQLite regressions verify Calibre comma-as-pipe author decoding, exact
+credit order/sorts/IDs and unchanged synthetic database bytes. Actual generated
+Calibre worker acceptance uses two comma-containing coauthors, proves the raw
+storage/public API difference, then completes verified copy/delete without relaxing
+the source metadata expectation.
 
 ## Test levels
 

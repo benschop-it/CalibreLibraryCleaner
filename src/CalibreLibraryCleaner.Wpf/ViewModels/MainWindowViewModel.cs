@@ -272,10 +272,12 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
             () => CanSetSelectedFinalAuthorApply(false));
         ClearAllQuarantineIncludeCommand = new RelayCommand(
             () => SetAllQuarantineInclude(false),
-            () => !IsBusy && _quarantineReviewWorkspace?.Subjects.Any(value => value.Include) == true);
+            () => !IsBusy && !_operationCoordinator.IsOperationActive && !_quarantineCompleted
+                && _quarantineReviewWorkspace?.Subjects.Any(value => value.Include) == true);
         CheckAllQuarantineIncludeCommand = new RelayCommand(
             () => SetAllQuarantineInclude(true),
-            () => !IsBusy && _quarantineReviewWorkspace?.Subjects.Any(value => !value.Include) == true);
+            () => !IsBusy && !_operationCoordinator.IsOperationActive && !_quarantineCompleted
+                && _quarantineReviewSubjects.Any(value => !value.Include));
         CheckSelectedQuarantineIncludeCommand = new RelayCommand(
             () => SetSelectedQuarantineInclude(true),
             () => CanSetSelectedQuarantineInclude(true));
@@ -284,16 +286,23 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
             () => CanSetSelectedQuarantineInclude(false));
         AddManualQuarantineRecordCommand = new RelayCommand(
             AddManualQuarantineRecord,
-            () => !IsBusy && _quarantineReviewWorkspace is not null
+            () => !IsBusy && !_operationCoordinator.IsOperationActive && !_quarantineCompleted
+                && _quarantineReviewWorkspace is not null
                 && long.TryParse(QuarantineManualRecordId, out long value) && value > 0);
         AcceptSelectedQualificationCommand = new RelayCommand(
             AcceptSelectedQualification,
             () => !IsBusy && !_operationCoordinator.IsOperationActive && !_quarantineCompleted
-                && _selectedQuarantineReviewSubjects.Length > 0);
+                && _selectedQuarantineReviewSubjects.Length > 0
+                && _selectedQuarantineReviewSubjects.All(value => value.CanAcceptReviewed));
         ReviewIdentityRepairsCommand = new AsyncRelayCommand(
             ReviewIdentityRepairsAsync,
             () => !IsBusy && !_operationCoordinator.IsOperationActive && !_quarantineCompleted
-                && _quarantineReviewWorkspace is not null && _prepareMetadataReview is not null);
+                && _quarantineReviewWorkspace is not null && _prepareMetadataReview is not null
+                && SelectedRepairBookIds().Length > 0);
+        ApplyCheckedIdentityMetadataCommand = new AsyncRelayCommand(
+            () => RunCandidateCleanupAsync(applyIdentityRepairs: true), CanApplyCheckedIdentityMetadata);
+        MoveCheckedQuarantineCommand = new AsyncRelayCommand(
+            CandidateCleanupAsync, CanMoveCheckedQuarantine);
         CandidateCleanupCommand = new AsyncRelayCommand(CandidateCleanupAsync, CanRunCandidateCleanup);
     }
 
@@ -501,11 +510,10 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         LibraryWorkflowPhase.CandidateCleanupCompleted when _metadataReviewWorkspace is null =>
             "Prepare online metadata review",
         LibraryWorkflowPhase.CandidateCleanupCompleted => "Apply checked metadata",
-        LibraryWorkflowPhase.Completed when _identityRepairReviewReady => "Apply checked identity metadata",
         LibraryWorkflowPhase.Completed when _finalAuthorStageCompleted && _quarantineCompleted =>
             "Unresolvable quarantine completed",
         LibraryWorkflowPhase.Completed when _finalAuthorStageCompleted && _quarantineReviewWorkspace is null =>
-            "Prepare Unresolvable review",
+            "Show books for quarantine review",
         LibraryWorkflowPhase.Completed when _finalAuthorStageCompleted => "Move checked records to quarantine",
         LibraryWorkflowPhase.Completed when _finalAuthorReviewWorkspace is null => "Prepare final author review",
         LibraryWorkflowPhase.Completed when _finalAuthorReviewWorkspace.Subjects.Any(value => value.Apply) =>
@@ -524,12 +532,10 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
             "Resolve online metadata only for records retained after Candidate cleanup",
         LibraryWorkflowPhase.CandidateCleanupCompleted =>
             "Apply checked online metadata proposals after backup confirmation",
-        LibraryWorkflowPhase.Completed when _identityRepairReviewReady =>
-            "Apply checked non-author repairs first; review authors and refresh managed naming afterward",
         LibraryWorkflowPhase.Completed when _finalAuthorStageCompleted && _quarantineCompleted =>
             "Run an explicit Rescan before another mutation",
         LibraryWorkflowPhase.Completed when _finalAuthorStageCompleted && _quarantineReviewWorkspace is null =>
-            "Prepare final reviewed quarantine proposals without mutation",
+            "Show current catalog problem/selection rows without opening every document or running online lookups",
         LibraryWorkflowPhase.Completed when _finalAuthorStageCompleted =>
             "Copy all checked records to the fixed sibling library, verify them, then delete their sources",
         LibraryWorkflowPhase.Completed when _finalAuthorReviewWorkspace is null =>
@@ -1698,8 +1704,11 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         }
     }
 
-    private async Task CandidateCleanupAsync()
+    private Task CandidateCleanupAsync() => RunCandidateCleanupAsync(applyIdentityRepairs: false);
+
+    private async Task RunCandidateCleanupAsync(bool applyIdentityRepairs)
     {
+        if (applyIdentityRepairs && !CanApplyCheckedIdentityMetadata()) return;
         if (_libraryStateSession is null || string.IsNullOrWhiteSpace(SelectedLibraryPath)) return;
         using IDisposable? operation = _operationCoordinator.TryBegin();
         if (operation is null) return;
@@ -1728,7 +1737,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         {
             if (startingPhase == LibraryWorkflowPhase.Completed)
             {
-                if (_identityRepairReviewReady && _metadataReviewWorkspace is not null)
+                if (applyIdentityRepairs && _identityRepairReviewReady && _metadataReviewWorkspace is not null)
                 {
                     MetadataReviewWorkspace reviewed = _metadataReviewWorkspace;
                     if (!reviewed.Subjects.Any(value => value.Apply))
@@ -1850,7 +1859,13 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
                     FinalAuthorReview: _finalAuthorReviewWorkspace), normalizationProgress, _scanCancellation.Token).ConfigureAwait(true);
                 CandidateCleanupResultSummary = $"Updated {normalizationResult.UpdatedMetadataFieldCount:N0} of {correctionCount:N0} checked author correction(s); "
                     + $"refreshed {normalizationResult.RefreshedManagedNameCount:N0} managed name(s); "
-                    + $"skipped {normalizationResult.SkippedMetadataFieldCount:N0} verified-unchanged record(s).";
+                    + $"skipped {normalizationResult.SkippedMetadataFieldCount:N0} unchanged metadata field(s); "
+                    + $"skipped {normalizationResult.SkippedManagedNameCount:N0} unchanged managed name(s).";
+                if (normalizationResult.SkippedManagedNames is { Count: > 0 } skippedNames)
+                    CandidateCleanupResultSummary += " Naming not applied: "
+                        + string.Join("; ", skippedNames.Take(16).Select(value =>
+                            $"record ID {value.RecordId.Value} ({value.ReasonCode})"))
+                        + (skippedNames.Count > 16 ? "; further skipped IDs are in the technical log." : ".");
                 LibraryState? normalizationFinal = _libraryStateSession.GetCurrent(SelectedLibraryPath);
                 StatusMessage = normalizationResult.IsCompleted
                     ? "Final author corrections completed."
@@ -1895,7 +1910,10 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
                     _verifiedManagedNameBookIds = normalizationResult.VerifiedManagedNameBookIds?.ToHashSet() ?? [];
                     _finalAuthorStageCompleted = true;
                     NotifyCandidateCleanupStateChanged();
-                    StatusMessage = "Final author corrections completed.";
+                    StatusMessage = normalizationResult.SkippedManagedNameCount > 0
+                        ? $"Managed naming completed with {normalizationResult.SkippedManagedNameCount:N0} unchanged book(s) skipped. "
+                            + "Continue to final disposition review; skipped naming remains unverified."
+                        : "Final author corrections completed.";
                 }
                 return;
             }
@@ -2250,6 +2268,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         CandidateCleanupCommand.NotifyCanExecuteChanged();
         OnPropertyChanged(nameof(CandidateCleanupAutomationName));
         OnPropertyChanged(nameof(CandidateCleanupToolTip));
+        OnPropertyChanged(nameof(HasIdentityRepairReview));
     }
 
     private void NotifyMetadataApplyCommands()
@@ -2258,6 +2277,8 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         CheckAllMetadataApplyCommand.NotifyCanExecuteChanged();
         CheckSelectedMetadataApplyCommand.NotifyCanExecuteChanged();
         UncheckSelectedMetadataApplyCommand.NotifyCanExecuteChanged();
+        ApplyCheckedIdentityMetadataCommand.NotifyCanExecuteChanged();
+        OnPropertyChanged(nameof(IdentityRepairActionText));
     }
 
     private bool CanLoadPersistedSnapshot() => !IsBusy
@@ -2904,21 +2925,13 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
 
         private void Drain()
         {
-            LibraryScanProgress? value;
             lock (_gate)
             {
-                value = _isActive ? _latest : null;
+                LibraryScanProgress? value = _isActive ? _latest : null;
                 _latest = null;
                 _isScheduled = false;
-            }
-
-            if (value is not null)
-            {
-                _handler(value);
-            }
-
-            lock (_gate)
-            {
+                if (value is not null)
+                    _handler(value);
                 if (!_isActive || _latest is null || _isScheduled)
                 {
                     return;

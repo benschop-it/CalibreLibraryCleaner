@@ -50,6 +50,7 @@ public sealed partial class ExecuteUnifiedCandidateCleanupUseCase(
         int omittedMetadataAuthorFields = 0;
         int refreshedManagedNames = 0;
         HashSet<CalibreBookId> verifiedManagedNameBookIds = [];
+        List<SkippedManagedName> skippedManagedNames = [];
         Dictionary<string, int> metadataSkipReasons = new(StringComparer.Ordinal);
         if (!request.ExternalBackupConfirmed)
         {
@@ -297,7 +298,13 @@ public sealed partial class ExecuteUnifiedCandidateCleanupUseCase(
                 cancellationToken.ThrowIfCancellationRequested();
                 if (!lease.IsHeld) throw new InvalidOperationException("The Candidate cleanup lease was lost.");
                 progress?.Report(new(
-                    "Processing unified candidates through the persistent Calibre worker.",
+                    authorNormalization
+                        ? chunk[0].Operation.Kind == CalibreMutationOperationKind.RefreshManagedName
+                            ? "Refreshing Calibre-managed names and verifying format bytes; this is not a quarantine move."
+                            : "Applying checked final author corrections through the persistent Calibre worker."
+                        : metadataMutation
+                            ? "Applying checked metadata changes; this is not a quarantine move."
+                            : "Processing unified candidates through the persistent Calibre worker.",
                     completedOperations,
                     operations.Length));
                 CalibreMutationChunkResult workerResult = await session.ExecuteChunkAsync(
@@ -339,8 +346,10 @@ public sealed partial class ExecuteUnifiedCandidateCleanupUseCase(
                         $"The persistent Calibre worker could not complete Candidate cleanup ({workerFailure}; "
                         + (failedOperationIndex < 0
                             ? "the worker did not identify a failed operation; "
-                            : $"chunk operation {failedOperationIndex + 1:N0} was {failedOperationKind}; ")
-                        + $"completed {completedOperations:N0} of {operations.Length:N0} committed operations)."));
+                            : $"chunk operation {failedOperationIndex + 1:N0} was {failedOperationKind} "
+                                + $"for record ID {failedOperation!.RecordId.Value}; ")
+                        + $"completed {completedOperations:N0} of {operations.Length:N0} committed operations). "
+                        + "The failed chunk may have changed the library. Run an explicit Scan before another mutation."));
                     return Result(UnifiedCandidateCleanupState.PartiallyCompleted,
                         transferred, removedFormats, removedRecords, plan.SkippedGroupCount);
                 }
@@ -381,15 +390,26 @@ public sealed partial class ExecuteUnifiedCandidateCleanupUseCase(
                 updatedMetadataFields += chunk.Zip(workerResult.OperationResults).Count(pair =>
                     pair.First.Operation.Kind == CalibreMutationOperationKind.SetMetadata
                     && !pair.Second.IsSkipped);
-                skippedMetadataFields += workerResult.OperationResults.Count(value => value.IsSkipped);
-                refreshedManagedNames += chunk.Count(value =>
-                    value.Operation.Kind == CalibreMutationOperationKind.RefreshManagedName);
-                verifiedManagedNameBookIds.UnionWith(chunk
-                    .Where(value => value.Operation.Kind == CalibreMutationOperationKind.RefreshManagedName)
-                    .Select(value => value.Operation.RecordId));
-                foreach (CalibreMutationOperationResult skipped in workerResult.OperationResults.Where(
-                             value => value.IsSkipped))
+                skippedMetadataFields += workerResult.OperationResults.Count(value => value.IsSkipped
+                    && value.Kind == CalibreMutationOperationKind.SetMetadata);
+                CalibreBookId[] refreshed = chunk.Zip(workerResult.OperationResults)
+                    .Where(pair => pair.First.Operation.Kind == CalibreMutationOperationKind.RefreshManagedName
+                        && !pair.Second.IsSkipped)
+                    .Select(pair => pair.First.Operation.RecordId).ToArray();
+                refreshedManagedNames += refreshed.Length;
+                verifiedManagedNameBookIds.UnionWith(refreshed);
+                foreach ((WorkerPlannedOperation planned, CalibreMutationOperationResult skipped) in
+                         chunk.Zip(workerResult.OperationResults).Where(pair => pair.Second.IsSkipped))
                 {
+                    if (planned.Operation.Kind == CalibreMutationOperationKind.RefreshManagedName)
+                    {
+                        string code = skipped.SkipCode
+                            ?? throw new InvalidOperationException("A skipped managed name has no reason code.");
+                        skippedManagedNames.Add(new(planned.Operation.RecordId, code));
+                        LogManagedNameSkippedUnchanged(
+                            _logger, executionId.ToString(), planned.Operation.RecordId.Value, code);
+                        continue;
+                    }
                     string reason = skipped.SkipCode ?? "metadata_unchanged";
                     metadataSkipReasons[reason] = metadataSkipReasons.GetValueOrDefault(reason) + 1;
                 }
@@ -405,6 +425,12 @@ public sealed partial class ExecuteUnifiedCandidateCleanupUseCase(
                 foreach ((string reason, int count) in metadataSkipReasons.OrderBy(value => value.Key, StringComparer.Ordinal))
                     LogMetadataSkippedUnchanged(_logger, executionId.ToString(), reason, count);
             }
+            if (skippedManagedNames.Count > 0)
+                issues.Add(new(
+                    "CANDIDATE.MANAGED_NAMES_SKIPPED_UNCHANGED",
+                    ExecutionIssueSeverity.Warning,
+                    $"Skipped managed naming for {skippedManagedNames.Count:N0} unchanged book(s); "
+                    + "other records continued. Skipped naming remains unverified for final disposition."));
 
             LibraryStateSessionOutcome checkpoint = await libraryState.CheckpointAsync(
                 request.LibraryRoot, CancellationToken.None).ConfigureAwait(false);
@@ -435,7 +461,8 @@ public sealed partial class ExecuteUnifiedCandidateCleanupUseCase(
                     transferred, removedFormats, removedRecords, plan.SkippedGroupCount);
             }
             progress?.Report(new(
-                authorNormalization ? "Author normalization completed." : "Candidate cleanup completed.",
+                authorNormalization ? "Final authors and managed naming finished."
+                    : metadataMutation ? "Checked metadata update completed." : "Candidate cleanup completed.",
                 operations.Length,
                 operations.Length));
             LogCleanupCompleted(_logger, executionId.ToString(), "Completed", operations.Length,
@@ -516,7 +543,8 @@ public sealed partial class ExecuteUnifiedCandidateCleanupUseCase(
             omittedMetadataCovers,
             omittedMetadataAuthorFields,
             refreshedManagedNames,
-            verifiedManagedNameBookIds.OrderBy(value => value.Value).ToArray());
+            verifiedManagedNameBookIds.OrderBy(value => value.Value).ToArray(),
+            skippedManagedNames.AsReadOnly());
     }
 
     private static MetadataOperationTemplate[] BuildMetadataOperations(
@@ -767,6 +795,12 @@ public sealed partial class ExecuteUnifiedCandidateCleanupUseCase(
         DateTimeOffset appliedAt,
         WorkerPlannedOperation planned,
         CalibreMutationOperationResult result) => result.IsSkipped
+            && planned.Operation.Kind == CalibreMutationOperationKind.RefreshManagedName
+        ? new SkipManagedNameLibraryStateDelta(
+            generation, revision, planned.Operation.OperationId, appliedAt,
+            planned.Operation.RecordId, result.SkipCode
+                ?? throw new InvalidOperationException("A skipped managed name has no reason code."))
+        : result.IsSkipped
         ? new SkipMetadataLibraryStateDelta(
             generation, revision, planned.Operation.OperationId, appliedAt,
             planned.Operation.RecordId, planned.Operation.Metadata!.Field,
@@ -900,6 +934,14 @@ public sealed partial class ExecuteUnifiedCandidateCleanupUseCase(
         string executionId,
         string failureCode,
         int count);
+
+    [LoggerMessage(86, LogLevel.Warning,
+        "Unified Candidate cleanup {ExecutionId} skipped verified-unchanged managed naming. RecordId={RecordId}, SkipCode={SkipCode}.")]
+    private static partial void LogManagedNameSkippedUnchanged(
+        ILogger logger,
+        string executionId,
+        long recordId,
+        string skipCode);
 
     private static long ElapsedMilliseconds(long started) =>
         (long)Stopwatch.GetElapsedTime(started).TotalMilliseconds;

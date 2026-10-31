@@ -19,6 +19,41 @@ public sealed class InspectEmbeddedAuthorMetadataUseCaseTests
     private static readonly FormatFileObservation Observation = new(
         10, DateTimeOffset.UnixEpoch, DateTimeOffset.UnixEpoch, 0);
 
+    [Theory]
+    [InlineData("format")]
+    [InlineData("fingerprint")]
+    [InlineData("extractor")]
+    [InlineData("limits")]
+    public async Task WorkspaceAndDiskFactsWithDifferentInputOrResourceVersionsAreNotReused(string difference)
+    {
+        Harness harness = Harness.Create(Book("Unknown", includeEpub: true));
+        EmbeddedAuthorMetadataCacheKey incompatible = new(
+            difference == "format" ? "PDF" : "EPUB",
+            difference == "fingerprint" ? new(11, new(new string('b', 64))) : Fingerprint,
+            difference == "extractor" ? "legacy-extractor/0" : EmbeddedAuthorMetadataVersions.EpubExtractor,
+            difference == "limits" ? "legacy-limits/0" : EmbeddedAuthorMetadataVersions.EpubLimits);
+        EmbeddedAuthorMetadataObservation stale = new(incompatible,
+            EmbeddedAuthorMetadataStatus.Available, "The Book", ["Incompatible Writer"]);
+        A.CallTo(() => harness.Cache.TryReadAsync(A<EmbeddedAuthorMetadataCacheKey>._, A<CancellationToken>._))
+            .Returns(stale);
+        A.CallTo(() => harness.Inspector.InspectAuthorMetadataAsync(A<EpubInspectionRequest>._, A<CancellationToken>._))
+            .ReturnsLazily(call => Task.FromResult(new EmbeddedAuthorMetadataObservation(
+                new("EPUB", call.GetArgument<EpubInspectionRequest>(0)!.Fingerprint,
+                    EmbeddedAuthorMetadataVersions.EpubExtractor, EmbeddedAuthorMetadataVersions.EpubLimits),
+                EmbeddedAuthorMetadataStatus.Missing, null, [])));
+        FinalAuthorReviewWorkspace initial = PrepareFinalAuthorReviewUseCase.Execute(harness.State, [stale]);
+        initial.Subjects.Single().NeedsInspection.Should().BeTrue();
+
+        FinalAuthorReviewWorkspace result = await harness.UseCase.ExecuteAsync(
+            harness.State, initial, null, CancellationToken.None);
+
+        result.MetadataInspectionCount.Should().Be(1);
+        result.MetadataCacheHitCount.Should().Be(0);
+        result.Subjects.Single().Resolution.ProposedDisplayNames.Should().BeEmpty();
+        A.CallTo(() => harness.Inspector.InspectAuthorMetadataAsync(
+            A<EpubInspectionRequest>._, A<CancellationToken>._)).MustHaveHappenedOnceExactly();
+    }
+
     [Fact]
     public async Task CleanBooksOpenNoFormats()
     {

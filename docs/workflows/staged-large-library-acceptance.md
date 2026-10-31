@@ -4,6 +4,19 @@ This record accepts the implemented Exact and Unified Candidate duplicate-cleanu
 baseline. It is not acceptance of the remaining online metadata, packaged-release,
 or final managed-name workflow in the active finish plan.
 
+For the separately verified managed-name worker boundary and diagnostics, see
+[managed-name worker failure diagnosis](../archive/plans/diagnose-managed-name-worker-failures.md).
+Those generated checks do not expand this historical large-library acceptance.
+The later [per-book naming continuation](../archive/plans/continue-after-verified-unchanged-managed-name-rejections.md)
+records verified-unchanged skips, an actual generated Windows sharing-lock case and
+preserved quarantine behavior, separately from this historical baseline.
+The [Unresolvable problem-review simplification](../archive/plans/simplify-unresolvable-problem-review.md)
+separates concrete catalog defects from incomplete verification and records the
+visible-only bulk-selection contract; it does not change this mutation acceptance.
+The [selected-record repair scope fix](../archive/plans/scope-identity-repairs-to-selected-books.md)
+records the explicit query/review scope and warm-request checks separately from
+this historical large-library mutation acceptance.
+
 ## Status
 
 - Checklist prepared: 2026-08-10.

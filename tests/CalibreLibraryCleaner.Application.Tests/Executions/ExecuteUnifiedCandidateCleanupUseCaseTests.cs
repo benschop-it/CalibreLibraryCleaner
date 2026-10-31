@@ -437,13 +437,17 @@ public sealed class ExecuteUnifiedCandidateCleanupUseCaseTests
         await harness.AdvanceToCompletedAsync();
         LibraryState current = harness.State.GetCurrent(harness.Snapshot.Identity.LibraryRoot)!;
 
+        List<UnifiedCandidateCleanupProgress> progress = [];
         UnifiedCandidateCleanupResult result = await harness.ExecuteFinalAuthorReviewAsync(
-            FinalWorkspace(current, apply: false));
+            FinalWorkspace(current, apply: false), new CapturingProgress(progress.Add));
 
         result.State.Should().Be(UnifiedCandidateCleanupState.Completed);
         result.RefreshedManagedNameCount.Should().Be(1);
         harness.Chunks.SelectMany(value => value.Operations).Should().ContainSingle()
             .Which.Kind.Should().Be(CalibreMutationOperationKind.RefreshManagedName);
+        progress.Should().Contain(value => value.Message.Contains("Refreshing Calibre-managed names", StringComparison.Ordinal)
+            && value.Message.Contains("not a quarantine move", StringComparison.Ordinal));
+        progress.Should().OnlyContain(value => !value.Message.Contains("Processing unified candidates", StringComparison.Ordinal));
     }
 
     [Fact]
@@ -903,6 +907,94 @@ public sealed class ExecuteUnifiedCandidateCleanupUseCaseTests
             A<string>._, A<LibraryStateMutationIntent>._, A<CancellationToken>._)).MustNotHaveHappened();
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ManagedNameRejectionContinuesOnlyWhenTheWorkerProvesItUnchanged(bool unchanged)
+    {
+        CalibreBook[] books = Enumerable.Range(1, 201).Select(id => Book(id, Format(id, "EPUB", 'a'))).ToArray();
+        Harness harness = await Harness.CreateAsync(books);
+        await harness.AdvanceToCompletedAsync();
+        LibraryState initial = harness.State.GetCurrent(harness.Snapshot.Identity.LibraryRoot)!;
+        FinalAuthorReviewWorkspace workspace = FinalWorkspace(initial, apply: false);
+        const string failure = "managed_name_update_path_os_error_errno_13_winerror_32";
+        int chunks = 0;
+        A.CallTo(() => harness.Worker.ExecuteChunkAsync(
+                A<CalibreMutationChunkRequest>._, A<CancellationToken>._))
+            .ReturnsLazily(call =>
+            {
+                CalibreMutationChunkRequest chunk = call.GetArgument<CalibreMutationChunkRequest>(0)!;
+                bool failing = ++chunks == 2;
+                CalibreMutationOperationResult[] results = chunk.Operations.Select((value, index) =>
+                {
+                    if (failing && index == 58 && unchanged)
+                        return new CalibreMutationOperationResult(value.OperationId, value.Kind, true,
+                            IsSkipped: true, SkipCode: failure);
+                    if (failing && index >= 58 && !unchanged)
+                        return new CalibreMutationOperationResult(value.OperationId, value.Kind, false, failure);
+                    BookFormat format = books.Single(book => book.Id == value.RecordId).Formats.Single();
+                    return new CalibreMutationOperationResult(value.OperationId, value.Kind, true,
+                        VerifiedManagedPath: $"Verified Author/Verified Title ({value.RecordId.Value})",
+                        VerifiedFormats: [new(format.Format, "Verified.epub", format.Fingerprint!,
+                            new(format.Fingerprint!.SizeInBytes, Now, Now, 0))]);
+                }).ToArray();
+                return Task.FromResult(new CalibreMutationChunkResult(
+                    chunk.ChunkId, true, results, failing && !unchanged ? failure : null));
+            });
+
+        UnifiedCandidateCleanupResult result = await harness.ExecuteFinalAuthorReviewAsync(workspace);
+
+        if (unchanged)
+        {
+            result.State.Should().Be(UnifiedCandidateCleanupState.Completed);
+            result.RefreshedManagedNameCount.Should().Be(200);
+            result.SkippedMetadataFieldCount.Should().Be(0);
+            result.SkippedManagedNameCount.Should().Be(1);
+            result.SkippedManagedNames.Should().ContainSingle()
+                .Which.Should().Be(new SkippedManagedName(new(159), failure));
+            result.VerifiedManagedNameBookIds.Should().HaveCount(200).And.NotContain(new CalibreBookId(159));
+            LibraryState completed = harness.State.GetCurrent(harness.Snapshot.Identity.LibraryRoot)!;
+            completed.Status.Should().Be(LibraryStateStatus.Authoritative);
+            completed.Revision.Value.Should().Be(initial.Revision.Value + 201);
+            completed.Snapshot.Books.Single(book => book.Id.Value == 159).Should().BeSameAs(books[158]);
+            completed.Snapshot.Books.Single(book => book.Id.Value == 201).RelativeDirectory
+                .Should().Be("Verified Author/Verified Title (201)");
+            result.Issues.Should().Contain(value => value.Code == "CANDIDATE.MANAGED_NAMES_SKIPPED_UNCHANGED"
+                && value.Severity == ExecutionIssueSeverity.Warning);
+            harness.Logger.Messages.Should().Contain(value => value.Contains("RecordId=159", StringComparison.Ordinal)
+                && value.Contains("SkipCode=" + failure, StringComparison.Ordinal));
+            A.CallTo(() => harness.Store.AppendDeltaBatchAsync(
+                    A<string>._,
+                    A<IReadOnlyList<LibraryStateDelta>>.That.Matches(values => values.Any(
+                        value => value is SkipManagedNameLibraryStateDelta)),
+                    A<LibraryState>._, A<bool>._, A<string?>._, A<bool>._, A<CancellationToken>._))
+                .MustHaveHappenedOnceExactly();
+            chunks.Should().Be(3, "later books and the next chunk must run without retrying the skipped book");
+            return;
+        }
+        result.State.Should().Be(UnifiedCandidateCleanupState.PartiallyCompleted);
+        result.RefreshedManagedNameCount.Should().Be(100);
+        result.Issues.Should().ContainSingle(value => value.Code == "CANDIDATE.WORKER_CHUNK_FAILED"
+            && value.Explanation.Contains(failure, StringComparison.Ordinal)
+            && value.Explanation.Contains("record ID 159", StringComparison.Ordinal)
+            && value.Explanation.Contains("completed 100 of 201", StringComparison.Ordinal)
+            && value.Explanation.Contains("explicit Scan", StringComparison.Ordinal));
+        LibraryState current = harness.State.GetCurrent(harness.Snapshot.Identity.LibraryRoot)!;
+        current.Status.Should().Be(LibraryStateStatus.Uncertain);
+        current.Revision.Value.Should().Be(initial.Revision.Value + 100);
+        current.Snapshot.Books.Where(book => book.Id.Value > 100)
+            .Should().Equal(books.Where(book => book.Id.Value > 100));
+        harness.Logger.Messages.Should().ContainSingle(value =>
+            value.Contains("UncommittedSuccessfulPrefix=58", StringComparison.Ordinal)
+            && value.Contains("RecordId=159", StringComparison.Ordinal)
+            && value.Contains(failure, StringComparison.Ordinal));
+
+        UnifiedCandidateCleanupResult blocked = await harness.ExecuteFinalAuthorReviewAsync(workspace);
+
+        blocked.State.Should().Be(UnifiedCandidateCleanupState.PreflightFailed);
+        chunks.Should().Be(2, "failed managed naming must not be retried or continued");
+    }
+
     [Fact]
     public async Task MissingBackupBlocksBeforeToolDiscovery()
     {
@@ -1108,6 +1200,12 @@ public sealed class ExecuteUnifiedCandidateCleanupUseCaseTests
             0,
             1,
             appliedOnlineProvenanceAvailable: false);
+    }
+
+    private sealed class CapturingProgress(Action<UnifiedCandidateCleanupProgress> report)
+        : IProgress<UnifiedCandidateCleanupProgress>
+    {
+        public void Report(UnifiedCandidateCleanupProgress value) => report(value);
     }
 
     private sealed class Harness
@@ -1365,7 +1463,8 @@ public sealed class ExecuteUnifiedCandidateCleanupUseCaseTests
         }
 
         public Task<UnifiedCandidateCleanupResult> ExecuteFinalAuthorReviewAsync(
-            FinalAuthorReviewWorkspace workspace)
+            FinalAuthorReviewWorkspace workspace,
+            IProgress<UnifiedCandidateCleanupProgress>? progress = null)
         {
             LibraryState current = State.GetCurrent(Snapshot.Identity.LibraryRoot)!;
             return _useCase.ExecuteAsync(new(
@@ -1375,7 +1474,7 @@ public sealed class ExecuteUnifiedCandidateCleanupUseCaseTests
                 [],
                 true,
                 NormalizeAuthors: true,
-                FinalAuthorReview: workspace), null, CancellationToken.None);
+                FinalAuthorReview: workspace), progress, CancellationToken.None);
         }
 
         public Task<UnifiedCandidateCleanupResult> ExecuteMetadataWorkspaceAsync(

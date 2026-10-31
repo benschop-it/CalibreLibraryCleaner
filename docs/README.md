@@ -42,6 +42,10 @@ The completed
 [read-only timeout boundary fix](archive/plans/contain-read-only-regex-timeouts.md)
 records command failure containment, retained display/state safety and explicit
 retry verification.
+The completed [selected quarantine/repair workflow fix](archive/plans/scope-identity-repairs-to-selected-books.md),
+[Calibre author storage decoding fix](archive/plans/decode-calibre-author-storage-names.md)
+and [author inspection fact reuse](archive/plans/reuse-compatible-author-inspection-facts.md)
+record the subsequent verified UI, copy-precondition and measured reuse corrections.
 The completed
 [final author resolution and managed naming plan](archive/plans/final-author-resolution-and-managed-naming.md)
 is archived with its implementation and acceptance evidence.

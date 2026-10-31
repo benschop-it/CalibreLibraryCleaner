@@ -326,7 +326,8 @@ internal sealed class SqliteCalibreMetadataReader(
             else
             {
                 long authorId = reader.GetInt64(1);
-                string name = reader.GetString(2);
+                // Calibre stores author-name commas as pipes; expose the public API spelling.
+                string name = reader.GetString(2).Replace('|', ',');
                 string sortName = reader.IsDBNull(3) ? string.Empty : reader.GetString(3);
                 book.Authors.Add(new(authorId, name, sortName));
                 if (string.IsNullOrWhiteSpace(sortName))

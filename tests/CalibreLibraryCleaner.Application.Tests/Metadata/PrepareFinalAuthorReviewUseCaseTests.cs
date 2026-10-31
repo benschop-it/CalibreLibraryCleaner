@@ -16,6 +16,48 @@ public sealed class PrepareFinalAuthorReviewUseCaseTests
     private static readonly FormatFileFingerprint EpubFingerprint = Fingerprint('a', 10);
     private static readonly FormatFileFingerprint PdfFingerprint = Fingerprint('b', 20);
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void IntrinsicMetadataSurvivesVerifiedRenamingWithoutRequiringAnotherParse(bool pdf)
+    {
+        FormatFileFingerprint fingerprint = pdf ? PdfFingerprint : EpubFingerprint;
+        BookFormat renamed = new(pdf ? "PDF" : "EPUB", "renamed", "Current/Book (1)/renamed",
+            FormatFileStatus.Present, fingerprint,
+            new(fingerprint.SizeInBytes, DateTimeOffset.UnixEpoch.AddDays(1), DateTimeOffset.UnixEpoch.AddDays(2), 32));
+        CalibreBook book = Book(1, "Unknown", [renamed]);
+        LibraryState state = State([book],
+            pdf ? [] : [Epub(1, "Previous/book.epub", fingerprint, "Reliable Writer")],
+            pdf ? [Pdf(1, "Previous/book.pdf", fingerprint, "Reliable Writer")] : []);
+
+        FinalAuthorReviewWorkspace result = PrepareFinalAuthorReviewUseCase.Execute(state);
+
+        result.Subjects.Single().Resolution.ProposedDisplayNames.Should().Equal("Reliable Writer");
+        result.Subjects.Single().NeedsInspection.Should().BeFalse();
+        result.Subjects.Single().Apply.Should().BeFalse();
+    }
+
+    [Theory]
+    [InlineData("analyzer")]
+    [InlineData("scoring")]
+    [InlineData("metadata-facet")]
+    public void StaleOrIncompleteAssessmentMetadataIsNotReused(string difference)
+    {
+        CalibreBook book = Book(1, "Unknown", [Format("EPUB", "Current/book.epub", EpubFingerprint)]);
+        EpubAssessment assessment = new(new FormatAssessment(new(1), "EPUB", "Previous/book.epub", EpubFingerprint,
+            AssessmentStatus.Unassessed, null,
+            difference == "analyzer" ? new("legacy/0") : EpubAssessmentEngine.AnalyzerVersion,
+            difference == "scoring" ? new("legacy/0") : EpubAssessmentEngine.ScoringModelVersion, [Finding()]),
+            new(true, true, authors: ["Incompatible Writer"],
+                availableFacets: difference == "metadata-facet" ? EpubAssessmentFacet.Package : EpubAssessmentFacet.Metadata));
+
+        FinalAuthorReviewWorkspace result = PrepareFinalAuthorReviewUseCase.Execute(State([book], [assessment]));
+
+        result.Subjects.Single().NeedsInspection.Should().BeTrue();
+        result.Subjects.Single().Resolution.ProposedDisplayNames.Should().BeEmpty();
+        result.CompatibleEvidenceCount.Should().Be(0);
+    }
+
     [Fact]
     public void PseudonymAnnotationsAppearInExistingFinalReviewWithoutInspectionOrDefaultApply()
     {

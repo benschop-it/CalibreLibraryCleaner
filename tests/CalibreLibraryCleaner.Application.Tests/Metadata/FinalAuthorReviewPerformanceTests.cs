@@ -6,6 +6,8 @@ using CalibreLibraryCleaner.Application.Assessments;
 using CalibreLibraryCleaner.Application.Assessments.Pdf;
 using CalibreLibraryCleaner.Application.Libraries;
 using CalibreLibraryCleaner.Application.Metadata;
+using CalibreLibraryCleaner.Domain.Assessments;
+using CalibreLibraryCleaner.Domain.Findings;
 using CalibreLibraryCleaner.Domain.Libraries;
 using FakeItEasy;
 using FluentAssertions;
@@ -16,6 +18,91 @@ namespace CalibreLibraryCleaner.Application.Tests.Metadata;
 
 public sealed class FinalAuthorReviewPerformanceTests(ITestOutputHelper output)
 {
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task SeventeenThousandRecordsReuseMetadataWithoutRepeatedSourceOrCacheReads(bool assessedAlready)
+    {
+        const int records = 17_000;
+        const int uniqueFiles = 20;
+        const string root = "C:\\generated-library";
+        CalibreBook[] books = Enumerable.Range(1, records).Select(id =>
+        {
+            FormatFileFingerprint fingerprint = Fingerprint(id % uniqueFiles);
+            return new CalibreBook(new(id), $"Generated Title {id}", "Unknown",
+                [new(new(id), "Unknown", "Unknown")], [],
+                [new("EPUB", "book", $"Current/Book ({id})/book.epub", FormatFileStatus.Present,
+                    fingerprint, new(fingerprint.SizeInBytes, DateTimeOffset.UnixEpoch, DateTimeOffset.UnixEpoch, 0))],
+                $"Current/Book ({id})");
+        }).ToArray();
+        EpubAssessment[] assessments = assessedAlready ? books.Select(book => new EpubAssessment(
+            book.Id, "EPUB", $"Previous/Book ({book.Id.Value})/old.epub", book.Formats[0].Fingerprint,
+            AssessmentStatus.Completed, new QualityScore(50), EpubAssessmentEngine.AnalyzerVersion,
+            EpubAssessmentEngine.ScoringModelVersion,
+            new(true, true, availableFacets: EpubAssessmentFacet.Metadata),
+            [new("EPUB.SCORE.BASELINE", FindingSeverity.Positive, 50, "Generated complete package metadata")])).ToArray() : [];
+        LibraryStateGenerationId generation = new(Guid.NewGuid());
+        LibraryState state = new(generation, new(0), LibraryStateStatus.Authoritative,
+            new(new("generated", records, root), DateTimeOffset.UnixEpoch, books, [], epubAssessments: assessments),
+            DateTimeOffset.UnixEpoch, workflowCheckpoint: new(
+                LibraryWorkflowPhase.Completed, generation, new(0), LibraryWorkflowPolicyVersions.Current,
+                DateTimeOffset.UnixEpoch, new(generation, new(0))));
+        ILibraryPathResolver resolver = A.Fake<ILibraryPathResolver>();
+        A.CallTo(() => resolver.ValidateAsync(root, A<CancellationToken>._))
+            .Returns(LibraryValidationOutcome.Success(new(root, "database")));
+        A.CallTo(() => resolver.ResolveFormat(A<ValidatedLibraryLocation>._,
+                A<string>._, A<string>._, "EPUB")).ReturnsLazily(call =>
+            {
+                string directory = call.GetArgument<string>(1)!;
+                return ResolvedFormatPathOutcome.Success(new(root,
+                    $"{root}\\{directory.Replace('/', '\\')}\\book.epub", $"{directory}/book.epub"));
+            });
+        int cacheReads = 0;
+        int parserStarts = 0;
+        IEmbeddedAuthorMetadataCache cache = A.Fake<IEmbeddedAuthorMetadataCache>();
+        A.CallTo(() => cache.TryReadAsync(A<EmbeddedAuthorMetadataCacheKey>._, A<CancellationToken>._))
+            .Invokes(() => cacheReads++).Returns(Task.FromResult<EmbeddedAuthorMetadataObservation?>(null));
+        A.CallTo(() => cache.WriteAsync(A<EmbeddedAuthorMetadataObservation>._, A<CancellationToken>._))
+            .Throws(new IOException("Generated unavailable cache persistence"));
+        IEpubInspector inspector = A.Fake<IEpubInspector>();
+        A.CallTo(() => inspector.InspectAuthorMetadataAsync(A<EpubInspectionRequest>._, A<CancellationToken>._))
+            .ReturnsLazily(call =>
+            {
+                parserStarts++;
+                EpubInspectionRequest request = call.GetArgument<EpubInspectionRequest>(0)!;
+                return Task.FromResult(new EmbeddedAuthorMetadataObservation(
+                    new("EPUB", request.Fingerprint, EmbeddedAuthorMetadataVersions.EpubExtractor,
+                        EmbeddedAuthorMetadataVersions.EpubLimits),
+                    EmbeddedAuthorMetadataStatus.Missing, null, []));
+            });
+        InspectEmbeddedAuthorMetadataUseCase useCase = new(
+            resolver, inspector, A.Fake<IPdfAuthorMetadataInspector>(), cache);
+        Stopwatch timer = Stopwatch.StartNew();
+
+        FinalAuthorReviewWorkspace cold = await useCase.ExecuteAsync(
+            state, PrepareFinalAuthorReviewUseCase.Execute(state), null, CancellationToken.None);
+        long coldMs = timer.ElapsedMilliseconds;
+        int coldReads = cacheReads;
+        int coldParsers = parserStarts;
+        cacheReads = 0;
+        parserStarts = 0;
+        timer.Restart();
+        FinalAuthorReviewWorkspace warm = await useCase.ExecuteAsync(state, cold, null, CancellationToken.None);
+        long warmMs = timer.ElapsedMilliseconds;
+        output.WriteLine($"records={records}; distinctFiles={uniqueFiles}; priorAssessment={assessedAlready}; "
+            + $"coldMs={coldMs}; warmMs={warmMs}; coldCacheReads={coldReads}; coldParserStarts={coldParsers}; "
+            + $"warmCacheReads={cacheReads}; warmParserStarts={parserStarts}; adapter=fake; diskWritesUnavailable=true");
+
+        coldParsers.Should().Be(assessedAlready ? 0 : uniqueFiles);
+        coldReads.Should().Be(assessedAlready ? 0 : uniqueFiles);
+        cacheReads.Should().Be(0);
+        parserStarts.Should().Be(0);
+        cold.MetadataInspectionCount.Should().Be(assessedAlready ? 0 : uniqueFiles);
+        warm.MetadataInspectionCount.Should().Be(0);
+        warm.MetadataCacheHitCount.Should().Be(records);
+        warm.EmbeddedObservations.Should().HaveCount(assessedAlready ? 0 : uniqueFiles);
+    }
+
     [Fact]
     public async Task CompleteRetainedRecordPassDeduplicatesColdDemandAndStartsNoWarmParsers()
     {
@@ -82,7 +169,8 @@ public sealed class FinalAuthorReviewPerformanceTests(ITestOutputHelper output)
             state, initial, null, CancellationToken.None, inspectAllRecords: true);
         long warmMilliseconds = timer.ElapsedMilliseconds;
 
-        cold.FrontMatterObservations.Should().HaveCount(recordCount);
+        cold.FrontMatterObservations.Should().HaveCount(distinctFormats,
+            "content-keyed facts are stored once, not repeated for every record that uses them");
         cold.FrontMatterInspectionCount.Should().Be(distinctFormats);
         warm.FrontMatterInspectionCount.Should().Be(0);
         warm.FrontMatterCacheHitCount.Should().Be(recordCount);

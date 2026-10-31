@@ -14,6 +14,25 @@ namespace CalibreLibraryCleaner.Application.Tests.Executions;
 public sealed class ExecuteQuarantineCleanupUseCaseTests
 {
     [Fact]
+    public async Task Explicit289BookMoveTouchesOnlyThoseBooksNotTheWholeLibraryOrMetadataRepairs()
+    {
+        Harness harness = new(copyFails: false, recordCount: 1000);
+
+        QuarantineCleanupResult result = await harness.ExecuteAsync(selectedRecordCount: 289);
+
+        result.IsCompleted.Should().BeTrue();
+        result.CopiedRecordCount.Should().Be(289);
+        result.RemovedSourceRecordCount.Should().Be(289);
+        CalibreMutationOperation[] operations = harness.Chunks.SelectMany(value => value.Operations).ToArray();
+        operations.Should().HaveCount(578);
+        operations.Should().OnlyContain(value => value.RecordId.Value >= 1 && value.RecordId.Value <= 289);
+        operations.Take(289).Should().OnlyContain(value => value.Kind == CalibreMutationOperationKind.CopyRecordToQuarantine);
+        operations.Skip(289).Should().OnlyContain(value => value.Kind == CalibreMutationOperationKind.RemoveRecordWithContent);
+        harness.AppliedDeltas.Should().HaveCount(289)
+            .And.OnlyContain(value => value is RemoveRecordWithContentLibraryStateDelta);
+    }
+
+    [Fact]
     public async Task CopiesAllBeforeDeletingAndProjectsVerifiedRemoval()
     {
         Harness harness = new(copyFails: false);
@@ -38,6 +57,9 @@ public sealed class ExecuteQuarantineCleanupUseCaseTests
         QuarantineCleanupResult result = await harness.ExecuteAsync();
 
         result.State.Should().Be(QuarantineCleanupState.PartiallyCompleted);
+        result.Issues.Should().Contain(value => value.Code == "QUARANTINE.COPY_FAILED"
+            && value.Explanation.Contains("record ID 1", StringComparison.Ordinal)
+            && value.Explanation.Contains("no source deletion began", StringComparison.Ordinal));
         harness.Chunks.SelectMany(value => value.Operations).Should().OnlyContain(value =>
             value.Kind == CalibreMutationOperationKind.CopyRecordToQuarantine);
         harness.AppliedDeltas.Should().BeEmpty();
@@ -249,9 +271,17 @@ public sealed class ExecuteQuarantineCleanupUseCaseTests
         public List<CalibreMutationChunkRequest> Chunks { get; } = [];
         public List<LibraryStateDelta> AppliedDeltas { get; } = [];
 
-        public Task<QuarantineCleanupResult> ExecuteAsync() => _useCase.ExecuteAsync(
-            _request,
-            null,
-            CancellationToken.None);
+        public Task<QuarantineCleanupResult> ExecuteAsync(int? selectedRecordCount = null)
+        {
+            ExecuteQuarantineCleanupRequest request = _request;
+            if (selectedRecordCount is int count)
+            {
+                QuarantineReviewWorkspace review = PrepareQuarantineReviewUseCase.SetAllInclude(request.Review, false);
+                review = PrepareQuarantineReviewUseCase.SetInclude(review,
+                    review.Subjects.Take(count).Select(value => value.BookId).ToArray(), true);
+                request = request with { Review = review };
+            }
+            return _useCase.ExecuteAsync(request, null, CancellationToken.None);
+        }
     }
 }

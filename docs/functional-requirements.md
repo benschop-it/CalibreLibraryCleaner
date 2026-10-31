@@ -20,6 +20,9 @@ verified.
   when the worker proves the complete target field, cover, managed path, author sort,
   and protected local fields exactly match their pre-write state. Any changed or
   unreadable post-state remains ambiguous and stops the run.
+- A managed-name rejection follows the same proof-based continuation rule, with
+  complete record/file evidence rather than only the target metadata field.
+  Skipped books are reported separately and do not become verified naming evidence.
 
 ## Implemented workflow
 
@@ -170,6 +173,14 @@ versions. Reduced local embedding comparisons are cached by input hashes plus
 runtime/model/preprocessing/comparison versions. Raw queries, model inputs, vectors,
 and provider payloads are not stored. Cache loss affects performance, not matching
 semantics.
+
+Repeated author/identity stages must reuse compatible assessment and current
+workspace facts before opening formats again. Bind reuse to format, full content
+fingerprint and extractor/analyzer/resource versions, not an obsolete filename.
+Use indexed record/file evidence lookup and one shared observation per complete
+key, including per-run reuse when persistent cache writes fail. A warm workspace
+should start zero parsers and need no further metadata-cache reads for unchanged
+covered facts. Do not equate this with skipping necessary copy/mutation read-back.
 
 SHA-256 cache entries use a one-way identity over canonical library root, expected
 relative path, and hash policy; store only fingerprint, exact file observation, and
@@ -405,12 +416,30 @@ bounded, HTTPS-only, outside the library, and removed after the run.
   `(record ID)` paths, registered basenames, format availability/count, unchanged
   fingerprints/bytes, and preserved metadata/local fields. No-op metadata tricks,
   direct renames, retries, or fallback engines are permitted.
+- Do not stop useful managed-name work merely because one book's update is rejected
+  without changing it. Report that book as skipped and continue other records only
+  after complete fresh pre/post read-back proves exact unchanged state. Check
+  Windows sharing locks read-only before calling Calibre; this avoids attribute
+  side effects of a rename that Calibre cannot perform. Do not retry the update.
+  Changed or unverifiable outcomes still stop and require explicit Scan. Keep
+  skipped naming counts/IDs/reasons distinct from metadata skips and actual naming
+  successes. Skipped naming remains pending/unverified during disposition, without
+  preventing assessment of other retained records.
 - After final author and managed-name cleanup succeeds, prepare a final reviewed
   disposition for every retained record, independently assessing title and author
   identity, usable content, and managed layout. Outcomes are Qualified, Repairable,
   Needs review, or Proposed Unresolvable. Catalog plausibility, absent final-author
   subjects, and exact placeholder labels alone do not establish qualification or
   authorize a default transfer.
+- Showing the quarantine selection list must not start another library-wide
+  identity/document inspection or online repair search. Build it from current
+  catalog values and already available evidence. An explicit checked quarantine
+  move does not require opening-page identity certification of every retained
+  book; it requires fresh selected-record identity/format preconditions, backup
+  confirmation and the fixed worker's copy/read-back/delete verification.
+  Leave unverified other records pending in optional accounting, not blocked behind
+  mandatory whole-library inspection. Optional Find repairs inspects only its
+  selected books and preserves observations/choices for the others.
 - Reuse bounded opening-page EPUB/PDF inspection for paired title/subtitle and
   ordered author candidates with unit/line locations. Unlabelled pairs remain
   uncertain. Editor, translator, illustrator, foreword, publisher and dedication
@@ -427,21 +456,61 @@ bounded, HTTPS-only, outside the library, and removed after the run.
   providers, missing keys, caps and timeouts are not completed negative findings.
   Conflicts and unresolved companion defects require review.
 - Offer targeted read-only identity repair from the existing Unresolvable review.
+  The Find repairs for selected action must query and publish results only for the
+  selected rows, or the current row when there is no multi-selection. Disable it
+  without a current selection. Require explicit validated scope in Application;
+  never widen a missing/invalid selection to other suspect library records.
+  Progress identifies the record ID or selected-record count, and reports actual
+  cache hits/HTTP requests. One book can require multiple bounded provider queries.
   Use a unique explicit local title/byline pair when available; suspect authors may
   use bounded title-only retrieval. Title-only alternatives remain ambiguous and
   title-only provider agreement stays Low/unchecked. Existing bibliographic budgets,
   field disclosure, caches, provenance and applicability policies remain in force.
   Local identity repair searches use text validation rather than blindly trusting
   a catalog ISBN that may identify a different publication.
-- Final repair review starts unchecked. Apply reviewed non-author fields through
+- Final repair review starts unchecked.
+  Metadata repairs and quarantine moves have separate explicit actions and
+  independent checked counts/confirmations. Preparing or checking repairs must
+  not replace a quarantine move button with a metadata-update action.
+  Only selected records appear in the repair workspace; preserve unrelated saved
+  Apply decisions, unselected quarantine choices/evidence and complete accounting.
+  A read-only repair search must retain every checked and explicitly unchecked
+  quarantine move, including the selected repaired record. Checking a Metadata
+  proposal, switching tabs or changing the problem view is not a request to clear
+  those moves. Reassessment may replace evidence but not the user's move choices.
+  Preserve provider provenance through Apply changes. Apply reviewed non-author fields through
   the metadata-only worker action; then carry reviewed author proposals into Final
   authors for a separately confirmed author/managed-name action and shared-author
   reconciliation. Reassess actual current values afterward; never rewrite already
   applied fields merely to advance review.
 - Permit explicit reviewer acceptance of title, complete credits, retained content
   and disclosed format defects after inspection, and explicit manual transfer by
-  record ID or individual selection. Check all selects only policy proposals or
-  previously manual transfers. Exclusion/Skip is not acceptance.
+  record ID or individual selection. In Unresolvable review, **Check all shown**
+  selects exactly the visible books as an explicit quarantine choice, including
+  previously unchecked problem rows; hidden books are untouched. Disable it when
+  no visible unchecked books exist. Uncheck all clears every move choice.
+  Exclusion/Skip is not acceptance.
+- Mutation progress must name the actual current operation: checked metadata,
+  final-author corrections or full managed-name/byte verification. Do not label
+  every phase unified Candidate cleanup or imply that a naming pass moves
+  quarantine records. Already-canonical names can leave no visible path change
+  while the required hash/read-back work still progresses.
+- Present Unresolvable as a problem-focused list, not seven overlapping qualification
+  filters. Default to detected catalog problems, confirmed unusable content and
+  checked moves; offer one optional Show all books checkbox. Proper-looking books
+  lacking opening-page identity/readability/naming proof must not be presented as
+  diagnosed bad metadata. Keep internal qualification and complete accounting intact.
+- Describe the suspected problem and inspection action in plain language. Review-only
+  signals reuse bounded current title/author triage and flag complete multi-token
+  author credits attached to title text by explicit separators, numeric bracketed
+  author annotations, and explicit opening-page evidence of swapped title/author
+  fields. These warnings do not change matching or automatically authorize moves.
+  Legitimate author mentions, single-word credits and life-date ranges are not
+  newly classified as corrupt metadata by those extra checks.
+- Use a single editable Move checkbox per book. Manual assignment and internal
+  qualification are not checkbox columns. Put technical codes, evidence coverage,
+  optional reviewer certification and ID-based assignment in clearly labelled
+  optional details/tools. Explain missing verification separately from defects.
 - Freeze retained-input accounting for the final pass. A finished high-quality
   source requires `retained input = qualified remaining + verified moved`, with
   zero pending records. Existing destination records are not new moves. A completed

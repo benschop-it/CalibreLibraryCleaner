@@ -73,8 +73,10 @@ public sealed class VersionedJsonLibraryStateStoreTests
         loaded.Status.Should().Be(LibraryStateStatus.Authoritative);
     }
 
-    [Fact]
-    public async Task VerifiedUnchangedMetadataSkipRoundTripsWithoutChangingSnapshot()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task VerifiedUnchangedSkipRoundTripsWithoutChangingSnapshot(bool managedName)
     {
         using TemporaryDirectory directory = new();
         InfrastructureExecutionFixture fixture = InfrastructureExecutionTestData.Create(directory.Path);
@@ -86,7 +88,10 @@ public sealed class VersionedJsonLibraryStateStoreTests
         LibraryStateMutationIntent intent = new(
             "metadata-intent", baseline.GenerationId, baseline.Revision, 1,
             baseline.ProjectedAtUtc.AddSeconds(1));
-        SkipMetadataLibraryStateDelta skip = new(
+        LibraryStateDelta skip = managedName ? new SkipManagedNameLibraryStateDelta(
+            baseline.GenerationId, baseline.Revision, "naming-skip",
+            baseline.ProjectedAtUtc.AddSeconds(1), target.Id,
+            "managed_name_update_path_os_error_errno_13_winerror_32") : new SkipMetadataLibraryStateDelta(
             baseline.GenerationId,
             baseline.Revision,
             "metadata-skip",

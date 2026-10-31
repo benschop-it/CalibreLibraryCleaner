@@ -1,3 +1,4 @@
+import copy
 import hashlib
 import json
 import os
@@ -8,7 +9,7 @@ from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
 
 
-PROTOCOL_VERSION = "calibre-mutation-worker-protocol/1.6"
+PROTOCOL_VERSION = "calibre-mutation-worker-protocol/1.7"
 MAXIMUM_MESSAGE_BYTES = 1048576
 MAXIMUM_OPERATIONS = 100
 CAPABILITIES = ["setMetadata", "refreshManagedName", "transferFormat", "removeFormat", "removeRecord",
@@ -306,7 +307,7 @@ def hash_file(path):
 def managed_format_state(cache, book_id, library_root=None):
     library_root = LIBRARY_ROOT if library_root is None else library_root
     result = []
-    for fmt in sorted(cache.formats(book_id, verify_formats=True) or ()):
+    for fmt in sorted(cache.formats(book_id, verify_formats=False) or ()):
         canonical = fmt.upper()
         path = os.path.realpath(cache.format_abspath(book_id, canonical))
         if os.path.commonpath((library_root, path)) != library_root or not os.path.isfile(path):
@@ -366,6 +367,8 @@ def managed_record_state(cache, book_id, library_root=None):
         if metadata.get("datatype") == "composite"
     }
     return {
+        "managedPath": cache.field_for("path", book_id),
+        "identity": {name: cache.field_for(name, book_id) for name in ("uuid", "timestamp", "last_modified")},
         "metadata": {name: cache.field_for(name, book_id) for name in fields},
         "local": local_values(cache, book_id),
         "cover": cache.cover(book_id),
@@ -378,35 +381,122 @@ def managed_record_state(cache, book_id, library_root=None):
 
 def refresh_managed_name(cache, operation):
     book_id = operation["recordId"]
-    before = managed_record_state(cache, book_id)
-    cache.update_path({book_id})
-    cache.clear_caches(book_ids={book_id})
-    after = managed_record_state(cache, book_id)
-    before_formats = [(value["format"], value["sizeInBytes"], value["sha256"])
-                      for value in before["formats"]]
-    after_formats = [(value["format"], value["sizeInBytes"], value["sha256"])
-                     for value in after["formats"]]
-    if before["metadata"] != after["metadata"] or before["local"] != after["local"] \
-            or before["cover"] != after["cover"] or before_formats != after_formats:
-        raise ValueError("managed_name_record_changed")
-    managed_path = cache.field_for("path", book_id)
-    if not isinstance(managed_path, str) or len(managed_path) > 1024 \
-            or any(ord(character) < 32 for character in managed_path):
+    phase = "before_readback"
+    try:
+        before = copy.deepcopy(managed_record_state(cache, book_id))
+        phase = "preflight"
+        probe_managed_name_sharing(before)
+        phase = "update_path"
+        cache.update_path({book_id})
+        phase = "clear_caches"
+        cache.clear_caches(book_ids={book_id})
+        phase = "after_readback"
+        after = managed_record_state(cache, book_id)
+        phase = "verification"
+        before_formats = [(value["format"], value["sizeInBytes"], value["sha256"])
+                          for value in before["formats"]]
+        after_formats = [(value["format"], value["sizeInBytes"], value["sha256"])
+                         for value in after["formats"]]
+        # A successful Calibre path update marks the book dirty; rejection proof below still compares every field.
+        before_identity = {name: value for name, value in before["identity"].items() if name != "last_modified"}
+        after_identity = {name: value for name, value in after["identity"].items() if name != "last_modified"}
+        if before["metadata"] != after["metadata"] or before_identity != after_identity \
+                or before["local"] != after["local"] \
+                or before["cover"] != after["cover"] or before_formats != after_formats:
+            raise ValueError("managed_name_record_changed")
+        managed_path = cache.field_for("path", book_id)
+        if not isinstance(managed_path, str) or len(managed_path) > 1024 \
+                or any(ord(character) < 32 for character in managed_path):
+            raise ValueError("managed_name_path_invalid")
+        normalized = managed_path.replace("\\", "/").strip("/")
+        segments = normalized.split("/")
+        if len(segments) != 2 or not all(segments) \
+                or not segments[1].endswith(" ({})".format(book_id)):
+            raise ValueError("managed_name_layout_invalid")
+        directory = os.path.realpath(os.path.join(LIBRARY_ROOT, *segments))
+        if os.path.commonpath((LIBRARY_ROOT, directory)) != LIBRARY_ROOT \
+                or not os.path.isdir(directory):
+            raise ValueError("managed_name_directory_unavailable")
+        formats = after["formats"]
+        for value in formats:
+            actual_path = os.path.realpath(os.path.join(LIBRARY_ROOT, value["relativePath"]))
+            if os.path.dirname(actual_path) != directory \
+                    or actual_path != os.path.realpath(os.path.join(directory, value["storedFileName"])):
+                raise ValueError("managed_name_format_containment_failed")
+        return {"managedPath": normalized, "formats": protocol_format_state(formats)}
+    except Exception as exception:
+        code = managed_name_failure_code(phase, exception)
+        if phase == "update_path" or phase == "preflight" and isinstance(exception, OSError):
+            try:
+                cache.clear_caches(book_ids={book_id})
+                unchanged = managed_record_state(cache, book_id) == before
+            except Exception as readback_exception:
+                raise ValueError(managed_name_failure_code(
+                    "rejection_readback", readback_exception)) from readback_exception
+            if unchanged:
+                return {"isSkipped": True, "skipCode": code}
+        raise ValueError(code) from exception
+
+
+def probe_managed_name_sharing(state):
+    if os.name != "nt":
+        return
+    import ctypes
+    from ctypes import wintypes
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel32.CreateFileW.argtypes = (
+        wintypes.LPCWSTR, wintypes.DWORD, wintypes.DWORD, wintypes.LPVOID,
+        wintypes.DWORD, wintypes.DWORD, wintypes.HANDLE,
+    )
+    kernel32.CreateFileW.restype = wintypes.HANDLE
+    kernel32.CloseHandle.argtypes = (wintypes.HANDLE,)
+    kernel32.CloseHandle.restype = wintypes.BOOL
+    directory = os.path.realpath(os.path.join(LIBRARY_ROOT, state["managedPath"]))
+    if os.path.commonpath((LIBRARY_ROOT, directory)) != LIBRARY_ROOT:
         raise ValueError("managed_name_path_invalid")
-    normalized = managed_path.replace("\\", "/").strip("/")
-    segments = normalized.split("/")
-    if len(segments) != 2 or not all(segments) \
-            or not segments[1].endswith(" ({})".format(book_id)):
-        raise ValueError("managed_name_layout_invalid")
-    directory = os.path.realpath(os.path.join(LIBRARY_ROOT, *segments))
-    if os.path.commonpath((LIBRARY_ROOT, directory)) != LIBRARY_ROOT \
-            or not os.path.isdir(directory):
-        raise ValueError("managed_name_directory_unavailable")
-    formats = managed_format_state(cache, book_id, LIBRARY_ROOT)
-    for value in formats:
-        if os.path.dirname(os.path.realpath(os.path.join(directory, value["storedFileName"]))) != directory:
+    paths = [os.path.join(LIBRARY_ROOT, value["relativePath"]) for value in state["formats"]]
+    paths.extend(os.path.join(directory, value[0]) for value in state["extraFiles"])
+    paths.extend(os.path.join(directory, name) for name in ("cover.jpg", "metadata.opf")
+                 if os.path.isfile(os.path.join(directory, name)))
+    for path in paths:
+        canonical = os.path.realpath(path)
+        if os.path.commonpath((LIBRARY_ROOT, canonical)) != LIBRARY_ROOT:
             raise ValueError("managed_name_format_containment_failed")
-    return {"managedPath": normalized, "formats": protocol_format_state(formats)}
+        if not canonical.startswith("\\\\?\\"):
+            canonical = "\\\\?\\UNC\\" + canonical[2:] if canonical.startswith("\\\\") \
+                else "\\\\?\\" + canonical
+        # Request rename sharing, without writing/deleting or restricting other handles.
+        handle = kernel32.CreateFileW(canonical, 0x00010000, 7, None, 3, 0x80, None)
+        if handle == wintypes.HANDLE(-1).value:
+            raise ctypes.WinError(ctypes.get_last_error())
+        if not kernel32.CloseHandle(handle):
+            raise RuntimeError("managed_name_preflight_handle_close_failed")
+
+
+def managed_name_failure_code(phase, exception):
+    validation_codes = {
+        "managed_format_unavailable", "managed_format_changed_while_hashing",
+        "managed_format_not_a_regular_file", "managed_name_target_missing",
+        "managed_extra_file_unavailable", "managed_name_record_changed",
+        "managed_name_path_invalid", "managed_name_layout_invalid",
+        "managed_name_directory_unavailable", "managed_name_format_containment_failed",
+    }
+    if type(exception) is ValueError and len(exception.args) == 1 \
+            and isinstance(exception.args[0], str) and exception.args[0] in validation_codes:
+        return exception.args[0]
+    categories = (
+        (OSError, "os_error"), (LookupError, "lookup_error"), (TypeError, "type_error"),
+        (ArithmeticError, "arithmetic_error"), (ValueError, "value_error"),
+        (RuntimeError, "runtime_error"),
+    )
+    category = next((name for kind, name in categories if isinstance(exception, kind)), "unexpected_error")
+    code = "managed_name_{}_{}".format(phase, category)
+    if isinstance(exception, OSError):
+        for name in ("errno", "winerror"):
+            number = getattr(exception, name, None)
+            if type(number) is int and 0 <= number <= 65535:
+                code += "_{}_{}".format(name, number)
+    return code
 
 
 def protocol_format_state(formats):
@@ -751,7 +841,10 @@ def execute_chunk(cache, source_legacy, destination_cache, destination_legacy, m
         for operation in (value for value in operations if value["kind"] == "refreshManagedName"):
             mutation_started = True
             managed_name = refresh_managed_name(cache, operation)
-            results.append(operation_result(operation, True, managed_name=managed_name))
+            skipped = managed_name.get("isSkipped", False)
+            results.append(operation_result(
+                operation, True, managed_name=None if skipped else managed_name,
+                skipped=skipped, skip_code=managed_name.get("skipCode")))
             completed_ids.add(operation["operationId"])
 
         for operation in (value for value in operations if value["kind"] == "transferFormat"):

@@ -11,6 +11,172 @@ namespace CalibreLibraryCleaner.Application.Tests.Metadata;
 public sealed class PrepareMetadataReviewUseCaseTests
 {
     [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task SelectedRepairScopeLimitsColdAndWarmQueriesAndPreservesUnrelatedDecisions(bool multiple)
+    {
+        CalibreBook[] books = Enumerable.Range(1, 1000).Select(id => new CalibreBook(
+            new(id), $"Generated Journey {id}", "Generated Writer",
+            [new(new(id), id == 467 ? "Generated Writer" : "Generated Writer [12]", "Writer, Generated")],
+            [], [], $"Generated/Book ({id})")).ToArray();
+        LibraryStateGenerationId generation = new(Guid.NewGuid());
+        LibraryState state = new(generation, new(0), LibraryStateStatus.Authoritative,
+            new(new("generated", 1, "C:\\generated"), DateTimeOffset.UnixEpoch, books, []),
+            DateTimeOffset.UnixEpoch, workflowCheckpoint: new(
+                LibraryWorkflowPhase.Completed, generation, new(0), LibraryWorkflowPolicyVersions.Current,
+                DateTimeOffset.UnixEpoch, new(generation, new(0))));
+        FinalAuthorReviewWorkspace identity = PrepareFinalAuthorReviewUseCase.Execute(state);
+        CalibreBookId[] selected = multiple ? [new(467), new(901)] : [new(467)];
+        EditionMetadataProviderIdentity providerIdentity = new("provider", "1.0");
+        IEditionMetadataProvider provider = A.Fake<IEditionMetadataProvider>();
+        A.CallTo(() => provider.Identity).Returns(providerIdentity);
+        List<long> providerBooks = [];
+        A.CallTo(() => provider.SearchAsync(A<EditionMetadataLookupQuery>._, A<CancellationToken>._))
+            .ReturnsLazily(call =>
+            {
+                EditionMetadataLookupQuery query = call.GetArgument<EditionMetadataLookupQuery>(0)!;
+                providerBooks.Add(query.BookId.Value);
+                return Task.FromResult(new EditionMetadataSearchResult(providerIdentity, EditionMetadataSearchStatus.Success,
+                    DateTimeOffset.UnixEpoch, [new("generated-work", $"edition-{query.BookId.Value}",
+                        query.Title!, ["Generated Writer"], publisher: "Generated Publisher")]));
+            });
+        Dictionary<CalibreBookId, EditionMetadataProposal> cached = [];
+        List<long> cacheReads = [];
+        IEditionMetadataProposalCache cache = A.Fake<IEditionMetadataProposalCache>();
+        A.CallTo(() => cache.TryReadAsync(A<EditionMetadataLookupQuery>._,
+                A<DateTimeOffset>._, A<CancellationToken>._)).ReturnsLazily(call =>
+            {
+                CalibreBookId id = call.GetArgument<EditionMetadataLookupQuery>(0)!.BookId;
+                cacheReads.Add(id.Value);
+                return Task.FromResult(cached.GetValueOrDefault(id));
+            });
+        A.CallTo(() => cache.WriteAsync(A<EditionMetadataLookupQuery>._,
+                A<EditionMetadataProposal>._, A<CancellationToken>._)).Invokes(call =>
+            {
+                EditionMetadataProposal proposal = call.GetArgument<EditionMetadataProposal>(1)!;
+                cached[proposal.BookId] = proposal;
+            }).Returns(Task.CompletedTask);
+        MetadataReviewDecision other = new(new(new("metadata-review/book/2"),
+            FusedEditionMetadataProposal.CurrentPolicyVersion, new(providerIdentity, "other-edition"),
+            generation, state.Revision), true);
+        List<MetadataReviewDecision> saved = [other];
+        IMetadataReviewDecisionStore store = A.Fake<IMetadataReviewDecisionStore>();
+        A.CallTo(() => store.ReadAsync(A<string>._, A<CancellationToken>._))
+            .ReturnsLazily(() => Task.FromResult<IReadOnlyList<MetadataReviewDecision>>(saved.ToArray()));
+        A.CallTo(() => store.WriteAsync(A<string>._, A<IReadOnlyList<MetadataReviewDecision>>._, A<CancellationToken>._))
+            .Invokes(call =>
+            {
+                MetadataReviewDecision[] next = call.GetArgument<IReadOnlyList<MetadataReviewDecision>>(1)!.ToArray();
+                saved.Clear();
+                saved.AddRange(next);
+            }).Returns(Task.CompletedTask);
+        IClock clock = A.Fake<IClock>();
+        A.CallTo(() => clock.GetUtcNow()).Returns(DateTimeOffset.UnixEpoch);
+        PrepareMetadataReviewUseCase useCase = new(new([provider], cache, clock, new()), store);
+
+        MetadataReviewWorkspace first = await useCase.ExecuteAsync(state, [], null, CancellationToken.None, identity, selected);
+
+        first.Subjects.Select(value => value.Subject.TargetBookId).Should().BeEquivalentTo(selected);
+        first.Subjects.Should().OnlyContain(value => !value.Apply);
+        first.ProviderResults!.InputIdentities!.Keys.Should().BeEquivalentTo(selected);
+        first.ProviderResults.Providers.Sum(value => value.ProviderRequests).Should().Be(selected.Length);
+        providerBooks.Should().BeEquivalentTo(selected.Select(value => value.Value));
+        cacheReads.Should().OnlyContain(id => selected.Select(value => value.Value).Contains(id));
+        saved.Should().Equal(other);
+        MetadataReviewWorkspace applied = await useCase.SetApplyAsync(
+            first, first.Subjects.First(value => value.Subject.Proposal.Candidate is not null).Subject.Id,
+            true, CancellationToken.None);
+        applied.ProviderResults.Should().BeSameAs(first.ProviderResults);
+        saved.Should().Contain(other);
+        MetadataReviewWorkspace cleared = await useCase.SetAllApplyAsync(applied, false, CancellationToken.None);
+        cleared.ProviderResults.Should().BeSameAs(first.ProviderResults);
+        saved.Should().Equal(other);
+        int requestsBefore = providerBooks.Count;
+
+        MetadataReviewWorkspace warm = await useCase.ExecuteAsync(state, [], null, CancellationToken.None, identity, selected);
+
+        providerBooks.Should().HaveCount(requestsBefore);
+        warm.ProviderResults!.Providers.Sum(value => value.ProviderRequests).Should().Be(0);
+        warm.ProviderResults.Providers.Sum(value => value.CacheHits).Should().Be(selected.Length);
+        warm.Subjects.Should().HaveCount(selected.Length).And.OnlyContain(value => !value.Apply);
+        saved.Should().Equal(other);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task SelectedLocalRepairNeverPublishesUnselectedLocalCandidatesAndStaysUncheckedOnDecisionFailure(bool readFails)
+    {
+        FormatFileFingerprint fingerprint = new(100, new(new string('b', 64)));
+        CalibreBook Book(int id) => new(new(id), "Broken Label", "Writer, Reliable",
+            [new(new(id), "Reliable Writer", "Writer, Reliable")], [],
+            [new("EPUB", "book", $"Writer/Book ({id})/book.epub", FormatFileStatus.Present, fingerprint,
+                new(100, DateTimeOffset.UnixEpoch, DateTimeOffset.UnixEpoch, 0))], $"Writer/Book ({id})");
+        CalibreBook[] books = [Book(467), Book(901)];
+        LibraryStateGenerationId generation = new(Guid.NewGuid());
+        LibraryState state = new(generation, new(0), LibraryStateStatus.Authoritative,
+            new(new("generated", 1, "C:\\generated"), DateTimeOffset.UnixEpoch, books, []),
+            DateTimeOffset.UnixEpoch, workflowCheckpoint: new(
+                LibraryWorkflowPhase.Completed, generation, new(0), LibraryWorkflowPolicyVersions.Current,
+                DateTimeOffset.UnixEpoch, new(generation, new(0))));
+        FrontMatterAuthorObservation observation = new(
+            "EPUB", fingerprint, FrontMatterAuthorVersions.EpubExtractor, FrontMatterAuthorVersions.Limits,
+            FrontMatterAuthorStatus.Available,
+            [new(AuthorCreditRole.Author, ["Reliable Writer"], 1, 2, "By")], 1, 1, 100, false,
+            identityCandidates: [new("Corrected Title", ["Reliable Writer"], 1, 1, 2, true)]);
+        FinalAuthorReviewWorkspace identity = PrepareFinalAuthorReviewUseCase.Execute(
+            state, frontMatterObservations: [observation]);
+        IMetadataReviewDecisionStore store = A.Fake<IMetadataReviewDecisionStore>();
+        if (readFails)
+            A.CallTo(() => store.ReadAsync(A<string>._, A<CancellationToken>._)).Throws(new IOException("generated failure"));
+        PrepareMetadataReviewUseCase useCase = new(
+            new([], A.Fake<IEditionMetadataProposalCache>(), A.Fake<IClock>(), new()), store);
+
+        MetadataReviewWorkspace result = await useCase.ExecuteAsync(state, [], null, CancellationToken.None, identity, [new(467)]);
+
+        ReviewedMetadataSubject row = result.Subjects.Should().ContainSingle().Subject;
+        row.Subject.TargetBookId.Should().Be(new CalibreBookId(467));
+        row.Subject.Proposal.Candidate!.Title.Should().Be("Corrected Title");
+        row.Apply.Should().BeFalse();
+        result.ProviderResults!.Providers.Single().Proposals.Keys.Should().Equal(new CalibreBookId(467));
+        result.PersistenceAvailable.Should().Be(!readFails);
+    }
+
+    [Theory]
+    [InlineData("absent")]
+    [InlineData("empty")]
+    [InlineData("duplicate")]
+    [InlineData("unknown")]
+    [InlineData("without-evidence")]
+    public async Task InvalidRepairScopeNeverFallsBackToWholeLibraryOrStartsIo(string kind)
+    {
+        Harness harness = Harness.Create();
+        LibraryState old = harness.State;
+        LibraryState state = new(old.GenerationId, old.Revision, old.Status, old.Snapshot, old.ProjectedAtUtc,
+            workflowCheckpoint: new(LibraryWorkflowPhase.Completed, old.GenerationId, old.Revision,
+                LibraryWorkflowPolicyVersions.Current, old.ProjectedAtUtc, new(old.GenerationId, old.Revision)));
+        FinalAuthorReviewWorkspace identity = PrepareFinalAuthorReviewUseCase.Execute(state);
+        CalibreBookId[]? selected = kind switch
+        {
+            "absent" => null,
+            "empty" => [],
+            "duplicate" => [new(1), new(1)],
+            "unknown" => [new(467)],
+            _ => [new(1)],
+        };
+        Func<Task> act = () => harness.UseCase.ExecuteAsync(state, [], null, CancellationToken.None,
+            kind == "without-evidence" ? null : identity, selected);
+
+        await act.Should().ThrowAsync<ArgumentException>();
+
+        A.CallTo(() => harness.Provider.SearchAsync(A<EditionMetadataLookupQuery>._, A<CancellationToken>._))
+            .MustNotHaveHappened();
+        A.CallTo(() => harness.Cache.TryReadAsync(A<EditionMetadataLookupQuery>._,
+            A<DateTimeOffset>._, A<CancellationToken>._)).MustNotHaveHappened();
+        A.CallTo(() => harness.Store.ReadAsync(A<string>._, A<CancellationToken>._)).MustNotHaveHappened();
+    }
+
+    [Theory]
     [InlineData("A.C. Baantjer")]
     [InlineData("Baantjer, A.C.")]
     public async Task CachedCompactInitialsCannotReopenAlreadyCanonicalCurrentAuthorWork(string providerAuthor)
@@ -120,7 +286,7 @@ public sealed class PrepareMetadataReviewUseCaseTests
             A.Fake<IMetadataReviewDecisionStore>());
 
         MetadataReviewWorkspace result = await useCase.ExecuteAsync(
-            state, [], null, CancellationToken.None, identity);
+            state, [], null, CancellationToken.None, identity, [book.Id]);
 
         ReviewedMetadataSubject repair = result.Subjects.Should().ContainSingle().Subject;
         repair.Apply.Should().BeFalse();

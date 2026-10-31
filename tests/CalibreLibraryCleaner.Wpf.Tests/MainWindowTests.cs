@@ -6,6 +6,7 @@ using System.Windows.Input;
 using System.Windows.Media;
 using CalibreLibraryCleaner.Application.Abstractions;
 using CalibreLibraryCleaner.Application.Libraries;
+using CalibreLibraryCleaner.Application.Metadata;
 using CalibreLibraryCleaner.Domain.Libraries;
 using CalibreLibraryCleaner.Wpf.Services;
 using CalibreLibraryCleaner.Wpf.ViewModels;
@@ -155,13 +156,59 @@ public sealed class MainWindowTests
                 tabs.SelectedItem = tabs.Items.OfType<TabItem>().Single(item =>
                     string.Equals(item.Header?.ToString(), "_Unresolvable", StringComparison.Ordinal));
                 window.UpdateLayout();
-                DataGridCheckBoxColumn manualColumn = Descendants<DataGrid>(window)
-                    .SelectMany(grid => grid.Columns)
-                    .OfType<DataGridCheckBoxColumn>()
-                    .Single(column => string.Equals(column.Header?.ToString(), "Manual", StringComparison.Ordinal));
-                Binding manualBinding = manualColumn.Binding.Should().BeOfType<Binding>().Subject;
-                manualBinding.Path.Path.Should().Be(nameof(QuarantineReviewSubjectRowViewModel.IsManual));
-                manualBinding.Mode.Should().Be(BindingMode.OneWay);
+                DataGrid review = Descendants<DataGrid>(window).Single(grid =>
+                    BindingOperations.GetBindingExpression(grid, ItemsControl.ItemsSourceProperty)
+                        ?.ParentBinding.Path.Path == nameof(MainWindowViewModel.QuarantineReviewSubjects));
+                review.Columns.Select(column => column.Header?.ToString())
+                    .Should().Equal("Move", "Record", "Title", "Authors", "Problem to review");
+                review.Columns.OfType<DataGridCheckBoxColumn>().Should().BeEmpty();
+                review.Columns.OfType<DataGridTemplateColumn>().Should().ContainSingle();
+                Descendants<ComboBox>(tabs).Should().BeEmpty(
+                    "Unresolvable review must not expose seven overlapping qualification filters");
+                CheckBox showAll = Descendants<CheckBox>(tabs).Single();
+                BindingOperations.GetBindingExpression(showAll, ToggleButton.IsCheckedProperty)!
+                    .ParentBinding.Path.Path.Should().Be(nameof(MainWindowViewModel.ShowAllQuarantineRecords));
+                showAll.IsChecked.Should().BeFalse();
+                Descendants<Button>(tabs).Should().Contain(button =>
+                    button.Command == viewModel.CheckAllQuarantineIncludeCommand
+                    && button.Content.ToString() == "Check all _shown");
+                Descendants<Button>(tabs).Should().Contain(button =>
+                    button.Command == viewModel.ReviewIdentityRepairsCommand
+                    && button.Content.ToString() == "Find _repairs for selected"
+                    && !button.IsEnabled);
+                bool persisted = false;
+                QuarantineReviewSubjectRowViewModel example = new(
+                    new(new(42), "Mara Vale - The Mountain", [new(new(1), "Mara Vale", "Vale, Mara")], [],
+                        new([], [])),
+                    (_, include) =>
+                    {
+                        persisted = include;
+                        return Task.CompletedTask;
+                    });
+                review.ItemsSource = new[] { example };
+                review.SelectedItem = example;
+                viewModel.SelectedQuarantineReviewSubject = example;
+                review.ScrollIntoView(example);
+                window.UpdateLayout();
+                DataGridRow exampleRow = (DataGridRow)review.ItemContainerGenerator.ContainerFromIndex(0);
+                CheckBox move = Descendants<CheckBox>(exampleRow).Single();
+                move.IsEnabled.Should().BeTrue("Move is an editable choice even though text cells are read-only");
+                typeof(ToggleButton).GetMethod("OnClick",
+                    System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!
+                    .Invoke(move, null);
+                example.Include.Should().BeTrue();
+                persisted.Should().BeTrue("the actual checkbox must execute its bound selection command");
+                if (Environment.GetEnvironmentVariable("CLC_PROBLEM_REVIEW_CAPTURE") is { Length: > 0 } capture)
+                {
+                    window.UpdateLayout();
+                    System.Windows.Media.Imaging.RenderTargetBitmap image = new(
+                        (int)window.ActualWidth, (int)window.ActualHeight, 96, 96, PixelFormats.Pbgra32);
+                    image.Render(window);
+                    System.Windows.Media.Imaging.PngBitmapEncoder encoder = new();
+                    encoder.Frames.Add(System.Windows.Media.Imaging.BitmapFrame.Create(image));
+                    using System.IO.FileStream output = System.IO.File.Create(capture);
+                    encoder.Save(output);
+                }
                 window.Close();
             }
             catch (Exception exception)

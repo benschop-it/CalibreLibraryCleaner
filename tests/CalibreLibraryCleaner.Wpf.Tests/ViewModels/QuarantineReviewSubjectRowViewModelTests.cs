@@ -23,8 +23,11 @@ public sealed class QuarantineReviewSubjectRowViewModelTests
 
         row.Include.Should().BeFalse();
         row.Coverage.Should().Be("local-PDF: Unavailable");
-        row.MatchesFilter(QuarantineReviewFilterMode.NeedsReview).Should().BeTrue();
-        row.MatchesFilter(QuarantineReviewFilterMode.Qualified).Should().BeFalse();
+        row.HasDetectedProblem.Should().BeFalse("incomplete evidence is not a catalog defect");
+        row.IsVisible(false).Should().BeFalse();
+        row.IsVisible(true).Should().BeTrue();
+        row.VerificationSummary.Should().Contain("did not confirm");
+        row.ProblemSummary.Should().Contain("No specific");
     }
 
     [Fact]
@@ -47,13 +50,13 @@ public sealed class QuarantineReviewSubjectRowViewModelTests
         });
 
         row.Provenance.Should().Be("ManagedLayout: Unknown");
-        row.Reasons.Should().Be(FinalRecordDispositionReasonCodes.PlaceholderLabel);
+        row.Reasons.Should().Contain(FinalRecordDispositionReasonCodes.PlaceholderLabel);
         row.Include = false;
         await row.PersistIncludeCommand.ExecuteAsync(null);
 
         persisted.Should().Equal((new CalibreBookId(7), false));
-        row.MatchesFilter(QuarantineReviewFilterMode.Checked).Should().BeFalse();
-        row.MatchesFilter(QuarantineReviewFilterMode.Proposed).Should().BeTrue();
+        row.IsVisible(false).Should().BeFalse();
+        row.IsProposed.Should().BeTrue();
     }
 
     [Fact]
@@ -70,6 +73,55 @@ public sealed class QuarantineReviewSubjectRowViewModelTests
 
         row.IsManual.Should().BeTrue();
         row.IsProposed.Should().BeFalse();
-        row.MatchesFilter(QuarantineReviewFilterMode.Manual).Should().BeTrue();
+        row.IsVisible(false).Should().BeTrue("checked moves remain visible even without a detected defect");
+        row.TransferChoice.Should().Contain("You checked");
+    }
+
+    [Theory]
+    [InlineData("Jane Writer - A Book", "Jane Writer", "title includes")]
+    [InlineData("A Book", "A Book", "identical")]
+    [InlineData("A Book", "Jane Writer [12]", "bracketed number")]
+    public void ConcreteProblemsHaveReadableDescriptionsAndAnInspectionAction(string title, string author, string explanation)
+    {
+        QuarantineReviewSubject subject = new(new(1), title, [new(new(1), author, author)], [], new([], []));
+        QuarantineReviewSubjectRowViewModel row = new(subject, (_, _) => Task.CompletedTask);
+
+        row.HasDetectedProblem.Should().BeTrue();
+        row.IsVisible(false).Should().BeTrue();
+        row.ProblemSummary.Should().Contain(explanation).And.NotContain("AUTHOR.");
+        row.SuggestedAction.Should().Contain("Double-click").And.Contain("Leave Move unchecked");
+        row.Include.Should().BeFalse("new review-only signals never authorize an automatic transfer");
+    }
+
+    [Fact]
+    public void ExplicitlyAcceptedLegitimateWarningLeavesTheProblemListButRemainsInspectable()
+    {
+        FinalRecordQualificationEvidence evidence = new(
+            false, false, FinalRecordContentStatus.Usable, true, false, false, false, [],
+            reviewerAccepted: true);
+        QuarantineReviewSubject subject = new(new(1), "1997 The Journey",
+            [new(new(1), "Jane Writer", "Writer, Jane")], [],
+            new([], [], FinalRecordQualification.Qualified, evidence));
+        QuarantineReviewSubjectRowViewModel row = new(subject, (_, _) => Task.CompletedTask);
+
+        row.HasMetadataProblem.Should().BeTrue();
+        row.HasDetectedProblem.Should().BeFalse("the bound reviewer decision resolved the warning");
+        row.IsVisible(false).Should().BeFalse();
+        row.IsVisible(true).Should().BeTrue();
+        row.ProblemSummary.Should().Contain("Accepted by you");
+    }
+
+    [Fact]
+    public void ConfirmedUnusableContentIsAProblemWithoutInventingAnAuthorDefect()
+    {
+        FinalRecordQualificationEvidence evidence = new(
+            true, true, FinalRecordContentStatus.ConfirmedUnusable, true, false, false, false, []);
+        QuarantineReviewSubject subject = new(new(1), "A Book", [new(new(1), "Jane Writer", "Writer, Jane")], [],
+            new([], [], FinalRecordQualification.ProposedUnresolvable, evidence));
+        QuarantineReviewSubjectRowViewModel row = new(subject, (_, _) => Task.CompletedTask);
+
+        row.HasMetadataProblem.Should().BeFalse();
+        row.HasDetectedProblem.Should().BeTrue();
+        row.ProblemSummary.Should().Be("No usable retained format was found.");
     }
 }

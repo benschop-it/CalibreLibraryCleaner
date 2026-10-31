@@ -419,6 +419,9 @@ internal sealed class PersistentCalibreMutationWorkerSession(
             else if (failureSeen) return false;
             if (result.IsSuccess == (result.FailureCode is not null)) return false;
             if (result.IsSkipped != (result.IsSuccess && result.SkipCode is not null)
+                || result.IsSkipped && result.Kind is not (CalibreMutationOperationKind.SetMetadata
+                    or CalibreMutationOperationKind.RefreshManagedName)
+                || result.IsSkipped && string.IsNullOrWhiteSpace(result.SkipCode)
                 || result.SkipCode is { Length: > 128 }
                 || result.SkipCode?.Any(char.IsControl) == true)
                 return false;

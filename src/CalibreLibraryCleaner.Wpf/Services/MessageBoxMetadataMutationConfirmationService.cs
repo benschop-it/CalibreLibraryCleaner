@@ -7,6 +7,7 @@ internal sealed class MessageBoxMetadataMutationConfirmationService :
 {
     public bool ConfirmExternalBackup(int selectedProposalCount) => MessageBox.Show(
         $"Apply {selectedProposalCount:N0} checked online metadata proposal(s)?\n\n"
+        + "This changes metadata only. It does not move checked books to the Unresolvable quarantine library.\n\n"
         + "The application will not create or verify a backup. Continue only if a complete external backup of this Calibre library exists.",
         "Confirm metadata update",
         MessageBoxButton.YesNo,

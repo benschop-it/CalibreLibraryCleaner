@@ -253,6 +253,12 @@ public static class PrepareFinalAuthorReviewUseCase
         List<FinalAuthorReviewSubject> subjects = [];
         IReadOnlyList<EmbeddedAuthorMetadataObservation> observations = embeddedObservations ?? [];
         IReadOnlyList<FrontMatterAuthorObservation> frontMatter = frontMatterObservations ?? [];
+        ILookup<CalibreBookId, EpubAssessment> epubsByBook = state.Snapshot.EpubAssessments.ToLookup(value => value.CalibreBookId);
+        ILookup<CalibreBookId, PdfAssessment> pdfsByBook = state.Snapshot.PdfAssessments.ToLookup(value => value.CalibreBookId);
+        ILookup<(string Format, FormatFileFingerprint Fingerprint), EmbeddedAuthorMetadataObservation> metadataByFile =
+            observations.ToLookup(value => (value.Key.Format, value.Key.Fingerprint));
+        ILookup<(string Format, FormatFileFingerprint Fingerprint), FrontMatterAuthorObservation> frontMatterByFile =
+            frontMatter.ToLookup(value => (value.Format, value.Fingerprint));
         int knownCount = 0;
         int compatibleEvidenceCount = 0;
         foreach (CalibreBook book in state.Snapshot.Books.OrderBy(value => value.Id.Value))
@@ -272,8 +278,7 @@ public static class PrepareFinalAuthorReviewUseCase
 
             List<AuthorEvidenceObservation> evidence = [];
             FinalAuthorEvidenceCoverage coverage = FinalAuthorEvidenceCoverage.None;
-            foreach (EpubAssessment assessment in state.Snapshot.EpubAssessments.Where(
-                         value => value.CalibreBookId == book.Id))
+            foreach (EpubAssessment assessment in epubsByBook[book.Id])
             {
                 if (!IsCompatible(book, assessment)) continue;
                 compatibleEvidenceCount++;
@@ -283,8 +288,7 @@ public static class PrepareFinalAuthorReviewUseCase
                     EvidenceIdentity(assessment.Format, assessment.ObservedFingerprint!, assessment.AnalyzerVersion.Value),
                     assessment.Features.Authors));
             }
-            foreach (PdfAssessment assessment in state.Snapshot.PdfAssessments.Where(
-                         value => value.CalibreBookId == book.Id))
+            foreach (PdfAssessment assessment in pdfsByBook[book.Id])
             {
                 if (!IsCompatible(book, assessment)) continue;
                 compatibleEvidenceCount++;
@@ -296,8 +300,9 @@ public static class PrepareFinalAuthorReviewUseCase
                         ? [assessment.Features.Metadata.Author.Value!]
                         : []));
             }
-            foreach (EmbeddedAuthorMetadataObservation observation in observations.Where(value =>
-                         MatchesObservation(book, value)))
+            foreach (EmbeddedAuthorMetadataObservation observation in book.Formats.Where(value => value.Fingerprint is not null)
+                         .SelectMany(format => metadataByFile[(format.Format, format.Fingerprint!)])
+                         .DistinctBy(value => value.Key).Where(value => MatchesObservation(book, value)))
             {
                 compatibleEvidenceCount++;
                 AuthorEvidenceSource source = observation.Key.Format == "EPUB"
@@ -314,8 +319,9 @@ public static class PrepareFinalAuthorReviewUseCase
                         observation.Key.ExtractorVersion),
                     observation.Authors));
             }
-            FrontMatterAuthorObservation[] bookFrontMatter = frontMatter.Where(value =>
-                MatchesFrontMatterObservation(book, value)).ToArray();
+            FrontMatterAuthorObservation[] bookFrontMatter = book.Formats.Where(value => value.Fingerprint is not null)
+                .SelectMany(format => frontMatterByFile[(format.Format, format.Fingerprint!)])
+                .Where(value => MatchesFrontMatterObservation(book, value)).ToArray();
             foreach (FrontMatterAuthorObservation observation in bookFrontMatter)
             {
                 compatibleEvidenceCount++;
@@ -395,40 +401,41 @@ public static class PrepareFinalAuthorReviewUseCase
             frontMatterInspectionCount);
     }
 
-    private static bool IsCompatible(CalibreBook book, EpubAssessment assessment) =>
+    internal static bool IsCompatible(CalibreBook book, EpubAssessment assessment) =>
         assessment.ObservedFingerprint is not null
+        && assessment.CalibreBookId == book.Id
         && assessment.AnalyzerVersion == EpubAssessmentEngine.AnalyzerVersion
         && assessment.ScoringModelVersion == EpubAssessmentEngine.ScoringModelVersion
         && assessment.Features.PackageParsed
         && assessment.Features.AvailableFacets.HasFlag(EpubAssessmentFacet.Metadata)
-        && MatchingFormat(book, assessment.Format, assessment.ExpectedRelativePath, assessment.ObservedFingerprint) is not null;
+        && MatchingFormat(book, assessment.Format, assessment.ObservedFingerprint) is not null;
 
-    private static bool IsCompatible(CalibreBook book, PdfAssessment assessment) =>
+    internal static bool IsCompatible(CalibreBook book, PdfAssessment assessment) =>
         assessment.ObservedFingerprint is not null
+        && assessment.CalibreBookId == book.Id
         && assessment.ObservedObservation is not null
         && assessment.AnalyzerVersion == PdfAssessmentEngine.AnalyzerVersion
         && assessment.ScoringModelVersion == PdfAssessmentEngine.ScoringModelVersion
         && assessment.Features.ResourceProfileVersion == PdfAssessmentEngine.ResourceProfileVersion
         && assessment.Features.OpenStatus == PdfOpenStatus.Opened
-        && MatchingFormat(book, assessment.Format, assessment.ExpectedRelativePath, assessment.ObservedFingerprint)
-            is { Observation: not null } format
-        && format.Observation == assessment.ObservedObservation;
+        && MatchingFormat(book, assessment.Format, assessment.ObservedFingerprint) is not null;
 
     private static BookFormat? MatchingFormat(
         CalibreBook book,
         string format,
-        string expectedRelativePath,
         FormatFileFingerprint fingerprint) => book.Formats.SingleOrDefault(value =>
         value.FileStatus == FormatFileStatus.Present
         && string.Equals(value.Format, format, StringComparison.OrdinalIgnoreCase)
-        && string.Equals(
-            value.ExpectedRelativePath.Replace('\\', '/'), expectedRelativePath.Replace('\\', '/'),
-            StringComparison.Ordinal)
         && value.Fingerprint == fingerprint);
 
     private static bool MatchesObservation(
         CalibreBook book,
-        EmbeddedAuthorMetadataObservation observation) => book.Formats.Any(value =>
+        EmbeddedAuthorMetadataObservation observation) =>
+        observation.Key.ExtractorVersion == (observation.Key.Format == "EPUB"
+            ? EmbeddedAuthorMetadataVersions.EpubExtractor : EmbeddedAuthorMetadataVersions.PdfExtractor)
+        && observation.Key.LimitsVersion == (observation.Key.Format == "EPUB"
+            ? EmbeddedAuthorMetadataVersions.EpubLimits : EmbeddedAuthorMetadataVersions.PdfLimits)
+        && book.Formats.Any(value =>
         value.FileStatus == FormatFileStatus.Present
         && string.Equals(value.Format, observation.Key.Format, StringComparison.OrdinalIgnoreCase)
         && value.Fingerprint == observation.Key.Fingerprint);

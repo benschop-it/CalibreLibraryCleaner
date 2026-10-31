@@ -13,7 +13,8 @@ public static class BuildMetadataReviewSubjectsUseCase
     public static IReadOnlyList<MetadataReviewSubject> Execute(
         LibrarySnapshot snapshot,
         EditionMetadataProvidersBatchResult providerResults,
-        IReadOnlyList<MetadataReviewKeeperSelection> keeperSelections)
+        IReadOnlyList<MetadataReviewKeeperSelection> keeperSelections,
+        IReadOnlySet<CalibreBookId>? subjectBookIds = null)
     {
         ArgumentNullException.ThrowIfNull(snapshot);
         ArgumentNullException.ThrowIfNull(providerResults);
@@ -29,7 +30,7 @@ public static class BuildMetadataReviewSubjectsUseCase
                 .Select(proposal => proposal.Value))
             .ToArray();
         return MetadataReviewSubjectPolicy.Create(
-            snapshot.Books,
+            subjectBookIds is null ? snapshot.Books : snapshot.Books.Where(book => subjectBookIds.Contains(book.Id)).ToArray(),
             [],
             new Dictionary<UnifiedCandidateGroupId, CalibreBookId>(),
             proposals);

@@ -2,6 +2,7 @@ using CalibreLibraryCleaner.Application.Abstractions;
 using CalibreLibraryCleaner.Application.Assessments;
 using CalibreLibraryCleaner.Application.Assessments.Pdf;
 using CalibreLibraryCleaner.Application.Libraries;
+using CalibreLibraryCleaner.Domain.Assessments;
 using CalibreLibraryCleaner.Domain.Libraries;
 
 namespace CalibreLibraryCleaner.Application.Metadata;
@@ -37,6 +38,8 @@ public sealed class InspectEmbeddedAuthorMetadataUseCase(
             throw new InvalidOperationException("The final author review library is unavailable.");
 
         Dictionary<CalibreBookId, CalibreBook> books = state.Snapshot.Books.ToDictionary(value => value.Id);
+        ILookup<CalibreBookId, EpubAssessment> epubs = state.Snapshot.EpubAssessments.ToLookup(value => value.CalibreBookId);
+        ILookup<CalibreBookId, PdfAssessment> pdfs = state.Snapshot.PdfAssessments.ToLookup(value => value.CalibreBookId);
         (CalibreBook Book, BookFormat Format)[] demands = initial.Subjects
             .Where(value => value.NeedsInspection)
             .SelectMany(subject => books[subject.BookId].Formats
@@ -49,22 +52,36 @@ public sealed class InspectEmbeddedAuthorMetadataUseCase(
             .OrderBy(value => value.Book.Id.Value)
             .ThenBy(value => value.Format.ExpectedRelativePath, StringComparer.Ordinal)
             .ToArray();
+        int total = demands.Length;
+        (CalibreBook Book, BookFormat Format)[] pending = demands.Where(value =>
+            value.Format.Format == "EPUB"
+                ? !epubs[value.Book.Id].Any(assessment =>
+                    assessment.ObservedFingerprint == value.Format.Fingerprint
+                    && PrepareFinalAuthorReviewUseCase.IsCompatible(value.Book, assessment))
+                : !pdfs[value.Book.Id].Any(assessment =>
+                    assessment.ObservedFingerprint == value.Format.Fingerprint
+                    && PrepareFinalAuthorReviewUseCase.IsCompatible(value.Book, assessment))).ToArray();
         List<EmbeddedAuthorMetadataObservation> observations = [];
-        int cacheHits = 0;
+        Dictionary<EmbeddedAuthorMetadataCacheKey, EmbeddedAuthorMetadataObservation> completed =
+            initial.EmbeddedObservations.DistinctBy(value => value.Key).ToDictionary(value => value.Key);
+        int cacheHits = total - pending.Length;
         int inspections = 0;
-        for (int index = 0; index < demands.Length; index++)
+        if (cacheHits > 0)
+            progress?.Report(new(cacheHits, total, cacheHits, 0, "Reusing previously assessed metadata"));
+        for (int index = 0; index < pending.Length; index++)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            (CalibreBook book, BookFormat format) = demands[index];
+            (CalibreBook book, BookFormat format) = pending[index];
             bool epub = format.Format == "EPUB";
             EmbeddedAuthorMetadataCacheKey key = new(
                 format.Format,
                 format.Fingerprint!,
                 epub ? EmbeddedAuthorMetadataVersions.EpubExtractor : EmbeddedAuthorMetadataVersions.PdfExtractor,
                 epub ? EmbeddedAuthorMetadataVersions.EpubLimits : EmbeddedAuthorMetadataVersions.PdfLimits);
-            EmbeddedAuthorMetadataObservation? observation = await TryReadAsync(
-                key, cancellationToken).ConfigureAwait(false);
-            if (observation?.Status == EmbeddedAuthorMetadataStatus.Unavailable)
+            EmbeddedAuthorMetadataObservation? observation = completed.GetValueOrDefault(key)
+                ?? await TryReadAsync(key, cancellationToken).ConfigureAwait(false);
+            if (observation is not null && observation.Key != key
+                || observation?.Status == EmbeddedAuthorMetadataStatus.Unavailable && !completed.ContainsKey(key))
                 observation = null;
             if (observation is not null)
             {
@@ -111,11 +128,14 @@ public sealed class InspectEmbeddedAuthorMetadataUseCase(
                 await TryWriteAsync(observation, cancellationToken).ConfigureAwait(false);
             }
             observations.Add(observation);
-            progress?.Report(new(index + 1, demands.Length, cacheHits, inspections,
+            completed[key] = observation;
+            progress?.Report(new(total - pending.Length + index + 1, total, cacheHits, inspections,
                 $"{format.Format} metadata"));
         }
         return PrepareFinalAuthorReviewUseCase.Execute(
-            state, observations, cacheHits, inspections);
+            state, observations.Concat(initial.EmbeddedObservations).DistinctBy(value => value.Key).ToArray(),
+            cacheHits, inspections, initial.FrontMatterObservations,
+            initial.FrontMatterCacheHitCount, initial.FrontMatterInspectionCount);
 
         async Task<EmbeddedAuthorMetadataObservation?> TryReadAsync(
             EmbeddedAuthorMetadataCacheKey keyValue,

@@ -44,6 +44,8 @@ public sealed record UnifiedCandidateCleanupProgress(
     int CompletedOperations,
     int TotalOperations);
 
+public sealed record SkippedManagedName(CalibreBookId RecordId, string ReasonCode);
+
 public sealed record UnifiedCandidateCleanupResult(
     CleanupExecutionId ExecutionId,
     UnifiedCandidateCleanupState State,
@@ -57,8 +59,10 @@ public sealed record UnifiedCandidateCleanupResult(
     int OmittedMetadataCoverCount = 0,
     int OmittedMetadataAuthorFieldCount = 0,
     int RefreshedManagedNameCount = 0,
-    IReadOnlyList<CalibreBookId>? VerifiedManagedNameBookIds = null)
+    IReadOnlyList<CalibreBookId>? VerifiedManagedNameBookIds = null,
+    IReadOnlyList<SkippedManagedName>? SkippedManagedNames = null)
 {
+    public int SkippedManagedNameCount => SkippedManagedNames?.Count ?? 0;
     public bool IsCompleted => State is UnifiedCandidateCleanupState.Completed
         or UnifiedCandidateCleanupState.NothingToDo;
 }

@@ -26,6 +26,12 @@ reference Infrastructure only in `App.xaml.cs`.
 
 ## Implemented staged pipeline
 
+The read-only SQLite adapter decodes Calibre's comma-as-pipe author-name storage
+before constructing catalog values. Display names match supported Cache API
+spellings; author IDs, sort values and credit order remain exact. This is storage
+translation, not an author correction, alias or fuzzy comparison. Old uncertain
+snapshots still require explicit Scan; they are not silently reauthorized.
+
 ```text
 Explicit Exact Scan
   -> catalog/path resolution
@@ -350,9 +356,102 @@ reuses fingerprint/version-bound EPUB/PDF observations, and selectively escalate
 three EPUB spine documents or five isolated-PDF pages with no retained prose. Atomic
 bounded caches store only author/title candidates, roles, locations, coverage, hashes,
 versions, and technical status. WPF presents a virtualized checked review bound to
-current state identity. Final execution isolates author writes, then protocol 1.3
+current state identity. Final execution isolates author writes, then protocol 1.7
 invokes public Calibre `update_path` for retained formatted records and projects only
 verified actual paths/basenames plus unchanged format fingerprints.
+
+Managed-name worker failures retain the exact phase (`before_readback`, `preflight`,
+`update_path`, `clear_caches`, `after_readback`, `verification` or `rejection_readback`), a fixed error
+category and bounded numeric errno/Windows error when available. Worker-owned
+validation codes retain their meanings; exception messages, paths, metadata and
+tracebacks are never copied into these diagnostics. The blocking UI issue identifies
+the failed record ID and requires explicit Scan. Successful results inside the
+failed chunk are not projected or inferred as a committed prefix.
+
+Protocol 1.7 additionally distinguishes a verified-unchanged managed-name rejection
+from a failed mutation. On Windows, a contained read-only delete-sharing access
+probe checks current formats, covers, OPF and extra files without writing/deleting;
+it closes every handle immediately and does not replace the supported Calibre
+update. A rejected probe or `update_path` may become a skip only after cache clear
+and exact complete fresh pre/post equality, including path, identity/timestamps,
+ordered author sorts, registered format inventory/names/bytes/observations,
+cover/local/custom values, extra files and composites. A successful update may
+legitimately change Calibre's `last_modified`; rejection proof may not ignore it.
+
+Skipped naming uses a typed `SkipManagedNameLibraryStateDelta`, preserves the
+snapshot and advances only operation accounting. Counts, technical record IDs and
+reasons remain separate from metadata skips and refreshed/verified naming IDs.
+WPF reports these skips and continues into disposition for the other records.
+Skipped naming remains pending/unverified and cannot be accepted as Qualified
+without independent verified layout. Changed/unreadable states still stop;
+there is no retry, skipped-count quota or automatic transfer for missing coverage.
+
+Unresolvable presentation defaults to concrete review problems and checked moves,
+with a single optional all-books view. A bounded review-only Domain policy reuses
+current catalog triage and adds delimiter-separated complete author credits in
+title text and bracketed numeric author annotations. Application also identifies
+exact reversed title/author pairs from explicit opening-page credits. These
+observations neither alter matching nor replace final qualification evidence or
+set automatic transfer defaults. Apparently normal unverified books remain
+internally pending and counted without being labelled damaged in the problem list.
+
+WPF translates problems to plain-language descriptions and next steps, separates
+automatic-verification gaps and optional technical evidence, and exposes one Move
+checkbox rather than read-only Manual/qualification status controls. Check all shown
+uses the existing explicit per-ID inclusion port for exactly visible records;
+it does not call the restricted policy-proposals-only bulk helper. Hidden records
+are unchanged. Empty/already-checked views disable the action. Actual moves retain
+the current review identity, backup confirmation and fixed worker boundaries.
+
+Find repairs for selected captures the current selected IDs (or the current row)
+once and passes them through Application demand planning, local-credit repair and
+metadata subject publication. A nonempty distinct current scope is mandatory for
+identity repair; omitted/invalid scope never falls back to all suspect books.
+The ordinary post-cleanup metadata preparation remains full-library. Selected
+books are queryable even when their problem is a review-only signal rather than an
+older triage reason. Provider variants, request budgets and cache identities remain
+unchanged, so a selected book may legitimately require several HTTP requests.
+
+Repair progress/results identify the selected record/count. Only those subjects
+appear in Metadata review and all start unchecked, including on decision-store
+failure. Scoped decision writes replace only the represented subjects' overrides,
+preserving unrelated saved choices; workspace selection copies retain provider
+results and deferred counts. Quarantine reassessment replaces selected evidence
+while preserving unselected evidence, every checked/unchecked move and full
+accounting. A checked policy suggestion that loses automatic support during
+read-only reassessment remains checked as a reviewed choice, not as evidence of
+obsolete automatic transfer authority. Metadata Apply checkbox changes and
+presentation/view changes do not clear quarantine choices. Existing mutation,
+new-generation and restart boundaries still invalidate/rebuild transient review;
+this is not a new resumability or recovery feature.
+
+Metadata repair application and quarantine movement use separate WPF commands,
+checked counts and confirmation services. The shared operation runner receives an
+explicit metadata-repair intent; the ordinary final disposition action cannot be
+redirected by the mere presence of repair proposals. Quarantine completion discards
+obsolete repair proposals. Worker progress names the actual metadata/author/naming
+phase; a naming pass explicitly says it is not quarantine.
+
+Author/identity review reuses intrinsic metadata from compatible versioned
+assessments before requesting a dedicated metadata parser. Verified naming changes
+do not invalidate content-derived author facts when format/fingerprint and all
+analyzer/resource versions still match; path/observation checks remain strict at
+actual file-inspection and mutation boundaries. Evidence lookup is indexed by
+record or format/fingerprint, not a full collection scan per book. Per-run and
+current-workspace inspection caches use complete format/fingerprint/extractor/
+limit identities, store shared observations once and retain unselected facts.
+Repeated stages can reuse current unavailable observations without inventing
+successful evidence; an explicit selected repair may retry unavailable local facts.
+Fresh-workspace cache corruption/loss remains a miss. No raw prose or global
+mutable memoization is added.
+
+Preparing quarantine rows uses current catalog state and existing observations
+only; it does not call whole-library front-matter inspection or providers. Missing
+certification remains explicit in optional accounting without delaying a manual
+move list. Find repairs can inspect opening pages only for its validated selected
+IDs, retaining unselected observations. Explicit manual movement uses the existing
+quarantine executor, which validates and copies/verifies/deletes only checked
+records; no metadata repair or naming operation is inserted into that action.
 
 ## Windows release assembly
 

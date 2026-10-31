@@ -435,6 +435,22 @@
                       Command="{Binding ClearAllMetadataApplyCommand}"
                       AutomationProperties.Name="Clear all metadata Apply choices"
                       ToolTip="Uncheck every current metadata proposal and persist the choices without changing the library" />
+              <Button Margin="0,0,8,0" Padding="8,4"
+                      Content="{Binding IdentityRepairActionText}"
+                      Command="{Binding ApplyCheckedIdentityMetadataCommand}"
+                      AutomationProperties.Name="Apply checked metadata repairs only"
+                      ToolTip="Apply metadata changes only. This does not move your checked quarantine books. A completed metadata mutation requires fresh final-author/naming and disposition review.">
+                <Button.Style>
+                  <Style TargetType="Button">
+                    <Setter Property="Visibility" Value="Collapsed" />
+                    <Style.Triggers>
+                      <DataTrigger Binding="{Binding HasIdentityRepairReview}" Value="True">
+                        <Setter Property="Visibility" Value="Visible" />
+                      </DataTrigger>
+                    </Style.Triggers>
+                  </Style>
+                </Button.Style>
+              </Button>
               </WrapPanel>
             </DockPanel>
           </Grid>
@@ -590,6 +606,11 @@
             <StackPanel>
               <TextBlock FontWeight="Bold" Text="{Binding FinalAuthorReviewSummary}" TextWrapping="Wrap" />
               <WrapPanel Margin="0,6,0,0">
+                <Button Margin="0,0,12,0" Padding="8,4"
+                        Content="{Binding QuarantineMoveActionText}"
+                        Command="{Binding MoveCheckedQuarantineCommand}"
+                        AutomationProperties.Name="Move checked quarantine books only"
+                        ToolTip="Move only the books checked in this Unresolvable list after backup confirmation. Metadata Apply checkboxes do not affect this action." />
                 <Button Margin="0,0,8,0" Padding="8,4" Content="Check _selected"
                   Command="{Binding CheckSelectedFinalAuthorApplyCommand}" />
                 <Button Margin="0,0,8,0" Padding="8,4" Content="_Uncheck selected"
@@ -665,47 +686,53 @@
             <RowDefinition Height="5" />
             <RowDefinition Height="2*" MinHeight="140" />
           </Grid.RowDefinitions>
-          <DockPanel Grid.Row="0" Margin="0,0,0,8">
-            <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" Margin="12,0,0,0">
-              <Label Target="{Binding ElementName=QuarantineFilterBox}" Content="_Show:" />
-              <ComboBox x:Name="QuarantineFilterBox"
-                        MinWidth="125"
-                        ItemsSource="{Binding QuarantineReviewFilterModes}"
-                        SelectedItem="{Binding QuarantineReviewFilterMode, Mode=TwoWay}" />
-            </StackPanel>
-            <StackPanel>
+          <StackPanel Grid.Row="0" Margin="0,0,0,8">
               <TextBlock FontWeight="Bold" Text="{Binding QuarantineReviewSummary}" TextWrapping="Wrap" />
+              <TextBlock Margin="0,4,0,0" TextWrapping="Wrap"
+                         Text="Review the problem described for each book. Double-click to open it. Leave Move unchecked to keep it; check Move only to move the book out of this library. Nothing moves until you confirm the quarantine action." />
+              <CheckBox Margin="0,6,0,0" Content="Show all books (including those without detected problems)"
+                        IsChecked="{Binding ShowAllQuarantineRecords, Mode=TwoWay}"
+                        AutomationProperties.Name="Show all quarantine review books" />
               <TextBlock Margin="0,3,0,0"
                          Text="{Binding QuarantineDestinationPath, StringFormat=Destination: {0}}"
                          TextWrapping="Wrap" />
               <WrapPanel Margin="0,6,0,0">
                 <Button Margin="0,0,8,0" Padding="8,4" Content="Check _selected"
+                        ToolTip="Check the selected rows for quarantine, including books you assign yourself."
                         Command="{Binding CheckSelectedQuarantineIncludeCommand}" />
                 <Button Margin="0,0,8,0" Padding="8,4" Content="_Uncheck selected"
                         Command="{Binding UncheckSelectedQuarantineIncludeCommand}" />
-                <Button Margin="0,0,8,0" Padding="8,4" Content="Check _all"
+                <Button Margin="0,0,8,0" Padding="8,4" Content="Check all _shown"
+                        AutomationProperties.Name="Check all shown books for quarantine"
+                        ToolTip="Check exactly the currently shown books for quarantine. Hidden books are not changed. This does not move files."
                         Command="{Binding CheckAllQuarantineIncludeCommand}" />
-                <Button Margin="0,0,16,0" Padding="8,4" Content="Clear all _Include"
+                <Button Margin="0,0,8,0" Padding="8,4" Content="Uncheck _all"
+                        ToolTip="Clear every quarantine move choice, including books not currently shown."
                         Command="{Binding ClearAllQuarantineIncludeCommand}" />
-                <Label Target="{Binding ElementName=ManualQuarantineRecordIdBox}" Content="Record _ID:" />
-                <TextBox x:Name="ManualQuarantineRecordIdBox"
-                         Width="90"
-                         Margin="0,0,6,0"
-                         VerticalContentAlignment="Center"
-                         Text="{Binding QuarantineManualRecordId, UpdateSourceTrigger=PropertyChanged}" />
-                <Button Padding="8,4" Content="_Add" Command="{Binding AddManualQuarantineRecordCommand}" />
-              </WrapPanel>
-              <WrapPanel Margin="0,6,0,0">
-                <Button Margin="0,0,8,0" Padding="8,4" Content="Review identity _repairs"
+                <Button Padding="8,4" Content="Find _repairs for selected"
+                        AutomationProperties.Name="Find repairs for selected books only"
+                        ToolTip="Search only the selected book(s), never the whole library. Reuses cached evidence and may contact configured online providers. Results appear unchecked in Metadata review; this does not move or update books."
                         Command="{Binding ReviewIdentityRepairsCommand}" />
-                <Button Padding="8,4" Content="Accept selected title, authors and _content"
-                        ToolTip="Explicitly confirm the complete identity, readable content and all disclosed format defects after inspection."
-                        Command="{Binding AcceptSelectedQualificationCommand}" />
               </WrapPanel>
-              <TextBlock Margin="0,4,0,0" TextWrapping="Wrap"
-                         Text="Every retained record is assessed. Pending, repairable and excluded records do not certify a finished high-quality library. Check all selects only proposed or previously manual transfers; checking a pending record assigns it manually." />
-            </StackPanel>
-          </DockPanel>
+              <Expander Margin="0,6,0,0" Header="Optional verification tools and accounting">
+                <StackPanel Margin="6">
+                  <TextBlock Text="{Binding QuarantineVerificationSummary}" TextWrapping="Wrap" />
+                  <TextBlock Margin="0,4,0,0" TextWrapping="Wrap"
+                             Text="A normal-looking book may lack an opening-page match or full readability/naming verification. This does not mean its title or authors are wrong. Hidden books stay in the accounting; they are not automatically certified or moved." />
+                  <WrapPanel Margin="0,6,0,0">
+                    <Button Margin="0,0,12,0" Padding="8,4" Content="Keep selected after _inspection"
+                            ToolTip="Certify the selected books only after checking their complete title, author credits, readable content and disclosed format issues. Unavailable naming cannot be accepted."
+                            Command="{Binding AcceptSelectedQualificationCommand}" />
+                    <Label Target="{Binding ElementName=ManualQuarantineRecordIdBox}" Content="Move record _ID:" />
+                    <TextBox x:Name="ManualQuarantineRecordIdBox" Width="80" Margin="0,0,6,0"
+                             VerticalContentAlignment="Center"
+                             Text="{Binding QuarantineManualRecordId, UpdateSourceTrigger=PropertyChanged}" />
+                    <Button Padding="8,4" Content="Check this record"
+                            Command="{Binding AddManualQuarantineRecordCommand}" />
+                  </WrapPanel>
+                </StackPanel>
+              </Expander>
+          </StackPanel>
           <DataGrid Grid.Row="1"
                     ItemsSource="{Binding QuarantineReviewSubjects}"
                     SelectedItem="{Binding SelectedQuarantineReviewSubject, Mode=TwoWay}"
@@ -723,22 +750,27 @@
                     ScrollViewer.CanContentScroll="True"
                     AutomationProperties.Name="Quarantine review subjects">
             <DataGrid.Columns>
-              <DataGridTemplateColumn Width="70" Header="Include">
+              <DataGridTemplateColumn Width="65" Header="Move">
                 <DataGridTemplateColumn.CellTemplate>
                   <DataTemplate>
                     <CheckBox HorizontalAlignment="Center" VerticalAlignment="Center"
+                              ToolTip="Move this book to quarantine after confirmation. Uncheck to keep it."
+                              AutomationProperties.Name="Move this book to quarantine"
                               IsChecked="{Binding Include, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
                               Command="{Binding PersistIncludeCommand}" />
                   </DataTemplate>
                 </DataGridTemplateColumn.CellTemplate>
               </DataGridTemplateColumn>
               <DataGridTextColumn Width="70" Header="Record" Binding="{Binding RecordId}" />
-              <DataGridTextColumn Width="150" Header="Qualification" Binding="{Binding Qualification}" />
               <DataGridTextColumn Width="2*" MinWidth="170" Header="Title" Binding="{Binding CurrentTitle}" />
               <DataGridTextColumn Width="2*" MinWidth="170" Header="Authors" Binding="{Binding CurrentAuthors}" />
-              <DataGridTextColumn Width="2*" MinWidth="170" Header="Reasons" Binding="{Binding Reasons}" />
-              <DataGridTextColumn Width="160" Header="Formats" Binding="{Binding Formats}" />
-              <DataGridCheckBoxColumn Width="70" Header="Manual" Binding="{Binding IsManual, Mode=OneWay}" />
+              <DataGridTextColumn Width="3*" MinWidth="220" Header="Problem to review" Binding="{Binding ProblemSummary}">
+                <DataGridTextColumn.ElementStyle>
+                  <Style TargetType="TextBlock">
+                    <Setter Property="TextWrapping" Value="Wrap" />
+                  </Style>
+                </DataGridTextColumn.ElementStyle>
+              </DataGridTextColumn>
             </DataGrid.Columns>
           </DataGrid>
           <GridSplitter Grid.Row="2" Height="5" HorizontalAlignment="Stretch"
@@ -750,15 +782,23 @@
                   DataContext="{Binding SelectedQuarantineReviewSubject}">
             <ScrollViewer VerticalScrollBarVisibility="Auto">
               <StackPanel>
-                <TextBlock FontSize="15" FontWeight="Bold" Text="Selected quarantine record" />
+                <TextBlock FontSize="15" FontWeight="Bold" Text="What to review" />
                 <TextBlock Margin="0,6,0,0" Text="{Binding CurrentTitle, StringFormat=Title: {0}}" TextWrapping="Wrap" />
                 <TextBlock Margin="0,3,0,0" Text="{Binding CurrentAuthors, StringFormat=Authors: {0}}" TextWrapping="Wrap" />
-                <TextBlock Margin="0,3,0,0" Text="{Binding CurrentSorts, StringFormat=Author sorts: {0}}" TextWrapping="Wrap" />
-                <TextBlock Margin="0,3,0,0" Text="{Binding Reasons, StringFormat=Reasons: {0}}" TextWrapping="Wrap" />
-                <TextBlock Margin="0,3,0,0" Text="{Binding Coverage, StringFormat=Coverage: {0}}" TextWrapping="Wrap" />
-                <TextBlock Margin="0,3,0,0" Text="{Binding ContentStatus, StringFormat=Content evidence: {0}}" TextWrapping="Wrap" />
-                <TextBlock Margin="0,3,0,0" Text="{Binding ManagedLayoutStatus, StringFormat=Managed layout: {0}}" TextWrapping="Wrap" />
-                <TextBlock Margin="0,3,0,0" Text="{Binding Provenance, StringFormat=Provenance: {0}}" TextWrapping="Wrap" />
+                <TextBlock Margin="0,6,0,0" FontWeight="Bold" Text="{Binding ProblemSummary}" TextWrapping="Wrap" />
+                <TextBlock Margin="0,6,0,0" Text="{Binding SuggestedAction}" TextWrapping="Wrap" />
+                <TextBlock Margin="0,6,0,0" Text="{Binding TransferChoice}" TextWrapping="Wrap" />
+                <TextBlock Margin="0,6,0,0" Text="{Binding VerificationSummary, StringFormat=Automatic checks: {0}}" TextWrapping="Wrap" />
+                <Expander Margin="0,8,0,0" Header="Technical evidence (optional)">
+                  <StackPanel>
+                    <TextBlock Margin="0,3,0,0" Text="{Binding CurrentSorts, StringFormat=Author sorts: {0}}" TextWrapping="Wrap" />
+                    <TextBlock Margin="0,3,0,0" Text="{Binding Formats, StringFormat=Formats: {0}}" TextWrapping="Wrap" />
+                    <TextBlock Margin="0,3,0,0" Text="{Binding Reasons, StringFormat=Reason codes: {0}}" TextWrapping="Wrap" />
+                    <TextBlock Margin="0,3,0,0" Text="{Binding Coverage, StringFormat=Coverage: {0}}" TextWrapping="Wrap" />
+                    <TextBlock Margin="0,3,0,0" Text="{Binding ManagedLayoutStatus}" TextWrapping="Wrap" />
+                    <TextBlock Margin="0,3,0,0" Text="{Binding Provenance, StringFormat=Evidence: {0}}" TextWrapping="Wrap" />
+                  </StackPanel>
+                </Expander>
               </StackPanel>
             </ScrollViewer>
           </Border>

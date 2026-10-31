@@ -10,7 +10,7 @@ import tempfile
 
 
 EXPECTED_MARKER = "I_CONFIRM_THIS_CALIBRE_LIBRARY_IS_DISPOSABLE"
-PROTOCOL_VERSION = "calibre-mutation-worker-protocol/1.6"
+PROTOCOL_VERSION = "calibre-mutation-worker-protocol/1.7"
 
 
 def require(condition, code):
@@ -46,8 +46,11 @@ def main():
     os.makedirs(config_root)
     os.makedirs(worker_temp)
     process = None
+    lock_handle = None
+    kernel32 = None
     from calibre.ebooks.metadata.book.base import Metadata
     from calibre.library import db
+    from calibre.utils.img import create_canvas, image_to_data
 
     try:
         cache = db(library_root).new_api
@@ -57,6 +60,10 @@ def main():
         )
         original_bytes = b"synthetic worker acceptance bytes\n"
         cache.add_format(book_id, "TXT", io.BytesIO(original_bytes))
+        cache.set_cover({book_id: image_to_data(create_canvas(16, 16, "#336699"), fmt="JPEG")})
+        original_cover = cache.cover(book_id)
+        original_extra = b"synthetic preserved extra file\n"
+        cache.add_extra_files(book_id, {"data/fixture-note.txt": io.BytesIO(original_extra)}, replace=False)
         cache.set_field("tags", {book_id: ["Preserved Tag"]}, do_path_update=False)
         cache.set_field("comments", {book_id: "Preserved Comment"}, do_path_update=False)
         cache.set_field("title", {book_id: "Final Title"}, do_path_update=False)
@@ -70,6 +77,19 @@ def main():
         author_ids = tuple(cache.field_ids_for("authors", author_book_id) or ())
         require(len(author_ids) == 1, "author_fixture_ids")
         cache.set_sort_for_authors({author_ids[0]: "Rowling, J.K."}, update_books=True)
+        locked_book_id = cache.create_book_entry(
+            Metadata("Before Locked Title", ["Locked Writer"]), add_duplicates=True
+        )
+        locked_bytes = b"synthetic locked managed-name bytes\n"
+        cache.add_format(locked_book_id, "TXT", io.BytesIO(locked_bytes))
+        locked_format = cache.format_abspath(locked_book_id, "TXT")
+        cache.set_field("title", {locked_book_id: "After Locked Title"}, do_path_update=False)
+        following_book_id = cache.create_book_entry(
+            Metadata("Before Following Title", ["Following Writer"]), add_duplicates=True
+        )
+        following_bytes = b"synthetic following managed-name bytes\n"
+        cache.add_format(following_book_id, "TXT", io.BytesIO(following_bytes))
+        cache.set_field("title", {following_book_id: "After Following Title"}, do_path_update=False)
         cache.clear_caches()
         library_uuid = str(cache.library_id)
         cache.close()
@@ -175,6 +195,47 @@ def main():
         require(observation.get("attributes") == current_stat.st_file_attributes, "observation_attributes_readback")
         require(len(observation.get("creationTimeUtc", "")) == 28
                 and len(observation.get("lastWriteTimeUtc", "")) == 28, "observation_timestamp_precision")
+        lock_skip_code = None
+        if os.name == "nt":
+            import ctypes
+            from ctypes import wintypes
+            kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+            kernel32.CreateFileW.argtypes = (
+                wintypes.LPCWSTR, wintypes.DWORD, wintypes.DWORD, wintypes.LPVOID,
+                wintypes.DWORD, wintypes.DWORD, wintypes.HANDLE,
+            )
+            kernel32.CreateFileW.restype = wintypes.HANDLE
+            kernel32.CloseHandle.argtypes = (wintypes.HANDLE,)
+            kernel32.CloseHandle.restype = wintypes.BOOL
+            lock_handle = kernel32.CreateFileW(locked_format, 0x80000000, 1, None, 3, 0x80, None)
+            require(lock_handle != wintypes.HANDLE(-1).value, "generated_lock_open_failed")
+            locked_operation = dict(operation, operationId="locked-refresh", recordId=locked_book_id)
+            following_operation = dict(operation, operationId="following-refresh", recordId=following_book_id)
+            write_message(process.stdin, {
+                "protocolVersion": PROTOCOL_VERSION,
+                "kind": "executeChunk",
+                "chunkId": "locked-refresh-chunk",
+                "operations": [locked_operation, following_operation],
+            })
+            locked_response = read_message(process.stdout)
+            require(locked_response.get("failureCode") is None, "unchanged_locked_book_aborted_chunk")
+            locked_result = locked_response["operationResults"][0]
+            lock_skip_code = locked_result.get("skipCode") or ""
+            require(lock_skip_code.startswith("managed_name_preflight_os_error_"),
+                    "locked_refresh_phase_not_reported")
+            require("_winerror_32" in lock_skip_code, "locked_refresh_os_code_not_reported")
+            require(locked_result.get("isSuccess") is True and locked_result.get("isSkipped") is True,
+                    "unchanged_locked_refresh_not_reported_as_skip")
+            require("verifiedManagedPath" not in locked_result and "verifiedFormats" not in locked_result,
+                    "skipped_naming_invented_verified_readback")
+            following_result = locked_response["operationResults"][1]
+            require(following_result.get("isSuccess") is True and following_result.get("isSkipped") is False,
+                    "following_book_was_not_updated")
+            require(following_result.get("verifiedManagedPath")
+                    == "Following Writer/After Following Title ({})".format(following_book_id),
+                    "following_book_path_not_updated")
+            require(kernel32.CloseHandle(lock_handle), "generated_lock_close_failed")
+            lock_handle = None
         write_message(process.stdin, {
             "protocolVersion": PROTOCOL_VERSION,
             "kind": "shutdown",
@@ -188,7 +249,7 @@ def main():
         stderr = process.stderr.read()
         require(return_code == 0, "worker_exit_{}_{}".format(return_code, stderr[-512:]))
 
-        cache = db(library_root).new_api
+        cache = db(library_root, read_only=True).new_api
         cache.init()
         try:
             final_path = cache.field_for("path", book_id)
@@ -199,6 +260,11 @@ def main():
             require(list(cache.field_for("authors", book_id)) == ["Final Author"], "authors_changed")
             require(cache.field_for("tags", book_id) == ("Preserved Tag",), "tags_changed")
             require(cache.field_for("comments", book_id) == "Preserved Comment", "comments_changed")
+            require(cache.cover(book_id) == original_cover, "cover_changed")
+            extras = cache.list_extra_files(book_id)
+            require(len(extras) == 1 and extras[0].relpath == "data/fixture-note.txt", "extra_files_changed")
+            with open(extras[0].file_path, "rb") as stream:
+                require(stream.read() == original_extra, "extra_file_bytes_changed")
             require(list(cache.field_for("authors", author_book_id)) == ["J. K. Rowling"],
                     "author_display_not_applied")
             final_author_ids = tuple(cache.field_ids_for("authors", author_book_id) or ())
@@ -210,10 +276,16 @@ def main():
             author_format = cache.format_abspath(author_book_id, "TXT")
             with open(author_format, "rb") as stream:
                 require(stream.read() == author_bytes, "author_format_bytes_changed")
-            require(len(cache.all_book_ids()) == 2, "record_count_changed")
+            require(len(cache.all_book_ids()) == 4, "record_count_changed")
             require(len(cache.formats(book_id)) == 1
-                    and len(cache.formats(author_book_id)) == 1, "format_count_changed")
+                    and len(cache.formats(author_book_id)) == 1
+                    and len(cache.formats(locked_book_id)) == 1
+                    and len(cache.formats(following_book_id)) == 1, "format_count_changed")
             require(final_bytes == original_bytes, "format_bytes_changed")
+            with open(cache.format_abspath(locked_book_id, "TXT"), "rb") as stream:
+                require(stream.read() == locked_bytes, "locked_format_bytes_changed")
+            with open(cache.format_abspath(following_book_id, "TXT"), "rb") as stream:
+                require(stream.read() == following_bytes, "following_format_bytes_changed")
         finally:
             cache.close()
         print(json.dumps({
@@ -225,11 +297,18 @@ def main():
             "author_sort": "Rowling, J. K.",
             "author_write_applied": True,
             "current_file_observation_verified": True,
-            "record_count": 2,
-            "format_count": 2,
+            "record_count": 4,
+            "format_count": 4,
             "bytes_unchanged": True,
+            "cover_unchanged": True,
+            "extra_file_unchanged": True,
+            "locked_refresh_skip_code": lock_skip_code,
+            "locked_refresh_retried": False,
+            "following_record_updated": os.name == "nt",
         }, indent=2, sort_keys=True))
     finally:
+        if lock_handle is not None:
+            kernel32.CloseHandle(lock_handle)
         if process is not None and process.poll() is None:
             process.kill()
             process.wait()

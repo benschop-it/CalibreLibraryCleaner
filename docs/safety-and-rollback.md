@@ -157,6 +157,13 @@ unregistered files are neither adopted nor moved.
 
 Final quarantine is available only after that author/managed-name mutation succeeds.
 Its read-only review covers every retained record, not only final-author exceptions.
+The selection list is prepared from current metadata and existing evidence without
+mandatory whole-library opening-page inspection. Lack of automatic title/byline
+certification does not block explicit manual assignment and transfer of selected
+books. It also never certifies unselected books or automatically assigns them.
+Optional repair inspection is scoped to selected IDs; the actual move still checks
+current selected-record inputs, backup confirmation and complete supported-API
+copy/read-back before deleting any source.
 Missing evidence, provider failure, a low score, or a placeholder-like title cannot
 by itself qualify a book or select a default transfer. Explicit route coverage and
 independent title/author evidence remain separate from confirmed mutation authority.
@@ -164,17 +171,36 @@ Reviewer acceptance confirms identity, content and disclosed companion defects; 
 review exclusion alone is never acceptance. Completed moves with pending records
 must not be described as a finished high-quality source library.
 
+The default problem list is a presentation subset, not a new qualification policy.
+Missing proof alone is not a diagnosed title/author defect, and hidden records remain
+in retained-input accounting. Review-only warnings never automatically check a move.
+Check all shown is an explicit manual assignment for the exact visible IDs, including
+pending rows; hidden books are not assigned. The Move checkbox, selected/bulk
+assignment and optional ID entry all use the same reviewed inclusion authority.
+They change no Calibre files before the separate confirmed mutation.
+
 Targeted identity repair reuses the existing metadata-only and final-author worker
 actions, with separate backup confirmations and non-author-before-author ordering.
 It does not create a new mutation engine. All final repair replacements start
 unchecked, and changed inputs/evidence invalidate prior review. The application
 does not blindly use a catalog ISBN to override contradictory local identity.
+Its read-only query and proposal scope is the explicitly selected current records,
+not every suspect record in the library. Empty/duplicate/unknown scope is rejected
+before cache/provider I/O. Repairing one record must not erase unrelated saved
+decisions, reset other quarantine choices or certify other records.
 
 Its destination is the fixed same-parent sibling `<source name> - Unresolvable` and
 must stay within Calibre's supported path bound. An existing destination is inspected
 read-only, bound by UUID, backed up externally, and never reinitialized. Its existing
 records and schema are preserved; equivalent metadata creates a separate duplicate
 record. Missing or incompatible custom columns stop before source deletion.
+
+Reviewed author expectations use the supported Calibre API spelling, not raw
+SQLite comma-as-pipe escaping. The read-only catalog adapter performs this exact
+decoding while preserving author order/sorts/IDs; the worker's exact metadata
+comparison is not relaxed. Copy failure diagnostics identify a failed record
+when the worker provides one. A failed chunk's destination copies remain ambiguous;
+no source deletion or automatic retry follows from an inferred successful prefix.
 
 The worker copies and exactly verifies all selected records before deleting any
 source. Verification covers ordinary and local metadata, writable custom values,
@@ -221,6 +247,14 @@ outcome:
    engines; and
 3. blocks further mutation until explicit Rescan.
 
+Managed-name failures report the failed record ID and distinguish pre-read,
+supported path update, cache clear, post-read and final verification failures.
+Fixed categories plus bounded numeric OS errors distinguish a sharing violation
+from an API/data error without exposing exception messages, filenames or metadata.
+These diagnostics alone never authorize retry/skip/continuation. Earlier committed
+chunks remain counted, but successful worker results inside a failed chunk do
+not become an inferred committed prefix.
+
 To minimize this stop boundary's impact, author metadata writes execute only after
 all non-author operations have completed and been checkpointed. Each author write is
 its own worker chunk. A failed author readback therefore has no uncommitted successful
@@ -234,6 +268,22 @@ may continue only after comparing the complete post-operation target field, cove
 managed path, author sort, and protected local fields with their pre-write values and
 proving equality. It emits a typed skipped result and no-op state delta. It does not
 retry. Any changed or unreadable post-state follows the stop-and-Rescan rule above.
+
+A managed-name rejection may also continue as a verified-unchanged skip. Read-only
+Windows sharing probes reject already locked formats/covers/OPF/extra files before
+Calibre can alter attributes. All probe handles are closed immediately; they never
+rename, delete, write or repair a file. After a probe or supported-update rejection,
+fresh cache-cleared read-back must exactly match a detached complete pre-state,
+including managed path, ordered sorts, record timestamps/identity, registered
+formats/names/paths/observations/hashes, cover/local/custom metadata, extras and
+composites. Any change (including file attributes), unreadable state or failed
+initial capture still stops. There is no update retry.
+
+A proven naming skip is a typed no-op journal outcome, not verified naming evidence.
+It preserves the record, remains explicitly pending at final qualification and is
+reported with record ID/reason while other books continue. Metadata and naming skip
+counts are separate. A skipped layout cannot become Qualified through the reviewer
+acceptance command, nor automatically authorize an Unresolvable transfer.
 
 The current implementation marks detailed projected state uncertain and retains
 markers/deltas/checkpoints. The accepted target may simplify this to minimal durable

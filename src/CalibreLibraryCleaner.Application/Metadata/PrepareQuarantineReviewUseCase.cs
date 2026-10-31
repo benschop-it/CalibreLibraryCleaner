@@ -35,6 +35,13 @@ public sealed record QuarantineReviewSubject
             .ToArray());
         Disposition = disposition;
         IdentityCandidates = Array.AsReadOnly((identityCandidates ?? []).Take(16).ToArray());
+        bool swapped = CurrentAuthors.Count == 1 && IdentityCandidates.Any(value =>
+            value.ExplicitCredit && value.Authors.Count == 1
+            && SameTitle(value.CompleteTitle, CurrentAuthors[0].Name)
+            && SameTitle(value.Authors[0], CurrentTitle));
+        MetadataProblemReasonCodes = Array.AsReadOnly(RecordMetadataProblemPolicy.Assess(
+            currentTitle, CurrentAuthors.Select(value => value.Name))
+            .Concat(swapped ? [RecordMetadataProblemPolicy.TitleAuthorSwapped] : Array.Empty<string>()).ToArray());
         InputIdentity = inputIdentity;
         ManuallyIncluded = manuallyIncluded;
         Include = include ?? (disposition.ProposedForQuarantine || manuallyIncluded);
@@ -45,10 +52,13 @@ public sealed record QuarantineReviewSubject
     public CalibreBookId BookId { get; }
     public string CurrentTitle { get; }
     public IReadOnlyList<BookAuthor> CurrentAuthors { get; }
+    public IReadOnlyList<string> MetadataProblemReasonCodes { get; }
     public IReadOnlyList<FinalAuthorFormatIdentity> Formats { get; }
     public FinalRecordDispositionAssessment Disposition { get; }
     public bool ManuallyIncluded { get; }
     public bool Include { get; }
+    public bool CanAcceptReviewed => Disposition.Evidence?.ManagedLayoutVerified == true
+        && Formats.Any(value => value.FileStatus == FormatFileStatus.Present && value.Fingerprint is not null);
     public FinalRecordQualification Qualification => Include && ManuallyIncluded
         ? FinalRecordQualification.ProposedUnresolvable : Disposition.Qualification;
     public IReadOnlyList<FrontMatterIdentityCandidate> IdentityCandidates { get; }
@@ -65,14 +75,17 @@ public sealed record QuarantineReviewSubject
         IdentityCandidates,
         InputIdentity);
 
+    private static bool SameTitle(string left, string right) =>
+        MetadataTextNormalizer.TryNormalizeTitle(left, out NormalizedTitle? a)
+        && MetadataTextNormalizer.TryNormalizeTitle(right, out NormalizedTitle? b) && a == b;
+
     public QuarantineReviewSubject AcceptReviewed()
     {
         FinalRecordQualificationEvidence evidence = Disposition.Evidence
             ?? throw new InvalidOperationException("Current qualification evidence is required.");
         if (!evidence.ManagedLayoutVerified)
             throw new InvalidOperationException("Managed naming must be verified before reviewer acceptance.");
-        if (Formats.Count == 0 || Formats.All(value =>
-                value.FileStatus != FormatFileStatus.Present || value.Fingerprint is null))
+        if (!CanAcceptReviewed)
             throw new InvalidOperationException("Reviewer acceptance requires retained content with verified file identity.");
         FinalRecordQualificationEvidence accepted = new(
             evidence.TitleSupported, evidence.AuthorsSupported, evidence.Content,
@@ -209,6 +222,37 @@ public static class PrepareQuarantineReviewUseCase
             throw new ArgumentException("Quarantine review selections are not current.", nameof(bookIds));
         return Copy(workspace, workspace.Subjects.Select(value =>
             selected.Contains(value.BookId) ? value.WithInclude(include) : value));
+    }
+
+    public static QuarantineReviewWorkspace ReassessSelected(
+        LibraryState state,
+        QuarantineReviewWorkspace workspace,
+        FinalAuthorReviewWorkspace finalAuthorReview,
+        EditionMetadataProvidersBatchResult providerResults,
+        IReadOnlyCollection<CalibreBookId> bookIds,
+        IReadOnlySet<CalibreBookId> verifiedManagedNameBookIds)
+    {
+        ValidateCurrent(state, workspace);
+        ArgumentNullException.ThrowIfNull(bookIds);
+        HashSet<CalibreBookId> selected = bookIds.ToHashSet();
+        if (selected.Count == 0 || selected.Count != bookIds.Count
+            || !selected.IsSubsetOf(workspace.Subjects.Select(value => value.BookId))
+            || providerResults.InputIdentities is null
+            || !selected.SetEquals(providerResults.InputIdentities.Keys))
+            throw new ArgumentException("Selected repair evidence does not match the current review records.", nameof(bookIds));
+        QuarantineReviewWorkspace assessed = Execute(
+            state, finalAuthorReview, true, providerResults, verifiedManagedNameBookIds);
+        Dictionary<CalibreBookId, QuarantineReviewSubject> replacements = assessed.Subjects
+            .Where(value => selected.Contains(value.BookId)).ToDictionary(value => value.BookId);
+        return Copy(workspace, workspace.Subjects.Select(previous =>
+        {
+            if (!selected.Contains(previous.BookId)) return previous;
+            QuarantineReviewSubject current = replacements[previous.BookId];
+            return new QuarantineReviewSubject(
+                current.BookId, current.CurrentTitle, current.CurrentAuthors, current.Formats, current.Disposition,
+                previous.ManuallyIncluded || previous.Include && !current.Disposition.ProposedForQuarantine,
+                previous.Include, current.IdentityCandidates, current.InputIdentity);
+        }));
     }
 
     public static QuarantineReviewWorkspace SetAllInclude(

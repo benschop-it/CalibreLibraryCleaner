@@ -527,6 +527,9 @@ internal sealed class VersionedJsonLibraryStateStore(
         SkipMetadataLibraryStateDelta value => new("skip-metadata", value.ExpectedRevision.Value,
             value.OperationId, value.AppliedAtUtc, value.RecordId.Value, value.Field.ToString(),
             null, null, null, null, null, [value.ReasonCode]),
+        SkipManagedNameLibraryStateDelta value => new("skip-managed-name", value.ExpectedRevision.Value,
+            value.OperationId, value.AppliedAtUtc, value.RecordId.Value, null,
+            null, null, null, null, null, [value.ReasonCode]),
         RefreshManagedNameLibraryStateDelta value => new(
             "refresh-managed-name", value.ExpectedRevision.Value, value.OperationId,
             value.AppliedAtUtc, value.RecordId.Value, null, null, null, null, null,
@@ -575,6 +578,10 @@ internal sealed class VersionedJsonLibraryStateStore(
                 Enum.Parse<LibraryMetadataField>(value.Format ?? string.Empty, false),
                 value.ExtraValues?.Single()
                     ?? throw new InvalidDataException("Skipped metadata has no reason code.")),
+            "skip-managed-name" => new SkipManagedNameLibraryStateDelta(generation, revision,
+                value.OperationId, value.AppliedAtUtc, recordId,
+                value.ExtraValues?.Single()
+                    ?? throw new InvalidDataException("Skipped managed naming has no reason code.")),
             "refresh-managed-name" => new RefreshManagedNameLibraryStateDelta(
                 generation, revision, value.OperationId, value.AppliedAtUtc, recordId,
                 value.VerifiedManagedPath

@@ -24,7 +24,8 @@ public sealed class InspectFrontMatterAuthorsUseCase(
         FinalAuthorReviewWorkspace initial,
         IProgress<FrontMatterAuthorProgress>? progress,
         CancellationToken cancellationToken,
-        bool inspectAllRecords = false)
+        bool inspectAllRecords = false,
+        IReadOnlyCollection<CalibreBookId>? targetBookIds = null)
     {
         ArgumentNullException.ThrowIfNull(state);
         ArgumentNullException.ThrowIfNull(initial);
@@ -32,6 +33,11 @@ public sealed class InspectFrontMatterAuthorsUseCase(
             || initial.Revision != state.Revision
             || !PathsEqual(initial.LibraryRoot, state.Snapshot.Identity.LibraryRoot))
             throw new InvalidOperationException("The final author review workspace is stale.");
+        HashSet<CalibreBookId>? targets = targetBookIds?.ToHashSet();
+        if (targets is not null && (targets.Count == 0 || targets.Count != targetBookIds!.Count
+                || !targets.IsSubsetOf(state.Snapshot.Books.Select(value => value.Id))
+                || inspectAllRecords))
+            throw new ArgumentException("Selected opening-page inspection requires distinct current record IDs.", nameof(targetBookIds));
         LibraryValidationOutcome validation = await pathResolver.ValidateAsync(
             initial.LibraryRoot, cancellationToken).ConfigureAwait(false);
         if (!validation.IsSuccess)
@@ -40,7 +46,7 @@ public sealed class InspectFrontMatterAuthorsUseCase(
         HashSet<CalibreBookId> selected = initial.Subjects
             .Where(value => value.NeedsInspection).Select(value => value.BookId).ToHashSet();
         (CalibreBook Book, BookFormat Format)[] demands = books.Values
-            .Where(book => inspectAllRecords || selected.Contains(book.Id))
+            .Where(book => targets is not null ? targets.Contains(book.Id) : inspectAllRecords || selected.Contains(book.Id))
             .SelectMany(book => book.Formats
                 .Where(format => format.Format is "EPUB" or "PDF"
                     && format.FileStatus == FormatFileStatus.Present
@@ -51,7 +57,12 @@ public sealed class InspectFrontMatterAuthorsUseCase(
             .ThenBy(value => value.Format.ExpectedRelativePath, StringComparer.Ordinal)
             .ToArray();
         List<FrontMatterAuthorObservation> observations = [];
-        Dictionary<FrontMatterAuthorCacheKey, FrontMatterAuthorObservation> completed = [];
+        Dictionary<FrontMatterAuthorCacheKey, FrontMatterAuthorObservation> completed = initial.FrontMatterObservations
+            .Where(value => targets is null || value.Status != FrontMatterAuthorStatus.Unavailable)
+            .DistinctBy(value => new FrontMatterAuthorCacheKey(
+                value.Format, value.Fingerprint, value.ExtractorVersion, value.LimitsVersion))
+            .ToDictionary(value => new FrontMatterAuthorCacheKey(
+                value.Format, value.Fingerprint, value.ExtractorVersion, value.LimitsVersion));
         int cacheHits = 0;
         int inspections = 0;
         for (int index = 0; index < demands.Length; index++)
@@ -66,7 +77,9 @@ public sealed class InspectFrontMatterAuthorsUseCase(
                 FrontMatterAuthorVersions.Limits);
             FrontMatterAuthorObservation? observation = completed.GetValueOrDefault(key)
                 ?? await TryReadAsync(key, cancellationToken).ConfigureAwait(false);
-            if (observation?.Status == FrontMatterAuthorStatus.Unavailable && !completed.ContainsKey(key))
+            if (observation is not null && (observation.Format != key.Format || observation.Fingerprint != key.Fingerprint
+                    || observation.ExtractorVersion != key.ExtractorVersion || observation.LimitsVersion != key.LimitsVersion)
+                || observation?.Status == FrontMatterAuthorStatus.Unavailable && !completed.ContainsKey(key))
                 observation = null;
             if (observation is not null)
             {
@@ -114,7 +127,14 @@ public sealed class InspectFrontMatterAuthorsUseCase(
             initial.EmbeddedObservations,
             initial.MetadataCacheHitCount,
             initial.MetadataInspectionCount,
-            observations,
+            observations.Concat(initial.FrontMatterObservations)
+                .DistinctBy(value => new
+                {
+                    value.Format,
+                    value.Fingerprint,
+                    value.ExtractorVersion,
+                    value.LimitsVersion,
+                }).ToArray(),
             cacheHits,
             inspections);
 

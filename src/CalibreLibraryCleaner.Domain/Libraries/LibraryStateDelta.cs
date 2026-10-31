@@ -262,6 +262,28 @@ public sealed record SkipMetadataLibraryStateDelta : LibraryStateDelta
     public string ReasonCode { get; }
 }
 
+public sealed record SkipManagedNameLibraryStateDelta : LibraryStateDelta
+{
+    public SkipManagedNameLibraryStateDelta(
+        LibraryStateGenerationId generationId,
+        LibraryStateRevision expectedRevision,
+        string operationId,
+        DateTimeOffset appliedAtUtc,
+        CalibreBookId recordId,
+        string reasonCode)
+        : base(generationId, expectedRevision, operationId, appliedAtUtc)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(reasonCode);
+        if (reasonCode.Length > 128 || reasonCode.Any(char.IsControl))
+            throw new ArgumentException("Skipped managed-name evidence is invalid.", nameof(reasonCode));
+        RecordId = recordId;
+        ReasonCode = reasonCode.Trim();
+    }
+
+    public CalibreBookId RecordId { get; }
+    public string ReasonCode { get; }
+}
+
 public sealed record ManagedFormatReadBack
 {
     public ManagedFormatReadBack(
@@ -347,6 +369,7 @@ public static class LibraryStateDeltaPolicy
             ReconcileAuthorMetadataLibraryStateDelta reconcileAuthors => ReconcileAuthors(
                 state.Snapshot, reconcileAuthors),
             SkipMetadataLibraryStateDelta skipMetadata => SkipMetadata(state.Snapshot, skipMetadata),
+            SkipManagedNameLibraryStateDelta skipManagedName => SkipManagedName(state.Snapshot, skipManagedName),
             RefreshManagedNameLibraryStateDelta refreshManagedName => RefreshManagedName(
                 state.Snapshot, refreshManagedName),
             _ => throw new ArgumentOutOfRangeException(nameof(delta), delta.GetType().Name, "Unsupported library-state delta."),
@@ -444,6 +467,15 @@ public static class LibraryStateDeltaPolicy
     {
         if (!snapshot.Books.Any(value => value.Id == delta.RecordId))
             throw new InvalidOperationException("The skipped metadata target is not present.");
+        return snapshot;
+    }
+
+    private static LibrarySnapshot SkipManagedName(
+        LibrarySnapshot snapshot,
+        SkipManagedNameLibraryStateDelta delta)
+    {
+        if (!snapshot.Books.Any(value => value.Id == delta.RecordId))
+            throw new InvalidOperationException("The skipped managed-name target is not present.");
         return snapshot;
     }
 

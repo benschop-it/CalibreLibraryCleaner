@@ -4,12 +4,13 @@ import io
 import json
 import os
 import shutil
+import sqlite3
 import subprocess
 import sys
 
 
 EXPECTED_MARKER = "I_CONFIRM_THE_QUARANTINE_WORKER_ROOT_IS_DISPOSABLE"
-PROTOCOL_VERSION = "calibre-mutation-worker-protocol/1.6"
+PROTOCOL_VERSION = "calibre-mutation-worker-protocol/1.7"
 
 
 def require(condition, code):
@@ -104,13 +105,14 @@ def main():
         source = source_legacy.new_api
         source.init()
 
-        metadata = Metadata("Worker Quarantine Probe", ["Probe Author"])
+        metadata = Metadata("Worker Quarantine Probe", ["Probe, Author", "Other, Writer"])
         metadata.tags = ["Probe Tag"]
         metadata.identifiers = {"clc-probe": "worker"}
         source_id = source.create_book_entry(metadata, add_duplicates=True)
         source.set_field("#clc_worker_probe", {source_id: "Custom Value"})
-        author_id = source.field_ids_for("authors", source_id)[0]
-        source.set_sort_for_authors({author_id: "Author, Probe"})
+        author_ids = tuple(source.field_ids_for("authors", source_id))
+        require(len(author_ids) == 2, "source_author_order_missing")
+        source.set_sort_for_authors(dict(zip(author_ids, ("Probe, Author", "Other, Writer"))))
         format_bytes = b"Fixed worker quarantine acceptance\n"
         require(
             source.add_format(source_id, "TXT", io.BytesIO(format_bytes), replace=False, run_hooks=False),
@@ -124,7 +126,7 @@ def main():
         expectation = {
             "title": source.field_for("title", source_id),
             "authors": list(source.field_for("authors", source_id)),
-            "authorSorts": [source.author_data((author_id,))[author_id]["sort"]],
+            "authorSorts": [source.author_data(author_ids)[author_id]["sort"] for author_id in author_ids],
             "formats": [{
                 "format": "TXT",
                 "expectedRelativePath": os.path.relpath(format_path, source_root).replace("\\", "/"),
@@ -136,6 +138,16 @@ def main():
         source = None
         source_legacy.close()
         source_legacy = None
+        from pathlib import Path
+        with sqlite3.connect(Path(os.path.join(source_root, "metadata.db")).as_uri() + "?mode=ro", uri=True) as connection:
+            connection.execute("PRAGMA query_only=ON")
+            stored = [row[0] for row in connection.execute(
+                "SELECT a.name FROM books_authors_link l JOIN authors a ON a.id=l.author "
+                "WHERE l.book=? ORDER BY l.id", (source_id,))]
+        require(any("|" in name for name in stored), "comma_author_storage_fixture_missing")
+        decoded = [name.replace("|", ",") for name in stored]
+        require(decoded == expectation["authors"], "decoded_catalog_authors_differ_from_api")
+        expectation["authors"] = decoded
 
         environment = dict(os.environ)
         environment["CLC_WORKER_TEMP_DIRECTORY"] = worker_temp
@@ -225,6 +237,7 @@ def main():
             "duplicate_mode_used": True,
             "source_deleted_after_copy": True,
             "worker_protocol": PROTOCOL_VERSION,
+            "decoded_comma_authors_verified": True,
         }, sort_keys=True))
     finally:
         for value in (

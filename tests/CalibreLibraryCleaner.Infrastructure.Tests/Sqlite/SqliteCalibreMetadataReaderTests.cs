@@ -1,3 +1,4 @@
+using System.Security.Cryptography;
 using CalibreLibraryCleaner.Application.Abstractions;
 using CalibreLibraryCleaner.Application.Libraries;
 using CalibreLibraryCleaner.Infrastructure.Tests.Fixtures;
@@ -9,6 +10,31 @@ namespace CalibreLibraryCleaner.Infrastructure.Tests.Sqlite;
 
 public sealed class SqliteCalibreMetadataReaderTests
 {
+    [Theory]
+    [InlineData("Writer| Mara", "Writer, Mara")]
+    [InlineData("Writer, Mara", "Writer, Mara")]
+    [InlineData("Mara Writer", "Mara Writer")]
+    [InlineData("Writer| Mara| Editor| Other", "Writer, Mara, Editor, Other")]
+    public async Task ReadDecodesCalibreAuthorStorageWithoutReorderingOrWriting(string storedName, string apiName)
+    {
+        using SyntheticCalibreLibrary library = new();
+        library.AddMetadataBook(1, "Generated Book", [storedName, "Other| Writer"],
+            ["Writer, Mara", "Writer, Other"], null);
+        byte[] before = SHA256.HashData(await File.ReadAllBytesAsync(library.DatabasePath));
+        using ServiceProvider provider = TestServices.CreateProvider();
+        ICalibreMetadataReader reader = provider.GetRequiredService<ICalibreMetadataReader>();
+
+        CalibreCatalogReadOutcome outcome = await reader.ReadAsync(
+            new(library.RootPath, library.DatabasePath), null, CancellationToken.None);
+
+        outcome.IsSuccess.Should().BeTrue();
+        CalibreBookRecord book = outcome.Catalog!.Books.Single();
+        book.Authors.Select(value => value.Name).Should().Equal(apiName, "Other, Writer");
+        book.Authors.Select(value => value.SortName).Should().Equal("Writer, Mara", "Writer, Other");
+        book.Authors.Select(value => value.Id).Should().Equal(1001, 1002);
+        SHA256.HashData(await File.ReadAllBytesAsync(library.DatabasePath)).Should().Equal(before);
+    }
+
     [Fact]
     public async Task ReadLoadsRequestedCatalogFieldsInCalibreOrder()
     {

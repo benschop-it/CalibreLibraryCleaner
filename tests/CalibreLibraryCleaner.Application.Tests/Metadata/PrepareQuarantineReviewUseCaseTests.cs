@@ -12,6 +12,115 @@ namespace CalibreLibraryCleaner.Application.Tests.Metadata;
 public sealed class PrepareQuarantineReviewUseCaseTests
 {
     [Fact]
+    public void ReadOnlyReassessmentDoesNotUncheckAPreviouslySuggestedMoveWhenItsEvidenceChanges()
+    {
+        LibraryState state = State([Book(467, "The Book", "Unknown")]);
+        FinalAuthorReviewWorkspace authors = FinalAuthors(state);
+        CalibreBook selected = state.Snapshot.Books.Single();
+        QuarantineReviewWorkspace initial = PrepareQuarantineReviewUseCase.Execute(
+            state, authors, managedLayoutVerified: true);
+        QuarantineReviewWorkspace workspace = new(state.Snapshot.Identity.LibraryRoot,
+            initial.DestinationRoot,
+            state.GenerationId, state.Revision,
+            [new(selected.Id, selected.Title, selected.Authors,
+                selected.Formats.Select(value => new FinalAuthorFormatIdentity(
+                    value.Format, value.ExpectedRelativePath, value.FileStatus, value.Fingerprint)),
+                new(["AUTHOR.PLACEHOLDER"], [], FinalRecordQualification.ProposedUnresolvable),
+                inputIdentity: FinalRecordInputIdentity.Create(selected))]);
+        EditionMetadataProvidersBatchResult results = new([],
+            new Dictionary<CalibreBookId, FinalRecordInputIdentity> { [selected.Id] = FinalRecordInputIdentity.Create(selected) });
+        workspace.Subjects.Single().Include.Should().BeTrue();
+        workspace.Subjects.Single().ManuallyIncluded.Should().BeFalse();
+
+        QuarantineReviewWorkspace reassessed = PrepareQuarantineReviewUseCase.ReassessSelected(
+            state, workspace, authors, results, [selected.Id], new HashSet<CalibreBookId> { selected.Id });
+
+        reassessed.Subjects.Single().Include.Should().BeTrue();
+        reassessed.Subjects.Single().ManuallyIncluded.Should().BeTrue(
+            "a retained move choice must no longer claim automatic authority from superseded evidence");
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void ReadOnlyRepairReassessmentPreservesHundredsOfCheckedAndExplicitlyUncheckedChoices(bool repairedBookChecked)
+    {
+        LibraryState state = State(Enumerable.Range(1, 1000)
+            .Select(id => Book(id, $"Generated Book {id}", "Unknown")).ToArray());
+        FinalAuthorReviewWorkspace authors = FinalAuthors(state);
+        QuarantineReviewWorkspace workspace = PrepareQuarantineReviewUseCase.Execute(
+            state, authors, managedLayoutVerified: true);
+        CalibreBookId[] checkedIds = Enumerable.Range(1, 800).Select(id => new CalibreBookId(id)).ToArray();
+        workspace = PrepareQuarantineReviewUseCase.SetInclude(workspace, checkedIds, true);
+        workspace = PrepareQuarantineReviewUseCase.SetInclude(workspace,
+            repairedBookChecked ? [new(468)] : [new(467), new(468)], false);
+        QuarantineReviewWorkspace before = workspace;
+        CalibreBook selected = state.Snapshot.Books.Single(value => value.Id.Value == 467);
+        EditionMetadataProvidersBatchResult results = new([],
+            new Dictionary<CalibreBookId, FinalRecordInputIdentity> { [selected.Id] = FinalRecordInputIdentity.Create(selected) });
+        HashSet<CalibreBookId> verified = state.Snapshot.Books.Select(value => value.Id).ToHashSet();
+
+        for (int attempt = 0; attempt < 2; attempt++)
+            workspace = PrepareQuarantineReviewUseCase.ReassessSelected(
+                state, workspace, authors, results, [selected.Id], verified);
+
+        workspace.Subjects.Select(value => (value.BookId, value.Include, value.ManuallyIncluded))
+            .Should().Equal(before.Subjects.Select(value => (value.BookId, value.Include, value.ManuallyIncluded)));
+        workspace.Subjects.Count(value => value.Include).Should().Be(repairedBookChecked ? 799 : 798);
+        workspace.Subjects.Single(value => value.BookId.Value == 467).Include.Should().Be(repairedBookChecked);
+        workspace.Subjects.Single(value => value.BookId.Value == 468).Include.Should().BeFalse();
+        workspace.RetainedInputCount.Should().Be(before.RetainedInputCount);
+        workspace.VerifiedMovedCount.Should().Be(0);
+    }
+
+    [Fact]
+    public void TargetedReassessmentPreservesUnselectedDecisionsEvidenceAndCompleteAccounting()
+    {
+        LibraryState state = State([
+            Book(1, "The Book", "Unknown"), Book(2, "Other Book", "Unknown"),
+            Book(3, "Fine Book", "Reliable Writer")]);
+        FinalAuthorReviewWorkspace authors = FinalAuthors(state);
+        QuarantineReviewWorkspace workspace = PrepareQuarantineReviewUseCase.Execute(
+            state, authors, managedLayoutVerified: true);
+        workspace = PrepareQuarantineReviewUseCase.SetInclude(workspace, [new(1), new(2)], true);
+        workspace = PrepareQuarantineReviewUseCase.AcceptReviewed(state, workspace, [new(3)]);
+        CalibreBook selected = state.Snapshot.Books.Single(value => value.Id.Value == 1);
+        EditionMetadataProvidersBatchResult results = new([],
+            new Dictionary<CalibreBookId, FinalRecordInputIdentity> { [selected.Id] = FinalRecordInputIdentity.Create(selected) });
+        HashSet<CalibreBookId> verified = state.Snapshot.Books.Select(value => value.Id).ToHashSet();
+
+        QuarantineReviewWorkspace reassessed = PrepareQuarantineReviewUseCase.ReassessSelected(
+            state, workspace, authors, results, [selected.Id], verified);
+
+        reassessed.Subjects.Single(value => value.BookId.Value == 1).Include.Should().BeTrue();
+        reassessed.Subjects.Single(value => value.BookId.Value == 1).ManuallyIncluded.Should().BeTrue();
+        reassessed.Subjects.Single(value => value.BookId.Value == 2).Should().BeSameAs(workspace.Subjects[1]);
+        reassessed.Subjects.Single(value => value.BookId.Value == 3).Should().BeSameAs(workspace.Subjects[2]);
+        reassessed.Subjects.Single(value => value.BookId.Value == 3).Qualification.Should().Be(FinalRecordQualification.Qualified);
+        reassessed.RetainedInputCount.Should().Be(3);
+        reassessed.QualifiedCount.Should().Be(workspace.QualifiedCount);
+        reassessed.PendingCount.Should().Be(workspace.PendingCount);
+    }
+
+    [Theory]
+    [InlineData(true, "The Mountain", "Jane Writer", true)]
+    [InlineData(false, "The Mountain", "Jane Writer", false)]
+    [InlineData(true, "Different Title", "Jane Writer", false)]
+    [InlineData(true, "The Mountain", "Other Writer", false)]
+    public void SwappedFieldReviewRequiresAnExplicitCompleteReversedPair(
+        bool explicitCredit, string localTitle, string localAuthor, bool expected)
+    {
+        QuarantineReviewSubject subject = new(new(1), "Jane Writer",
+            [new(new(1), "The Mountain", "The Mountain")], [], new([], []),
+            identityCandidates: [new(localTitle, [localAuthor], 1, 1, 2, explicitCredit)]);
+
+        subject.MetadataProblemReasonCodes.Contains(RecordMetadataProblemPolicy.TitleAuthorSwapped)
+            .Should().Be(expected);
+        subject.Include.Should().BeFalse("review warnings do not authorize a transfer");
+        subject.WithInclude(true).MetadataProblemReasonCodes.Should().Equal(subject.MetadataProblemReasonCodes);
+    }
+
+    [Fact]
     public void UnavailableLegacyCoauthorOrderDoesNotCountAsExhaustedResolution()
     {
         CalibreBook book = Book(1, "The Book", "Unknown");

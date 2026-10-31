@@ -29,6 +29,230 @@ namespace CalibreLibraryCleaner.Wpf.Tests.ViewModels;
 public sealed class MainWindowViewModelTests
 {
     [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task FindRepairsPublishesOnlySelectedRecordsAndReportsTheirScope(bool multiple)
+    {
+        const string libraryRoot = "C:\\Books";
+        LibrarySnapshot template = Snapshot(libraryRoot);
+        CalibreBook[] books = Enumerable.Range(1, 1000).Select(id => new CalibreBook(
+            new(id), $"Generated Journey {id}", "Generated Writer",
+            [new(new(id), "Generated Writer [12]", "Writer, Generated")], [],
+            [new("EPUB", "book", $"Writer/Book ({id})/book.epub", FormatFileStatus.Present,
+                new(10, new(new string('a', 64))),
+                new(10, DateTimeOffset.UnixEpoch, DateTimeOffset.UnixEpoch, 0))], $"Writer/Book ({id})")).ToArray();
+        LibrarySnapshot snapshot = new(template.Identity, template.ScannedAt, books, []);
+        LibraryState completed = WorkflowState(snapshot, LibraryWorkflowPhase.Completed, new(new(Guid.NewGuid()), new(3)));
+        ILibrarySnapshotStore store = A.Fake<ILibrarySnapshotStore>();
+        A.CallTo(() => store.ListAsync(A<CancellationToken>._)).Returns([new(libraryRoot, snapshot.ScannedAt)]);
+        ILibraryStateSession session = A.Fake<ILibraryStateSession>();
+        A.CallTo(() => session.LoadAsync(libraryRoot, A<CancellationToken>._))
+            .Returns(LibraryStateSessionOutcome.Success(completed));
+        A.CallTo(() => session.GetCurrent(libraryRoot)).Returns(completed);
+        IUnifiedCandidateCleanupExecutor executor = A.Fake<IUnifiedCandidateCleanupExecutor>();
+        A.CallTo(() => executor.ExecuteAsync(A<ExecuteUnifiedCandidateCleanupRequest>._,
+                A<IProgress<UnifiedCandidateCleanupProgress>?>._, A<CancellationToken>._))
+            .Returns(new UnifiedCandidateCleanupResult(new(Guid.NewGuid()),
+                UnifiedCandidateCleanupState.Completed, 0, 0, 0, 0, [],
+                VerifiedManagedNameBookIds: books.Select(value => value.Id).ToArray()));
+        IMetadataMutationConfirmationService confirmation = A.Fake<IMetadataMutationConfirmationService>();
+        A.CallTo(() => confirmation.ConfirmAuthorNormalization(A<int>._)).Returns(true);
+        IQuarantineCleanupExecutor quarantine = A.Fake<IQuarantineCleanupExecutor>();
+        IQuarantineCleanupConfirmationService quarantineConfirmation = A.Fake<IQuarantineCleanupConfirmationService>();
+        IQuarantineDestinationInspector destination = A.Fake<IQuarantineDestinationInspector>();
+        A.CallTo(() => destination.InspectAsync(
+                libraryRoot, libraryRoot + " - Unresolvable", A<CancellationToken>._))
+            .Returns(new QuarantineDestinationInspection(new(false, null)));
+        List<long> requestedIds = [];
+        PrepareMetadataReviewUseCase metadata = CreateMetadataReviewUseCase([],
+            onProviderQuery: query => requestedIds.Add(query.BookId.Value));
+        IFrontMatterAuthorCache frontMatterCache = A.Fake<IFrontMatterAuthorCache>();
+        using MainWindowViewModel viewModel = CreateViewModel(A.Fake<ILibraryFolderPicker>(),
+            out ILibraryPathResolver resolver, out _, out _, new(store), session,
+            workflowOptions: LibraryWorkflowOptions.Staged, candidateExecutor: executor,
+            metadataConfirmation: confirmation, enableFinalAuthorReview: true,
+            quarantineDestination: destination, prepareMetadataReview: metadata,
+            quarantineExecutor: quarantine, quarantineConfirmation: quarantineConfirmation,
+            frontMatterCache: frontMatterCache);
+        A.CallTo(() => resolver.ValidateAsync(libraryRoot, A<CancellationToken>._))
+            .Returns(LibraryValidationOutcome.Success(new(libraryRoot, "database")));
+        A.CallTo(() => resolver.ResolveFormat(A<ValidatedLibraryLocation>._,
+                A<string>._, A<string>._, A<string>._))
+            .Returns(ResolvedFormatPathOutcome.Failure("Generated unavailable inspection"));
+        await viewModel.InitializeAsync();
+        viewModel.SelectedPersistedLibraryPath = libraryRoot;
+        await viewModel.LoadPersistedSnapshotCommand.ExecuteAsync(null);
+        await viewModel.CandidateCleanupCommand.ExecuteAsync(null);
+        await viewModel.CandidateCleanupCommand.ExecuteAsync(null);
+        Fake.ClearRecordedCalls(frontMatterCache);
+        await viewModel.CandidateCleanupCommand.ExecuteAsync(null);
+        A.CallTo(() => frontMatterCache.TryReadAsync(A<FrontMatterAuthorCacheKey>._, A<CancellationToken>._))
+            .MustNotHaveHappened();
+        requestedIds.Should().BeEmpty("showing quarantine choices must not run online identity repair");
+        viewModel.SelectedQuarantineReviewSubject = null;
+        viewModel.UpdateQuarantineReviewSelection([]);
+        viewModel.ReviewIdentityRepairsCommand.CanExecute(null).Should().BeFalse();
+        QuarantineReviewSubjectRowViewModel target = viewModel.QuarantineReviewSubjects.Single(value => value.RecordId == 467);
+        viewModel.UpdateQuarantineReviewSelection(viewModel.QuarantineReviewSubjects.Where(
+            value => value.RecordId <= 288 || value.RecordId == 467));
+        viewModel.CheckSelectedQuarantineIncludeCommand.Execute(null);
+        viewModel.UpdateQuarantineReviewSelection([viewModel.QuarantineReviewSubjects.Single(value => value.RecordId == 288)]);
+        viewModel.UncheckSelectedQuarantineIncludeCommand.Execute(null);
+        target = viewModel.QuarantineReviewSubjects.Single(value => value.RecordId == 467);
+        QuarantineReviewSubjectRowViewModel other = viewModel.QuarantineReviewSubjects.Single(value => value.RecordId == 999);
+        other.Include = true;
+        await other.PersistIncludeCommand.ExecuteAsync(null);
+        viewModel.SelectedQuarantineReviewSubject = target;
+        if (multiple)
+            viewModel.UpdateQuarantineReviewSelection(viewModel.QuarantineReviewSubjects.Where(
+                value => value.RecordId == 467 || value.RecordId >= 901 && value.RecordId <= 906));
+        else
+            viewModel.UpdateQuarantineReviewSelection([]);
+        long[] expected = multiple ? [467, 901, 902, 903, 904, 905, 906] : [467];
+        long[] checkedBeforeRepair = viewModel.QuarantineReviewSubjects.Where(value => value.Include)
+            .Select(value => value.RecordId).ToArray();
+
+        viewModel.ReviewIdentityRepairsCommand.CanExecute(null).Should().BeTrue();
+        await viewModel.ReviewIdentityRepairsCommand.ExecuteAsync(null);
+
+        requestedIds.Should().NotBeEmpty().And.OnlyContain(id => expected.Contains(id));
+        requestedIds.Distinct().Should().BeEquivalentTo(expected);
+        viewModel.MetadataReviewSubjects.Select(value => value.TargetBookId).Should().BeEquivalentTo(expected);
+        viewModel.MetadataReviewSubjects.Should().OnlyContain(value => !value.Apply);
+        viewModel.StatusMessage.Should().Contain(multiple ? "7 selected records only" : "record ID 467 only");
+        viewModel.QuarantineReviewSubjects.Single(value => value.RecordId == 999).Include.Should().BeTrue();
+        viewModel.QuarantineReviewSubjects.Where(value => value.Include).Select(value => value.RecordId)
+            .Should().Equal(checkedBeforeRepair, "finding repairs must preserve every move decision");
+        await viewModel.CheckAllMetadataApplyCommand.ExecuteAsync(null);
+        viewModel.ShowAllQuarantineRecords = true;
+        viewModel.ShowAllQuarantineRecords = false;
+        viewModel.QuarantineReviewSubjects.Where(value => value.Include).Select(value => value.RecordId)
+            .Should().Equal(checkedBeforeRepair, "checking a metadata proposal or changing the view must not clear move choices");
+        viewModel.QuarantineReviewSubjects.Single(value => value.RecordId == 288).Include.Should().BeFalse();
+        checkedBeforeRepair.Should().HaveCount(289);
+        viewModel.CandidateCleanupAutomationName.Should().Be("Move checked records to quarantine",
+            "metadata repair choices must not hijack the quarantine action");
+        viewModel.QuarantineMoveActionText.Should().StartWith("Move 289 checked");
+        viewModel.IdentityRepairActionText.Should().StartWith($"Apply {expected.Length} checked metadata");
+        viewModel.ApplyCheckedIdentityMetadataCommand.CanExecute(null).Should().BeTrue();
+        await viewModel.ApplyCheckedIdentityMetadataCommand.ExecuteAsync(null);
+        A.CallTo(() => confirmation.ConfirmExternalBackup(expected.Length)).MustHaveHappenedOnceExactly();
+        A.CallTo(() => quarantineConfirmation.ConfirmMove(A<int>._, A<string>._, A<bool>._))
+            .MustNotHaveHappened();
+        viewModel.MoveCheckedQuarantineCommand.CanExecute(null).Should().BeTrue();
+        await viewModel.MoveCheckedQuarantineCommand.ExecuteAsync(null);
+        A.CallTo(() => quarantineConfirmation.ConfirmMove(289, libraryRoot + " - Unresolvable", false))
+            .MustHaveHappenedOnceExactly();
+        A.CallTo(() => confirmation.ConfirmExternalBackup(expected.Length)).MustHaveHappenedOnceExactly();
+        viewModel.QuarantineReviewSubjects.Where(value => value.Include).Select(value => value.RecordId)
+            .Should().Equal(checkedBeforeRepair);
+        A.CallTo(() => quarantine.ExecuteAsync(A<ExecuteQuarantineCleanupRequest>._,
+            A<IProgress<QuarantineCleanupProgress>?>._, A<CancellationToken>._)).MustNotHaveHappened();
+        session.GetCurrent(libraryRoot).Should().BeSameAs(completed);
+        viewModel.IsBusy.Should().BeFalse();
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task QuarantineCheckAllShownChecksNeedsReviewProblemsAndNeverHiddenBooks(bool noProblems)
+    {
+        const string libraryRoot = "C:\\Books";
+        LibrarySnapshot template = Snapshot(libraryRoot);
+        CalibreBook Book(long id, string title, string author) => new(new(id), title, author,
+            [new(new(id), author, author)], [],
+            [new("EPUB", "book", $"Writer/Book ({id})/book.epub", FormatFileStatus.Present,
+                new(10, new(new string('a', 64))),
+                new(10, DateTimeOffset.UnixEpoch, DateTimeOffset.UnixEpoch, 0))], $"Writer/Book ({id})");
+        CalibreBook[] books = noProblems
+            ? [Book(1, "A Good Book", "Reliable Writer")]
+            : [Book(1, "A Good Book", "Reliable Writer"), Book(2, "Another Book", "Another Book"),
+                Book(3, "The Journey", "Other Writer [12]")];
+        LibrarySnapshot snapshot = new(template.Identity, template.ScannedAt, books, []);
+        LibraryState completed = WorkflowState(snapshot, LibraryWorkflowPhase.Completed,
+            new(new(Guid.NewGuid()), new(3)));
+        ILibrarySnapshotStore store = A.Fake<ILibrarySnapshotStore>();
+        A.CallTo(() => store.ListAsync(A<CancellationToken>._)).Returns([new(libraryRoot, snapshot.ScannedAt)]);
+        ILibraryStateSession session = A.Fake<ILibraryStateSession>();
+        A.CallTo(() => session.LoadAsync(libraryRoot, A<CancellationToken>._))
+            .Returns(LibraryStateSessionOutcome.Success(completed));
+        A.CallTo(() => session.GetCurrent(libraryRoot)).Returns(completed);
+        IUnifiedCandidateCleanupExecutor executor = A.Fake<IUnifiedCandidateCleanupExecutor>();
+        A.CallTo(() => executor.ExecuteAsync(A<ExecuteUnifiedCandidateCleanupRequest>._,
+                A<IProgress<UnifiedCandidateCleanupProgress>?>._, A<CancellationToken>._))
+            .Returns(new UnifiedCandidateCleanupResult(new(Guid.NewGuid()),
+                UnifiedCandidateCleanupState.Completed, 0, 0, 0, 0, [],
+                VerifiedManagedNameBookIds: books.Select(value => value.Id).ToArray()));
+        IMetadataMutationConfirmationService confirmation = A.Fake<IMetadataMutationConfirmationService>();
+        A.CallTo(() => confirmation.ConfirmAuthorNormalization(A<int>._)).Returns(true);
+        IQuarantineDestinationInspector destination = A.Fake<IQuarantineDestinationInspector>();
+        A.CallTo(() => destination.InspectAsync(
+                libraryRoot, libraryRoot + " - Unresolvable", A<CancellationToken>._))
+            .Returns(new QuarantineDestinationInspection(new(false, null)));
+        IQuarantineCleanupExecutor quarantine = A.Fake<IQuarantineCleanupExecutor>();
+        LibraryOperationCoordinator coordinator = new();
+        using MainWindowViewModel viewModel = CreateViewModel(
+            A.Fake<ILibraryFolderPicker>(), out ILibraryPathResolver resolver, out _, out _, new(store), session,
+            workflowOptions: LibraryWorkflowOptions.Staged, candidateExecutor: executor,
+            operationCoordinator: coordinator, metadataConfirmation: confirmation, enableFinalAuthorReview: true,
+            quarantineDestination: destination, quarantineExecutor: quarantine);
+        A.CallTo(() => resolver.ValidateAsync(libraryRoot, A<CancellationToken>._))
+            .Returns(LibraryValidationOutcome.Success(new(libraryRoot, "database")));
+        A.CallTo(() => resolver.ResolveFormat(A<ValidatedLibraryLocation>._,
+                A<string>._, A<string>._, A<string>._))
+            .Returns(ResolvedFormatPathOutcome.Failure("Generated unavailable inspection"));
+        await viewModel.InitializeAsync();
+        viewModel.SelectedPersistedLibraryPath = libraryRoot;
+        await viewModel.LoadPersistedSnapshotCommand.ExecuteAsync(null);
+        await viewModel.CandidateCleanupCommand.ExecuteAsync(null);
+        await viewModel.CandidateCleanupCommand.ExecuteAsync(null);
+        await viewModel.CandidateCleanupCommand.ExecuteAsync(null);
+
+        viewModel.ShowAllQuarantineRecords.Should().BeFalse();
+        viewModel.QuarantineReviewSubjects.Select(value => value.RecordId)
+            .Should().Equal(noProblems ? [] : new long[] { 2, 3 });
+        viewModel.QuarantineReviewSubjects.Should().OnlyContain(value => !value.Include);
+        viewModel.QuarantineVerificationSummary.Should().Contain($"Retained input {books.Length}");
+        viewModel.CheckAllQuarantineIncludeCommand.CanExecute(null).Should().Be(!noProblems);
+        if (noProblems)
+        {
+            viewModel.ShowAllQuarantineRecords = true;
+            QuarantineReviewSubjectRowViewModel normal = viewModel.QuarantineReviewSubjects.Should().ContainSingle().Subject;
+            normal.ProblemSummary.Should().Contain("No specific");
+            normal.SuggestedAction.Should().Contain("Missing verification");
+            await viewModel.CandidateCleanupCommand.ExecuteAsync(null);
+            viewModel.StatusMessage.Should().Contain("nothing will be moved").And.Contain("not fully verified");
+            A.CallTo(() => quarantine.ExecuteAsync(A<ExecuteQuarantineCleanupRequest>._,
+                A<IProgress<QuarantineCleanupProgress>?>._, A<CancellationToken>._)).MustNotHaveHappened();
+            return;
+        }
+
+        using (coordinator.TryBegin())
+            viewModel.CheckAllQuarantineIncludeCommand.CanExecute(null).Should().BeFalse();
+        viewModel.CheckAllQuarantineIncludeCommand.Execute(null);
+
+        viewModel.QuarantineReviewSubjects.Should().OnlyContain(value => value.Include && value.IsManual);
+        viewModel.StatusMessage.Should().Contain("Checked 2 shown").And.Contain("No files have been moved");
+        viewModel.CheckAllQuarantineIncludeCommand.CanExecute(null).Should().BeFalse();
+        viewModel.ShowAllQuarantineRecords = true;
+        viewModel.QuarantineReviewSubjects.Should().HaveCount(3);
+        viewModel.QuarantineReviewSubjects.Single(value => value.RecordId == 1).Include.Should().BeFalse();
+        viewModel.ClearAllQuarantineIncludeCommand.Execute(null);
+        QuarantineReviewSubjectRowViewModel row = viewModel.QuarantineReviewSubjects.Single(value => value.RecordId == 2);
+        row.Include = true;
+        await row.PersistIncludeCommand.ExecuteAsync(null);
+        row = viewModel.QuarantineReviewSubjects.Single(value => value.RecordId == 3);
+        viewModel.UpdateQuarantineReviewSelection([row]);
+        viewModel.CheckSelectedQuarantineIncludeCommand.Execute(null);
+        viewModel.ShowAllQuarantineRecords = false;
+        viewModel.QuarantineReviewSubjects.Should().OnlyContain(value => value.Include);
+        viewModel.QuarantineReviewSubjects.Select(value => value.RecordId).Should().Equal(2, 3);
+        A.CallTo(() => quarantine.ExecuteAsync(A<ExecuteQuarantineCleanupRequest>._,
+            A<IProgress<QuarantineCleanupProgress>?>._, A<CancellationToken>._)).MustNotHaveHappened();
+        session.GetCurrent(libraryRoot).Should().BeSameAs(completed);
+    }
+
+    [Theory]
     [InlineData("scan")]
     [InlineData("load")]
     [InlineData("load-replaced")]
@@ -779,8 +1003,10 @@ public sealed class MainWindowViewModelTests
         restored.Provenance.Should().Be(proposedEdition);
     }
 
-    [Fact]
-    public async Task CompletedWorkflowPreparesThenAppliesFinalAuthorReviewThroughBackupPrompt()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task CompletedWorkflowPreparesThenAppliesFinalAuthorReviewThroughBackupPrompt(bool namingSkipped)
     {
         const string libraryRoot = "C:\\Books";
         CalibreBook book = new(
@@ -814,7 +1040,10 @@ public sealed class MainWindowViewModelTests
             .Returns(new UnifiedCandidateCleanupResult(
                 new(Guid.Parse("99999999-8888-7777-6666-555555555555")),
                 UnifiedCandidateCleanupState.Completed, 0, 0, 0, 0, [], UpdatedMetadataFieldCount: 1,
-                RefreshedManagedNameCount: 1, VerifiedManagedNameBookIds: [book.Id]));
+                RefreshedManagedNameCount: namingSkipped ? 0 : 1,
+                VerifiedManagedNameBookIds: namingSkipped ? [] : [book.Id],
+                SkippedManagedNames: namingSkipped
+                    ? [new(book.Id, "managed_name_preflight_os_error_errno_13_winerror_32")] : []));
         IMetadataMutationConfirmationService confirmation = A.Fake<IMetadataMutationConfirmationService>();
         A.CallTo(() => confirmation.ConfirmAuthorNormalization(1)).Returns(true);
         CapturingLogger<MainWindowViewModel> logger = new();
@@ -868,21 +1097,37 @@ public sealed class MainWindowViewModelTests
         captured.FinalAuthorReview.Should().NotBeNull();
         captured.MetadataReview.Should().BeNull();
         captured.GroupSelections.Should().BeEmpty();
-        viewModel.CandidateCleanupResultSummary.Should().Be(
-            "Updated 1 of 1 checked author correction(s); refreshed 1 managed name(s); skipped 0 verified-unchanged record(s).");
-        viewModel.StatusMessage.Should().Be("Final author corrections completed.");
+        viewModel.CandidateCleanupResultSummary.Should().StartWith(
+            $"Updated 1 of 1 checked author correction(s); refreshed {(namingSkipped ? 0 : 1)} managed name(s); "
+            + $"skipped 0 unchanged metadata field(s); skipped {(namingSkipped ? 1 : 0)} unchanged managed name(s).");
+        if (namingSkipped)
+        {
+            viewModel.CandidateCleanupResultSummary.Should().Contain("record ID 1")
+                .And.Contain("managed_name_preflight_os_error_errno_13_winerror_32");
+            viewModel.StatusMessage.Should().Contain("skipped").And.Contain("Continue");
+        }
+        else
+            viewModel.StatusMessage.Should().Be("Final author corrections completed.");
         logger.Entries.Should().Contain(value =>
             value.EventId.Name == "UserVisibleOperationResult"
             && value.Message == viewModel.CandidateCleanupResultSummary);
 
         await viewModel.CandidateCleanupCommand.ExecuteAsync(null);
+        viewModel.ShowAllQuarantineRecords = true;
         QuarantineReviewSubjectRowViewModel disposition = viewModel.QuarantineReviewSubjects
             .Should().ContainSingle().Subject;
         disposition.Include.Should().BeFalse();
-        viewModel.QuarantineReviewSummary.Should().Contain("Retained input 1").And.Contain("pending 1");
+        viewModel.QuarantineVerificationSummary.Should().Contain("Retained input 1").And.Contain("pending 1");
         viewModel.UpdateQuarantineReviewSelection([disposition]);
+        if (namingSkipped)
+        {
+            viewModel.AcceptSelectedQualificationCommand.CanExecute(null).Should().BeFalse(
+                "a skipped managed name cannot become qualified through reviewer acceptance");
+            disposition.Include.Should().BeFalse();
+            return;
+        }
         viewModel.AcceptSelectedQualificationCommand.Execute(null);
-        viewModel.QuarantineReviewSummary.Should().Contain("qualified 1").And.Contain("pending 0");
+        viewModel.QuarantineVerificationSummary.Should().Contain("qualified 1").And.Contain("pending 0");
         await viewModel.CandidateCleanupCommand.ExecuteAsync(null);
         viewModel.StatusMessage.Should().Contain("High-quality library complete");
         A.CallTo(() => quarantine.ExecuteAsync(
@@ -1715,7 +1960,8 @@ public sealed class MainWindowViewModelTests
         IFinalAuthorCatalogReconciler? finalAuthorCatalogReconciler = null,
         IFrontMatterAuthorCache? frontMatterCache = null,
         IQuarantineDestinationInspector? quarantineDestination = null,
-        IQuarantineCleanupExecutor? quarantineExecutor = null)
+        IQuarantineCleanupExecutor? quarantineExecutor = null,
+        IQuarantineCleanupConfirmationService? quarantineConfirmation = null)
     {
         resolver = A.Fake<ILibraryPathResolver>();
         reader = A.Fake<ICalibreMetadataReader>();
@@ -1765,7 +2011,7 @@ public sealed class MainWindowViewModelTests
             quarantineDestinationInspector: quarantineDestination,
             quarantineCleanupExecutor: quarantineExecutor,
             quarantineCleanupConfirmation: quarantineExecutor is null
-                ? null : A.Fake<IQuarantineCleanupConfirmationService>(),
+                ? null : quarantineConfirmation ?? A.Fake<IQuarantineCleanupConfirmationService>(),
             reconcileFinalAuthorCatalog: finalAuthorCatalogReconciler);
     }
 
@@ -1801,12 +2047,13 @@ public sealed class MainWindowViewModelTests
 
     private static PrepareMetadataReviewUseCase CreateMetadataReviewUseCase(
         List<MetadataReviewDecision> persisted,
-        Action? onProviderSearch = null)
+        Action? onProviderSearch = null,
+        Action<EditionMetadataLookupQuery>? onProviderQuery = null)
     {
         IEditionMetadataProvider openLibrary = Provider(
-            "open-library", "open-library/1.0.0", onProviderSearch);
+            "open-library", "open-library/1.0.0", onProviderSearch, onProviderQuery);
         IEditionMetadataProvider googleBooks = Provider(
-            "google-books", "google-books/1.0.0", onProviderSearch);
+            "google-books", "google-books/1.0.0", onProviderSearch, onProviderQuery);
         IEditionMetadataProposalCache cache = A.Fake<IEditionMetadataProposalCache>();
         IClock clock = A.Fake<IClock>();
         A.CallTo(() => clock.GetUtcNow()).Returns(new DateTimeOffset(2026, 8, 16, 12, 0, 0, TimeSpan.Zero));
@@ -1827,7 +2074,8 @@ public sealed class MainWindowViewModelTests
             .Returns(Task.CompletedTask);
         return new(resolver, store);
 
-        static IEditionMetadataProvider Provider(string id, string version, Action? onSearch)
+        static IEditionMetadataProvider Provider(
+            string id, string version, Action? onSearch, Action<EditionMetadataLookupQuery>? onQuery)
         {
             EditionMetadataProviderIdentity identity = new(id, version);
             IEditionMetadataProvider provider = A.Fake<IEditionMetadataProvider>();
@@ -1837,6 +2085,7 @@ public sealed class MainWindowViewModelTests
                 {
                     onSearch?.Invoke();
                     EditionMetadataLookupQuery query = call.GetArgument<EditionMetadataLookupQuery>(0)!;
+                    onQuery?.Invoke(query);
                     return Task.FromResult(new EditionMetadataSearchResult(
                         identity,
                         EditionMetadataSearchStatus.Success,
@@ -1857,7 +2106,7 @@ public sealed class MainWindowViewModelTests
 
     private sealed class CapturingLogger<T> : ILogger<T>
     {
-        public List<(LogLevel Level, EventId EventId, string Message)> Entries { get; } = [];
+        public ConcurrentQueue<(LogLevel Level, EventId EventId, string Message)> Entries { get; } = [];
 
         public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
         public bool IsEnabled(LogLevel logLevel) => true;
@@ -1867,7 +2116,7 @@ public sealed class MainWindowViewModelTests
             TState state,
             Exception? exception,
             Func<TState, Exception?, string> formatter) =>
-            Entries.Add((logLevel, eventId, formatter(state, exception)));
+            Entries.Enqueue((logLevel, eventId, formatter(state, exception)));
     }
 
     private static LibraryState WorkflowState(

@@ -12,6 +12,56 @@ public sealed class RefreshManagedNameLibraryStateDeltaTests
         10, DateTimeOffset.UnixEpoch, DateTimeOffset.UnixEpoch, 0);
 
     [Fact]
+    public void SkippedUnchangedNamingAdvancesOnlyRevisionAndPreservesTheExactSnapshot()
+    {
+        LibraryState state = State();
+        SkipManagedNameLibraryStateDelta delta = new(
+            state.GenerationId, state.Revision, "skip-name", DateTimeOffset.UnixEpoch,
+            new(1), "managed_name_update_path_os_error_errno_13_winerror_32");
+
+        LibraryState projected = LibraryStateDeltaPolicy.Apply(state, delta);
+
+        projected.Revision.Should().Be(state.Revision.Next());
+        projected.IsAuthoritative.Should().BeTrue();
+        projected.Snapshot.Should().BeSameAs(state.Snapshot);
+    }
+
+    [Fact]
+    public void AManagedNameSkipCannotInventAMissingRecord()
+    {
+        LibraryState state = State();
+        SkipManagedNameLibraryStateDelta delta = new(
+            state.GenerationId, state.Revision, "skip-missing", DateTimeOffset.UnixEpoch,
+            new(2), "managed_name_update_path_os_error_errno_13");
+
+        Action apply = () => LibraryStateDeltaPolicy.Apply(state, delta);
+
+        apply.Should().Throw<InvalidOperationException>();
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("invalid\ncode")]
+    public void ManagedNameSkipsRequireBoundedTechnicalReasonCodes(string reason)
+    {
+        LibraryState state = State();
+        Action create = () => _ = new SkipManagedNameLibraryStateDelta(
+            state.GenerationId, state.Revision, "skip-name", DateTimeOffset.UnixEpoch, new(1), reason);
+
+        create.Should().Throw<ArgumentException>();
+    }
+
+    [Fact]
+    public void ManagedNameSkipReasonCannotExceedItsPersistedBound()
+    {
+        LibraryState state = State();
+        Action create = () => _ = new SkipManagedNameLibraryStateDelta(
+            state.GenerationId, state.Revision, "skip-name", DateTimeOffset.UnixEpoch, new(1), new string('x', 129));
+
+        create.Should().Throw<ArgumentException>();
+    }
+
+    [Fact]
     public void VerifiedReadBackProjectsActualPathAndBasenameWithoutChangingIdentity()
     {
         LibraryState state = State();

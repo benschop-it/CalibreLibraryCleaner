@@ -125,10 +125,16 @@ public sealed partial class ExecuteQuarantineCleanupUseCase(
                     || result.OperationResults.Select(value => value.QuarantineRecordId).Distinct().Count()
                         != result.OperationResults.Count)
                 {
+                    CalibreMutationOperationResult? failed = result.OperationResults.FirstOrDefault(value => !value.IsSuccess);
+                    CalibreMutationOperation? failedOperation = failed is null ? null
+                        : chunk.FirstOrDefault(value => value.OperationId == failed.OperationId);
                     await MarkUncertainAsync("QUARANTINE.COPY_FAILED",
                         "A destination record copy was failed or ambiguous.").ConfigureAwait(false);
                     return Fail("QUARANTINE.COPY_FAILED",
-                        $"Destination copy stopped ({FailureCode(result)}); no source deletion began.",
+                        $"Destination copy stopped ({FailureCode(result)}"
+                        + (failedOperation is null ? string.Empty : $"; record ID {failedOperation.RecordId.Value}")
+                        + "); no source deletion began. The destination may contain copies from the stopped chunk; "
+                        + "completed-copy counts exclude that uncertain chunk. Review the destination before another attempt.",
                         QuarantineCleanupState.PartiallyCompleted);
                 }
                 copied += chunk.Length;
